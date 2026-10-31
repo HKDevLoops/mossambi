@@ -693,17 +693,19 @@ fn draw_hardware_tab(f: &mut Frame, area: Rect, _state: &AppState, accent: Color
     let (os, arch) = get_system_arch_info();
 
     let p = Paragraph::new(vec![
-        Line::from(Span::styled("⚡ Hardware Acceleration & SIMD Architecture", Style::default().fg(accent).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("⚡ Hardware Acceleration, NPU & SIMD Diagnostics", Style::default().fg(accent).add_modifier(Modifier::BOLD))),
         Line::from(""),
         Line::from(vec![Span::styled("OS Platform: ", Style::default().fg(Color::DarkGray)), Span::raw(os)]),
         Line::from(vec![Span::styled("Target CPU Arch: ", Style::default().fg(Color::DarkGray)), Span::styled(arch, Style::default().fg(PANTONE_SWEET_ZEST))]),
-        Line::from(vec![Span::styled("GPU Acceleration Vendor: ", Style::default().fg(Color::DarkGray)), Span::styled(format!("{:?}", hw.vendor), Style::default().fg(accent))]),
+        Line::from(vec![Span::styled("GPU Vendor: ", Style::default().fg(Color::DarkGray)), Span::styled(format!("{:?}", hw.vendor), Style::default().fg(accent))]),
         Line::from(vec![Span::styled("FFmpeg HW Accel Flag: ", Style::default().fg(Color::DarkGray)), Span::raw(hw.ffmpeg_hwaccel_flag)]),
         Line::from(vec![Span::styled("H.264 Encoder Engine: ", Style::default().fg(Color::DarkGray)), Span::raw(hw.h264_encoder)]),
         Line::from(vec![Span::styled("HEVC Encoder Engine: ", Style::default().fg(Color::DarkGray)), Span::raw(hw.hevc_encoder)]),
-        Line::from(vec![Span::styled("AV1 Hardware Encoding: ", Style::default().fg(Color::DarkGray)), Span::raw(if hw.supports_av1_hw { "Supported" } else { "Not Available" })]),
+        Line::from(vec![Span::styled("NPU Neural Engine: ", Style::default().fg(Color::DarkGray)), Span::styled(hw.npu_name, Style::default().fg(PANTONE_CITRUS_GOLD))]),
+        Line::from(vec![Span::styled("NPU AI Status: ", Style::default().fg(Color::DarkGray)), Span::styled(if hw.supports_npu_ai { "Active (DirectML / NPU Accelerated)" } else { "CPU Fallback" }, Style::default().fg(PANTONE_SWEET_ZEST))]),
         Line::from(vec![Span::styled("ARM NEON 128-bit SIMD: ", Style::default().fg(Color::DarkGray)), Span::styled(if hw.supports_neon_simd { "Active" } else { "Inactive" }, Style::default().fg(PANTONE_SWEET_ZEST))]),
         Line::from(vec![Span::styled("x86_64 AVX2 256-bit SIMD: ", Style::default().fg(Color::DarkGray)), Span::styled(if hw.supports_avx2_simd { "Active" } else { "Inactive" }, Style::default().fg(PANTONE_SWEET_ZEST))]),
+        Line::from(vec![Span::styled("Concurrent Rayon Workers: ", Style::default().fg(Color::DarkGray)), Span::styled(format!("{} threads", hw.optimal_thread_count), Style::default().fg(accent))]),
     ])
     .block(Block::default().title(" Platform Capabilities ").borders(Borders::ALL).border_type(BorderType::Rounded));
     f.render_widget(p, area);

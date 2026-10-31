@@ -137,17 +137,19 @@ class RadialWheel(QWidget):
                 self.anim_progress += diff * 0.15
                 self.update()
 
-    # Geometry calculations
-    def _get_radii(self) -> Tuple[float, float, float, float]:
-        """Returns (cx, cy, r_hub, r_petal_in, r_petal_out)."""
+    # Geometry calculations for botanical Mossambi citrus fruit slice
+    def _get_radii(self) -> Tuple[float, float, float, float, float, float, float]:
+        """Returns (cx, cy, r_hub, r_in, r_out, r_pith, r_peel)."""
         w = self.width()
         h = self.height()
         cx = w / 2.0
         cy = h / 2.0
-        r_hub = w * 0.135        # Center hub radius (~59px at 440px)
-        r_in = w * 0.162         # Petal inner radius (~71px)
-        r_out = w * 0.435        # Petal outer radius (~191px)
-        return cx, cy, r_hub, r_in, r_out
+        r_hub = w * 0.135         # Central Columella core hub (~59px at 440px)
+        r_in = w * 0.160          # Carpel pulp inner boundary (~70px)
+        r_out = w * 0.415         # Carpel pulp outer boundary (~182px)
+        r_pith = w * 0.428        # Albedo inner white pith ring (~188px)
+        r_peel = w * 0.444        # Flavedo outer peel rind boundary (~195px)
+        return cx, cy, r_hub, r_in, r_out, r_pith, r_peel
 
     def _build_petal_path(
         self,
@@ -211,7 +213,7 @@ class RadialWheel(QWidget):
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-        cx, cy, r_hub, r_in, r_out = self._get_radii()
+        cx, cy, r_hub, r_in, r_out, r_pith, r_peel = self._get_radii()
         n = len(self.sectors)
         if n == 0:
             painter.end()
@@ -220,12 +222,25 @@ class RadialWheel(QWidget):
         step = 360.0 / n
         gap_deg = 3.6  # Consistent angular gap between petals
 
-        # 1. Draw subtle ambient drop shadow beneath the wheel
+        # 1. Subtle ambient drop shadow beneath the citrus wheel
         shadow_path = QPainterPath()
-        shadow_path.addEllipse(QPointF(cx, cy + 3), r_out + 4, r_out + 4)
+        shadow_path.addEllipse(QPointF(cx, cy + 3), r_peel + 5, r_peel + 5)
         painter.fillPath(shadow_path, self.theme.shadow)
 
-        # 2. Draw each petal sector
+        # 2. Botanical Mossambi Outer Flavedo (Peel / Rind) & Albedo (Inner White Pith)
+        # Draw Flavedo Outer Peel Rind in Mossambi Green (Pantone 376 C)
+        peel_pen = QPen(QColor(255, 255, 255, 80) if not self.theme.is_dark else QColor(255, 255, 255, 30), 1.0)
+        painter.setBrush(QBrush(self.theme.accent))
+        painter.setPen(peel_pen)
+        painter.drawEllipse(QPointF(cx, cy), r_peel, r_peel)
+
+        # Draw Albedo Inner White Pith Layer
+        pith_color = QColor(255, 255, 255, 220) if not self.theme.is_dark else QColor(46, 46, 52, 230)
+        painter.setBrush(QBrush(pith_color))
+        painter.setPen(QPen(self.theme.divider, 0.8))
+        painter.drawEllipse(QPointF(cx, cy), r_pith, r_pith)
+
+        # 3. Draw each radial carpel pulp sector (the 8 petals)
         for i, fmt in enumerate(self.sectors):
             # 12 o'clock center offset: center_angle = -90 + i * step
             # Qt angle system: 0 is 3 o'clock, positive is counter-clockwise.
@@ -410,7 +425,7 @@ class RadialWheel(QWidget):
     # Polar Hit Testing
     def _hit_test(self, pos: QPointF) -> Tuple[Optional[int], bool]:
         """Maps cursor (x, y) to sector index or center hub flag."""
-        cx, cy, r_hub, r_in, r_out = self._get_radii()
+        cx, cy, r_hub, r_in, r_out, r_pith, r_peel = self._get_radii()
         dx = pos.x() - cx
         dy = cy - pos.y()  # standard math Cartesian y (upward is positive)
         r = math.hypot(dx, dy)
@@ -419,8 +434,8 @@ class RadialWheel(QWidget):
         if r <= r_hub:
             return None, True
 
-        # Petal sector hit test
-        if r_in <= r <= r_out + 12:
+        # Petal sector hit test (including outer carpel margin)
+        if r_in <= r <= r_peel + 6:
             n = len(self.sectors)
             if n == 0:
                 return None, False

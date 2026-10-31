@@ -548,6 +548,10 @@ fn handle_hw(as_json: bool) -> Result<()> {
             "os": os,
             "arch": arch,
             "gpu_vendor": format!("{:?}", hw.vendor),
+            "npu_engine": format!("{:?}", hw.npu_engine),
+            "npu_name": hw.npu_name,
+            "supports_gpu_transcode": hw.supports_gpu_transcode,
+            "supports_npu_ai": hw.supports_npu_ai,
             "supports_h264_hw": hw.supports_h264_hw,
             "supports_hevc_hw": hw.supports_hevc_hw,
             "supports_av1_hw": hw.supports_av1_hw,
@@ -556,6 +560,7 @@ fn handle_hw(as_json: bool) -> Result<()> {
             "ffmpeg_hwaccel_flag": hw.ffmpeg_hwaccel_flag,
             "h264_encoder": hw.h264_encoder,
             "hevc_encoder": hw.hevc_encoder,
+            "optimal_thread_count": hw.optimal_thread_count,
         });
         println!("{}", serde_json::to_string_pretty(&res)?);
     } else {
@@ -567,9 +572,12 @@ fn handle_hw(as_json: bool) -> Result<()> {
         println!("FFmpeg HW Flag:       {}", hw.ffmpeg_hwaccel_flag);
         println!("H.264 Encoder:        {}", hw.h264_encoder);
         println!("HEVC Encoder:         {}", hw.hevc_encoder);
+        println!("NPU AI Accelerator:   {}", hw.npu_name);
+        println!("NPU Status:           {}", if hw.supports_npu_ai { "Active (AI Scan & OCR Acceleration)" } else { "CPU Fallback" });
         println!("AV1 Support:          {}", if hw.supports_av1_hw { "Yes" } else { "No" });
         println!("ARM NEON SIMD:        {}", if hw.supports_neon_simd { "Enabled" } else { "Disabled" });
         println!("x86_64 AVX2 SIMD:     {}", if hw.supports_avx2_simd { "Enabled" } else { "Disabled" });
+        println!("Multi-Core Threads:   {} concurrent worker threads", hw.optimal_thread_count);
         println!("==========================================================");
     }
 

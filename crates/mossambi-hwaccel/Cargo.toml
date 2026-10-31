@@ -11,3 +11,4 @@ description = "GPU hardware acceleration detection (NVENC, AMF, QSV, Qualcomm Ad
 log = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
+rayon = { workspace = true }
