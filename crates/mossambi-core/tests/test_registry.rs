@@ -1,0 +1,58 @@
+use mossambi_core::{
+    get_system_arch_info, resolve_sibling_output_path, CitrusShade, FileCategory,
+    PantonePalette, UniversalRegistry,
+};
+use std::path::Path;
+
+#[test]
+fn test_universal_registry_classification() {
+    assert_eq!(UniversalRegistry::classify_extension("png"), FileCategory::Image);
+    assert_eq!(UniversalRegistry::classify_extension("FLAC"), FileCategory::Audio);
+    assert_eq!(UniversalRegistry::classify_extension("mp4"), FileCategory::Video);
+    assert_eq!(UniversalRegistry::classify_extension("docx"), FileCategory::Document);
+    assert_eq!(UniversalRegistry::classify_extension("xlsx"), FileCategory::Spreadsheet);
+    assert_eq!(UniversalRegistry::classify_extension("tar.gz"), FileCategory::Archive);
+    assert_eq!(UniversalRegistry::classify_extension("srt"), FileCategory::Subtitle);
+}
+
+#[test]
+fn test_eight_petal_widget_layout_has_all_sector() {
+    for cat in [
+        FileCategory::Image,
+        FileCategory::Video,
+        FileCategory::Audio,
+        FileCategory::Document,
+        FileCategory::Spreadsheet,
+        FileCategory::Archive,
+        FileCategory::Subtitle,
+    ] {
+        let sectors = UniversalRegistry::get_widget_sectors_for_category(cat);
+        assert_eq!(sectors.len(), 8, "Category {:?} must have exactly 8 radial sectors", cat);
+        assert_eq!(*sectors.last().unwrap(), "ALL", "Category {:?} sector 8 must be golden 'ALL'", cat);
+    }
+}
+
+#[test]
+fn test_non_destructive_sibling_output_path() {
+    let input = Path::new("test_data").join("audio_recording.flac");
+    let out = resolve_sibling_output_path(&input, None, "WAV", None);
+    assert_eq!(out, Path::new("test_data").join("audio_recording_converted.wav"));
+}
+
+#[test]
+fn test_pantone_certified_swatches() {
+    let raw_peel = CitrusShade::RawPeel.to_pantone();
+    assert_eq!(raw_peel.code, "Pantone 376 C");
+    assert_eq!(raw_peel.hex, "#70C922");
+
+    let gold = PantonePalette::CITRUS_GOLD;
+    assert_eq!(gold.code, "Pantone 1235 C");
+    assert_eq!(gold.hex, "#FFB81C");
+}
+
+#[test]
+fn test_platform_arch_info() {
+    let (os, arch) = get_system_arch_info();
+    assert!(!os.is_empty());
+    assert!(!arch.is_empty());
+}

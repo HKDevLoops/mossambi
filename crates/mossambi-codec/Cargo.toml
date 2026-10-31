@@ -1,0 +1,28 @@
+[package]
+name = "mossambi-codec"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ArtCraft-inspired Zero-Loss (0.00% loss) conversion and transcoding engine for Mossambi"
+
+[dependencies]
+mossambi-core = { workspace = true }
+mossambi-hwaccel = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+image = { workspace = true }
+resvg = { workspace = true }
+lopdf = { workspace = true }
+calamine = { workspace = true }
+rust_xlsxwriter = { workspace = true }
+csv = { workspace = true }
+crc32fast = { workspace = true }
+sha2 = { workspace = true }
+rayon = { workspace = true }
+log = { workspace = true }
+regex = { workspace = true }
+dunce = { workspace = true }

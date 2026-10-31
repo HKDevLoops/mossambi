@@ -1,0 +1,69 @@
+//! Mossambi Core Library
+//! Format registry, Pantone color palette, sibling output path logic, and persistent configuration.
+
+pub mod config;
+pub mod pantone;
+pub mod registry;
+
+pub use config::{MossambiConfig, OutputMode, ThemeMode};
+pub use pantone::{CitrusShade, PantoneColor, PantonePalette};
+pub use registry::{FileCategory, FormatInfo, UniversalRegistry};
+
+use std::path::{Path, PathBuf};
+
+/// Computes a non-destructive sibling output path.
+/// Format: <parent_dir>/<file_stem>_converted.<target_ext>
+/// Automatically appends _1, _2... if a collision occurs so original files are never overwritten.
+pub fn resolve_sibling_output_path(
+    input: &Path,
+    suffix: Option<&str>,
+    target_ext: &str,
+    custom_dir: Option<&Path>,
+) -> PathBuf {
+    let parent = custom_dir.unwrap_or_else(|| input.parent().unwrap_or_else(|| Path::new(".")));
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+
+    let base_stem = match suffix {
+        Some(sfx) if !sfx.is_empty() => format!("{}_{}", stem, sfx),
+        _ => format!("{}_converted", stem),
+    };
+
+    let ext_clean = target_ext.trim_start_matches('.').to_lowercase();
+    let mut candidate = parent.join(format!("{}.{}", base_stem, ext_clean));
+
+    let mut counter = 1u32;
+    while candidate.exists() {
+        candidate = parent.join(format!("{}_{}.{}", base_stem, counter, ext_clean));
+        counter += 1;
+    }
+
+    candidate
+}
+
+/// Target CPU architecture and platform information.
+pub fn get_system_arch_info() -> (&'static str, &'static str) {
+    let os = if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "unknown"
+    };
+
+    let arch = if cfg!(target_arch = "x86_64") {
+        "x86_64"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else if cfg!(target_arch = "arm") {
+        "arm"
+    } else {
+        "unknown"
+    };
+
+    (os, arch)
+}

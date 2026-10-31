@@ -1,0 +1,8 @@
+/target/
+**/__pycache__/
+*.pyc
+*.pyo
+.mossambi/
+.idea/
+.vscode/
+*.log

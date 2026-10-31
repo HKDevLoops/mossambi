@@ -1,0 +1,13 @@
+[package]
+name = "mossambi-hwaccel"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "GPU hardware acceleration detection (NVENC, AMF, QSV, Qualcomm Adreno, VAAPI, NEON)"
+
+[dependencies]
+log = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
