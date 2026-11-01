@@ -106,11 +106,31 @@ fn run_listener_loop(
         PM_REMOVE, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_QUIT,
     };
 
+    struct HookGuard(HHOOK);
+    impl Drop for HookGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    UnhookWindowsHookEx(self.0);
+                }
+                log::info!("Unhooked WH_MOUSE_LL drag gesture listener.");
+            }
+        }
+    }
+
+    struct ContextResetGuard;
+    impl Drop for ContextResetGuard {
+        fn drop(&mut self) {
+            let mut guard = GLOBAL_CONTEXT.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = None;
+        }
+    }
+
     let tracker = KinematicGestureTracker::new(allow_shake, allow_circle)
         .with_sensitivity(sensitivity_px, 450);
 
     {
-        let mut guard = GLOBAL_CONTEXT.lock().unwrap();
+        let mut guard = GLOBAL_CONTEXT.lock().unwrap_or_else(|e| e.into_inner());
         *guard = Some(HookContext {
             tracker,
             is_holding_files: false,
@@ -120,12 +140,14 @@ fn run_listener_loop(
         });
     }
 
+    let _ctx_guard = ContextResetGuard;
+
     unsafe extern "system" fn low_level_mouse_proc(
         n_code: i32,
         w_param: WPARAM,
         l_param: LPARAM,
     ) -> LRESULT {
-        if n_code < 0 {
+        if n_code < 0 || l_param == 0 {
             return CallNextHookEx(null_mut(), n_code, w_param, l_param);
         }
 
@@ -199,6 +221,7 @@ fn run_listener_loop(
             return;
         }
 
+        let _hook_guard = HookGuard(hook);
         log::info!("Registered WH_MOUSE_LL system drag gesture listener hook.");
 
         let mut msg: MSG = std::mem::zeroed();
@@ -212,13 +235,7 @@ fn run_listener_loop(
             }
             std::thread::sleep(std::time::Duration::from_millis(16));
         }
-
-        UnhookWindowsHookEx(hook);
-        log::info!("Unhooked WH_MOUSE_LL drag gesture listener.");
     }
-
-    let mut guard = GLOBAL_CONTEXT.lock().unwrap();
-    *guard = None;
 }
 
 #[cfg(target_os = "windows")]

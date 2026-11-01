@@ -94,7 +94,7 @@ impl ActivationManager {
 fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown: Arc<AtomicBool>) {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::RegisterHotKey;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
     use windows_sys::Win32::UI::Shell::{
         Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
         NOTIFYICONDATAW,
@@ -103,10 +103,10 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
         AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
         DestroyWindow, DispatchMessageW, GetCursorPos, LoadIconW, PeekMessageW,
         RegisterClassExW, SetForegroundWindow, TrackPopupMenu, TranslateMessage,
-        CS_HREDRAW, CS_VREDRAW, IDI_APPLICATION, MF_CHECKED, MF_POPUP, MF_SEPARATOR,
-        MF_STRING, MF_UNCHECKED, MSG, PM_REMOVE, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
-        TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_HOTKEY, WM_USER, WNDCLASSEXW,
-        WS_OVERLAPPEDWINDOW,
+        UnregisterClassW, CS_HREDRAW, CS_VREDRAW, IDI_APPLICATION, MF_CHECKED,
+        MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, PM_REMOVE,
+        TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+        WM_HOTKEY, WM_USER, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
     };
 
     const MOD_CONTROL: u32 = 0x0002;
@@ -182,6 +182,14 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
             null_mut(),
         )
     };
+
+    if hwnd.is_null() {
+        log::error!("Failed to create hidden window for Mossambi tray listener.");
+        unsafe {
+            UnregisterClassW(class_name.as_ptr(), null_mut());
+        }
+        return;
+    }
 
     // Register global Win + Shift + C (Radial Widget) & Win + Ctrl + C (Studio GUI)
     unsafe {
@@ -448,7 +456,10 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
     }
 
     unsafe {
+        UnregisterHotKey(hwnd, HOTKEY_WIDGET_ID);
+        UnregisterHotKey(hwnd, HOTKEY_GUI_ID);
         Shell_NotifyIconW(NIM_DELETE, &nid);
         DestroyWindow(hwnd);
+        UnregisterClassW(class_name.as_ptr(), null_mut());
     }
 }

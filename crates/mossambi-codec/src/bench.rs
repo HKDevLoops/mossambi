@@ -97,12 +97,15 @@ impl BenchmarkReport {
 }
 
 fn truncate_str(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    let char_count = s.chars().count();
+    if char_count <= max {
         s.to_string()
     } else if max > 3 {
-        format!("{}...", &s[..max - 3])
+        let budget = max.saturating_sub(3);
+        let prefix: String = s.chars().take(budget).collect();
+        format!("{prefix}...")
     } else {
-        s[..max].to_string()
+        s.chars().take(max).collect()
     }
 }
 

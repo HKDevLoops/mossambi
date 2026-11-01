@@ -64,9 +64,36 @@ fn query_shell_selection(target_hwnd: isize) -> Option<PathBuf> {
     };
     use windows_sys::core::GUID;
 
+    struct ComGuard(bool);
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                unsafe {
+                    CoUninitialize();
+                }
+            }
+        }
+    }
+
+    struct ComReleaseGuard(*mut std::ffi::c_void);
+    impl Drop for ComReleaseGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    let unknown = self.0 as *mut *mut usize;
+                    if let Some(vtable) = unknown.as_ref() {
+                        let release_fn: extern "system" fn(*mut std::ffi::c_void) -> u32 =
+                            std::mem::transmute((*vtable).add(2).read());
+                        release_fn(self.0);
+                    }
+                }
+            }
+        }
+    }
+
     unsafe {
         let hr = CoInitializeEx(null_mut(), COINIT_APARTMENTTHREADED as u32);
-        let should_uninit = hr >= 0;
+        let _com_guard = ComGuard(hr >= 0);
 
         // CLSID_ShellWindows = {9BA05972-F6A8-11CF-A442-00A0C90A8F39}
         let clsid_shell_windows = GUID {
@@ -92,25 +119,12 @@ fn query_shell_selection(target_hwnd: isize) -> Option<PathBuf> {
             &mut shell_windows,
         );
 
-        let mut resolved_path: Option<PathBuf> = None;
-
         if create_res >= 0 && !shell_windows.is_null() {
-            resolved_path = resolve_from_shell_windows(shell_windows, target_hwnd);
-
-            // Release shell_windows
-            let unknown = shell_windows as *mut *mut usize;
-            if let Some(vtable) = unknown.as_ref() {
-                let release_fn: extern "system" fn(*mut std::ffi::c_void) -> u32 =
-                    std::mem::transmute((*vtable).add(2).read());
-                release_fn(shell_windows);
-            }
+            let _release_guard = ComReleaseGuard(shell_windows);
+            resolve_from_shell_windows(shell_windows, target_hwnd)
+        } else {
+            None
         }
-
-        if should_uninit {
-            CoUninitialize();
-        }
-
-        resolved_path
     }
 }
 

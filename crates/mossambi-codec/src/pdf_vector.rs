@@ -4,7 +4,7 @@
 //! multi-page pagination, headers, footers, and page numbers.
 //! 0.00% pixelation guarantee (NO bitmap rasterization).
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use lopdf::content::{Content, Operation};
@@ -137,14 +137,19 @@ pub fn convert_text_to_pdf_vector(
     output_path: &Path,
     settings: Option<TextPdfSettings>,
 ) -> Result<()> {
+    let meta = fs::metadata(input_path)?;
+    const MAX_TEXT_PDF_BYTES: u64 = 100 * 1024 * 1024; // 100 MB safety ceiling
+    if meta.len() > MAX_TEXT_PDF_BYTES {
+        bail!("Input text file exceeds safe ceiling of 100 MB: {}", input_path.display());
+    }
+
     let raw_text = fs::read_to_string(input_path)
         .with_context(|| format!("Failed to read input text file: {}", input_path.display()))?;
 
     let doc_title = input_path
         .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("Document")
-        .to_string();
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Document".to_string());
 
     let mut cfg = settings.unwrap_or_default();
     if cfg.title.is_none() {
@@ -487,10 +492,18 @@ pub fn convert_image_to_pdf_vector(
     let mut doc = Document::with_version("1.7");
     let pages_id = doc.new_object_id();
 
-    // Check if image is JPEG - if so, stream directly with DCTDecode for 0% loss!
+    // Check if image is genuinely JPEG - if so, stream directly with DCTDecode for 0% loss!
     let (image_stream_data, filter_name) = if in_ext == "JPG" || in_ext == "JPEG" {
         let raw_jpeg = fs::read(input_path)?;
-        (raw_jpeg, "DCTDecode")
+        if raw_jpeg.starts_with(&[0xFF, 0xD8]) {
+            (raw_jpeg, "DCTDecode")
+        } else {
+            let rgb = img.to_rgb8();
+            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(rgb.as_raw())?;
+            let compressed = encoder.finish()?;
+            (compressed, "FlateDecode")
+        }
     } else {
         let rgb = img.to_rgb8();
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());

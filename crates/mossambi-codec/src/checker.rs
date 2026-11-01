@@ -142,8 +142,11 @@ impl FileQualityReport {
 }
 
 fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() > max_len {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+    let char_count = s.chars().count();
+    if char_count > max_len {
+        let budget = max_len.saturating_sub(3);
+        let prefix: String = s.chars().take(budget).collect();
+        format!("{prefix}...")
     } else {
         s.to_string()
     }
@@ -162,9 +165,8 @@ impl FileQualityChecker {
 
         let file_name = path
             .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
 
         let (category, ext) = UniversalRegistry::classify_file(path);
         let ext_upper = ext.to_uppercase();

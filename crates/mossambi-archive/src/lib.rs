@@ -117,7 +117,7 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
             if unpack_tar_safe(gz, &canonical_dest).is_err() {
                 let file = File::open(archive_path)?;
                 let gz = flate2::read::GzDecoder::new(file);
-                let stem = archive_path.file_stem().and_then(|s| s.to_str()).unwrap_or("decompressed");
+                let stem = archive_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "decompressed".to_string());
                 let out_file = canonical_dest.join(stem);
                 extract_single_file_safe(gz, &out_file)?;
             }
@@ -128,7 +128,7 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
             if unpack_tar_safe(bz, &canonical_dest).is_err() {
                 let file = File::open(archive_path)?;
                 let bz = bzip2::read::BzDecoder::new(file);
-                let stem = archive_path.file_stem().and_then(|s| s.to_str()).unwrap_or("decompressed");
+                let stem = archive_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "decompressed".to_string());
                 let out_file = canonical_dest.join(stem);
                 extract_single_file_safe(bz, &out_file)?;
             }
@@ -139,7 +139,7 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
             if unpack_tar_safe(xz, &canonical_dest).is_err() {
                 let file = File::open(archive_path)?;
                 let xz = xz2::read::XzDecoder::new(file);
-                let stem = archive_path.file_stem().and_then(|s| s.to_str()).unwrap_or("decompressed");
+                let stem = archive_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "decompressed".to_string());
                 let out_file = canonical_dest.join(stem);
                 extract_single_file_safe(xz, &out_file)?;
             }
@@ -150,7 +150,7 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
             if unpack_tar_safe(zst, &canonical_dest).is_err() {
                 let file = File::open(archive_path)?;
                 let zst = zstd::stream::read::Decoder::new(file)?;
-                let stem = archive_path.file_stem().and_then(|s| s.to_str()).unwrap_or("decompressed");
+                let stem = archive_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "decompressed".to_string());
                 let out_file = canonical_dest.join(stem);
                 extract_single_file_safe(zst, &out_file)?;
             }
@@ -258,7 +258,7 @@ fn pack_zip(inputs: &[PathBuf], output: &Path) -> Result<()> {
 
     for input in inputs {
         if input.is_file() {
-            let name = input.file_name().and_then(|n| n.to_str()).unwrap_or("entry");
+            let name = input.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "entry".to_string());
             zip_writer.start_file(name, options)?;
             let mut f = File::open(input)?;
             io::copy(&mut f, &mut zip_writer)?;
@@ -348,11 +348,11 @@ fn pack_tar_zst(inputs: &[PathBuf], output: &Path) -> Result<()> {
 
 fn add_inputs_to_tar<W: Write>(builder: &mut tar::Builder<W>, inputs: &[PathBuf]) -> Result<()> {
     for input in inputs {
-        let name = input.file_name().and_then(|n| n.to_str()).unwrap_or("entry");
+        let name = input.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "entry".to_string());
         if input.is_file() {
-            builder.append_path_with_name(input, name)?;
+            builder.append_path_with_name(input, &name)?;
         } else if input.is_dir() {
-            builder.append_dir_all(name, input)?;
+            builder.append_dir_all(&name, input)?;
         }
     }
     Ok(())

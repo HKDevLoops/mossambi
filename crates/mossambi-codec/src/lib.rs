@@ -920,25 +920,35 @@ fn convert_video_zero_loss(
 }
 
 fn convert_subtitles(input: &Path, output: &Path, target_ext: &str) -> Result<()> {
+    let meta = fs::metadata(input)?;
+    const MAX_SUBTITLE_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
+    if meta.len() > MAX_SUBTITLE_BYTES {
+        bail!("Subtitle file exceeds maximum permitted size of 50 MB: {}", input.display());
+    }
+
     let raw = fs::read_to_string(input)?;
     let in_ext = input
         .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
+        .map(|e| e.to_string_lossy())
+        .unwrap_or_default()
         .to_uppercase();
+
+    static SRT_TO_VTT_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static VTT_TO_SRT_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static TXT_CLEANUP_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
 
     let converted = match (in_ext.as_str(), target_ext) {
         ("SRT", "VTT") => {
-            let re = regex::Regex::new(r"(\d{2}:\d{2}:\d{2}),(\d{3})")?;
+            let re = SRT_TO_VTT_RE.get_or_init(|| regex::Regex::new(r"(\d{2}:\d{2}:\d{2}),(\d{3})").expect("valid regex"));
             format!("WEBVTT\n\n{}", re.replace_all(&raw, "$1.$2"))
         }
         ("VTT", "SRT") => {
             let body = raw.trim_start_matches("WEBVTT").trim();
-            let re = regex::Regex::new(r"(\d{2}:\d{2}:\d{2})\.(\d{3})")?;
+            let re = VTT_TO_SRT_RE.get_or_init(|| regex::Regex::new(r"(\d{2}:\d{2}:\d{2})\.(\d{3})").expect("valid regex"));
             re.replace_all(body, "$1,$2").to_string()
         }
         (_, "TXT") => {
-            let re = regex::Regex::new(r"(?m)^\d+\r?$|^\d{2}:\d{2}:\d{2}[,\.]\d{3}.*|^WEBVTT.*")?;
+            let re = TXT_CLEANUP_RE.get_or_init(|| regex::Regex::new(r"(?m)^\d+\r?$|^\d{2}:\d{2}:\d{2}[,\.]\d{3}.*|^WEBVTT.*").expect("valid regex"));
             re.replace_all(&raw, "")
                 .lines()
                 .map(str::trim)
