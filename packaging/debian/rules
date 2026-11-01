@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release --workspace
+
+override_dh_auto_install:
+	install -Dm755 target/release/mossambi debian/mossambi/usr/bin/mossambi
+	install -Dm755 target/release/mossambi-gui debian/mossambi/usr/bin/mossambi-gui
+	install -Dm755 target/release/mossambi-tui debian/mossambi/usr/bin/mossambi-tui
+	install -Dm644 packaging/assets/mossambi.desktop debian/mossambi/usr/share/applications/mossambi.desktop

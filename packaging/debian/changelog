@@ -1,0 +1,9 @@
+mossambi (2.1.0-1) unstable; urgency=medium
+
+  * Release version 2.1.0.
+  * Three user interfaces: CLI, TUI, and GUI Floating Radial Widget.
+  * 0.00% Zero-Loss mathematical remuxing.
+  * Indian Competitive Exam Studio (UPSC, SSC, IBPS).
+  * Shell auto-completions and Carapace bridge.
+
+ -- Mossambi Systems Team <maintainers@mossambi.org>  Sun, 01 Nov 2026 14:00:00 +0530

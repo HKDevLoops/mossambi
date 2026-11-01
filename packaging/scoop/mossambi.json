@@ -1,0 +1,41 @@
+{
+  "version": "2.1.0",
+  "description": "Zero-loss native desktop file converter, archive suite, and Indian exam form tuner",
+  "homepage": "https://github.com/mossambi/mossambi",
+  "license": "MIT",
+  "notes": "Run 'mossambi' for CLI, 'mossambi-tui' for terminal workspace, or 'mossambi-gui' for floating radial widget & studio.",
+  "suggest": {
+    "FFmpeg": "ffmpeg"
+  },
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/mossambi/mossambi/releases/download/v2.1.0/mossambi-v2.1.0-x86_64-pc-windows-msvc.zip",
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "bin": [
+    "mossambi.exe",
+    "mossambi-gui.exe",
+    "mossambi-tui.exe"
+  ],
+  "shortcuts": [
+    [
+      "mossambi-gui.exe",
+      "Mossambi Studio & Radial Widget"
+    ],
+    [
+      "mossambi-tui.exe",
+      "Mossambi TUI"
+    ]
+  ],
+  "checkver": {
+    "github": "https://github.com/mossambi/mossambi"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/mossambi/mossambi/releases/download/v$version/mossambi-v$version-x86_64-pc-windows-msvc.zip"
+      }
+    }
+  }
+}

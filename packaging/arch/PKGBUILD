@@ -1,0 +1,47 @@
+# Maintainer: Mossambi Systems Team <maintainers@mossambi.org>
+# Contributor: Mossambi Community
+pkgname=mossambi-bin
+pkgver=2.1.0
+pkgrel=1
+pkgdesc="Zero-loss native desktop file converter, archive suite, and Indian exam form tuner (CLI, TUI, GUI & Radial Widget)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/mossambi/mossambi"
+license=('MIT' 'Apache-2.0')
+depends=('ffmpeg' 'libxkbcommon' 'wayland' 'mesa' 'alsa-lib')
+optdepends=(
+    'vulkan-driver: GPU accelerated video transcoding'
+    'cuda: NVIDIA NVENC video transcoding acceleration'
+    'intel-media-driver: Intel QSV hardware transcoding acceleration'
+)
+provides=('mossambi' 'mossambi-gui' 'mossambi-tui')
+conflicts=('mossambi')
+
+source_x86_64=("https://github.com/mossambi/mossambi/releases/download/v${pkgver}/mossambi-v${pkgver}-x86_64-unknown-linux-gnu.tar.gz")
+sha256sums_x86_64=('SKIP')
+
+package() {
+    cd "${srcdir}/mossambi-v${pkgver}-${CARCH}-unknown-linux-gnu" 2>/dev/null || cd "${srcdir}"
+
+    # Install binaries
+    install -Dm755 mossambi "${pkgdir}/usr/bin/mossambi"
+    install -Dm755 mossambi-gui "${pkgdir}/usr/bin/mossambi-gui"
+    install -Dm755 mossambi-tui "${pkgdir}/usr/bin/mossambi-tui"
+
+    # Install Desktop Entry
+    install -Dm644 "${startdir}/../assets/mossambi.desktop" "${pkgdir}/usr/share/applications/mossambi.desktop" 2>/dev/null || true
+
+    # Install Shell Auto-Completions
+    "${pkgdir}/usr/bin/mossambi" completions bash > mossambi.bash 2>/dev/null || true
+    "${pkgdir}/usr/bin/mossambi" completions zsh > _mossambi 2>/dev/null || true
+    "${pkgdir}/usr/bin/mossambi" completions fish > mossambi.fish 2>/dev/null || true
+
+    if [ -f mossambi.bash ]; then
+        install -Dm644 mossambi.bash "${pkgdir}/usr/share/bash-completion/completions/mossambi"
+    fi
+    if [ -f _mossambi ]; then
+        install -Dm644 _mossambi "${pkgdir}/usr/share/zsh/site-functions/_mossambi"
+    fi
+    if [ -f mossambi.fish ]; then
+        install -Dm644 mossambi.fish "${pkgdir}/usr/share/fish/vendor_completions.d/mossambi.fish"
+    fi
+}

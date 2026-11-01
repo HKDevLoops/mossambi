@@ -231,12 +231,20 @@ pub enum Commands {
 
     /// Display Unicode box table help and usage manual
     HelpManual,
+
+    /// Display MOSSAMBI sweet lime fruit ASCII art and curvy banner
+    Banner,
 }
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--table-help" || a == "help-manual") {
         print_table_help();
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "--banner" || a == "banner") {
+        print_welcome_banner();
         return Ok(());
     }
 
@@ -296,6 +304,10 @@ fn main() -> Result<()> {
             Commands::Carapace { shell, args } => handle_carapace(shell.as_deref(), &args),
             Commands::HelpManual => {
                 print_table_help();
+                Ok(())
+            }
+            Commands::Banner => {
+                print_welcome_banner();
                 Ok(())
             }
         };
@@ -891,29 +903,55 @@ fn handle_config(action: &str, key: Option<&str>, value: Option<&str>, as_json: 
 }
 
 fn print_welcome_banner() {
-    println!(r#"
-  __  __                                  _     _ 
- |  \/  | ___  ___ ___  __ _ _ __ ___  _ | |__ (_)
- | |\/| |/ _ \/ __/ __|/ _` | '_ ` _ \| '_ \ | |
- | |  | | (_) \__ \__ \ (_| | | | | | | |_) | |
- |_|  |_|\___/|___/___/\__,_|_| |_| |_|_.__/|_|
-  Native Desktop Zero-Loss Converter & Form Tuner
-"#);
-    println!("Usage (UNIX mv-style):");
-    println!("  mossambi <file> [format]            # Convert file (e.g. mossambi song.flac mp3)");
-    println!("  mossambi <file> --all               # Batch transcode to ALL domain formats");
-    println!("  mossambi <photo> --exam upsc-photo  # Indian Exam Optimizer (UPSC/SSC/IBPS)");
-    println!("  mossambi archive <files...> -o out.7z  # Pack exhaustive compression archive");
-    println!("  mossambi extract <archive>          # Unpack archive safely");
-    println!("  mossambi info <file>                # Inspect format, sectors & catalog");
-    println!("  mossambi check <file>               # Universal Quality, Integrity & Compatibility Inspector");
-    println!("  mossambi bench <file> [tgt]         # Benchmark speed & compare vs Online/CLI tools");
-    println!("  mossambi tui                        # Launch Ratatui terminal interface");
-    println!("  mossambi gui                        # Launch radial widget & Mac-styled GUI");
-    println!("  mossambi hw                         # Check GPU & SIMD hardware engines");
-    println!("  mossambi config                     # View or edit system settings");
-    println!("  mossambi help-manual                # Display full Unicode box table manual");
-    println!("\nRun 'mossambi --help' for exhaustive options.\n");
+    let green = "\x1b[38;2;120;190;32m";  // Pantone 376 C
+    let zest  = "\x1b[38;2;228;240;36m";  // Pantone 388 C
+    let gold  = "\x1b[38;2;255;184;28m";  // Pantone 1235 C
+    let cyan  = "\x1b[38;2;60;200;230m";
+    let white = "\x1b[38;2;245;245;247m";
+    let muted = "\x1b[38;2;160;160;165m";
+    let bold  = "\x1b[1m";
+    let reset = "\x1b[0m";
+
+    println!(
+        r#"{green}
+                       .-''''-.     _/\_
+                     .'  ____  `.  (____)
+                    /  .' || `.  \   ||
+                   |  / \ || / \  |  ||
+                   | ==  (())  == |  ||
+                   |  \ / || \ /  |  ||
+                    \  `. || .'  /   ||
+                     `.  `--'  .'
+                       `'-..-'`{reset}
+
+{zest}   ╭╮╭╮╭╮ ╭───╮ ╭────╮ ╭────╮ ╭───╮ ╭╮╭╮╭╮ ╭────╮ ╭─╮
+   ││││││ │╭─╮│ │╭───╯ │╭───╯ │╭─╮│ ││││││ │╭─╮│ │ │
+   ││││││ ││ ││ ╰───╮  ╰───╮  ││ ││ ││││││ │╰─╯│ │ │
+   ││││││ │╰─╯│ ╭───╯  ╭───╯  │╰─╯│ ││││││ │╭─╮│ │ │
+   ╰╯╰╯╰╯ ╰───╯ ╰────╯ ╰────╯ ╰─╰─╯ ╰╯╰╯╰╯ ╰───╯ ╰─╯{reset}
+
+{gold}   Universal File Conversion Platform · Indian Exam Form Studio{reset}
+{muted}   One Rust Core · Three Interfaces: CLI, TUI, and Floating Radial Widget{reset}
+   {white}v2.1.0 | 0.00% Zero-Loss Standard | Hardware Accelerated{reset}
+"#
+    );
+
+    println!("{bold}Usage (UNIX mv-style):{reset}");
+    println!("  {cyan}mossambi <file> [format]{reset}            # Convert file (e.g. mossambi song.flac mp3)");
+    println!("  {cyan}mossambi <file> --all{reset}               # Batch transcode to ALL domain formats");
+    println!("  {cyan}mossambi <photo> --exam upsc-photo{reset}  # Indian Exam Optimizer (UPSC/SSC/IBPS)");
+    println!("  {cyan}mossambi archive <files...> -o out.7z{reset}  # Pack exhaustive compression archive");
+    println!("  {cyan}mossambi extract <archive>{reset}          # Unpack archive safely with Zip-Slip protection");
+    println!("  {cyan}mossambi info <file>{reset}                # Inspect format, sectors & catalog");
+    println!("  {cyan}mossambi check <file>{reset}               # Universal Quality, Integrity & Compatibility Inspector");
+    println!("  {cyan}mossambi bench <file> [tgt]{reset}         # Benchmark speed & compare vs Online/CLI tools");
+    println!("  {cyan}mossambi tui{reset}                        # Launch Ratatui terminal interface");
+    println!("  {cyan}mossambi gui{reset}                        # Launch radial widget & Mac-styled GUI");
+    println!("  {cyan}mossambi hw{reset}                         # Check GPU & SIMD hardware engines");
+    println!("  {cyan}mossambi config{reset}                     # View or edit system settings");
+    println!("  {cyan}mossambi help-manual{reset}                # Display full Unicode box table manual");
+    println!("  {cyan}mossambi banner{reset}                     # Print Sweet Lime fruit ASCII art & banner");
+    println!("\nRun '{cyan}mossambi --help{reset}' or '{cyan}mossambi help-manual{reset}' for exhaustive options.\n");
 }
 
 fn handle_completions(shell_str: Option<&str>, carapace: bool) -> Result<()> {

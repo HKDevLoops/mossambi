@@ -1,0 +1,20 @@
+Source: mossambi
+Section: utils
+Priority: optional
+Maintainer: Mossambi Systems Team <maintainers@mossambi.org>
+Build-Depends: debhelper-compat (= 13), cargo, rustc, libasound2-dev, libgl1-mesa-dev, libxkbcommon-dev, libwayland-dev, pkg-config
+Standards-Version: 4.6.2
+Homepage: https://github.com/mossambi/mossambi
+
+Package: mossambi
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ffmpeg
+Recommends: mesa-va-drivers, intel-media-va-driver
+Description: Zero-loss native file converter, archive suite, and Indian exam form tuner
+ Mossambi is a universal high-performance native file conversion suite powered by
+ a shared pure-Rust conversion engine with three user interfaces:
+  * mossambi (UNIX-style CLI with stream-copy and mv grammar)
+  * mossambi-tui (macOS-styled interactive terminal workspace)
+  * mossambi-gui (Desktop studio with floating 8-carpel radial widget)
+ Features 0.00% Zero-Loss mathematical remuxing, 100% scorecard Indian exam
+ document optimization (UPSC, SSC, IBPS), and streaming file quality inspection.

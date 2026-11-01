@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.singleton.1.6.0.schema.json
+PackageIdentifier: Mossambi.Mossambi
+PackageVersion: 2.1.0
+PackageName: Mossambi
+Publisher: Mossambi Systems
+PublisherUrl: https://github.com/mossambi/mossambi
+PublisherSupportUrl: https://github.com/mossambi/mossambi/issues
+Author: Mossambi Systems Team
+Moniker: mossambi
+ShortDescription: Zero-loss native desktop file converter, archive suite, and Indian exam form tuner.
+Description: |
+  Mossambi is a high-performance native desktop file conversion suite and Indian competitive exam form optimizer.
+  Features:
+  - 1 shared pure-Rust conversion engine with 3 user interfaces: CLI, TUI, and GUI/Floating Radial Widget.
+  - 0.00% Zero-Loss mathematical remuxing for video, audio, and images.
+  - Native Windows System Tray integration with global activation (WIN+CTRL or circular drag gesture).
+  - Indian Competitive Exam & Job Application Form Studio (UPSC, SSC, IBPS, GATE, RRB) with 100% scorecard convergence.
+  - Streaming file quality inspector & high-resolution benchmark engine.
+  - Shell auto-completions and context-aware Carapace bridge.
+License: MIT OR Apache-2.0
+LicenseUrl: https://github.com/mossambi/mossambi/blob/main/LICENSE
+Copyright: Copyright (c) 2026 Mossambi Systems Team
+PackageUrl: https://github.com/mossambi/mossambi
+Tags:
+  - audio-converter
+  - video-converter
+  - image-converter
+  - lossless-remux
+  - exam-photo-optimizer
+  - upsc
+  - ssc
+  - ibps
+  - archive
+  - zip
+  - 7z
+  - ratatui
+  - egui
+ReleaseNotesUrl: https://github.com/mossambi/mossambi/releases/tag/v2.1.0
+Commands:
+  - mossambi
+  - mossambi-gui
+  - mossambi-tui
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    InstallerUrl: https://github.com/mossambi/mossambi/releases/download/v2.1.0/mossambi-v2.1.0-x86_64-pc-windows-msvc.zip
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: mossambi.exe
+        PortableCommandAlias: mossambi
+      - RelativeFilePath: mossambi-gui.exe
+        PortableCommandAlias: mossambi-gui
+      - RelativeFilePath: mossambi-tui.exe
+        PortableCommandAlias: mossambi-tui
+ManifestType: singleton
+ManifestVersion: 1.6.0

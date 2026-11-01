@@ -1,0 +1,35 @@
+# Maintainer: Mossambi Systems Team <maintainers@mossambi.org>
+pkgname=mossambi
+pkgver=2.1.0
+pkgrel=0
+pkgdesc="Universal file converter, archive suite, and Indian exam form tuner"
+url="https://github.com/mossambi/mossambi"
+arch="all"
+license="MIT OR Apache-2.0"
+makedepends="cargo rust ffmpeg-dev alsa-lib-dev mesa-dev libxkbcommon-dev wayland-dev"
+subpackages="$pkgname-doc $pkgname-bash-completion $pkgname-zsh-completion $pkgname-fish-completion"
+source="https://github.com/mossambi/mossambi/archive/v$pkgver/$pkgname-$pkgver.tar.gz"
+
+build() {
+	cargo build --release --locked --workspace
+}
+
+check() {
+	cargo test --release --locked --workspace
+}
+
+package() {
+	install -Dm755 target/release/mossambi "$pkgdir"/usr/bin/mossambi
+	install -Dm755 target/release/mossambi-gui "$pkgdir"/usr/bin/mossambi-gui
+	install -Dm755 target/release/mossambi-tui "$pkgdir"/usr/bin/mossambi-tui
+	install -Dm644 packaging/assets/mossambi.desktop "$pkgdir"/usr/share/applications/mossambi.desktop
+
+	# completions
+	"$pkgdir"/usr/bin/mossambi completions bash > mossambi.bash || true
+	"$pkgdir"/usr/bin/mossambi completions zsh > _mossambi || true
+	"$pkgdir"/usr/bin/mossambi completions fish > mossambi.fish || true
+
+	install -Dm644 mossambi.bash "$pkgdir"/usr/share/bash-completion/completions/mossambi
+	install -Dm644 _mossambi "$pkgdir"/usr/share/zsh/site-functions/_mossambi
+	install -Dm644 mossambi.fish "$pkgdir"/usr/share/fish/vendor_completions.d/mossambi.fish
+}

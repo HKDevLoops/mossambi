@@ -1,0 +1,26 @@
+[Desktop Entry]
+Name=Mossambi
+GenericName=Universal File Converter & Indian Exam Studio
+Comment=Zero-loss native file conversion, archive manager, and constraint-based form optimizer
+Exec=mossambi-gui %U
+Icon=mossambi
+Terminal=false
+Type=Application
+Categories=Utility;AudioVideo;Graphics;Archiving;Office;
+MimeType=image/png;image/jpeg;image/webp;image/tiff;audio/x-wav;audio/flac;audio/mpeg;video/mp4;video/x-matroska;application/pdf;application/zip;
+Keywords=converter;transcoder;lossless;audio;video;image;pdf;exam;upsc;ssc;ibps;archive;7z;zip;
+StartupNotify=true
+Actions=Widget;Studio;TUI;
+
+[Desktop Action Widget]
+Name=Open Sweet Lime Radial Widget
+Exec=mossambi-gui --widget
+
+[Desktop Action Studio]
+Name=Open Mossambi Studio
+Exec=mossambi-gui --studio
+
+[Desktop Action TUI]
+Name=Open Interactive Terminal (TUI)
+Exec=mossambi-tui
+Terminal=true
