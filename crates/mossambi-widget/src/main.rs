@@ -34,6 +34,7 @@ struct MossambiWidgetApp {
     // Context Menu & Dragging
     show_context_menu: bool,
     context_menu_pos: Pos2,
+    first_frame_done: bool,
 
     // Worker Channels
     result_rx: Receiver<WidgetResult>,
@@ -43,11 +44,11 @@ struct MossambiWidgetApp {
 impl Default for MossambiWidgetApp {
     fn default() -> Self {
         let (tx, rx) = channel();
-        // Default petals matching Image reference.png: DOCX, JPG, WEBP, HEIC, TIFF, AVIF, BMP, PDF
+        // Default petals matching Image reference.png: JPG, WEBP, HEIC, TIFF, AVIF, BMP, PDF, DOCX
         let default_sectors = vec!["JPG", "WEBP", "HEIC", "TIFF", "AVIF", "BMP", "PDF", "DOCX"];
 
         Self {
-            geometry: RadialWidgetGeometry::default(),
+            geometry: RadialWidgetGeometry::new(Pos2::new(200.0, 200.0), 400.0),
             sectors: default_sectors,
             hovered_carpel: None,
             current_file: None,
@@ -61,6 +62,7 @@ impl Default for MossambiWidgetApp {
 
             show_context_menu: false,
             context_menu_pos: Pos2::ZERO,
+            first_frame_done: false,
 
             result_rx: rx,
             result_tx: tx,
@@ -97,14 +99,81 @@ impl MossambiWidgetApp {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn enforce_borderless_win32() {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumThreadWindows, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
+        GWL_STYLE, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION,
+        WS_EX_LAYERED, WS_EX_TOPMOST, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
+    };
+
+    extern "system" {
+        fn GetCurrentThreadId() -> u32;
+    }
+
+    #[repr(C)]
+    struct Margins {
+        cx_left: i32,
+        cx_right: i32,
+        cy_top: i32,
+        cy_bottom: i32,
+    }
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmExtendFrameIntoClientArea(hwnd: HWND, p_mar_inset: *const Margins) -> i32;
+    }
+
+    unsafe extern "system" fn enum_proc(hwnd: HWND, _: isize) -> i32 {
+        let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        style &= !(WS_CAPTION | WS_THICKFRAME);
+        style |= WS_POPUP | WS_VISIBLE;
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style as isize);
+
+        let mut ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        ex |= WS_EX_LAYERED | WS_EX_TOPMOST;
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex as isize);
+
+        let margins = Margins {
+            cx_left: -1,
+            cx_right: -1,
+            cy_top: -1,
+            cy_bottom: -1,
+        };
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+
+        SetWindowPos(
+            hwnd,
+            std::ptr::null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+        );
+        1
+    }
+
+    unsafe {
+        EnumThreadWindows(GetCurrentThreadId(), Some(enum_proc), 0);
+    }
+}
+
 impl eframe::App for MossambiWidgetApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Adaptive repaint: 16ms (60 FPS) when converting or animating, 150ms when idle
+        #[cfg(target_os = "windows")]
+        if !self.first_frame_done {
+            enforce_borderless_win32();
+            self.first_frame_done = true;
+        }
+
+        // Adaptive repaint: 16ms (60 FPS) when converting or animating, 120ms when idle
         let is_active = self.is_converting || self.success_time.is_some();
         let repaint_delay = if is_active {
             Duration::from_millis(16)
         } else {
-            Duration::from_millis(150)
+            Duration::from_millis(120)
         };
         ctx.request_repaint_after(repaint_delay);
 
@@ -192,7 +261,7 @@ impl eframe::App for MossambiWidgetApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(Color32::TRANSPARENT))
             .show(ctx, |ui| {
-                let (rect, response) = ui.allocate_exact_size(Vec2::new(360.0, 360.0), egui::Sense::click_and_drag());
+                let (rect, response) = ui.allocate_exact_size(Vec2::new(400.0, 400.0), egui::Sense::click_and_drag());
                 let painter = ui.painter_at(rect);
                 self.geometry.center = rect.center();
 
@@ -256,17 +325,17 @@ impl eframe::App for MossambiWidgetApp {
 
                 // 6. Right-Click Context Menu Pill
                 if self.show_context_menu {
-                    let menu_rect = Rect::from_min_size(self.context_menu_pos, Vec2::new(170.0, 100.0));
+                    let menu_rect = Rect::from_min_size(self.context_menu_pos, Vec2::new(175.0, 110.0));
                     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(menu_rect), |ui| {
                         let fill_bg = if self.geometry.theme == WidgetTheme::Dark {
-                            Color32::from_rgba_premultiplied(30, 34, 42, 240)
+                            Color32::from_rgba_premultiplied(22, 26, 34, 245)
                         } else {
-                            Color32::from_rgba_premultiplied(250, 250, 252, 240)
+                            Color32::from_rgba_premultiplied(250, 250, 252, 245)
                         };
                         let border_col = if self.geometry.theme == WidgetTheme::Dark {
-                            Color32::from_rgb(60, 68, 85)
+                            Color32::from_rgb(55, 62, 78)
                         } else {
-                            Color32::from_rgb(220, 224, 230)
+                            Color32::from_rgb(215, 220, 228)
                         };
 
                         egui::Frame::none()
@@ -360,7 +429,7 @@ fn main() -> Result<(), eframe::Error> {
             let parts: Vec<&str> = args[i + 1].split(',').collect();
             if parts.len() == 2 {
                 if let (Ok(x), Ok(y)) = (parts[0].trim().parse::<f32>(), parts[1].trim().parse::<f32>()) {
-                    initial_pos = Some(Pos2::new(x - 180.0, y - 180.0));
+                    initial_pos = Some(Pos2::new(x - 200.0, y - 200.0));
                 }
             }
             i += 2;
@@ -378,10 +447,10 @@ fn main() -> Result<(), eframe::Error> {
     }
 
     let mut builder = ViewportBuilder::default()
-        .with_title("Mossambi Radial Widget")
-        .with_inner_size([360.0, 360.0])
-        .with_min_inner_size([360.0, 360.0])
-        .with_max_inner_size([360.0, 360.0])
+        .with_title("")
+        .with_inner_size([400.0, 400.0])
+        .with_min_inner_size([400.0, 400.0])
+        .with_max_inner_size([400.0, 400.0])
         .with_resizable(false)
         .with_decorations(false) // ZERO titlebar, ZERO system borders
         .with_transparent(true)  // 100% borderless transparency
@@ -401,7 +470,7 @@ fn main() -> Result<(), eframe::Error> {
     };
 
     eframe::run_native(
-        "Mossambi Radial Widget",
+        "",
         options,
         Box::new(move |_cc| {
             let mut app = MossambiWidgetApp::default();

@@ -37,7 +37,7 @@ impl Default for RadialWidgetGeometry {
         Self {
             center: Pos2::new(180.0, 180.0),
             outer_radius: 165.0,
-            inner_radius: 74.0,
+            inner_radius: 61.0,
             hub_radius: 60.0,
             theme: WidgetTheme::Light,
         }
@@ -49,9 +49,9 @@ impl RadialWidgetGeometry {
         let r = size / 2.0;
         Self {
             center,
-            outer_radius: r * 0.94,
-            inner_radius: r * 0.42,
-            hub_radius: r * 0.35,
+            outer_radius: r * 0.88,
+            inner_radius: r * 0.33,
+            hub_radius: r * 0.32,
             theme: WidgetTheme::Light,
         }
     }
@@ -118,10 +118,35 @@ impl RadialWidgetGeometry {
             _ => drag_hover_target,
         };
 
+        let is_dark = self.theme == WidgetTheme::Dark;
+
+        // 0. Soft ambient drop shadow around the circular fruit
+        let shadow_col1 = if is_dark {
+            Color32::from_black_alpha(80)
+        } else {
+            Color32::from_rgba_premultiplied(20, 30, 50, 45)
+        };
+        let shadow_col2 = if is_dark {
+            Color32::from_black_alpha(45)
+        } else {
+            Color32::from_rgba_premultiplied(20, 30, 50, 22)
+        };
+        painter.circle_filled(self.center + Vec2::new(0.0, 5.0), self.outer_radius + 3.0, shadow_col1);
+        painter.circle_filled(self.center + Vec2::new(0.0, 8.0), self.outer_radius + 7.0, shadow_col2);
+
         // 1. Render each of the 8 petals
         for i in 0..8 {
             let label = sectors.get(i).copied().unwrap_or("FMT");
             let is_hovered = active_petal == Some(i);
+
+            if is_hovered {
+                let glow_col = if is_dark {
+                    Color32::from_rgba_premultiplied(120, 240, 90, 75)
+                } else {
+                    Color32::from_rgba_premultiplied(120, 190, 32, 60)
+                };
+                painter.circle_filled(self.petal_center(i) + Vec2::new(0.0, 2.0), 30.0, glow_col);
+            }
 
             // Angle of sector: 0 is North (-PI/2)
             let center_angle = -PI / 2.0 + (i as f32) * sector_span;
