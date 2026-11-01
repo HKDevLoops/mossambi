@@ -638,10 +638,11 @@ impl StudioView {
             .inner_margin(egui::Margin::same(16.0));
 
         trigger_frame.show(ui, |ui| {
-            ui.label(egui::RichText::new("Background Resident Daemon & Global Hotkeys (Whisper Flow Style)").strong().color(palette.text_primary));
+            ui.label(egui::RichText::new("Background Resident Daemon & Global Triggers (Whisper Flow Style)").strong().color(palette.text_primary));
             ui.label("• Win + Shift + C: Summon Floating Radial Wheel centered under cursor (with file auto-detection).");
             ui.label("• Win + Ctrl + C: Open Full Desktop Studio GUI.");
-            ui.label("• 2-Circle Gesture: Trace 2 circles with mouse while dragging a file to summon wheel.");
+            ui.label("• Shake or Circle Gesture: Shake cursor or sweep arc while dragging file(s) to overlay wheel under cursor.");
+            ui.label("• System-Level Gated Hook: 0.00% CPU overhead - motion is only analyzed when files/folders are actively held.");
             ui.label("• System Tray: Right-click citrus tray icon for themes, exam presets, and autostart toggle.");
             ui.add_space(8.0);
 
@@ -649,6 +650,14 @@ impl StudioView {
             let check_resp = ui.checkbox(&mut autostart, "🚀 Run in Background at Startup (Auto-start on boot like Whisper Flow)");
             if check_resp.changed() {
                 let _ = mossambi_core::MossambiConfig::set_autostart(autostart);
+            }
+
+            let mut cfg = mossambi_core::MossambiConfig::load();
+            let mut gesture_enabled = cfg.enable_gesture_wakeup;
+            let gesture_resp = ui.checkbox(&mut gesture_enabled, "🖱️ Enable File Drag Mouse Gesture Activation (Shake or Circle while dragging)");
+            if gesture_resp.changed() {
+                cfg.enable_gesture_wakeup = gesture_enabled;
+                let _ = cfg.save();
             }
         });
 

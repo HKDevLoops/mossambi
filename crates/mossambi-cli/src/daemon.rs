@@ -24,6 +24,18 @@ pub fn handle_daemon_command(action: &str) -> Result<()> {
         "status" => {
             print_daemon_status();
         }
+        "gesture" | "gesture-on" => {
+            let mut cfg = mossambi_core::MossambiConfig::load();
+            cfg.enable_gesture_wakeup = true;
+            let _ = cfg.save();
+            println!("✓ File drag mouse gesture activation enabled (Gated to active file drags).");
+        }
+        "gesture-off" => {
+            let mut cfg = mossambi_core::MossambiConfig::load();
+            cfg.enable_gesture_wakeup = false;
+            let _ = cfg.save();
+            println!("✓ File drag mouse gesture activation disabled.");
+        }
         "install" => {
             mossambi_core::MossambiConfig::set_autostart(true)?;
             let mut cfg = mossambi_core::MossambiConfig::load();
@@ -52,10 +64,18 @@ pub fn handle_daemon_command(action: &str) -> Result<()> {
 
 pub fn print_daemon_status() {
     let autostart = mossambi_core::MossambiConfig::is_autostart_configured();
+    let cfg = mossambi_core::MossambiConfig::load();
+    let gesture_status = if cfg.enable_gesture_wakeup {
+        "ENABLED  [Gated to active file drags]"
+    } else {
+        "DISABLED"
+    };
+
     println!("┌────────────────────────────────────────────────────────┐");
     println!("│  MOSSAMBI BACKGROUND DAEMON STATUS                    │");
     println!("├────────────────────────────────────────────────────────┤");
     println!("│  Autostart on Boot:  {}", if autostart { "ENABLED  [Active at login]" } else { "DISABLED" });
+    println!("│  File Drag Gesture:  {}  │", gesture_status);
     println!("│  Global Hotkey 1:    Win + Shift + C  (Radial Wheel)   │");
     println!("│  Global Hotkey 2:    Win + Ctrl + C   (Studio GUI)     │");
     println!("│  Tray Tooltip:       Sweet Lime Transcoder & Studio    │");
@@ -261,6 +281,19 @@ pub fn run_daemon_loop() -> Result<()> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
+    let cfg = mossambi_core::MossambiConfig::load();
+    let allow_shake = cfg.gesture_type == "shake" || cfg.gesture_type == "both";
+    let allow_circle = cfg.gesture_type == "circle" || cfg.gesture_type == "both";
+    let mut drag_listener = if cfg.enable_gesture_wakeup {
+        Some(mossambi_core::DragGestureListener::start(
+            allow_shake,
+            allow_circle,
+            cfg.shake_sensitivity_px,
+        ))
+    } else {
+        None
+    };
+
     let mut msg: MSG = unsafe { std::mem::zeroed() };
     loop {
         unsafe {
@@ -325,6 +358,9 @@ pub fn run_daemon_loop() -> Result<()> {
                                 let _ = mossambi_core::MossambiConfig::set_autostart(new_setting);
                             }
                             CMD_QUIT => {
+                                if let Some(mut listener) = drag_listener.take() {
+                                    listener.stop();
+                                }
                                 Shell_NotifyIconW(NIM_DELETE, &nid);
                                 DestroyWindow(hwnd);
                                 return Ok(());
@@ -337,7 +373,15 @@ pub fn run_daemon_loop() -> Result<()> {
                 DispatchMessageW(&msg);
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Check for system-level mouse drag gestures while holding files
+        if let Some(ref listener) = drag_listener {
+            if let Some(evt) = listener.try_recv() {
+                spawn_widget_at_with_files(evt.cursor_pos.0 as i32, evt.cursor_pos.1 as i32, &evt.files, true);
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(30));
     }
 }
 
@@ -345,12 +389,34 @@ pub fn run_daemon_loop() -> Result<()> {
 pub fn run_daemon_loop() -> Result<()> {
     println!("Mossambi background daemon running on Linux/macOS.");
     println!("Global Shortcuts configured via Desktop Environment / Autostart (Super+Shift+C / Super+Ctrl+C).");
+    let cfg = mossambi_core::MossambiConfig::load();
+    let allow_shake = cfg.gesture_type == "shake" || cfg.gesture_type == "both";
+    let allow_circle = cfg.gesture_type == "circle" || cfg.gesture_type == "both";
+    let drag_listener = if cfg.enable_gesture_wakeup {
+        Some(mossambi_core::DragGestureListener::start(
+            allow_shake,
+            allow_circle,
+            cfg.shake_sensitivity_px,
+        ))
+    } else {
+        None
+    };
+
     loop {
-        std::thread::sleep(std::time::Duration::from_secs(60));
+        if let Some(ref listener) = drag_listener {
+            if let Some(evt) = listener.try_recv() {
+                spawn_widget_at_with_files(evt.cursor_pos.0 as i32, evt.cursor_pos.1 as i32, &evt.files, true);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
 
 fn spawn_widget_at(x: i32, y: i32) {
+    spawn_widget_at_with_files(x, y, &[], false);
+}
+
+fn spawn_widget_at_with_files(x: i32, y: i32, files: &[std::path::PathBuf], active_drag: bool) {
     #[cfg(target_os = "windows")]
     let bin = "mossambi-widget.exe";
     #[cfg(not(target_os = "windows"))]
@@ -366,6 +432,12 @@ fn spawn_widget_at(x: i32, y: i32) {
         }
     }
     cmd.arg("--pos").arg(format!("{},{}", x, y));
+    if active_drag {
+        cmd.arg("--active-drag");
+    }
+    for file in files {
+        cmd.arg(file);
+    }
     let _ = cmd.spawn();
 }
 

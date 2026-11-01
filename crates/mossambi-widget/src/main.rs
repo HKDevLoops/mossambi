@@ -169,6 +169,19 @@ impl eframe::App for MossambiWidgetApp {
                 }
             }
 
+            // Handle button release over petal when file is pre-loaded via gesture activation
+            if i.pointer.button_released(egui::PointerButton::Primary) && !self.is_converting {
+                if let Some(pos) = i.pointer.hover_pos() {
+                    if let Some(carpel_idx) = self.geometry.hit_test_petal(pos) {
+                        if let Some(target) = self.sectors.get(carpel_idx).copied() {
+                            if self.current_file.is_some() {
+                                self.start_conversion(target);
+                            }
+                        }
+                    }
+                }
+            }
+
             // Keyboard shortcut ESC to dismiss
             if i.key_pressed(Key::Escape) {
                 ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -336,6 +349,8 @@ fn main() -> Result<(), eframe::Error> {
                 }
             }
             i += 2;
+        } else if args[i] == "--active-drag" {
+            i += 1;
         } else if !args[i].starts_with('-') {
             let p = PathBuf::from(&args[i]);
             if p.exists() {

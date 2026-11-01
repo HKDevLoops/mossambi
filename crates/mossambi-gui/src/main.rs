@@ -193,6 +193,7 @@ impl MossambiApp {
             cmd.arg("--pos").arg(format!("{:.0},{:.0}", x, y));
         }
         if let Some(f) = file {
+            cmd.arg("--active-drag");
             cmd.arg(f);
         }
         let _ = cmd.spawn();

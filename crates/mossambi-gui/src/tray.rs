@@ -7,7 +7,6 @@
 //!    Indian Exam Presets, Studio / Radial Widget toggles, and Zero-Loss settings.
 
 use crate::active_file::get_active_file_under_cursor;
-use crate::gesture::CircleGestureDetector;
 use crate::macos_theme::ThemeStyle;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -95,9 +94,7 @@ impl ActivationManager {
 fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown: Arc<AtomicBool>) {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, RegisterHotKey, VK_LBUTTON,
-    };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::RegisterHotKey;
     use windows_sys::Win32::UI::Shell::{
         Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
         NOTIFYICONDATAW,
@@ -221,7 +218,19 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
         Shell_NotifyIconW(NIM_ADD, &nid);
     }
 
-    let mut gesture_detector = CircleGestureDetector::new();
+    let cfg = mossambi_core::MossambiConfig::load();
+    let allow_shake = cfg.gesture_type == "shake" || cfg.gesture_type == "both";
+    let allow_circle = cfg.gesture_type == "circle" || cfg.gesture_type == "both";
+    let mut drag_listener = if cfg.enable_gesture_wakeup {
+        Some(mossambi_core::DragGestureListener::start(
+            allow_shake,
+            allow_circle,
+            cfg.shake_sensitivity_px,
+        ))
+    } else {
+        None
+    };
+
     let mut msg: MSG = unsafe { std::mem::zeroed() };
     let mut zero_loss_enabled = true;
     let mut current_theme = ThemeStyle::LiquidGlass;
@@ -397,6 +406,9 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                                 let _ = sender.send(AppControlEvent::ToggleZeroLoss(zero_loss_enabled));
                             }
                             CMD_QUIT => {
+                                if let Some(mut l) = drag_listener.take() {
+                                    l.stop();
+                                }
                                 let _ = sender.send(AppControlEvent::QuitApp);
                                 shutdown.store(true, Ordering::Relaxed);
                                 break;
@@ -414,27 +426,25 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
             break;
         }
 
-        // 2. Poll cursor position and left button state for 2-time circular motion gesture
-        unsafe {
-            let mut pt: POINT = std::mem::zeroed();
-            GetCursorPos(&mut pt);
-            let is_lbutton_down = (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0;
-
-            if let Some((cx, cy)) = gesture_detector.update(pt.x as f32, pt.y as f32, is_lbutton_down) {
-                // When 2 circular loops are detected while dragging, resolve the active file under cursor!
-                let active_file = get_active_file_under_cursor(pt.x, pt.y);
-                if sender.send(AppControlEvent::Wakeup(WakeupEvent {
-                    cursor_x: cx,
-                    cursor_y: cy,
-                    reason: WakeupReason::CircleDragGesture,
+        // 2. Check for system-level drag gestures (gated strictly to active file drags)
+        if let Some(ref listener) = drag_listener {
+            if let Some(evt) = listener.try_recv() {
+                let active_file = evt.files.first().cloned().or_else(|| {
+                    get_active_file_under_cursor(evt.cursor_pos.0 as i32, evt.cursor_pos.1 as i32)
+                });
+                let _ = sender.send(AppControlEvent::SummonWidget {
+                    cursor_x: evt.cursor_pos.0,
+                    cursor_y: evt.cursor_pos.1,
                     active_file,
-                })).is_err() {
-                    break;
-                }
+                });
             }
         }
 
-        thread::sleep(Duration::from_millis(20)); // 50 Hz sampling rate
+        thread::sleep(Duration::from_millis(30)); // Responsive event loop
+    }
+
+    if let Some(mut l) = drag_listener.take() {
+        l.stop();
     }
 
     unsafe {

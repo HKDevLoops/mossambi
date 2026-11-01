@@ -2,10 +2,14 @@
 //! Format registry, Pantone color palette, sibling output path logic, and persistent configuration.
 
 pub mod config;
+pub mod drag_listener;
+pub mod gesture;
 pub mod pantone;
 pub mod registry;
 
 pub use config::{MossambiConfig, OutputMode, ThemeMode};
+pub use drag_listener::{DragGestureEvent, DragGestureListener};
+pub use gesture::{GestureKind, GesturePoint, KinematicGestureTracker};
 pub use pantone::{CitrusShade, PantoneColor, PantonePalette};
 pub use registry::{
     DynamicWheelSector, FileCategory, FormatInfo, FormatNature, FormatSpecification,

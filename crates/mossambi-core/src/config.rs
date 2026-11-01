@@ -39,6 +39,30 @@ pub struct MossambiConfig {
     pub enforce_zero_loss: bool,
     #[serde(default)]
     pub autostart_prompted: Option<bool>,
+    #[serde(default = "default_gesture_type")]
+    pub gesture_type: String, // "shake", "circle", "both"
+    #[serde(default = "default_shake_sensitivity")]
+    pub shake_sensitivity_px: f32,
+    #[serde(default = "default_gesture_timeout")]
+    pub gesture_timeout_ms: u64,
+    #[serde(default = "default_deep_drag")]
+    pub deep_drag_detection_only: bool,
+}
+
+fn default_gesture_type() -> String {
+    "both".to_string()
+}
+
+fn default_shake_sensitivity() -> f32 {
+    25.0
+}
+
+fn default_gesture_timeout() -> u64 {
+    450
+}
+
+fn default_deep_drag() -> bool {
+    true
 }
 
 impl Default for MossambiConfig {
@@ -56,6 +80,10 @@ impl Default for MossambiConfig {
             enable_hotkey_wakeup: true,
             enforce_zero_loss: true,
             autostart_prompted: None,
+            gesture_type: "both".to_string(),
+            shake_sensitivity_px: 25.0,
+            gesture_timeout_ms: 450,
+            deep_drag_detection_only: true,
         }
     }
 }
