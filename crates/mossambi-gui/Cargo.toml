@@ -24,4 +24,4 @@ image = { workspace = true }
 rfd = "0.15"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_System_Com", "Win32_System_Ole"] }
+windows-sys = { workspace = true, features = ["Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant"] }

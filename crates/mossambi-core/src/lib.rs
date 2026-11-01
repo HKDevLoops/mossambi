@@ -9,6 +9,8 @@ pub mod registry;
 
 pub use config::{MossambiConfig, OutputMode, ThemeMode};
 pub use drag_listener::{DragGestureEvent, DragGestureListener};
+#[cfg(target_os = "windows")]
+pub use drag_listener::query_active_explorer_files;
 pub use gesture::{GestureKind, GesturePoint, KinematicGestureTracker};
 pub use pantone::{CitrusShade, PantoneColor, PantonePalette};
 pub use registry::{

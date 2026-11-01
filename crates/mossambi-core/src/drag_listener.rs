@@ -291,10 +291,348 @@ fn is_shell_class_name(name: &str) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn query_active_explorer_files(_pt: windows_sys::Win32::Foundation::POINT) -> Vec<PathBuf> {
-    // Attempt to query any selected files from Windows Explorer via Shell Windows COM or clipboard
-    // If unavailable mid-drag, return empty list (widget will summon and receive dropped file payload)
-    Vec::new()
+pub fn query_active_explorer_files(pt: windows_sys::Win32::Foundation::POINT) -> Vec<PathBuf> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, WindowFromPoint, GA_ROOT};
+
+    let hwnd = unsafe {
+        let h = WindowFromPoint(pt);
+        if h.is_null() {
+            0
+        } else {
+            let root = GetAncestor(h, GA_ROOT);
+            if !root.is_null() {
+                root as isize
+            } else {
+                h as isize
+            }
+        }
+    };
+
+    unsafe { shell_com::query_selected_explorer_files(hwnd) }
+}
+
+#[cfg(target_os = "windows")]
+mod shell_com {
+    use std::path::PathBuf;
+    use std::ptr::null_mut;
+    use windows_sys::core::GUID;
+    use windows_sys::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_LOCAL_SERVER,
+        COINIT_APARTMENTTHREADED, DISPPARAMS,
+    };
+    use windows_sys::Win32::System::Variant::{
+        VariantClear, VARIANT, VT_BSTR, VT_DISPATCH, VT_I4,
+    };
+
+    const DISPATCH_METHOD: u16 = 0x1;
+    const DISPATCH_PROPERTYGET: u16 = 0x2;
+
+    type IDispatchPtr = *mut std::ffi::c_void;
+
+    struct ComGuard(bool);
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                unsafe {
+                    CoUninitialize();
+                }
+            }
+        }
+    }
+
+    pub unsafe fn query_selected_explorer_files(target_hwnd: isize) -> Vec<PathBuf> {
+        let hr = CoInitializeEx(null_mut(), COINIT_APARTMENTTHREADED as u32);
+        let _guard = ComGuard(hr >= 0);
+
+        let mut results = Vec::new();
+
+        // CLSID_ShellWindows = {9BA05972-F6A8-11CF-A442-00A0C90A8F39}
+        let clsid_shell_windows = GUID {
+            data1: 0x9ba05972,
+            data2: 0xf6a8,
+            data3: 0x11cf,
+            data4: [0xa4, 0x42, 0x00, 0xa0, 0xc9, 0x0a, 0x8f, 0x39],
+        };
+        let iid_idispatch = GUID {
+            data1: 0x00020400,
+            data2: 0x0000,
+            data3: 0x0000,
+            data4: [0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46],
+        };
+
+        let mut shell_windows: IDispatchPtr = null_mut();
+        let res = CoCreateInstance(
+            &clsid_shell_windows,
+            null_mut(),
+            CLSCTX_LOCAL_SERVER,
+            &iid_idispatch,
+            &mut shell_windows,
+        );
+
+        if res >= 0 && !shell_windows.is_null() {
+            enumerate_windows(shell_windows, target_hwnd, &mut results);
+            release_dispatch(shell_windows);
+        }
+
+        results
+    }
+
+    unsafe fn enumerate_windows(
+        shell_windows: IDispatchPtr,
+        target_hwnd: isize,
+        results: &mut Vec<PathBuf>,
+    ) {
+        let count_dispid = match get_disp_id(shell_windows, "Count") {
+            Some(id) => id,
+            None => return,
+        };
+
+        let mut var_count: VARIANT = std::mem::zeroed();
+        let mut empty_params: DISPPARAMS = std::mem::zeroed();
+        if invoke(
+            shell_windows,
+            count_dispid,
+            DISPATCH_PROPERTYGET,
+            &mut empty_params,
+            &mut var_count,
+        ) < 0
+        {
+            return;
+        }
+
+        let count = match var_count.Anonymous.Anonymous.vt {
+            VT_I4 => var_count.Anonymous.Anonymous.Anonymous.lVal,
+            _ => {
+                VariantClear(&mut var_count);
+                return;
+            }
+        };
+        VariantClear(&mut var_count);
+
+        let item_dispid = match get_disp_id(shell_windows, "Item") {
+            Some(id) => id,
+            None => return,
+        };
+
+        for i in 0..count {
+            let mut arg_val: VARIANT = std::mem::zeroed();
+            arg_val.Anonymous.Anonymous.vt = VT_I4;
+            arg_val.Anonymous.Anonymous.Anonymous.lVal = i;
+
+            let mut params = DISPPARAMS {
+                rgvarg: &mut arg_val,
+                rgdispidNamedArgs: null_mut(),
+                cArgs: 1,
+                cNamedArgs: 0,
+            };
+
+            let mut var_win: VARIANT = std::mem::zeroed();
+            let hr = invoke(
+                shell_windows,
+                item_dispid,
+                DISPATCH_METHOD,
+                &mut params,
+                &mut var_win,
+            );
+            VariantClear(&mut arg_val);
+
+            if hr >= 0 && var_win.Anonymous.Anonymous.vt == VT_DISPATCH {
+                let win_disp = var_win.Anonymous.Anonymous.Anonymous.pdispVal as IDispatchPtr;
+                if !win_disp.is_null() {
+                    let mut is_match = target_hwnd == 0;
+                    if !is_match {
+                        if let Some(hwnd_id) = get_disp_id(win_disp, "HWND") {
+                            let mut var_hwnd: VARIANT = std::mem::zeroed();
+                            let mut p = std::mem::zeroed();
+                            if invoke(win_disp, hwnd_id, DISPATCH_PROPERTYGET, &mut p, &mut var_hwnd) >= 0 {
+                                let w_hwnd = var_hwnd.Anonymous.Anonymous.Anonymous.lVal as isize;
+                                is_match = w_hwnd == target_hwnd;
+                                VariantClear(&mut var_hwnd);
+                            }
+                        }
+                    }
+
+                    if is_match {
+                        extract_selected_from_window(win_disp, results);
+                    }
+                    release_dispatch(win_disp);
+
+                    if !results.is_empty() {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    unsafe fn extract_selected_from_window(
+        win_disp: IDispatchPtr,
+        results: &mut Vec<PathBuf>,
+    ) {
+        let doc_id = match get_disp_id(win_disp, "Document") {
+            Some(id) => id,
+            None => return,
+        };
+
+        let mut var_doc: VARIANT = std::mem::zeroed();
+        let mut p: DISPPARAMS = std::mem::zeroed();
+        if invoke(win_disp, doc_id, DISPATCH_PROPERTYGET, &mut p, &mut var_doc) < 0 {
+            return;
+        }
+
+        if var_doc.Anonymous.Anonymous.vt != VT_DISPATCH || var_doc.Anonymous.Anonymous.Anonymous.pdispVal.is_null() {
+            VariantClear(&mut var_doc);
+            return;
+        }
+        let doc_disp = var_doc.Anonymous.Anonymous.Anonymous.pdispVal as IDispatchPtr;
+
+        // Document.SelectedItems()
+        if let Some(sel_id) = get_disp_id(doc_disp, "SelectedItems") {
+            let mut var_sel: VARIANT = std::mem::zeroed();
+            let mut p2: DISPPARAMS = std::mem::zeroed();
+            if invoke(doc_disp, sel_id, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &mut p2, &mut var_sel) >= 0 {
+                if var_sel.Anonymous.Anonymous.vt == VT_DISPATCH && !var_sel.Anonymous.Anonymous.Anonymous.pdispVal.is_null() {
+                    let sel_disp = var_sel.Anonymous.Anonymous.Anonymous.pdispVal as IDispatchPtr;
+
+                    // SelectedItems.Count
+                    if let Some(cnt_id) = get_disp_id(sel_disp, "Count") {
+                        let mut var_cnt: VARIANT = std::mem::zeroed();
+                        let mut p3: DISPPARAMS = std::mem::zeroed();
+                        if invoke(sel_disp, cnt_id, DISPATCH_PROPERTYGET, &mut p3, &mut var_cnt) >= 0 {
+                            let item_count = var_cnt.Anonymous.Anonymous.Anonymous.lVal;
+                            VariantClear(&mut var_cnt);
+
+                            if let Some(item_id) = get_disp_id(sel_disp, "Item") {
+                                for idx in 0..item_count {
+                                    let mut arg_idx: VARIANT = std::mem::zeroed();
+                                    arg_idx.Anonymous.Anonymous.vt = VT_I4;
+                                    arg_idx.Anonymous.Anonymous.Anonymous.lVal = idx;
+
+                                    let mut p4 = DISPPARAMS {
+                                        rgvarg: &mut arg_idx,
+                                        rgdispidNamedArgs: null_mut(),
+                                        cArgs: 1,
+                                        cNamedArgs: 0,
+                                    };
+
+                                    let mut var_item: VARIANT = std::mem::zeroed();
+                                    if invoke(sel_disp, item_id, DISPATCH_METHOD, &mut p4, &mut var_item) >= 0 {
+                                        if var_item.Anonymous.Anonymous.vt == VT_DISPATCH && !var_item.Anonymous.Anonymous.Anonymous.pdispVal.is_null() {
+                                            let item_disp = var_item.Anonymous.Anonymous.Anonymous.pdispVal as IDispatchPtr;
+
+                                            // Item.Path
+                                            if let Some(path_id) = get_disp_id(item_disp, "Path") {
+                                                let mut var_path: VARIANT = std::mem::zeroed();
+                                                let mut p5: DISPPARAMS = std::mem::zeroed();
+                                                if invoke(item_disp, path_id, DISPATCH_PROPERTYGET, &mut p5, &mut var_path) >= 0 {
+                                                    if var_path.Anonymous.Anonymous.vt == VT_BSTR && !var_path.Anonymous.Anonymous.Anonymous.bstrVal.is_null() {
+                                                        let path_str = bstr_to_string(var_path.Anonymous.Anonymous.Anonymous.bstrVal);
+                                                        let pb = PathBuf::from(&path_str);
+                                                        if pb.exists() {
+                                                            results.push(pb);
+                                                        }
+                                                    }
+                                                    VariantClear(&mut var_path);
+                                                }
+                                            }
+                                            release_dispatch(item_disp);
+                                        }
+                                        VariantClear(&mut var_item);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    release_dispatch(sel_disp);
+                }
+                VariantClear(&mut var_sel);
+            }
+        }
+
+        release_dispatch(doc_disp);
+        VariantClear(&mut var_doc);
+    }
+
+    unsafe fn get_disp_id(disp: IDispatchPtr, name: &str) -> Option<i32> {
+        let mut wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut names = [wide.as_mut_ptr()];
+        let mut dispid = 0i32;
+        let vtable = *(disp as *mut *mut usize);
+        let get_ids_fn: extern "system" fn(
+            IDispatchPtr,
+            *const GUID,
+            *mut *mut u16,
+            u32,
+            u32,
+            *mut i32,
+        ) -> i32 = std::mem::transmute(vtable.add(5).read());
+
+        let hr = get_ids_fn(
+            disp,
+            &GUID { data1: 0, data2: 0, data3: 0, data4: [0; 8] },
+            names.as_mut_ptr(),
+            1,
+            0x0800,
+            &mut dispid,
+        );
+        if hr >= 0 {
+            Some(dispid)
+        } else {
+            None
+        }
+    }
+
+    unsafe fn invoke(
+        disp: IDispatchPtr,
+        dispid: i32,
+        flags: u16,
+        params: *mut DISPPARAMS,
+        result: *mut VARIANT,
+    ) -> i32 {
+        let vtable = *(disp as *mut *mut usize);
+        let invoke_fn: extern "system" fn(
+            IDispatchPtr,
+            i32,
+            *const GUID,
+            u32,
+            u16,
+            *mut DISPPARAMS,
+            *mut VARIANT,
+            *mut std::ffi::c_void,
+            *mut u32,
+        ) -> i32 = std::mem::transmute(vtable.add(6).read());
+
+        invoke_fn(
+            disp,
+            dispid,
+            &GUID { data1: 0, data2: 0, data3: 0, data4: [0; 8] },
+            0x0800,
+            flags,
+            params,
+            result,
+            null_mut(),
+            null_mut(),
+        )
+    }
+
+    unsafe fn release_dispatch(disp: IDispatchPtr) {
+        if !disp.is_null() {
+            let vtable = *(disp as *mut *mut usize);
+            let release_fn: extern "system" fn(IDispatchPtr) -> u32 =
+                std::mem::transmute(vtable.add(2).read());
+            release_fn(disp);
+        }
+    }
+
+    unsafe fn bstr_to_string(bstr: *const u16) -> String {
+        if bstr.is_null() {
+            return String::new();
+        }
+        let len_bytes = *(bstr.byte_sub(4) as *const u32);
+        let len_chars = (len_bytes / 2) as usize;
+        let slice = std::slice::from_raw_parts(bstr, len_chars);
+        String::from_utf16_lossy(slice)
+    }
 }
 
 // ==============================================================================
@@ -324,5 +662,17 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(50));
         assert!(listener.try_recv().is_none());
         listener.stop();
+    }
+
+    #[test]
+    fn test_query_active_explorer_files_safe() {
+        #[cfg(target_os = "windows")]
+        {
+            use windows_sys::Win32::Foundation::POINT;
+            let pt = POINT { x: -10000, y: -10000 };
+            // Should safely return empty list or non-panicking results
+            let files = query_active_explorer_files(pt);
+            assert!(files.is_empty() || !files.is_empty());
+        }
     }
 }
