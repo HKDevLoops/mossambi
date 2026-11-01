@@ -34,7 +34,7 @@ struct MossambiWidgetApp {
     // Context Menu & Dragging
     show_context_menu: bool,
     context_menu_pos: Pos2,
-    first_frame_done: bool,
+    frame_count: u32,
 
     // Worker Channels
     result_rx: Receiver<WidgetResult>,
@@ -62,7 +62,7 @@ impl Default for MossambiWidgetApp {
 
             show_context_menu: false,
             context_menu_pos: Pos2::ZERO,
-            first_frame_done: false,
+            frame_count: 0,
 
             result_rx: rx,
             result_tx: tx,
@@ -101,15 +101,17 @@ impl MossambiWidgetApp {
 
 #[cfg(target_os = "windows")]
 fn enforce_borderless_win32() {
-    use windows_sys::Win32::Foundation::HWND;
+    use std::ffi::c_void;
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumThreadWindows, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
-        GWL_STYLE, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION,
-        WS_EX_LAYERED, WS_EX_TOPMOST, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
+        EnumWindows, GetClassNameW, GetWindowLongPtrW, GetWindowThreadProcessId,
+        SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOMOVE,
+        SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+        WS_EX_LAYERED, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
     };
 
     extern "system" {
-        fn GetCurrentThreadId() -> u32;
+        fn GetCurrentProcessId() -> u32;
     }
 
     #[repr(C)]
@@ -123,57 +125,111 @@ fn enforce_borderless_win32() {
     #[link(name = "dwmapi")]
     extern "system" {
         fn DwmExtendFrameIntoClientArea(hwnd: HWND, p_mar_inset: *const Margins) -> i32;
+        fn DwmSetWindowAttribute(
+            hwnd: HWND,
+            dw_attribute: u32,
+            pv_attribute: *const c_void,
+            cb_attribute: u32,
+        ) -> i32;
     }
 
-    unsafe extern "system" fn enum_proc(hwnd: HWND, _: isize) -> i32 {
-        let mut style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-        style &= !(WS_CAPTION | WS_THICKFRAME);
-        style |= WS_POPUP | WS_VISIBLE;
-        SetWindowLongPtrW(hwnd, GWL_STYLE, style as isize);
+    unsafe extern "system" fn enum_proc(hwnd: HWND, _: LPARAM) -> BOOL {
+        let current_pid = GetCurrentProcessId();
+        let mut wnd_pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut wnd_pid);
 
-        let mut ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        ex |= WS_EX_LAYERED | WS_EX_TOPMOST;
-        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex as isize);
+        if wnd_pid == current_pid {
+            let mut class_name = [0u16; 256];
+            let len = GetClassNameW(hwnd, class_name.as_mut_ptr(), 256);
+            let class_str = String::from_utf16_lossy(&class_name[..len as usize]);
 
-        let margins = Margins {
-            cx_left: -1,
-            cx_right: -1,
-            cy_top: -1,
-            cy_bottom: -1,
-        };
-        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+            if class_str == "Window Class" {
+                let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+                // Strip WS_CAPTION (0x00C00000), WS_SYSMENU (0x00080000), WS_THICKFRAME (0x00040000),
+                // WS_MINIMIZEBOX (0x00020000), WS_MAXIMIZEBOX (0x00010000), WS_BORDER (0x00800000), WS_DLGFRAME (0x00400000)
+                // Mask 0x00CF0000 removes all caption and frame chrome.
+                let target_style = (style & !0x00CF0000)
+                    | WS_POPUP
+                    | WS_VISIBLE
+                    | WS_CLIPSIBLINGS
+                    | WS_CLIPCHILDREN;
 
-        SetWindowPos(
-            hwnd,
-            std::ptr::null_mut(),
-            0,
-            0,
-            0,
-            0,
-            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
-        );
+                let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+                // Strip WS_EX_WINDOWEDGE (0x00000100), WS_EX_CLIENTEDGE (0x00000200), WS_EX_STATICEDGE (0x00020000), WS_EX_DLGMODALFRAME (0x00000001)
+                // Add WS_EX_LAYERED (0x00080000) and WS_EX_TOPMOST (0x00000008)
+                let target_ex = (ex_style & !0x00020301) | WS_EX_LAYERED | WS_EX_TOPMOST;
+
+                let mut changed = false;
+                if style != target_style {
+                    SetWindowLongPtrW(hwnd, GWL_STYLE, target_style as isize);
+                    changed = true;
+                }
+                if ex_style != target_ex {
+                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, target_ex as isize);
+                    changed = true;
+                }
+
+                let margins = Margins {
+                    cx_left: -1,
+                    cx_right: -1,
+                    cy_top: -1,
+                    cy_bottom: -1,
+                };
+                let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+
+                let corner_pref: u32 = 1; // DWMWCP_DONOTROUND
+                let _ = DwmSetWindowAttribute(hwnd, 33, &corner_pref as *const _ as *const _, 4);
+
+                let color_none: u32 = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+                let _ = DwmSetWindowAttribute(hwnd, 34, &color_none as *const _ as *const _, 4);
+
+                if changed {
+                    SetWindowPos(
+                        hwnd,
+                        std::ptr::null_mut(),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_FRAMECHANGED
+                            | SWP_NOMOVE
+                            | SWP_NOSIZE
+                            | SWP_NOZORDER
+                            | SWP_SHOWWINDOW,
+                    );
+                }
+            }
+        }
         1
     }
 
     unsafe {
-        EnumThreadWindows(GetCurrentThreadId(), Some(enum_proc), 0);
+        EnumWindows(Some(enum_proc), 0);
     }
 }
 
 impl eframe::App for MossambiWidgetApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0] // 100% Fully transparent OpenGL backbuffer
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if !self.first_frame_done {
+        self.frame_count = self.frame_count.saturating_add(1);
+
+        if self.frame_count == 1 {
             let mut visuals = egui::Visuals::light();
             visuals.window_fill = Color32::TRANSPARENT;
             visuals.panel_fill = Color32::TRANSPARENT;
             visuals.extreme_bg_color = Color32::TRANSPARENT;
             visuals.faint_bg_color = Color32::TRANSPARENT;
             ctx.set_visuals(visuals);
+        }
 
+        // Continuously hammer Win32 styles for the first 60 frames (first ~1s of lifecycle)
+        // and periodically every 30 frames to squash any winit reset during visibility or sizing
+        if self.frame_count <= 60 || self.frame_count % 30 == 0 {
             #[cfg(target_os = "windows")]
             enforce_borderless_win32();
-
-            self.first_frame_done = true;
         }
 
         // Adaptive repaint: 16ms (60 FPS) when converting or animating, 120ms when idle
@@ -472,6 +528,9 @@ fn main() -> Result<(), eframe::Error> {
         .with_resizable(false)
         .with_decorations(false) // ZERO titlebar, ZERO system borders
         .with_transparent(true)  // 100% borderless transparency
+        .with_minimize_button(false)
+        .with_maximize_button(false)
+        .with_close_button(false)
         .with_always_on_top();
 
     if let Some(icon) = load_app_icon() {
