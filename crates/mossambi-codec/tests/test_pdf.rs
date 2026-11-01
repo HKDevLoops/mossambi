@@ -48,7 +48,7 @@ This guarantees 100% publication-grade clarity across all displays and 1200+ DPI
     let mut has_font = false;
     let mut has_raster_image = false;
 
-    for (_, object) in doc.objects.iter() {
+    for object in doc.objects.values() {
         if let Ok(dict) = object.as_dict() {
             if let Ok(type_name) = dict.get(b"Type").and_then(|o| o.as_name()) {
                 if type_name == b"Font" {
@@ -106,7 +106,7 @@ fn test_image_to_pdf_vector_container() {
     assert!(pdf_path.exists());
     let doc = Document::load(&pdf_path).expect("Failed to parse image PDF");
     let mut has_image = false;
-    for (_, object) in doc.objects.iter() {
+    for object in doc.objects.values() {
         if let Ok(dict) = object.as_dict() {
             if let Ok(subtype) = dict.get(b"Subtype").and_then(|o| o.as_name()) {
                 if subtype == b"Image" {

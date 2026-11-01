@@ -355,6 +355,13 @@ impl AppState {
     }
 }
 
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[allow(clippy::collapsible_match)]
 fn main() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -669,7 +676,7 @@ fn draw_convert_tab(f: &mut Frame, area: Rect, state: &AppState, palette: &TuiTh
             let is_all = *sector == "ALL";
 
             let label = if is_all {
-                format!(" ⭐ ALL (Batch Transcode to Every Format) ")
+                " ⭐ ALL (Batch Transcode to Every Format) ".to_string()
             } else {
                 format!(" Sector {}: {} ", idx + 1, sector)
             };
@@ -831,12 +838,12 @@ fn draw_hardware_tab(f: &mut Frame, area: Rect, _state: &AppState, palette: &Tui
 }
 
 fn draw_settings_tab(f: &mut Frame, area: Rect, state: &AppState, palette: &TuiThemePalette) {
-    let mut spans = Vec::new();
-    spans.push(Line::from(Span::styled("⚙️ Appearance, Themes & Configuration", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD))));
-    spans.push(Line::from("All settings persist to ~/.mossambi/config.json"));
-    spans.push(Line::from(""));
-
-    spans.push(Line::from(Span::styled("Apple macOS Themes (Press [t] to cycle themes):", Style::default().fg(palette.text_primary).add_modifier(Modifier::BOLD))));
+    let mut spans = vec![
+        Line::from(Span::styled("⚙️ Appearance, Themes & Configuration", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD))),
+        Line::from("All settings persist to ~/.mossambi/config.json"),
+        Line::from(""),
+        Line::from(Span::styled("Apple macOS Themes (Press [t] to cycle themes):", Style::default().fg(palette.text_primary).add_modifier(Modifier::BOLD))),
+    ];
     let themes = [
         (ThemeMode::LiquidGlass, "1. Liquid Glass (macOS Sequoia Specular Refraction)"),
         (ThemeMode::FrostedGlass, "2. Frosted Glass (macOS Sonoma Matte Acrylic)"),

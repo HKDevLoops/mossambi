@@ -44,6 +44,7 @@ impl Default for StudioView {
 
 impl StudioView {
     /// Renders the complete macOS Studio window with sidebar and content area.
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         ui: &mut Ui,
@@ -250,7 +251,6 @@ impl StudioView {
                     );
                     if all_btn.clicked() {
                         on_convert("ALL".to_string());
-                        return;
                     }
                 });
             });

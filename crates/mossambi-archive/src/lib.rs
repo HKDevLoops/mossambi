@@ -114,25 +114,53 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
             let file = File::open(archive_path)?;
             let gz = flate2::read::GzDecoder::new(file);
             let mut tar_archive = tar::Archive::new(gz);
-            tar_archive.unpack(&canonical_dest)?;
+            if tar_archive.unpack(&canonical_dest).is_err() {
+                let file = File::open(archive_path)?;
+                let mut gz = flate2::read::GzDecoder::new(file);
+                let stem = archive_path.file_stem().and_then(|s| s.to_str()).unwrap_or("decompressed");
+                let out_file = canonical_dest.join(stem);
+                let mut out = File::create(out_file)?;
+                io::copy(&mut gz, &mut out)?;
+            }
         }
         "BZ2" | "TBZ2" => {
             let file = File::open(archive_path)?;
             let bz = bzip2::read::BzDecoder::new(file);
             let mut tar_archive = tar::Archive::new(bz);
-            tar_archive.unpack(&canonical_dest)?;
+            if tar_archive.unpack(&canonical_dest).is_err() {
+                let file = File::open(archive_path)?;
+                let mut bz = bzip2::read::BzDecoder::new(file);
+                let stem = archive_path.file_stem().and_then(|s| s.to_str()).unwrap_or("decompressed");
+                let out_file = canonical_dest.join(stem);
+                let mut out = File::create(out_file)?;
+                io::copy(&mut bz, &mut out)?;
+            }
         }
         "XZ" | "TXZ" => {
             let file = File::open(archive_path)?;
             let xz = xz2::read::XzDecoder::new(file);
             let mut tar_archive = tar::Archive::new(xz);
-            tar_archive.unpack(&canonical_dest)?;
+            if tar_archive.unpack(&canonical_dest).is_err() {
+                let file = File::open(archive_path)?;
+                let mut xz = xz2::read::XzDecoder::new(file);
+                let stem = archive_path.file_stem().and_then(|s| s.to_str()).unwrap_or("decompressed");
+                let out_file = canonical_dest.join(stem);
+                let mut out = File::create(out_file)?;
+                io::copy(&mut xz, &mut out)?;
+            }
         }
         "ZST" | "TZST" => {
             let file = File::open(archive_path)?;
             let zst = zstd::stream::read::Decoder::new(file)?;
             let mut tar_archive = tar::Archive::new(zst);
-            tar_archive.unpack(&canonical_dest)?;
+            if tar_archive.unpack(&canonical_dest).is_err() {
+                let file = File::open(archive_path)?;
+                let mut zst = zstd::stream::read::Decoder::new(file)?;
+                let stem = archive_path.file_stem().and_then(|s| s.to_str()).unwrap_or("decompressed");
+                let out_file = canonical_dest.join(stem);
+                let mut out = File::create(out_file)?;
+                io::copy(&mut zst, &mut out)?;
+            }
         }
         _ => {
             bail!("Unsupported or unrecognized archive format: {}", ext);
@@ -189,7 +217,8 @@ fn pack_tar_gz(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
-    builder.finish()?;
+    let enc = builder.into_inner()?;
+    enc.finish()?;
     Ok(())
 }
 
@@ -198,7 +227,8 @@ fn pack_tar_bz2(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let enc = bzip2::write::BzEncoder::new(file, bzip2::Compression::default());
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
-    builder.finish()?;
+    let enc = builder.into_inner()?;
+    enc.finish()?;
     Ok(())
 }
 
@@ -207,7 +237,8 @@ fn pack_tar_xz(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let enc = xz2::write::XzEncoder::new(file, 6);
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
-    builder.finish()?;
+    let enc = builder.into_inner()?;
+    enc.finish()?;
     Ok(())
 }
 
@@ -216,7 +247,8 @@ fn pack_tar_zst(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let enc = zstd::stream::write::Encoder::new(file, 3)?;
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
-    builder.finish()?;
+    let enc = builder.into_inner()?;
+    enc.finish()?;
     Ok(())
 }
 

@@ -234,13 +234,13 @@ pub fn render_text_to_pdf(text: &str, output_path: &Path, cfg: &TextPdfSettings)
             }
         } else {
             // Normal paragraph or bullet point
-            let (is_bullet, content_text) = if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-                (true, format!("   - {}", &trimmed[2..]))
+            let content_text = if let Some(stripped) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+                format!("   - {}", stripped)
             } else {
-                (false, trimmed.to_string())
+                trimmed.to_string()
             };
 
-            let font_to_use = if is_bullet { "F_REG" } else { "F_REG" };
+            let font_to_use = "F_REG";
             let wrapped = wrap_paragraph(&content_text, usable_w, base_font_size, base_font_name);
             for wl in wrapped {
                 layout_lines.push(PageLine {
@@ -374,7 +374,7 @@ pub fn render_text_to_pdf(text: &str, output_path: &Path, cfg: &TextPdfSettings)
             ops.push(Operation::new("rg", vec![0.4.into(), 0.4.into(), 0.4.into()]));
             ops.push(Operation::new(
                 "Td",
-                vec![((page_w - margin - page_str_w)).into(), (margin - 20.0).into()],
+                vec![(page_w - margin - page_str_w).into(), (margin - 20.0).into()],
             ));
             ops.push(Operation::new(
                 "Tj",

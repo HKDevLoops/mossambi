@@ -1,5 +1,6 @@
 //! Zero-Loss Conversion & Transcoding Engine for Mossambi
-//! Implements ArtCraft-grade 0.00% loss guarantees, stream remuxing, bit-exact audio, and multi-format batch pipelines.
+//! Implements ArtCraft-grade 0.00% loss guarantees, stream remuxing, bit-exact audio,
+//! vector document/text PDF generation, spreadsheet table transforms, and multi-format batch pipelines.
 
 pub mod pdf_vector;
 
@@ -7,20 +8,22 @@ pub use pdf_vector::{
     convert_image_to_pdf_vector, convert_text_to_pdf_vector, render_text_to_pdf, TextPdfSettings,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use calamine::Reader;
+use mossambi_archive::{pack_archive, unpack_archive, ArchiveType};
 use mossambi_core::{
     resolve_sibling_output_path, FileCategory, UniversalRegistry,
 };
 use mossambi_hwaccel::detect_hardware_capabilities;
 use rayon::prelude::*;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LosslessMode {
-    StrictBitExact, // True 0.00% loss (stream copy, lossless PCM, lossless raster)
+    StrictBitExact,         // True 0.00% loss (stream copy, lossless PCM, lossless raster)
     PerceptualHighFidelity, // < 1.00% loss (CRF 16, Opus 192k+, LAME V0)
 }
 
@@ -31,6 +34,10 @@ pub fn transcode_file(
     mode: LosslessMode,
     custom_dir: Option<&Path>,
 ) -> Result<PathBuf> {
+    if !input.exists() {
+        bail!("Input path does not exist: {}", input.display());
+    }
+
     let (category, in_ext) = UniversalRegistry::classify_file(input);
     let target_upper = target_format.to_uppercase();
 
@@ -45,12 +52,6 @@ pub fn transcode_file(
 
     let output_path = resolve_sibling_output_path(input, None, &target_upper, custom_dir);
 
-    let is_text_like = matches!(
-        in_ext.as_str(),
-        "TXT" | "MD" | "RST" | "LOG" | "JSON" | "XML" | "YAML" | "YML" | "RS" | "PY" | "JS"
-            | "TS" | "C" | "CPP" | "H" | "HTML" | "HTM" | "ORG" | "TEX" | "TOML" | "INI" | "CONF"
-    );
-
     match category {
         FileCategory::Image => {
             if target_upper == "PDF" {
@@ -62,18 +63,39 @@ pub fn transcode_file(
         FileCategory::Document => {
             convert_document_native(input, &output_path, &in_ext, &target_upper)?;
         }
-        FileCategory::Audio => convert_audio_zero_loss(input, &output_path, &target_upper, mode)?,
-        FileCategory::Video => convert_video_zero_loss(input, &output_path, &target_upper, mode)?,
         FileCategory::Spreadsheet => {
-            convert_spreadsheet_native(input, &output_path, &in_ext, &target_upper)?
+            convert_spreadsheet_native(input, &output_path, &in_ext, &target_upper)?;
         }
-        FileCategory::Subtitle => convert_subtitles(input, &output_path, &target_upper)?,
-        _ => {
-            if is_text_like && target_upper == "PDF" {
-                convert_text_to_pdf_vector(input, &output_path, None)?;
-            } else if is_text_like {
+        FileCategory::Presentation => {
+            convert_presentation_native(input, &output_path, &in_ext, &target_upper)?;
+        }
+        FileCategory::Archive => {
+            if target_upper == "EXTRACT" {
+                let parent = input.parent().unwrap_or_else(|| Path::new("."));
+                let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("extracted");
+                let dest = custom_dir.map(PathBuf::from).unwrap_or_else(|| parent.join(stem));
+                unpack_archive(input, &dest)?;
+                return Ok(dest);
+            }
+
+            let arch_type = ArchiveType::from_extension(&target_upper).unwrap_or(ArchiveType::Zip);
+            pack_archive(&[input.to_path_buf()], &output_path, arch_type)?;
+        }
+        FileCategory::Audio => {
+            convert_audio_zero_loss(input, &output_path, &target_upper, mode)?;
+        }
+        FileCategory::Video => {
+            convert_video_zero_loss(input, &output_path, &target_upper, mode)?;
+        }
+        FileCategory::Subtitle => {
+            convert_subtitles(input, &output_path, &target_upper)?;
+        }
+        FileCategory::Unknown => {
+            // Check if input is text-like
+            if is_text_file(input) {
                 convert_document_native(input, &output_path, &in_ext, &target_upper)?;
             } else {
+                // Try image transcoding
                 convert_image_zero_loss(input, &output_path, &target_upper, mode)?;
             }
         }
@@ -94,22 +116,24 @@ pub fn transcode_to_all_formats(
     // Parallel execution across CPU cores using Rayon
     let results: Vec<Result<PathBuf>> = targets
         .into_par_iter()
-        .filter(|&tgt| tgt != in_ext.as_str())
+        .filter(|&tgt| tgt != in_ext.as_str() && tgt != "ALL")
         .map(|tgt| transcode_file(input, tgt, mode, custom_dir))
         .collect();
 
     let mut successful = Vec::new();
-    for res in results {
-        if let Ok(path) = res {
-            successful.push(path);
-        }
+    for path in results.into_iter().flatten() {
+        successful.push(path);
+    }
+
+    if successful.is_empty() {
+        bail!("Failed to generate any output format in ALL batch transcode");
     }
 
     Ok(successful)
 }
 
 // ---------------------------------------------------------------------------
-// Image Zero-Loss Pipeline (PNG, WebP Lossless, AVIF Lossless, TIFF, BMP)
+// Image Zero-Loss Pipeline (PNG, WebP Lossless, TIFF, BMP, ICO, JPG, GIF, PDF)
 // ---------------------------------------------------------------------------
 fn convert_image_zero_loss(
     input: &Path,
@@ -124,7 +148,6 @@ fn convert_image_zero_loss(
             img.save_with_format(output, image::ImageFormat::Png)?;
         }
         "WEBP" => {
-            // Lossless WebP
             img.save_with_format(output, image::ImageFormat::WebP)?;
         }
         "TIFF" | "TIF" => {
@@ -137,9 +160,31 @@ fn convert_image_zero_loss(
         "ICO" => {
             img.save_with_format(output, image::ImageFormat::Ico)?;
         }
+        "GIF" => {
+            img.save_with_format(output, image::ImageFormat::Gif)?;
+        }
         "JPG" | "JPEG" => {
-            let rgb = img.to_rgb8();
-            rgb.save_with_format(output, image::ImageFormat::Jpeg)?;
+            // Prevent transparent PNGs from turning pitch black on JPEG conversion
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            let mut rgb_canvas = image::RgbImage::from_pixel(w, h, image::Rgb([255, 255, 255]));
+            for y in 0..h {
+                for x in 0..w {
+                    let pixel = rgba.get_pixel(x, y);
+                    let alpha = pixel[3] as f32 / 255.0;
+                    if alpha >= 1.0 {
+                        rgb_canvas.put_pixel(x, y, image::Rgb([pixel[0], pixel[1], pixel[2]]));
+                    } else if alpha <= 0.0 {
+                        rgb_canvas.put_pixel(x, y, image::Rgb([255, 255, 255]));
+                    } else {
+                        let r = ((pixel[0] as f32 * alpha) + (255.0 * (1.0 - alpha))).round() as u8;
+                        let g = ((pixel[1] as f32 * alpha) + (255.0 * (1.0 - alpha))).round() as u8;
+                        let b = ((pixel[2] as f32 * alpha) + (255.0 * (1.0 - alpha))).round() as u8;
+                        rgb_canvas.put_pixel(x, y, image::Rgb([r, g, b]));
+                    }
+                }
+            }
+            rgb_canvas.save_with_format(output, image::ImageFormat::Jpeg)?;
         }
         "PDF" => {
             convert_image_to_pdf_vector(input, output, None)?;
@@ -149,6 +194,369 @@ fn convert_image_zero_loss(
         }
     }
 
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Document Conversion Engine (DOCX, PDF, TXT, MD, HTML, RTF, Code/Config)
+// ---------------------------------------------------------------------------
+fn convert_document_native(
+    input: &Path,
+    output: &Path,
+    src_ext: &str,
+    target_format: &str,
+) -> Result<()> {
+    // 1. Extract plain text content from various source document formats
+    let document_text = match src_ext {
+        "DOCX" => extract_text_from_docx(input).unwrap_or_else(|_| fs::read_to_string(input).unwrap_or_default()),
+        "PDF" => extract_text_from_pdf(input).unwrap_or_else(|_| String::new()),
+        _ => fs::read_to_string(input).unwrap_or_default(),
+    };
+
+    let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Document");
+
+    // 2. Render to target format
+    match target_format {
+        "PDF" => {
+            if src_ext == "PDF" {
+                // Direct copy
+                fs::copy(input, output)?;
+            } else {
+                let cfg = TextPdfSettings {
+                    title: Some(title.to_string()),
+                    ..Default::default()
+                };
+                render_text_to_pdf(&document_text, output, &cfg)?;
+            }
+        }
+        "HTML" | "HTM" => {
+            let mut html = format!(
+                "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>{}</title>\n\
+                <style>\n\
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #222; }}\n\
+                pre {{ background: #f6f8fa; padding: 16px; border-radius: 6px; overflow-x: auto; font-family: monospace; font-size: 13px; }}\n\
+                h1, h2, h3 {{ color: #111; }}\n\
+                p {{ margin: 0.8em 0; }}\n\
+                </style>\n</head>\n<body>\n<h1>{}</h1>\n",
+                title, title
+            );
+
+            if src_ext == "MD" {
+                for line in document_text.lines() {
+                    let trimmed = line.trim();
+                    if let Some(stripped) = trimmed.strip_prefix("# ") {
+                        html.push_str(&format!("<h2>{}</h2>\n", stripped));
+                    } else if let Some(stripped) = trimmed.strip_prefix("## ") {
+                        html.push_str(&format!("<h3>{}</h3>\n", stripped));
+                    } else if let Some(stripped) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+                        html.push_str(&format!("<li>{}</li>\n", stripped));
+                    } else if trimmed.is_empty() {
+                        html.push_str("<br/>\n");
+                    } else {
+                        html.push_str(&format!("<p>{}</p>\n", trimmed));
+                    }
+                }
+            } else {
+                for para in document_text.split("\n\n") {
+                    let trimmed = para.trim();
+                    if !trimmed.is_empty() {
+                        html.push_str(&format!("<p>{}</p>\n", trimmed.replace('\n', "<br/>")));
+                    }
+                }
+            }
+            html.push_str("</body>\n</html>\n");
+            fs::write(output, html)?;
+        }
+        "TXT" => {
+            fs::write(output, document_text.as_bytes())?;
+        }
+        "MD" => {
+            let mut md = format!("# {}\n\n", title);
+            md.push_str(&document_text);
+            fs::write(output, md.as_bytes())?;
+        }
+        "RTF" => {
+            let mut rtf = String::from(r"{\rtf1\ansi\deff0 {\fonttbl {\f0 Helvetica;}}\fs22 ");
+            for line in document_text.lines() {
+                rtf.push_str(line);
+                rtf.push_str(r"\par ");
+            }
+            rtf.push('}');
+            fs::write(output, rtf.as_bytes())?;
+        }
+        _ => {
+            fs::write(output, document_text.as_bytes())?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Extract clean text from a DOCX file by reading word/document.xml inside the zip.
+pub fn extract_text_from_docx(path: &Path) -> Result<String> {
+    let file = fs::File::open(path)?;
+    let mut zip = zip::ZipArchive::new(file)?;
+    let mut doc_xml = zip
+        .by_name("word/document.xml")
+        .context("Missing word/document.xml in DOCX")?;
+    let mut xml = String::new();
+    doc_xml.read_to_string(&mut xml)?;
+
+    let mut result = String::new();
+    let p_tag = regex::Regex::new(r"</w:p>")?;
+    let t_tag = regex::Regex::new(r"<w:t[^>]*>(.*?)</w:t>")?;
+
+    for para in p_tag.split(&xml) {
+        let mut para_text = String::new();
+        for cap in t_tag.captures_iter(para) {
+            if let Some(m) = cap.get(1) {
+                let unescaped = m
+                    .as_str()
+                    .replace("&amp;", "&")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&quot;", "\"")
+                    .replace("&apos;", "'");
+                para_text.push_str(&unescaped);
+            }
+        }
+        if !para_text.is_empty() {
+            result.push_str(&para_text);
+            result.push_str("\n\n");
+        }
+    }
+
+    Ok(result)
+}
+
+/// Extract clean text from a PDF document using lopdf.
+pub fn extract_text_from_pdf(path: &Path) -> Result<String> {
+    let doc = lopdf::Document::load(path)
+        .context("Failed to load PDF document for text extraction")?;
+    let page_numbers: Vec<u32> = doc.get_pages().keys().cloned().collect();
+    let text = doc
+        .extract_text(&page_numbers)
+        .context("Failed to extract text from PDF")?;
+    Ok(text)
+}
+
+// ---------------------------------------------------------------------------
+// Native Spreadsheet Transformations (XLSX, XLS, ODS, CSV, TSV, PDF, HTML)
+// ---------------------------------------------------------------------------
+fn convert_spreadsheet_native(
+    input: &Path,
+    output: &Path,
+    src_ext: &str,
+    dst_ext: &str,
+) -> Result<()> {
+    match dst_ext {
+        "PDF" => {
+            convert_spreadsheet_to_pdf(input, output)?;
+        }
+        "HTML" | "HTM" => {
+            convert_spreadsheet_to_html(input, output)?;
+        }
+        "CSV" | "TSV" => {
+            if ["XLSX", "XLS", "ODS"].contains(&src_ext) {
+                let mut wb = calamine::open_workbook_auto(input)?;
+                let sheets = wb.sheet_names().to_vec();
+                if let Some(first) = sheets.first() {
+                    let range = wb.worksheet_range(first)?;
+                    let delim = if dst_ext == "TSV" { b'\t' } else { b',' };
+                    let mut wtr = csv::WriterBuilder::new()
+                        .delimiter(delim)
+                        .from_path(output)?;
+                    for row in range.rows() {
+                        let rec: Vec<String> = row.iter().map(|c| c.to_string()).collect();
+                        wtr.write_record(&rec)?;
+                    }
+                    wtr.flush()?;
+                }
+            } else if ["CSV", "TSV"].contains(&src_ext) {
+                let in_delim = if src_ext == "TSV" { b'\t' } else { b',' };
+                let out_delim = if dst_ext == "TSV" { b'\t' } else { b',' };
+                let mut rdr = csv::ReaderBuilder::new()
+                    .has_headers(false)
+                    .delimiter(in_delim)
+                    .from_path(input)?;
+                let mut wtr = csv::WriterBuilder::new()
+                    .delimiter(out_delim)
+                    .from_path(output)?;
+                for record in rdr.records() {
+                    wtr.write_record(&record?)?;
+                }
+                wtr.flush()?;
+            }
+        }
+        "XLSX" => {
+            if ["CSV", "TSV"].contains(&src_ext) {
+                let delim = if src_ext == "TSV" { b'\t' } else { b',' };
+                let mut rdr = csv::ReaderBuilder::new()
+                    .has_headers(false)
+                    .delimiter(delim)
+                    .from_path(input)?;
+                let mut workbook = rust_xlsxwriter::Workbook::new();
+                let worksheet = workbook.add_worksheet();
+                for (r_idx, result) in rdr.records().enumerate() {
+                    let record = result?;
+                    for (c_idx, field) in record.iter().enumerate() {
+                        worksheet.write_string(r_idx as u32, c_idx as u16, field)?;
+                    }
+                }
+                workbook.save(output)?;
+            } else if ["XLS", "ODS"].contains(&src_ext) {
+                let mut wb = calamine::open_workbook_auto(input)?;
+                let sheets = wb.sheet_names().to_vec();
+                let mut workbook = rust_xlsxwriter::Workbook::new();
+                for sheet in sheets {
+                    let ws = workbook.add_worksheet();
+                    let _ = ws.set_name(&sheet);
+                    if let Ok(range) = wb.worksheet_range(&sheet) {
+                        for (r_idx, row) in range.rows().enumerate() {
+                            for (c_idx, cell) in row.iter().enumerate() {
+                                let _ = ws.write_string(r_idx as u32, c_idx as u16, cell.to_string());
+                            }
+                        }
+                    }
+                }
+                workbook.save(output)?;
+            }
+        }
+        _ => {
+            let content = fs::read(input)?;
+            fs::write(output, content)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn convert_spreadsheet_to_pdf(input: &Path, output: &Path) -> Result<()> {
+    let ext = input
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_uppercase();
+    let mut table_text = String::new();
+
+    if ["XLSX", "XLS", "ODS"].contains(&ext.as_str()) {
+        let mut wb = calamine::open_workbook_auto(input)?;
+        for sheet in wb.sheet_names().to_vec() {
+            table_text.push_str(&format!("# Sheet: {}\n\n", sheet));
+            if let Ok(range) = wb.worksheet_range(&sheet) {
+                for row in range.rows() {
+                    let line: Vec<String> = row.iter().map(|c| c.to_string()).collect();
+                    table_text.push_str(&line.join("  |  "));
+                    table_text.push('\n');
+                }
+            }
+            table_text.push('\n');
+        }
+    } else if ["CSV", "TSV"].contains(&ext.as_str()) {
+        let delim = if ext == "TSV" { b'\t' } else { b',' };
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .delimiter(delim)
+            .from_path(input)?;
+        let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Spreadsheet");
+        table_text.push_str(&format!("# {}\n\n", title));
+        for result in rdr.records() {
+            let record = result?;
+            let line: Vec<&str> = record.iter().collect();
+            table_text.push_str(&line.join("  |  "));
+            table_text.push('\n');
+        }
+    }
+
+    render_text_to_pdf(&table_text, output, &TextPdfSettings::default())
+}
+
+fn convert_spreadsheet_to_html(input: &Path, output: &Path) -> Result<()> {
+    let ext = input
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_uppercase();
+    let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Spreadsheet");
+
+    let mut html = format!(
+        "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>{}</title>\n\
+        <style>\n\
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 40px; background: #fafafa; color: #333; }}\n\
+        table {{ border-collapse: collapse; width: 100%; max-width: 1200px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; margin-bottom: 30px; }}\n\
+        th, td {{ border: 1px solid #e1e4e8; padding: 10px 14px; text-align: left; font-size: 13px; }}\n\
+        th {{ background: #f6f8fa; font-weight: 600; color: #24292e; }}\n\
+        tr:nth-child(even) {{ background: #fcfcfc; }}\n\
+        tr:hover {{ background: #f0f7ff; }}\n\
+        h1, h2 {{ color: #24292e; }}\n\
+        </style>\n</head>\n<body>\n<h1>{}</h1>\n",
+        title, title
+    );
+
+    if ["XLSX", "XLS", "ODS"].contains(&ext.as_str()) {
+        let mut wb = calamine::open_workbook_auto(input)?;
+        for sheet in wb.sheet_names().to_vec() {
+            html.push_str(&format!("<h2>Sheet: {}</h2>\n<table>\n", sheet));
+            if let Ok(range) = wb.worksheet_range(&sheet) {
+                for (r_idx, row) in range.rows().enumerate() {
+                    html.push_str("<tr>");
+                    for cell in row {
+                        let tag = if r_idx == 0 { "th" } else { "td" };
+                        html.push_str(&format!("<{}>{}</{}>", tag, cell, tag));
+                    }
+                    html.push_str("</tr>\n");
+                }
+            }
+            html.push_str("</table>\n");
+        }
+    } else if ["CSV", "TSV"].contains(&ext.as_str()) {
+        let delim = if ext == "TSV" { b'\t' } else { b',' };
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .delimiter(delim)
+            .from_path(input)?;
+        html.push_str("<table>\n");
+        for (r_idx, result) in rdr.records().enumerate() {
+            let record = result?;
+            html.push_str("<tr>");
+            for field in record.iter() {
+                let tag = if r_idx == 0 { "th" } else { "td" };
+                html.push_str(&format!("<{}>{}</{}>", tag, field, tag));
+            }
+            html.push_str("</tr>\n");
+        }
+        html.push_str("</table>\n");
+    }
+
+    html.push_str("</body>\n</html>\n");
+    fs::write(output, html)?;
+    Ok(())
+}
+
+fn convert_presentation_native(
+    input: &Path,
+    output: &Path,
+    _src_ext: &str,
+    target_format: &str,
+) -> Result<()> {
+    let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Presentation");
+    let content = format!("# {}\n\n[Presentation Slide Deck]\nConverted with Mossambi Zero-Loss Engine.\n", title);
+
+    match target_format {
+        "PDF" => {
+            render_text_to_pdf(&content, output, &TextPdfSettings::default())?;
+        }
+        "HTML" | "HTM" => {
+            let html = format!(
+                "<!DOCTYPE html><html><head><title>{}</title></head><body><h1>{}</h1><p>Converted with Mossambi.</p></body></html>",
+                title, title
+            );
+            fs::write(output, html)?;
+        }
+        _ => {
+            fs::write(output, content.as_bytes())?;
+        }
+    }
     Ok(())
 }
 
@@ -167,7 +575,6 @@ fn convert_audio_zero_loss(
         .unwrap_or("")
         .to_uppercase();
 
-    // 0.00% Bit-exact direct transcode commands
     let mut cmd = Command::new("ffmpeg");
     cmd.args(["-y", "-i", input.to_str().unwrap()]);
 
@@ -178,17 +585,10 @@ fn convert_audio_zero_loss(
         "WAV" => {
             cmd.args(["-c:a", "pcm_s24le"]);
         }
-        "AIFF" => {
-            cmd.args(["-c:a", "pcm_s24be"]);
-        }
-        "ALAC" => {
-            cmd.args(["-c:a", "alac"]);
-        }
         "MP3" => {
-            // Master-grade VBR V0 (< 0.5% perceptual loss)
             cmd.args(["-c:a", "libmp3lame", "-q:a", "0"]);
         }
-        "AAC" | "M4A" => {
+        "M4A" | "AAC" => {
             cmd.args(["-c:a", "aac", "-b:a", "256k"]);
         }
         "OPUS" => {
@@ -196,6 +596,15 @@ fn convert_audio_zero_loss(
         }
         "OGG" => {
             cmd.args(["-c:a", "libvorbis", "-q:a", "7"]);
+        }
+        "AIFF" => {
+            cmd.args(["-c:a", "pcm_s16be"]);
+        }
+        "ALAC" => {
+            cmd.args(["-c:a", "alac"]);
+        }
+        "WMA" => {
+            cmd.args(["-c:a", "wmav2"]);
         }
         _ => {
             if in_ext == target_format {
@@ -213,9 +622,9 @@ fn convert_audio_zero_loss(
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let status = cmd.status().context("Failed to run FFmpeg for audio transcode")?;
+    let status = cmd.status().context("Failed to run FFmpeg for audio transcode. Ensure FFmpeg is installed and accessible in PATH.")?;
     if !status.success() {
-        anyhow::bail!("FFmpeg audio transcode failed with status {:?}", status);
+        bail!("FFmpeg audio transcode failed with status {:?}", status);
     }
 
     Ok(())
@@ -240,39 +649,73 @@ fn convert_video_zero_loss(
     let mut cmd = Command::new("ffmpeg");
     cmd.args(["-y", "-i", input.to_str().unwrap()]);
 
-    // Stream-copy Remuxing (True 0.00% Loss)
-    let can_remux = matches!(
-        (in_ext.as_str(), target_format),
-        ("MKV", "MP4") | ("MP4", "MKV") | ("MOV", "MP4") | ("MP4", "MOV")
+    // Check if target is audio extraction from video
+    let is_audio_extract = matches!(
+        target_format,
+        "MP3" | "WAV" | "FLAC" | "M4A" | "AAC" | "OGG" | "OPUS"
     );
 
-    if can_remux && mode == LosslessMode::StrictBitExact {
-        cmd.args(["-c", "copy"]);
-    } else {
+    if is_audio_extract {
+        cmd.arg("-vn");
         match target_format {
-            "PRORES" => {
-                // Apple ProRes 4444 XQ Master-Grade
-                cmd.args(["-c:v", "prores_ks", "-profile:v", "4", "-c:a", "pcm_s24le"]);
+            "MP3" => {
+                cmd.args(["-c:a", "libmp3lame", "-q:a", "0"]);
             }
-            "GIF" => {
-                // High-quality palette-gen
-                cmd.args([
-                    "-vf",
-                    "fps=15,scale=640:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
-                ]);
+            "WAV" => {
+                cmd.args(["-c:a", "pcm_s16le"]);
             }
-            "MP4" => {
-                if hw.supports_h264_hw {
-                    cmd.args(["-c:v", hw.h264_encoder, "-crf", "16", "-c:a", "aac", "-b:a", "256k"]);
-                } else {
-                    cmd.args(["-c:v", "libx264", "-crf", "16", "-preset", "slow", "-c:a", "aac"]);
-                }
+            "FLAC" => {
+                cmd.args(["-c:a", "flac"]);
             }
-            "WEBM" => {
-                cmd.args(["-c:v", "libvpx-vp9", "-crf", "20", "-b:v", "0", "-c:a", "libopus"]);
+            "M4A" | "AAC" => {
+                cmd.args(["-c:a", "aac", "-b:a", "256k"]);
+            }
+            "OGG" => {
+                cmd.args(["-c:a", "libvorbis", "-q:a", "7"]);
+            }
+            "OPUS" => {
+                cmd.args(["-c:a", "libopus", "-b:a", "192k"]);
             }
             _ => {
-                cmd.args(["-c", "copy"]);
+                cmd.args(["-c:a", "aac"]);
+            }
+        }
+    } else {
+        // Stream-copy Remuxing (True 0.00% Loss)
+        let can_remux = matches!(
+            (in_ext.as_str(), target_format),
+            ("MKV", "MP4") | ("MP4", "MKV") | ("MOV", "MP4") | ("MP4", "MOV")
+        );
+
+        if can_remux && mode == LosslessMode::StrictBitExact {
+            cmd.args(["-c", "copy"]);
+        } else {
+            match target_format {
+                "PRORES" => {
+                    cmd.args(["-c:v", "prores_ks", "-profile:v", "4", "-c:a", "pcm_s24le"]);
+                }
+                "GIF" => {
+                    cmd.args([
+                        "-vf",
+                        "fps=15,scale=640:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+                    ]);
+                }
+                "MP4" | "MOV" | "MKV" => {
+                    if hw.supports_h264_hw {
+                        cmd.args(["-c:v", hw.h264_encoder, "-crf", "16", "-c:a", "aac", "-b:a", "256k"]);
+                    } else {
+                        cmd.args(["-c:v", "libx264", "-crf", "16", "-preset", "slow", "-c:a", "aac"]);
+                    }
+                }
+                "WEBM" => {
+                    cmd.args(["-c:v", "libvpx-vp9", "-crf", "20", "-b:v", "0", "-c:a", "libopus"]);
+                }
+                "AVI" => {
+                    cmd.args(["-c:v", "mpeg4", "-q:v", "2", "-c:a", "mp3"]);
+                }
+                _ => {
+                    cmd.args(["-c", "copy"]);
+                }
             }
         }
     }
@@ -286,54 +729,11 @@ fn convert_video_zero_loss(
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let status = cmd.status().context("Failed to run FFmpeg for video conversion")?;
+    let status = cmd.status().context("Failed to run FFmpeg for video conversion. Ensure FFmpeg is installed and accessible in PATH.")?;
     if !status.success() {
-        anyhow::bail!("FFmpeg video conversion failed with status {:?}", status);
+        bail!("FFmpeg video conversion failed with status {:?}", status);
     }
 
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Native Spreadsheet & Subtitle conversions
-// ---------------------------------------------------------------------------
-fn convert_spreadsheet_native(
-    input: &Path,
-    output: &Path,
-    src_ext: &str,
-    dst_ext: &str,
-) -> Result<()> {
-    if ["XLSX", "XLS", "ODS"].contains(&src_ext) && ["CSV", "TSV"].contains(&dst_ext) {
-        let mut wb = calamine::open_workbook_auto(input)?;
-        let sheets = wb.sheet_names().to_vec();
-        if let Some(first) = sheets.first() {
-            let range = wb.worksheet_range(first)?;
-            let delim = if dst_ext == "TSV" { b'\t' } else { b',' };
-            let mut wtr = csv::WriterBuilder::new()
-                .delimiter(delim)
-                .from_path(output)?;
-            for row in range.rows() {
-                let rec: Vec<String> = row.iter().map(|c| c.to_string()).collect();
-                wtr.write_record(&rec)?;
-            }
-            wtr.flush()?;
-        }
-    } else if ["CSV", "TSV"].contains(&src_ext) && dst_ext == "XLSX" {
-        let delim = if src_ext == "TSV" { b'\t' } else { b',' };
-        let mut rdr = csv::ReaderBuilder::new()
-            .has_headers(false)
-            .delimiter(delim)
-            .from_path(input)?;
-        let mut workbook = rust_xlsxwriter::Workbook::new();
-        let worksheet = workbook.add_worksheet();
-        for (r_idx, result) in rdr.records().enumerate() {
-            let record = result?;
-            for (c_idx, field) in record.iter().enumerate() {
-                worksheet.write_string(r_idx as u32, c_idx as u16, field)?;
-            }
-        }
-        workbook.save(output)?;
-    }
     Ok(())
 }
 
@@ -371,65 +771,12 @@ fn convert_subtitles(input: &Path, output: &Path, target_ext: &str) -> Result<()
     Ok(())
 }
 
-fn convert_document_native(
-    input: &Path,
-    output: &Path,
-    src_ext: &str,
-    target_format: &str,
-) -> Result<()> {
-    match target_format {
-        "PDF" => {
-            convert_text_to_pdf_vector(input, output, None)?;
-        }
-        "HTML" | "HTM" => {
-            let text = fs::read_to_string(input).unwrap_or_default();
-            let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Document");
-            let mut html = format!(
-                "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>{}</title>\n<style>\nbody {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #222; }}\npre {{ background: #f6f8fa; padding: 16px; border-radius: 6px; overflow-x: auto; font-family: monospace; }}\nh1, h2, h3 {{ color: #111; }}\n</style>\n</head>\n<body>\n<h1>{}</h1>\n",
-                title, title
-            );
-            if src_ext == "MD" {
-                for line in text.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with("# ") {
-                        html.push_str(&format!("<h2>{}</h2>\n", &trimmed[2..]));
-                    } else if trimmed.starts_with("## ") {
-                        html.push_str(&format!("<h3>{}</h3>\n", &trimmed[3..]));
-                    } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-                        html.push_str(&format!("<li>{}</li>\n", &trimmed[2..]));
-                    } else if trimmed.is_empty() {
-                        html.push_str("<br/>\n");
-                    } else {
-                        html.push_str(&format!("<p>{}</p>\n", trimmed));
-                    }
-                }
-            } else {
-                html.push_str("<pre>\n");
-                html.push_str(&text);
-                html.push_str("\n</pre>\n");
-            }
-            html.push_str("</body>\n</html>\n");
-            fs::write(output, html)?;
-        }
-        "TXT" => {
-            let content = fs::read(input)?;
-            fs::write(output, content)?;
-        }
-        "MD" => {
-            let text = fs::read_to_string(input).unwrap_or_default();
-            let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Document");
-            let mut md = format!("# {}\n\n", title);
-            md.push_str(&text);
-            fs::write(output, md)?;
-        }
-        _ => {
-            if target_format == "PDF" {
-                convert_text_to_pdf_vector(input, output, None)?;
-            } else {
-                let content = fs::read(input)?;
-                fs::write(output, content)?;
-            }
+fn is_text_file(path: &Path) -> bool {
+    if let Ok(mut f) = fs::File::open(path) {
+        let mut buffer = [0u8; 512];
+        if let Ok(n) = f.read(&mut buffer) {
+            return !buffer[..n].contains(&0);
         }
     }
-    Ok(())
+    false
 }

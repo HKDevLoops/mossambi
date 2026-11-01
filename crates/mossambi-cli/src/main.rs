@@ -304,6 +304,7 @@ fn handle_convert(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_exam(
     input: &Path,
     preset: Option<&str>,

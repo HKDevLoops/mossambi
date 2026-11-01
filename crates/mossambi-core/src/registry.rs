@@ -104,26 +104,24 @@ impl UniversalRegistry {
     pub fn get_all_supported_outputs(category: FileCategory) -> Vec<&'static str> {
         match category {
             FileCategory::Image => vec![
-                "PNG", "JPG", "JPEG", "WEBP", "AVIF", "HEIC", "TIFF", "BMP", "ICO", "GIF", "PDF",
-                "SVG", "EPS", "PSD", "QOI", "JXL",
+                "PNG", "JPG", "WEBP", "TIFF", "BMP", "ICO", "GIF", "PDF",
             ],
             FileCategory::Video => vec![
-                "MP4", "MOV", "MKV", "WEBM", "AVI", "WMV", "GIF", "MP3", "WAV", "FLAC", "M4A",
-                "OGV", "TS", "PRORES",
+                "MP4", "MOV", "MKV", "WEBM", "AVI", "GIF", "MP3", "WAV", "FLAC", "M4A",
             ],
             FileCategory::Audio => vec![
-                "WAV", "FLAC", "MP3", "M4A", "AAC", "OGG", "OPUS", "AIFF", "ALAC", "WMA", "DSD",
+                "WAV", "FLAC", "MP3", "M4A", "AAC", "OGG", "OPUS", "AIFF",
             ],
             FileCategory::Document => vec![
-                "PDF", "DOCX", "TXT", "MD", "HTML", "EPUB", "RTF", "ORG", "TEX", "PNG", "JPG",
+                "PDF", "TXT", "MD", "HTML", "RTF",
             ],
-            FileCategory::Spreadsheet => vec!["XLSX", "CSV", "TSV", "PDF", "ODS", "HTML"],
-            FileCategory::Presentation => vec!["PDF", "PPTX", "PNG", "JPG", "HTML"],
+            FileCategory::Spreadsheet => vec!["XLSX", "CSV", "TSV", "PDF", "HTML"],
+            FileCategory::Presentation => vec!["PDF", "TXT", "HTML"],
             FileCategory::Archive => vec![
-                "ZIP", "7Z", "TAR", "TAR.GZ", "TAR.BZ2", "TAR.XZ", "TAR.ZST", "EXTRACT",
+                "ZIP", "TAR", "TAR.GZ", "TAR.BZ2", "TAR.XZ", "TAR.ZST", "EXTRACT",
             ],
-            FileCategory::Subtitle => vec!["VTT", "SRT", "TXT", "ASS", "SSA"],
-            FileCategory::Unknown => vec!["ZIP", "PDF", "TXT"],
+            FileCategory::Subtitle => vec!["VTT", "SRT", "TXT"],
+            FileCategory::Unknown => vec!["PDF", "TXT", "HTML", "ZIP"],
         }
     }
 }

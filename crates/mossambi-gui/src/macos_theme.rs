@@ -31,18 +31,13 @@ pub const TRAFFIC_MAX: Color32 = Color32::from_rgb(39, 201, 63); // #27C93F
 // ---------------------------------------------------------------------------
 // Theme Modes
 // ---------------------------------------------------------------------------
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ThemeStyle {
+    #[default]
     LiquidGlass,
     FrostedGlass,
     DarkAnthracite,
     LightAqua,
-}
-
-impl Default for ThemeStyle {
-    fn default() -> Self {
-        ThemeStyle::LiquidGlass
-    }
 }
 
 impl ThemeStyle {
