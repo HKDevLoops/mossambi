@@ -1,13 +1,12 @@
-//! Mossambi Native Desktop Suite (GUI & Radial Citrus Widget)
-//! 100% Pure Native Rust Application
-//! - Frameless translucent Mossambi citrus fruit radial widget matching `brain/Image reference.png`
-//! - Botanical anatomy: Flavedo peel (Pantone 376 C), Albedo pith, 8 carpel pulp wedges, Columella core hub, Golden ALL sector
-//! - Contextual quick settings popup for every converter (Vector PDF, Image, Audio, Video, Exam)
-//! - Activation via global `WIN + CTRL` hotkey and circular mouse drag gesture (>=300 deg)
-//! - Hardware acceleration (GPU + NPU) and multi-threaded Rayon execution
-//! - Zero external Python or script dependencies
+//! Mossambi 100% Apple macOS-Styled Desktop Suite (GUI & Radial Citrus Widget)
+//! Pure Native Rust Application
+//! - Hero standalone circular Sweet Lime Citrus Widget (no ugly attached dashboard)
+//! - Long-Press (>=350ms) on any converter petal triggers an anchored floating macOS popover
+//! - 100% macOS designed Mossambi Studio window with traffic lights, sidebar, and Indian Exam Studio
+//! - Fast UNIX mv-like CLI, TUI, and global WIN+CTRL & circle-drag activation hooks
+//! - 0.00% Zero-Loss Standard, Hardware Acceleration (GPU + NPU), 16 Rayon worker threads
 
-use eframe::egui::{self, Color32, Margin, Pos2, Rounding, Vec2, ViewportBuilder, ViewportCommand};
+use eframe::egui::{self, Color32, Key, Pos2, Vec2, ViewportBuilder, ViewportCommand};
 use mossambi_archive::{pack_archive, unpack_archive, ArchiveType};
 use mossambi_codec::{
     convert_text_to_pdf_vector, transcode_file, transcode_to_all_formats, LosslessMode,
@@ -15,14 +14,22 @@ use mossambi_codec::{
 };
 use mossambi_core::{FileCategory, UniversalRegistry};
 use mossambi_exam::{optimize_exam_media, ExamConstraint};
-use mossambi_gui::citrus_geometry::{CitrusGeometry, FLAVEDO_GREEN};
+use mossambi_gui::citrus_geometry::CitrusGeometry;
+use mossambi_gui::macos_theme::*;
+use mossambi_gui::popover::PetalPopover;
 use mossambi_gui::quick_settings::QuickSettingsState;
-use mossambi_gui::tray::{ActivationManager, WakeupReason};
-use mossambi_hwaccel::detect_hardware_capabilities;
+use mossambi_gui::studio_view::StudioView;
+use mossambi_gui::tray::ActivationManager;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppViewMode {
+    RadialWidget, // Hero circular sweet lime overlay (360x360, transparent)
+    Studio,       // 100% macOS styled window with sidebar (980x640)
+}
 
 #[derive(Debug, Clone)]
 pub enum ConversionResult {
@@ -31,11 +38,13 @@ pub enum ConversionResult {
 }
 
 pub struct MossambiApp {
+    mode: AppViewMode,
     geometry: CitrusGeometry,
     quick_settings: QuickSettingsState,
+    studio_view: StudioView,
     activation_manager: ActivationManager,
 
-    // Dynamic state
+    // File Staging & Conversion
     current_file: Option<PathBuf>,
     current_category: FileCategory,
     current_sectors: Vec<&'static str>,
@@ -46,12 +55,13 @@ pub struct MossambiApp {
     last_completed_output: Option<PathBuf>,
     status_message: String,
 
-    // Channels for background worker
+    // Long-Press Tracking (>=350ms triggers Quick Settings popover)
+    press_start: Option<(Instant, usize)>,
+    popover_active_sector: Option<usize>,
+
+    // Background worker channels
     result_receiver: Receiver<ConversionResult>,
     result_sender: Sender<ConversionResult>,
-
-    // UI View toggle
-    show_studio_view: bool,
 }
 
 impl Default for MossambiApp {
@@ -61,8 +71,10 @@ impl Default for MossambiApp {
         let default_sectors = UniversalRegistry::get_widget_sectors_for_category(default_cat);
 
         Self {
-            geometry: CitrusGeometry::new(Pos2::new(160.0, 160.0), 320.0),
+            mode: AppViewMode::RadialWidget,
+            geometry: CitrusGeometry::new(Pos2::new(180.0, 180.0), 320.0),
             quick_settings: QuickSettingsState::default(),
+            studio_view: StudioView::default(),
             activation_manager: ActivationManager::new(),
 
             current_file: None,
@@ -73,12 +85,13 @@ impl Default for MossambiApp {
             is_converting: false,
             progress_angle: 0.0,
             last_completed_output: None,
-            status_message: "Ready. Press WIN+CTRL or drag file in circle to wake up.".to_string(),
+            status_message: "Ready. WIN+CTRL or drag in circle to summon.".to_string(),
+
+            press_start: None,
+            popover_active_sector: None,
 
             result_receiver: rx,
             result_sender: tx,
-
-            show_studio_view: false,
         }
     }
 }
@@ -88,7 +101,6 @@ impl MossambiApp {
         Self::default()
     }
 
-    /// Handles file selection or drop
     pub fn select_file(&mut self, path: PathBuf) {
         let (cat, ext) = UniversalRegistry::classify_file(&path);
         self.current_file = Some(path);
@@ -100,7 +112,6 @@ impl MossambiApp {
         }
     }
 
-    /// Triggers asynchronous conversion pipeline
     pub fn start_conversion(&mut self, target_format: &str) {
         let input_file = match self.current_file.clone() {
             Some(f) => f,
@@ -112,6 +123,7 @@ impl MossambiApp {
 
         self.is_converting = true;
         self.hub_status = "BUSY".to_string();
+        self.popover_active_sector = None;
         self.status_message = format!("Converting '{}' -> {}...", input_file.file_name().unwrap_or_default().to_string_lossy(), target_format);
 
         let sender = self.result_sender.clone();
@@ -123,9 +135,21 @@ impl MossambiApp {
             let _ = sender.send(res);
         });
     }
+
+    pub fn switch_to_studio(&mut self, ctx: &egui::Context) {
+        self.mode = AppViewMode::Studio;
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(980.0, 640.0)));
+        ctx.send_viewport_cmd(ViewportCommand::Decorations(false));
+    }
+
+    pub fn switch_to_widget(&mut self, ctx: &egui::Context) {
+        self.mode = AppViewMode::RadialWidget;
+        self.popover_active_sector = None;
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(360.0, 360.0)));
+    }
 }
 
-/// Standalone background execution routine
+/// Standalone conversion routine
 fn execute_conversion(
     input: &Path,
     target: &str,
@@ -133,7 +157,7 @@ fn execute_conversion(
 ) -> ConversionResult {
     let target_upper = target.to_uppercase();
 
-    // 1. Check Indian Exam Form Mode
+    // 1. Indian Exam Form Mode
     if settings.exam_mode_enabled || target_upper.contains("EXAM") {
         let constraint = ExamConstraint {
             name: settings.exam_preset_name.clone(),
@@ -161,7 +185,7 @@ fn execute_conversion(
         }
     }
 
-    // 2. Check ALL Sector Batch Transcode
+    // 2. ALL Sector Batch Transcode
     if target_upper == "ALL" {
         let mode = if settings.image_lossless || settings.audio_strict_lossless {
             LosslessMode::StrictBitExact
@@ -238,24 +262,20 @@ fn execute_conversion(
 
 impl eframe::App for MossambiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Continuous repaint for smooth animations and gesture responsiveness
-        ctx.request_repaint_after(Duration::from_millis(30));
+        ctx.request_repaint_after(Duration::from_millis(25));
 
         // 1. Check for activation events from global hotkey or circle gesture
         if let Some(event) = self.activation_manager.try_recv() {
             ctx.send_viewport_cmd(ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(ViewportCommand::Focus);
-            // Center the widget directly under the cursor location
-            let win_x = (event.cursor_x - 160.0).max(0.0);
-            let win_y = (event.cursor_y - 160.0).max(0.0);
-            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Pos2::new(win_x, win_y)));
 
-            let reason_str = match event.reason {
-                WakeupReason::HotkeyWinCtrl => "Global Hotkey (WIN+CTRL)",
-                WakeupReason::CircleDragGesture => "Circle-Drag Gesture",
-                WakeupReason::TrayClick => "System Tray",
-            };
-            self.status_message = format!("Summoned via {} at ({:.0}, {:.0})", reason_str, event.cursor_x, event.cursor_y);
+            if self.mode == AppViewMode::RadialWidget {
+                let win_x = (event.cursor_x - 180.0).max(0.0);
+                let win_y = (event.cursor_y - 180.0).max(0.0);
+                ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Pos2::new(win_x, win_y)));
+            }
+
+            self.status_message = format!("Summoned at ({:.0}, {:.0})", event.cursor_x, event.cursor_y);
         }
 
         // 2. Poll for background conversion results
@@ -276,22 +296,22 @@ impl eframe::App for MossambiApp {
             }
         }
 
-        // 3. Update rotating progress angle
+        // 3. Progress angle animation
         if self.is_converting {
-            self.progress_angle += 0.15;
+            self.progress_angle += 0.16;
             if self.progress_angle > 2.0 * std::f32::consts::PI {
                 self.progress_angle -= 2.0 * std::f32::consts::PI;
             }
         }
 
-        // 4. Handle Drag-and-Drop Files from OS Explorer
+        // 4. Handle Drag-and-Drop Files from Explorer
         ctx.input(|i| {
             if !i.raw.dropped_files.is_empty() {
                 if let Some(drop) = i.raw.dropped_files.first() {
                     if let Some(ref path) = drop.path {
                         self.select_file(path.clone());
 
-                        // If dropped onto a specific carpel wedge, convert immediately
+                        // If dropped onto a specific carpel sector, convert immediately!
                         if let Some(carpel_idx) = self.hovered_carpel {
                             if let Some(target) = self.current_sectors.get(carpel_idx) {
                                 self.start_conversion(target);
@@ -300,186 +320,160 @@ impl eframe::App for MossambiApp {
                     }
                 }
             }
+
+            // Esc key dismisses the overlay widget
+            if i.key_pressed(Key::Escape) {
+                if self.popover_active_sector.is_some() {
+                    self.popover_active_sector = None;
+                } else if self.mode == AppViewMode::RadialWidget {
+                    ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+                }
+            }
         });
 
-        // 5. Render Main Interface
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::from_black_alpha(0))) // Fully transparent window background
-            .show(ctx, |ui| {
-                if self.show_studio_view {
-                    self.render_studio_view(ui);
-                } else {
-                    self.render_radial_widget_view(ui);
-                }
-            });
+        // 5. Render active view mode
+        match self.mode {
+            AppViewMode::RadialWidget => {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::none().fill(Color32::TRANSPARENT))
+                    .show(ctx, |ui| {
+                        self.render_pure_radial_widget(ui, ctx);
+                    });
+            }
+            AppViewMode::Studio => {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::none().fill(MAC_WINDOW_BG))
+                    .show(ctx, |ui| {
+                        let cur_file = self.current_file.clone();
+                        let mut qs = self.quick_settings.clone();
+
+                        let mut file_to_pick = false;
+                        let mut convert_to_target: Option<String> = None;
+                        let mut open_target_folder: Option<PathBuf> = None;
+                        let mut req_switch_widget = false;
+
+                        self.studio_view.render(
+                            ui,
+                            ctx,
+                            &cur_file,
+                            &mut qs,
+                            || file_to_pick = true,
+                            |t| convert_to_target = Some(t),
+                            |p| open_target_folder = Some(p.to_path_buf()),
+                            || req_switch_widget = true,
+                        );
+
+                        self.quick_settings = qs;
+
+                        if file_to_pick {
+                            if let Some(path) = rfd::FileDialog::new().pick_file() {
+                                self.select_file(path);
+                            }
+                        }
+                        if let Some(target) = convert_to_target {
+                            self.start_conversion(&target);
+                        }
+                        if let Some(p) = open_target_folder {
+                            open_in_file_manager(&p);
+                        }
+                        if req_switch_widget {
+                            self.switch_to_widget(ctx);
+                        }
+                    });
+            }
+        }
     }
 }
 
 impl MossambiApp {
-    /// Renders the radial botanical sweet lime widget and contextual quick settings
-    fn render_radial_widget_view(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            // Left Column: The 8-Petal Mossambi Fruit Radial Widget
-            let (rect, response) = ui.allocate_exact_size(Vec2::new(320.0, 320.0), egui::Sense::click_and_drag());
-            let painter = ui.painter_at(rect);
+    /// Renders the Hero Standalone Circular Sweet Lime Radial Wheel with Long-Press Popover support
+    fn render_pure_radial_widget(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(360.0, 360.0), egui::Sense::click_and_drag());
+        let painter = ui.painter_at(rect);
 
-            self.geometry.center = rect.center();
+        self.geometry.center = rect.center();
 
-            // Hit test hovered carpel
-            if let Some(hover_pos) = response.hover_pos() {
-                self.hovered_carpel = self.geometry.hit_test_carpel(hover_pos);
-                if let Some(idx) = self.hovered_carpel {
-                    if let Some(fmt) = self.current_sectors.get(idx) {
-                        self.quick_settings.set_active_format(fmt);
-                    }
-                }
+        let hover_pos = response.hover_pos();
+        self.hovered_carpel = hover_pos.and_then(|p| self.geometry.hit_test_carpel(p));
 
-                // If user clicks on a carpel wedge, start conversion to that format
-                if response.clicked() {
-                    if let Some(idx) = self.hovered_carpel {
+        // 1. Long-Press Detection (>=350ms on a carpel sector)
+        let is_primary_down = ui.input(|i| i.pointer.primary_down());
+
+        if is_primary_down {
+            if let Some(idx) = self.hovered_carpel {
+                if self.press_start.is_none() {
+                    self.press_start = Some((Instant::now(), idx));
+                } else if let Some((start_time, sector_idx)) = self.press_start {
+                    if sector_idx == idx && start_time.elapsed() >= Duration::from_millis(350) {
+                        self.popover_active_sector = Some(idx);
                         if let Some(fmt) = self.current_sectors.get(idx) {
-                            self.start_conversion(fmt);
-                        }
-                    } else if self.geometry.hit_test_hub(hover_pos) {
-                        // Clicking hub opens file picker
-                        if let Some(path) = rfd::FileDialog::new().pick_file() {
-                            self.select_file(path);
+                            self.quick_settings.set_active_format(fmt);
                         }
                     }
                 }
             } else {
-                self.hovered_carpel = None;
+                self.press_start = None;
             }
-
-            // Draw botanical citrus fruit geometry
-            self.geometry.render(
-                &painter,
-                &self.current_sectors,
-                self.hovered_carpel,
-                &self.hub_status,
-                self.is_converting,
-                self.progress_angle,
-            );
-
-            // Right Column: Contextual Quick Settings Menu Panel (Requested by User)
-            ui.add_space(8.0);
-            ui.vertical(|ui| {
-                // Top control bar
-                ui.horizontal(|ui| {
-                    if ui.button(egui::RichText::new("📁 Browse").size(11.0)).clicked() {
-                        if let Some(path) = rfd::FileDialog::new().pick_file() {
-                            self.select_file(path);
-                        }
+        } else {
+            // Mouse released
+            if let Some((start_time, sector_idx)) = self.press_start {
+                if start_time.elapsed() < Duration::from_millis(350) && self.hovered_carpel == Some(sector_idx) {
+                    // Short tap: immediate conversion!
+                    if let Some(fmt) = self.current_sectors.get(sector_idx) {
+                        self.start_conversion(fmt);
                     }
-
-                    if ui.button(egui::RichText::new("⚡ Studio").size(11.0)).clicked() {
-                        self.show_studio_view = true;
-                    }
-
-                    let btn_text = if self.quick_settings.is_open { "⚙ Hide Settings" } else { "⚙ Quick Settings" };
-                    if ui.button(egui::RichText::new(btn_text).size(11.0)).clicked() {
-                        self.quick_settings.is_open = !self.quick_settings.is_open;
-                    }
-                });
-
-                ui.add_space(6.0);
-
-                // Quick Settings Card
-                if self.quick_settings.is_open {
-                    self.quick_settings.render_ui(ui);
                 }
+            }
+            self.press_start = None;
+        }
 
-                ui.add_space(6.0);
-
-                // Action Bar: Instant Convert Button
-                let active_fmt = self.quick_settings.active_format.clone();
-                let can_convert = self.current_file.is_some() && !self.is_converting;
-
-                ui.horizontal(|ui| {
-                    let conv_btn = ui.add_enabled(
-                        can_convert,
-                        egui::Button::new(
-                            egui::RichText::new(format!("⚡ Convert to {}", active_fmt))
-                                .size(12.5)
-                                .strong()
-                                .color(Color32::from_rgb(20, 30, 15)),
-                        )
-                        .fill(FLAVEDO_GREEN),
-                    );
-
-                    if conv_btn.clicked() {
-                        let fmt = active_fmt.clone();
-                        self.start_conversion(&fmt);
-                    }
-
-                    // Open Output Folder Button
-                    if let Some(ref out) = self.last_completed_output {
-                        if ui.button(egui::RichText::new("📂 Open Output").size(11.0)).clicked() {
-                            if let Some(parent) = out.parent() {
-                                open_in_file_manager(parent);
-                            }
-                        }
-                    }
-                });
-
-                // Status ticker
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(&self.status_message)
-                        .size(10.5)
-                        .color(Color32::from_rgb(200, 220, 190)),
-                );
-            });
-        });
-    }
-
-    /// Renders the full Mossambi Studio dashboard
-    fn render_studio_view(&mut self, ui: &mut egui::Ui) {
-        egui::Frame::none()
-            .fill(Color32::from_rgb(24, 28, 22))
-            .rounding(Rounding::same(12.0))
-            .inner_margin(Margin::same(16.0))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("🍋 Mossambi Studio (Full Suite)")
-                            .size(16.0)
-                            .strong()
-                            .color(FLAVEDO_GREEN),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("⮌ Radial Widget").clicked() {
-                            self.show_studio_view = false;
-                        }
-                    });
-                });
-
-                ui.separator();
-                ui.add_space(10.0);
-
-                let hw = detect_hardware_capabilities();
-                ui.label(egui::RichText::new("Hardware Acceleration Engines Active:").strong());
-                ui.label(format!("• GPU: {:?} | Encoder: {} | HEVC: {}", hw.vendor, hw.h264_encoder, hw.hevc_encoder));
-                ui.label(format!("• NPU AI Accelerator: {} | Concurrency: {} Rayon Threads", hw.npu_name, hw.optimal_thread_count));
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                ui.label(egui::RichText::new("Selected File:").strong());
-                if let Some(ref f) = self.current_file {
-                    ui.label(format!("{}", f.display()));
-                } else {
-                    ui.label("No file loaded yet. Use Browse or drop a file.");
-                }
-
-                ui.add_space(10.0);
-                if ui.button(egui::RichText::new("📁 Select File to Convert").size(13.0)).clicked() {
+        // Center hub interaction
+        if response.clicked() {
+            if let Some(pos) = hover_pos {
+                if self.geometry.hit_test_hub(pos) {
                     if let Some(path) = rfd::FileDialog::new().pick_file() {
                         self.select_file(path);
                     }
                 }
-            });
+            }
+        }
+
+        if response.secondary_clicked() || response.double_clicked() {
+            // Right-click or double-click switches to full macOS Studio!
+            self.switch_to_studio(ctx);
+            return;
+        }
+
+        // 2. Render Hero Botanical Citrus Fruit Slice
+        self.geometry.render(
+            &painter,
+            &self.current_sectors,
+            self.hovered_carpel,
+            &self.hub_status,
+            self.is_converting,
+            self.progress_angle,
+        );
+
+        // 3. Render Long-Press Floating macOS Popover if active
+        if let Some(pop_idx) = self.popover_active_sector {
+            let sector_span = (2.0 * std::f32::consts::PI) / 8.0;
+            let angle = -std::f32::consts::PI / 2.0 + (pop_idx as f32 + 0.5) * sector_span;
+            let r_mid = (self.geometry.carpel_outer + self.geometry.carpel_inner) / 2.0;
+            let anchor_pos = Pos2::new(
+                self.geometry.center.x + r_mid * angle.cos(),
+                self.geometry.center.y + r_mid * angle.sin(),
+            );
+
+            let fmt_name = self.current_sectors.get(pop_idx).copied().unwrap_or("FMT");
+
+            PetalPopover::render(
+                ui,
+                anchor_pos,
+                fmt_name,
+                &mut self.quick_settings,
+                || self.popover_active_sector = None,
+            );
+        }
     }
 }
 
@@ -501,10 +495,11 @@ pub fn open_in_file_manager(path: &Path) {
 fn main() -> Result<(), eframe::Error> {
     env_logger::init();
 
+    // Start with frameless, transparent overlay window for the Sweet Lime Radial Widget
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
-            .with_title("Mossambi Native Suite")
-            .with_inner_size([650.0, 360.0])
+            .with_title("Mossambi")
+            .with_inner_size([360.0, 360.0])
             .with_min_inner_size([340.0, 340.0])
             .with_decorations(false) // Frameless window
             .with_transparent(true)  // Native borderless transparency
@@ -513,7 +508,7 @@ fn main() -> Result<(), eframe::Error> {
     };
 
     eframe::run_native(
-        "Mossambi Native Suite",
+        "Mossambi",
         options,
         Box::new(|cc| Ok(Box::new(MossambiApp::new(cc)))),
     )

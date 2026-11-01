@@ -1,4 +1,7 @@
 pub mod citrus_geometry;
 pub mod gesture;
+pub mod macos_theme;
+pub mod popover;
 pub mod quick_settings;
+pub mod studio_view;
 pub mod tray;
