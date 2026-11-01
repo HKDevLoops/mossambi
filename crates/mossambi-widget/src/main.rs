@@ -183,6 +183,14 @@ fn enforce_borderless_win32() {
                 let color_none: u32 = 0xFFFFFFFE; // DWMWA_COLOR_NONE
                 let _ = DwmSetWindowAttribute(hwnd, 34, &color_none as *const _ as *const _, 4);
 
+                // Physically clip and shape the OS window hierarchy into an organic circular fruit region.
+                // Guarantees ZERO rectangular window corners exist in the Windows window manager.
+                use windows_sys::Win32::Graphics::Gdi::{CreateEllipticRgn, SetWindowRgn};
+                let rgn = CreateEllipticRgn(6, 6, 394, 394);
+                if !rgn.is_null() {
+                    let _ = SetWindowRgn(hwnd, rgn, 1);
+                }
+
                 if changed {
                     SetWindowPos(
                         hwnd,

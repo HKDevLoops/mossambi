@@ -401,7 +401,6 @@ impl eframe::App for MossambiApp {
         let mut file_to_pick = false;
         let mut convert_to_target: Option<String> = None;
         let mut open_target_folder: Option<PathBuf> = None;
-        let mut req_switch_widget = false;
 
         self.studio_view.render(
             ctx,
@@ -411,7 +410,6 @@ impl eframe::App for MossambiApp {
             || file_to_pick = true,
             |t| convert_to_target = Some(t),
             |p| open_target_folder = Some(p.to_path_buf()),
-            || req_switch_widget = true,
         );
 
         self.quick_settings = qs;
@@ -426,9 +424,6 @@ impl eframe::App for MossambiApp {
         }
         if let Some(p) = open_target_folder {
             open_in_file_manager(&p);
-        }
-        if req_switch_widget {
-            self.launch_radial_widget();
         }
     }
 }

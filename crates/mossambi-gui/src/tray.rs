@@ -127,12 +127,6 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
     const CMD_THEME_FROSTED_GLASS: u32 = 2011;
     const CMD_THEME_DARK_ANTHRACITE: u32 = 2012;
     const CMD_THEME_LIGHT_AQUA: u32 = 2013;
-    const CMD_EXAM_UPSC_PHOTO: u32 = 2020;
-    const CMD_EXAM_UPSC_SIGN: u32 = 2021;
-    const CMD_EXAM_SSC_PHOTO: u32 = 2022;
-    const CMD_EXAM_SSC_SIGN: u32 = 2023;
-    const CMD_EXAM_IBPS_PHOTO: u32 = 2024;
-    const CMD_EXAM_IBPS_SIGN: u32 = 2025;
     const CMD_TOGGLE_ZERO_LOSS: u32 = 2030;
     const CMD_QUIT: u32 = 2099;
 
@@ -280,7 +274,6 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
 
                         let hmenu = CreatePopupMenu();
                         let hmenu_themes = CreatePopupMenu();
-                        let hmenu_exams = CreatePopupMenu();
 
                         // Helper to encode UTF-16
                         fn to_u16(s: &str) -> Vec<u16> {
@@ -313,17 +306,8 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                             to_u16("Light Aqua (Clean Light #F5F5F7)").as_ptr(),
                         );
 
-                        // Exam Presets Submenu
-                        AppendMenuW(hmenu_exams, MF_STRING, CMD_EXAM_UPSC_PHOTO as usize, to_u16("UPSC Civil Services Photo (350x450, 300 DPI)").as_ptr());
-                        AppendMenuW(hmenu_exams, MF_STRING, CMD_EXAM_UPSC_SIGN as usize, to_u16("UPSC Civil Services Signature (350x150, 300 DPI)").as_ptr());
-                        AppendMenuW(hmenu_exams, MF_STRING, CMD_EXAM_SSC_PHOTO as usize, to_u16("SSC CGL Photo (100x120, 200 DPI)").as_ptr());
-                        AppendMenuW(hmenu_exams, MF_STRING, CMD_EXAM_SSC_SIGN as usize, to_u16("SSC CGL Signature (140x60, 200 DPI)").as_ptr());
-                        AppendMenuW(hmenu_exams, MF_STRING, CMD_EXAM_IBPS_PHOTO as usize, to_u16("IBPS Bank PO Photo (200x230, 200 DPI)").as_ptr());
-                        AppendMenuW(hmenu_exams, MF_STRING, CMD_EXAM_IBPS_SIGN as usize, to_u16("IBPS Bank PO Signature (140x60, 200 DPI)").as_ptr());
-
                         // Root Menu
-                        AppendMenuW(hmenu, MF_STRING, CMD_SUMMON_WIDGET as usize, to_u16("🍊 Summon Radial Wheel (Win+Shift+C)").as_ptr());
-                        AppendMenuW(hmenu, MF_STRING, CMD_OPEN_STUDIO as usize, to_u16("🖥️ Open Mossambi Studio (Win+Ctrl+C)").as_ptr());
+                        AppendMenuW(hmenu, MF_STRING, CMD_OPEN_STUDIO as usize, to_u16("🖥️ Open Mossambi Studio").as_ptr());
                         AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
                         let is_autostart = mossambi_core::MossambiConfig::is_autostart_configured();
                         AppendMenuW(
@@ -334,7 +318,6 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                         );
                         AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
                         AppendMenuW(hmenu, MF_POPUP, hmenu_themes as usize, to_u16("🎨 Themes (Liquid & Frosted Glass)").as_ptr());
-                        AppendMenuW(hmenu, MF_POPUP, hmenu_exams as usize, to_u16("🇮🇳 Indian Exam Presets (UPSC/SSC/IBPS)").as_ptr());
                         AppendMenuW(
                             hmenu,
                             MF_STRING | if zero_loss_enabled { MF_CHECKED } else { MF_UNCHECKED },
@@ -355,7 +338,6 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                         );
 
                         DestroyMenu(hmenu_themes);
-                        DestroyMenu(hmenu_exams);
                         DestroyMenu(hmenu);
 
                         match cmd as u32 {
@@ -390,24 +372,6 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                             CMD_THEME_LIGHT_AQUA => {
                                 current_theme = ThemeStyle::LightAqua;
                                 let _ = sender.send(AppControlEvent::ChangeTheme(ThemeStyle::LightAqua));
-                            }
-                            CMD_EXAM_UPSC_PHOTO => {
-                                let _ = sender.send(AppControlEvent::ChangeExamPreset("UPSC Civil Services Photo (350x450, 300DPI)".to_string()));
-                            }
-                            CMD_EXAM_UPSC_SIGN => {
-                                let _ = sender.send(AppControlEvent::ChangeExamPreset("UPSC Civil Services Signature (350x150, 300DPI)".to_string()));
-                            }
-                            CMD_EXAM_SSC_PHOTO => {
-                                let _ = sender.send(AppControlEvent::ChangeExamPreset("SSC CGL Photo (100x120, 200DPI)".to_string()));
-                            }
-                            CMD_EXAM_SSC_SIGN => {
-                                let _ = sender.send(AppControlEvent::ChangeExamPreset("SSC CGL Signature (140x60, 200DPI)".to_string()));
-                            }
-                            CMD_EXAM_IBPS_PHOTO => {
-                                let _ = sender.send(AppControlEvent::ChangeExamPreset("IBPS Bank PO Photo (200x230, 200DPI)".to_string()));
-                            }
-                            CMD_EXAM_IBPS_SIGN => {
-                                let _ = sender.send(AppControlEvent::ChangeExamPreset("IBPS Bank PO Signature (140x60, 200DPI)".to_string()));
                             }
                             CMD_TOGGLE_ZERO_LOSS => {
                                 zero_loss_enabled = !zero_loss_enabled;

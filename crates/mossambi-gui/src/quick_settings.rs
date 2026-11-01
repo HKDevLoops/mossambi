@@ -71,12 +71,12 @@ impl Default for QuickSettingsState {
             archive_compression: "Ultra".to_string(),
 
             exam_mode_enabled: false,
-            exam_preset_name: "UPSC Photo".to_string(),
+            exam_preset_name: "Custom Specification".to_string(),
             exam_width: 350,
             exam_height: 350,
             exam_dpi: 200,
             exam_min_kb: 20,
-            exam_max_kb: 300,
+            exam_max_kb: 100,
             exam_whiten: true,
         }
     }
@@ -273,40 +273,39 @@ impl QuickSettingsState {
             ui.add_space(6.0);
             ui.separator();
 
-            // Indian Exam Form Tuner Toggle
+            // Custom Specification & Form Conformer Parameters
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.exam_mode_enabled, "🇮🇳 Indian Exam Form Tuner");
+                ui.checkbox(&mut self.exam_mode_enabled, "🎯 Custom Parameter Envelope");
             });
 
             if self.exam_mode_enabled {
                 ui.add_space(4.0);
-                egui::ComboBox::from_label("Preset")
-                    .selected_text(&self.exam_preset_name)
-                    .show_ui(ui, |ui| {
-                        if ui.selectable_value(&mut self.exam_preset_name, "UPSC Photo".to_string(), "UPSC Photo (350x350, 20-300KB)").clicked() {
-                            self.exam_width = 350; self.exam_height = 350; self.exam_min_kb = 20; self.exam_max_kb = 300; self.exam_dpi = 200;
-                        }
-                        if ui.selectable_value(&mut self.exam_preset_name, "UPSC Signature".to_string(), "UPSC Signature (350x350, 10-40KB)").clicked() {
-                            self.exam_width = 350; self.exam_height = 350; self.exam_min_kb = 10; self.exam_max_kb = 40; self.exam_dpi = 200;
-                        }
-                        if ui.selectable_value(&mut self.exam_preset_name, "SSC Photo".to_string(), "SSC Photo (140x190, 20-50KB)").clicked() {
-                            self.exam_width = 140; self.exam_height = 190; self.exam_min_kb = 20; self.exam_max_kb = 50; self.exam_dpi = 200;
-                        }
-                        if ui.selectable_value(&mut self.exam_preset_name, "SSC Signature".to_string(), "SSC Signature (140x60, 10-20KB)").clicked() {
-                            self.exam_width = 140; self.exam_height = 60; self.exam_min_kb = 10; self.exam_max_kb = 20; self.exam_dpi = 200;
-                        }
-                        if ui.selectable_value(&mut self.exam_preset_name, "IBPS Photo".to_string(), "IBPS Photo (200x230, 20-50KB)").clicked() {
-                            self.exam_width = 200; self.exam_height = 230; self.exam_min_kb = 20; self.exam_max_kb = 50; self.exam_dpi = 200;
-                        }
-                        if ui.selectable_value(&mut self.exam_preset_name, "IBPS Signature".to_string(), "IBPS Signature (140x60, 10-20KB)").clicked() {
-                            self.exam_width = 140; self.exam_height = 60; self.exam_min_kb = 10; self.exam_max_kb = 20; self.exam_dpi = 200;
-                        }
-                    });
+                ui.horizontal(|ui| {
+                    ui.label("Name:");
+                    ui.add(egui::TextEdit::singleline(&mut self.exam_preset_name).desired_width(170.0));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Dimensions:");
+                    ui.add(egui::DragValue::new(&mut self.exam_width).speed(1).prefix("W: ").suffix("px"));
+                    ui.add(egui::DragValue::new(&mut self.exam_height).speed(1).prefix("H: ").suffix("px"));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Size Limit:");
+                    ui.add(egui::DragValue::new(&mut self.exam_min_kb).speed(1).prefix("Min: ").suffix("KB"));
+                    ui.add(egui::DragValue::new(&mut self.exam_max_kb).speed(1).prefix("Max: ").suffix("KB"));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("DPI:");
+                    ui.add(egui::DragValue::new(&mut self.exam_dpi).speed(1));
+                    ui.checkbox(&mut self.exam_whiten, "Whiten Background");
+                });
 
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(format!("Envelope: {}x{} px | {}-{} KB @ {} DPI", self.exam_width, self.exam_height, self.exam_min_kb, self.exam_max_kb, self.exam_dpi)).size(10.0).color(Color32::from_rgb(255, 199, 44)));
                 });
-                ui.checkbox(&mut self.exam_whiten, "Auto-whiten background (NPU accelerated)");
             }
         });
     }

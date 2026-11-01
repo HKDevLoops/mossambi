@@ -68,10 +68,8 @@ impl StudioView {
         mut on_pick_file: impl FnMut(),
         mut on_convert: impl FnMut(String),
         on_open_folder: impl FnMut(&Path),
-        on_switch_to_widget: impl FnOnce(),
     ) {
         let palette = current_theme.colors();
-        let mut req_switch_to_widget = false;
 
         // 1. Fixed Left Sidebar Panel (240px wide, pinned to top-left)
         let sidebar_frame = egui::Frame::none()
@@ -120,7 +118,7 @@ impl StudioView {
                 }
                 ui.add_space(2.0);
 
-                if render_sidebar_item(ui, &palette, "Exam Studio", "🇮🇳", self.current_tab == StudioTab::ExamStudio) {
+                if render_sidebar_item(ui, &palette, "Custom Conformer", "🎯", self.current_tab == StudioTab::ExamStudio) {
                     self.current_tab = StudioTab::ExamStudio;
                     quick_settings.exam_mode_enabled = true;
                 }
@@ -149,27 +147,11 @@ impl StudioView {
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.add_space(8.0);
                     ui.label(
-                        egui::RichText::new("Win+Shift+C: Fruit Widget\nWin+Ctrl+C: Studio")
+                        egui::RichText::new("Mossambi Universal Transcoder\nWin+Ctrl+C: Studio")
                             .size(9.5)
                             .color(palette.text_muted),
                     );
                     ui.add_space(8.0);
-
-                    let widget_btn = ui.add(
-                        egui::Button::new(
-                            egui::RichText::new("🍋 Launch Fruit Widget")
-                                .size(12.0)
-                                .strong()
-                                .color(Color32::from_rgb(25, 40, 10)),
-                        )
-                        .fill(PANTONE_FLAVEDO)
-                        .rounding(Rounding::same(8.0)),
-                    );
-                    if widget_btn.on_hover_text("Open standalone borderless circular fruit widget (Win+Shift+C)").clicked() {
-                        req_switch_to_widget = true;
-                    }
-
-                    ui.add_space(10.0);
                     ui.separator();
                 });
             });
@@ -207,10 +189,6 @@ impl StudioView {
                         }
                     });
             });
-
-        if req_switch_to_widget {
-            on_switch_to_widget();
-        }
     }
 
     /// Tab 1: Universal Transcoder & 200+ Format Matrix (Never blank!)
@@ -383,6 +361,38 @@ impl StudioView {
                         ui.label(egui::RichText::new("Lossless bit-exact container remux active. 0.00% Zero-Loss.").size(11.0).color(palette.text_muted));
                     }
                 }
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                // Custom Conformer Parameters directly in Transcoder tab
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut settings.exam_mode_enabled, "🎯 Apply Custom Parameters (Dimensions, DPI & Size Limit)");
+                });
+
+                if settings.exam_mode_enabled {
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.add(egui::TextEdit::singleline(&mut settings.exam_preset_name).desired_width(180.0));
+                        ui.add_space(10.0);
+                        ui.checkbox(&mut settings.exam_whiten, "Whiten Background");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Dimensions:");
+                        ui.add(egui::DragValue::new(&mut settings.exam_width).speed(1).prefix("W: ").suffix("px"));
+                        ui.add(egui::DragValue::new(&mut settings.exam_height).speed(1).prefix("H: ").suffix("px"));
+                        ui.add_space(10.0);
+                        ui.label("DPI:");
+                        ui.add(egui::DragValue::new(&mut settings.exam_dpi).speed(1));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Size Bounds:");
+                        ui.add(egui::DragValue::new(&mut settings.exam_min_kb).speed(1).prefix("Min: ").suffix("KB"));
+                        ui.add(egui::DragValue::new(&mut settings.exam_max_kb).speed(1).prefix("Max: ").suffix("KB"));
+                    });
+                }
             });
         } else {
             // =========================================================================
@@ -525,10 +535,10 @@ impl StudioView {
                     .rounding(Rounding::same(10.0))
                     .inner_margin(egui::Margin::same(14.0));
                 p4.show(&mut cols[1], |ui| {
-                    ui.label(egui::RichText::new("🇮🇳 Indian Exam Studio").size(13.0).strong().color(palette.text_primary));
-                    ui.label(egui::RichText::new("Conforms photos to 500x300, 200 DPI, 20-50 KB for UPSC, SSC, IBPS, and State PSC.").size(11.0).color(palette.text_secondary));
+                    ui.label(egui::RichText::new("🎯 Custom Form Conformer").size(13.0).strong().color(palette.text_primary));
+                    ui.label(egui::RichText::new("Conforms any photo, signature, or document to exact custom dimensions, DPI, and file size boundaries.").size(11.0).color(palette.text_secondary));
                     ui.add_space(6.0);
-                    if ui.button(egui::RichText::new("Open Exam Studio ➔").size(11.0).color(PANTONE_FLAVEDO)).clicked() {
+                    if ui.button(egui::RichText::new("Open Conformer ➔").size(11.0).color(PANTONE_FLAVEDO)).clicked() {
                         self.current_tab = StudioTab::ExamStudio;
                     }
                 });
@@ -601,7 +611,7 @@ impl StudioView {
         }
     }
 
-    /// Tab 2: Indian Competitive Exam & Recruitment Portal Form Tuner
+    /// Tab 2: Custom Specification & Application Form Conformer (Zero hardcoded templates)
     fn render_exam_studio_tab(
         &mut self,
         ui: &mut Ui,
@@ -611,32 +621,13 @@ impl StudioView {
         mut on_pick_file: impl FnMut(),
         mut on_open_folder: impl FnMut(&Path),
     ) {
-        ui.label(egui::RichText::new("🇮🇳 Indian Competitive Exam & Recruitment Form Studio").size(22.0).strong().color(palette.text_primary));
+        ui.label(egui::RichText::new("🎯 Custom Specification & Form Conformer").size(22.0).strong().color(palette.text_primary));
         ui.label(
-            egui::RichText::new("Solves rejection errors on UPSC, SSC, IBPS, GATE, and State PSC application portals with micro-converged binary search bounds.")
+            egui::RichText::new("Conform any photo, signature, or document to your exact custom specifications with micro-converged binary search bounds. No unverified or outdated templates.")
                 .size(12.0)
                 .color(palette.text_secondary),
         );
         ui.add_space(14.0);
-
-        // Preset Chips
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Official Exam Presets:").size(12.5).strong().color(palette.text_primary));
-            if ui.button(egui::RichText::new("UPSC Photo (350x450, 300DPI, 20-100KB)").size(11.0)).clicked() {
-                settings.apply_exam_preset(&ExamConstraint::preset_upsc_photo());
-            }
-            if ui.button(egui::RichText::new("UPSC Sign (350x150, 300DPI, 10-40KB)").size(11.0)).clicked() {
-                settings.apply_exam_preset(&ExamConstraint::preset_upsc_signature());
-            }
-            if ui.button(egui::RichText::new("SSC CGL (100x120, 20-50KB)").size(11.0)).clicked() {
-                settings.apply_exam_preset(&ExamConstraint::preset_ssc_photo());
-            }
-            if ui.button(egui::RichText::new("IBPS Bank (200x230, 20-50KB)").size(11.0)).clicked() {
-                settings.apply_exam_preset(&ExamConstraint::preset_ibps_photo());
-            }
-        });
-
-        ui.add_space(12.0);
 
         // Tuning Envelope Card
         let envelope_frame = egui::Frame::none()
@@ -647,53 +638,74 @@ impl StudioView {
 
         envelope_frame.show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Target Envelope Constraints").strong().color(PANTONE_FLAVEDO));
+                ui.label(egui::RichText::new("Custom Parameter Envelope").strong().color(PANTONE_FLAVEDO));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("Active Preset: {}", settings.exam_preset_name)).size(11.0).color(palette.text_muted));
+                    ui.label(egui::RichText::new(format!("Active Specification: {}", settings.exam_preset_name)).size(11.0).color(palette.text_muted));
                 });
+            });
+
+            ui.add_space(10.0);
+
+            // Row 1: Specification Name
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Specification Name:").size(12.0));
+                ui.add(egui::TextEdit::singleline(&mut settings.exam_preset_name).desired_width(220.0).hint_text("e.g. Application Photo, Signature"));
             });
 
             ui.add_space(8.0);
 
+            // Row 2: Two-column layout for Dimensions & File Size Bounds
             ui.columns(2, |cols| {
                 cols[0].vertical(|ui| {
+                    ui.label(egui::RichText::new("📏 Dimensions & Resolution").strong().color(palette.text_primary));
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.label("Width (px):");
-                        ui.add(egui::DragValue::new(&mut settings.exam_width).speed(1));
+                        ui.add(egui::DragValue::new(&mut settings.exam_width).speed(1).range(20..=8000));
                     });
                     ui.horizontal(|ui| {
                         ui.label("Height (px):");
-                        ui.add(egui::DragValue::new(&mut settings.exam_height).speed(1));
+                        ui.add(egui::DragValue::new(&mut settings.exam_height).speed(1).range(20..=8000));
                     });
                     ui.horizontal(|ui| {
                         ui.label("Calibrated DPI:");
-                        ui.add(egui::DragValue::new(&mut settings.exam_dpi).speed(1));
+                        ui.add(egui::DragValue::new(&mut settings.exam_dpi).speed(1).range(50..=1200));
                     });
+                    let ratio = if settings.exam_height > 0 {
+                        settings.exam_width as f32 / settings.exam_height as f32
+                    } else {
+                        1.0
+                    };
+                    ui.label(egui::RichText::new(format!("Aspect Ratio: {:.2}:1 ({}x{} px)", ratio, settings.exam_width, settings.exam_height)).size(10.5).color(palette.text_muted));
                 });
 
                 cols[1].vertical(|ui| {
+                    ui.label(egui::RichText::new("📦 File Size Boundaries").strong().color(palette.text_primary));
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.label("Min Size (KB):");
-                        ui.add(egui::DragValue::new(&mut settings.exam_min_kb).speed(1));
+                        ui.add(egui::DragValue::new(&mut settings.exam_min_kb).speed(1).range(1..=102400));
                     });
                     ui.horizontal(|ui| {
                         ui.label("Max Size (KB):");
-                        ui.add(egui::DragValue::new(&mut settings.exam_max_kb).speed(1));
+                        ui.add(egui::DragValue::new(&mut settings.exam_max_kb).speed(1).range(1..=102400));
                     });
-                    ui.checkbox(&mut settings.exam_whiten, "Whiten Scanner Shadows (DirectML)");
+                    ui.add_space(4.0);
+                    ui.checkbox(&mut settings.exam_whiten, "Whiten Background & Clean Scanner Shadows");
+                    ui.label(egui::RichText::new(format!("Allowed Range: {} KB — {} KB", settings.exam_min_kb, settings.exam_max_kb)).size(10.5).color(palette.text_muted));
                 });
             });
 
-            ui.add_space(12.0);
+            ui.add_space(14.0);
             ui.separator();
             ui.add_space(8.0);
 
-            // Execute Exam Optimization
+            // Execute Custom Form Optimization
             ui.horizontal(|ui| {
                 if let Some(ref path) = current_file {
                     let optimize_btn = ui.add(
                         egui::Button::new(
-                            egui::RichText::new("🎯 Optimize & Generate Portal-Ready JPG")
+                            egui::RichText::new("🎯 Optimize & Generate Conformed Output")
                                 .size(13.0)
                                 .strong()
                                 .color(Color32::WHITE),
@@ -717,8 +729,8 @@ impl StudioView {
                         };
 
                         let parent = path.parent().unwrap_or_else(|| Path::new("."));
-                        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("exam_output");
-                        let out_file = parent.join(format!("{}_portal_ready.jpg", stem));
+                        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+                        let out_file = parent.join(format!("{}_conformed.jpg", stem));
 
                         match optimize_exam_media(path, &out_file, &constraint) {
                             Ok(res) => {
@@ -734,7 +746,7 @@ impl StudioView {
                                 self.last_exam_output = Some(res);
                             }
                             Err(e) => {
-                                self.exam_status = format!("❌ Exam optimization failed: {}", e);
+                                self.exam_status = format!("❌ Optimization failed: {}", e);
                             }
                         }
                     }
@@ -745,15 +757,17 @@ impl StudioView {
                         }
                     }
                 } else {
-                    ui.label(egui::RichText::new("Drag and drop photo or signature file to begin.").color(palette.text_muted));
-                    if ui.button("📁 Select Photo").clicked() {
+                    ui.label(egui::RichText::new("Drag and drop photo, signature, or document to begin.").color(palette.text_muted));
+                    if ui.button("📁 Select File").clicked() {
                         on_pick_file();
                     }
                 }
             });
 
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new(&self.exam_status).size(11.5).color(PANTONE_GOLD));
+            if !self.exam_status.is_empty() {
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new(&self.exam_status).size(11.5).color(PANTONE_GOLD));
+            }
         });
     }
 
