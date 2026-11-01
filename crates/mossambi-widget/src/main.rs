@@ -162,9 +162,17 @@ fn enforce_borderless_win32() {
 
 impl eframe::App for MossambiWidgetApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        #[cfg(target_os = "windows")]
         if !self.first_frame_done {
+            let mut visuals = egui::Visuals::light();
+            visuals.window_fill = Color32::TRANSPARENT;
+            visuals.panel_fill = Color32::TRANSPARENT;
+            visuals.extreme_bg_color = Color32::TRANSPARENT;
+            visuals.faint_bg_color = Color32::TRANSPARENT;
+            ctx.set_visuals(visuals);
+
+            #[cfg(target_os = "windows")]
             enforce_borderless_win32();
+
             self.first_frame_done = true;
         }
 
@@ -356,6 +364,16 @@ impl eframe::App for MossambiWidgetApp {
                                         } else {
                                             WidgetTheme::Dark
                                         };
+                                        let mut visuals = if self.geometry.theme == WidgetTheme::Dark {
+                                            egui::Visuals::dark()
+                                        } else {
+                                            egui::Visuals::light()
+                                        };
+                                        visuals.window_fill = Color32::TRANSPARENT;
+                                        visuals.panel_fill = Color32::TRANSPARENT;
+                                        visuals.extreme_bg_color = Color32::TRANSPARENT;
+                                        visuals.faint_bg_color = Color32::TRANSPARENT;
+                                        ctx.set_visuals(visuals);
                                         self.show_context_menu = false;
                                     }
 
