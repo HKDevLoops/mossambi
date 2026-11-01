@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Mossambi Universal Windows Installer
     Universal File Conversion Platform, Indian Exam Studio & Archive Suite
@@ -99,6 +99,16 @@ function Install-DirectBinaries {
         Write-Host "$C_GREEN✓ Installed:$C_RESET $InstallDir\mossambi-widget.exe"
     }
 
+    # Copy Icon Assets
+    $installIconDir = Join-Path $InstallDir "icons"
+    if (-not (Test-Path $installIconDir)) {
+        New-Item -ItemType Directory -Path $installIconDir -Force | Out-Null
+    }
+    $localIcons = Join-Path $PSScriptRoot "assets\icons"
+    if (Test-Path $localIcons) {
+        Copy-Item "$localIcons\*" $installIconDir -Recurse -Force
+    }
+
     # Add to User PATH if not already present
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($currentPath -notlike "*$InstallDir*") {
@@ -108,19 +118,47 @@ function Install-DirectBinaries {
         Write-Host "$C_GREEN✓ User PATH updated successfully.$C_RESET"
     }
 
-    # Create Windows Start Menu Shortcut
+    # Create Windows Start Menu & Desktop Shortcuts with Custom Icon
     $startMenuDir = [Environment]::GetFolderPath("Programs")
-    $shortcutPath = Join-Path $startMenuDir "Mossambi.lnk"
+    $desktopDir = [Environment]::GetFolderPath("Desktop")
+    $icoFile = Join-Path $installIconDir "mossambi.ico"
+
     try {
         $wshShell = New-Object -ComObject WScript.Shell
+
+        # 1. Start Menu Studio Shortcut
+        $shortcutPath = Join-Path $startMenuDir "Mossambi Studio.lnk"
         $shortcut = $wshShell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = "$InstallDir\mossambi-gui.exe"
         $shortcut.WorkingDirectory = $InstallDir
         $shortcut.Description = "Mossambi — Sweet Lime Transcoder & Indian Exam Studio"
+        if (Test-Path $icoFile) { $shortcut.IconLocation = "$icoFile,0" }
         $shortcut.Save()
         Write-Host "$C_GREEN✓ Created Start Menu Shortcut:$C_RESET $shortcutPath"
+
+        # 2. Start Menu Radial Widget Shortcut
+        if (Test-Path "$InstallDir\mossambi-widget.exe") {
+            $widgetShortcutPath = Join-Path $startMenuDir "Mossambi Radial Widget.lnk"
+            $wShortcut = $wshShell.CreateShortcut($widgetShortcutPath)
+            $wShortcut.TargetPath = "$InstallDir\mossambi-widget.exe"
+            $wShortcut.WorkingDirectory = $InstallDir
+            $wShortcut.Description = "Summon Floating Sweet Lime Radial Widget"
+            if (Test-Path $icoFile) { $wShortcut.IconLocation = "$icoFile,0" }
+            $wShortcut.Save()
+            Write-Host "$C_GREEN✓ Created Start Menu Widget Shortcut:$C_RESET $widgetShortcutPath"
+        }
+
+        # 3. Desktop Shortcut
+        $desktopShortcutPath = Join-Path $desktopDir "Mossambi.lnk"
+        $dShortcut = $wshShell.CreateShortcut($desktopShortcutPath)
+        $dShortcut.TargetPath = "$InstallDir\mossambi-gui.exe"
+        $dShortcut.WorkingDirectory = $InstallDir
+        $dShortcut.Description = "Mossambi — Universal File Conversion Studio"
+        if (Test-Path $icoFile) { $dShortcut.IconLocation = "$icoFile,0" }
+        $dShortcut.Save()
+        Write-Host "$C_GREEN✓ Created Desktop Shortcut:$C_RESET $desktopShortcutPath"
     } catch {
-        Write-Verbose "Could not create Start Menu shortcut: $_"
+        Write-Verbose "Could not create shortcuts: $_"
     }
 
     # Setup PowerShell Auto-Completions

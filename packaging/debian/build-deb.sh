@@ -35,8 +35,16 @@ fi
 cp -f target/release/mossambi-tui "${PKG_DIR}/usr/bin/"
 chmod 755 "${PKG_DIR}/usr/bin/"*
 
-# Desktop file
+# Desktop file & icons
 cp -f packaging/assets/mossambi.desktop "${PKG_DIR}/usr/share/applications/"
+for size in 16 32 48 64 128 256 512; do
+    mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/${size}x${size}/apps"
+    cp -f "assets/icons/mossambi-${size}x${size}.png" "${PKG_DIR}/usr/share/icons/hicolor/${size}x${size}/apps/mossambi.png"
+done
+mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps"
+cp -f "assets/icons/mossambi.svg" "${PKG_DIR}/usr/share/icons/hicolor/scalable/apps/mossambi.svg"
+mkdir -p "${PKG_DIR}/usr/share/pixmaps"
+cp -f "packaging/assets/mossambi.png" "${PKG_DIR}/usr/share/pixmaps/mossambi.png"
 
 # Generate completions
 "${PKG_DIR}/usr/bin/mossambi" completions bash > "${PKG_DIR}/usr/share/bash-completion/completions/mossambi" || true

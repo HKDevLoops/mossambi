@@ -1,23 +1,54 @@
 # 📦 Mossambi Package Manager & Distribution Directory
 
-Mossambi provides official, turnkey package manager manifests and automated installer methods for all major operating systems and Linux distributions.
+Mossambi provides official, turnkey binary installers, package manager manifests, and automated distribution pipelines for all major operating systems and Linux distributions.
 
 ---
 
-## 🪟 Windows Package Managers
+## 🪟 Windows Binary Installers & Package Managers
 
-### 1. Windows Package Manager (`winget`)
+### 1. Windows Installer (`.msi`) & Portable Bundle (`.zip`)
+```powershell
+# Build both the official .msi and portable .zip bundle:
+pwsh -File packaging/windows/build-msi.ps1
+
+# The output is generated in target/dist/:
+#  - target/dist/mossambi-2.1.0-x64.msi
+#  - target/dist/mossambi-v2.1.0-windows-x64.zip
+```
+- **WiX Toolset Manifest**: [`packaging/windows/mossambi.wxs`](windows/mossambi.wxs) defines the 64-bit MSI package with custom desktop/start-menu shortcuts, `PATH` registration, and ARP uninstaller metadata.
+- **Portable ZIP Bundle**: Contains all 4 binaries (`mossambi.exe`, `mossambi-gui.exe`, `mossambi-widget.exe`, `mossambi-tui.exe`), `setup.bat`, `install.ps1`, and official Sweet Lime icon assets.
+
+### 2. Windows Package Manager (`winget`)
 ```powershell
 winget install Mossambi.Mossambi
 # Or from local manifest:
 winget install --manifest packaging/winget/Mossambi.Mossambi.yaml
 ```
 
-### 2. Scoop
+### 3. Scoop
 ```powershell
 # Add custom bucket or install directly:
 scoop install packaging/scoop/mossambi.json
 ```
+
+---
+
+## 🎨 Official Sweet Lime Brand Icons (`assets/icons/`)
+
+Mossambi includes custom-crafted, publication-grade Sweet Lime fruit icon artwork across all standard dimensions:
+
+| Format / Dimension | Path | Usage |
+|---|---|---|
+| **Master Scalable Vector** | [`assets/icons/mossambi.svg`](../assets/icons/mossambi.svg) | High-DPI displays, Linux scalable vector themes, web banners |
+| **Windows Multi-Res Icon** | [`assets/icons/mossambi.ico`](../assets/icons/mossambi.ico) | Windows Explorer, Taskbar, MSI Installer, Start Menu (16 to 256 px) |
+| **Ultra-High Resolution** | [`assets/icons/mossambi-1024x1024.png`](../assets/icons/mossambi-1024x1024.png) | macOS App Store, publication marketing, high-res splashes |
+| **Standard App Icon** | [`assets/icons/mossambi-512x512.png`](../assets/icons/mossambi-512x512.png) | Linux `/usr/share/pixmaps/`, Flathub, Snap Store |
+| **Desktop Icon** | [`assets/icons/mossambi-256x256.png`](../assets/icons/mossambi-256x256.png) | Embedded in `mossambi-gui` and `mossambi-widget` window frames |
+| **System Tray Icon** | [`assets/icons/mossambi-128x128.png`](../assets/icons/mossambi-128x128.png) | App launchers, dock icons |
+| **Medium Shell Icon** | [`assets/icons/mossambi-64x64.png`](../assets/icons/mossambi-64x64.png) | Linux hicolor standard |
+| **Small Shell Icon** | [`assets/icons/mossambi-48x48.png`](../assets/icons/mossambi-48x48.png) | Windows Control Panel & notification area |
+| **Menu / Tray Icon** | [`assets/icons/mossambi-32x32.png`](../assets/icons/mossambi-32x32.png) | Taskbar and window titlebar |
+| **Smallest Micro Icon** | [`assets/icons/mossambi-16x16.png`](../assets/icons/mossambi-16x16.png) | Windows System Tray notification area, tab icons |
 
 ---
 

@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Ambient Shadow -->
+    <filter id="fruit-shadow" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#142606" flood-opacity="0.35"/>
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#142606" flood-opacity="0.25"/>
+    </filter>
+
+    <!-- Inner Glow & Depth -->
+    <radialGradient id="peel-gradient" cx="38%" cy="32%" r="65%">
+      <stop offset="0%" stop-color="#EBF875"/>
+      <stop offset="25%" stop-color="#C2E625"/>
+      <stop offset="55%" stop-color="#78BE20"/>
+      <stop offset="85%" stop-color="#4C8C10"/>
+      <stop offset="100%" stop-color="#2D5A06"/>
+    </radialGradient>
+
+    <!-- Translucent Carpels Rim -->
+    <radialGradient id="pulp-core-gradient" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="35%" stop-color="#F2FA9D" stop-opacity="0.85"/>
+      <stop offset="70%" stop-color="#C5EA38" stop-opacity="0.75"/>
+      <stop offset="100%" stop-color="#6DA815" stop-opacity="0.9"/>
+    </radialGradient>
+
+    <!-- Carpel Teardrop Gradient -->
+    <linearGradient id="carpel-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="40%" stop-color="#E8F98A" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#A6D818" stop-opacity="0.6"/>
+    </linearGradient>
+
+    <!-- Leaf Gradient -->
+    <linearGradient id="leaf-grad" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#66BB6A"/>
+      <stop offset="40%" stop-color="#2E7D32"/>
+      <stop offset="100%" stop-color="#1B5E20"/>
+    </linearGradient>
+
+    <!-- Stem Gradient -->
+    <linearGradient id="stem-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8D6E63"/>
+      <stop offset="50%" stop-color="#5D4037"/>
+      <stop offset="100%" stop-color="#3E2723"/>
+    </linearGradient>
+
+    <!-- Gloss Specular Highlight -->
+    <linearGradient id="gloss-highlight" x1="30%" y1="0%" x2="70%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.55"/>
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Group with Shadow -->
+  <g filter="url(#fruit-shadow)">
+    <!-- Woody Stem at Top -->
+    <path d="M 252 110 C 250 82, 260 54, 275 42 C 279 39, 285 41, 283 47 C 272 65, 266 86, 264 110 Z" 
+          fill="url(#stem-grad)"/>
+
+    <!-- Lush Citrus Leaf with Dew Glow -->
+    <path d="M 268 95 C 310 60, 380 70, 415 110 C 418 114, 414 118, 408 117 C 360 110, 315 130, 272 108 Z" 
+          fill="url(#leaf-grad)"/>
+    <!-- Leaf Center Vein -->
+    <path d="M 272 98 C 320 85, 365 95, 410 112" 
+          stroke="#A5D6A7" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.6"/>
+
+    <!-- Main Mossambi Fruit Spherical Body -->
+    <circle cx="256" cy="280" r="185" fill="url(#peel-gradient)"/>
+
+    <!-- Specular Crescent Shimmer on Top Left -->
+    <path d="M 120 220 C 135 150, 210 115, 290 120 C 230 135, 160 175, 140 240 C 132 265, 116 250, 120 220 Z" 
+          fill="url(#gloss-highlight)"/>
+
+    <!-- Translucent Center Pulp Window (Represents the 8 Conversion Petals) -->
+    <circle cx="256" cy="280" r="128" fill="#1D3E04" fill-opacity="0.22"/>
+    <circle cx="256" cy="280" r="120" fill="url(#pulp-core-gradient)" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="3"/>
+
+    <!-- 8 Symmetrical Citrus Carpels (Radial Petal Layout) -->
+    <g transform="translate(256, 280)">
+      <!-- Carpel 0 (Top) -->
+      <path d="M 0 -22 C -14 -42, -26 -78, 0 -105 C 26 -78, 14 -42, 0 -22 Z" fill="url(#carpel-grad)"/>
+      <!-- Carpel 1 (Top-Right) -->
+      <path d="M 0 -22 C -14 -42, -26 -78, 0 -105 C 26 -78, 14 -42, 0 -22 Z" fill="url(#carpel-grad)" transform="rotate(45)"/>
+      <!-- Carpel 2 (Right) -->
+      <path d="M 0 -22 C -14 -42, -26 -78, 0 -105 C 26 -78, 14 -42, 0 -22 Z" fill="url(#carpel-grad)" transform="rotate(90)"/>
+      <!-- Carpel 3 (Bottom-Right) -->
+      <path d="M 0 -22 C -14 -42, -26 -78, 0 -105 C 26 -78, 14 -42, 0 -22 Z" fill="url(#carpel-grad)" transform="rotate(135)"/>
+      <!-- Carpel 4 (Bottom) -->
+      <path d="M 0 -22 C -14 -42, -26 -78, 0 -105 C 26 -78, 14 -42, 0 -22 Z" fill="url(#carpel-grad)" transform="rotate(180)"/>
+      <!-- Carpel 5 (Bottom-Left) -->
+      <path d="M 0 -22 C -14 -42, -26 -78, 0 -105 C 26 -78, 14 -42, 0 -22 Z" fill="url(#carpel-grad)" transform="rotate(225)"/>
+      <!-- Carpel 6 (Left) -->
+      <path d="M 0 -22 C -14 -42, -26 -78, 0 -105 C 26 -78, 14 -42, 0 -22 Z" fill="url(#carpel-grad)" transform="rotate(270)"/>
+      <!-- Carpel 7 (Top-Left) -->
+      <path d="M 0 -22 C -14 -42, -26 -78, 0 -105 C 26 -78, 14 -42, 0 -22 Z" fill="url(#carpel-grad)" transform="rotate(315)"/>
+
+      <!-- Center White Pip / Navel Core -->
+      <circle cx="0" cy="0" r="16" fill="#FFFFFF" fill-opacity="0.95"/>
+      <circle cx="0" cy="0" r="8" fill="#E8F98A"/>
+    </g>
+
+    <!-- Subtle Calyx Ring At Top Base of Fruit -->
+    <path d="M 244 100 C 252 104, 260 104, 268 100 C 264 106, 248 106, 244 100 Z" fill="#2E5507" opacity="0.6"/>
+  </g>
+</svg>

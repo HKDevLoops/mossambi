@@ -332,6 +332,21 @@ impl eframe::App for MossambiWidgetApp {
     }
 }
 
+fn load_app_icon() -> Option<egui::IconData> {
+    let icon_bytes = include_bytes!("../../../assets/icons/mossambi-256x256.png");
+    if let Ok(img) = image::load_from_memory(icon_bytes) {
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        Some(egui::IconData {
+            rgba: rgba.into_raw(),
+            width: w,
+            height: h,
+        })
+    } else {
+        None
+    }
+}
+
 fn main() -> Result<(), eframe::Error> {
     env_logger::init();
 
@@ -371,6 +386,10 @@ fn main() -> Result<(), eframe::Error> {
         .with_decorations(false) // ZERO titlebar, ZERO system borders
         .with_transparent(true)  // 100% borderless transparency
         .with_always_on_top();
+
+    if let Some(icon) = load_app_icon() {
+        builder = builder.with_icon(icon);
+    }
 
     if let Some(pos) = initial_pos {
         builder = builder.with_position([pos.x.max(0.0), pos.y.max(0.0)]);

@@ -150,13 +150,35 @@ install_direct_binary() {
     fi
     echo -e "${C_GREEN}✓ Installed:${C_RESET} ${INSTALL_DIR}/mossambi-tui"
 
-    # Install Desktop Entry on Linux
+    # Install Desktop Entry & Icons on Linux
     if [ "${PLATFORM}" = "linux" ]; then
         APP_DIR="${HOME}/.local/share/applications"
         mkdir -p "${APP_DIR}"
         if [ -f "${SCRIPT_DIR}/packaging/assets/mossambi.desktop" ]; then
             cp -f "${SCRIPT_DIR}/packaging/assets/mossambi.desktop" "${APP_DIR}/"
             echo -e "${C_GREEN}✓ Installed Desktop Launcher:${C_RESET} ${APP_DIR}/mossambi.desktop"
+        fi
+
+        # Install Hicolor Icons
+        if [ -d "${SCRIPT_DIR}/assets/icons" ]; then
+            for size in 16 32 48 64 128 256 512; do
+                ICON_SIZE_DIR="${HOME}/.local/share/icons/hicolor/${size}x${size}/apps"
+                mkdir -p "${ICON_SIZE_DIR}"
+                if [ -f "${SCRIPT_DIR}/assets/icons/mossambi-${size}x${size}.png" ]; then
+                    cp -f "${SCRIPT_DIR}/assets/icons/mossambi-${size}x${size}.png" "${ICON_SIZE_DIR}/mossambi.png"
+                fi
+            done
+            SCALABLE_DIR="${HOME}/.local/share/icons/hicolor/scalable/apps"
+            mkdir -p "${SCALABLE_DIR}"
+            if [ -f "${SCRIPT_DIR}/assets/icons/mossambi.svg" ]; then
+                cp -f "${SCRIPT_DIR}/assets/icons/mossambi.svg" "${SCALABLE_DIR}/mossambi.svg"
+            fi
+            PIXMAPS_DIR="${HOME}/.local/share/pixmaps"
+            mkdir -p "${PIXMAPS_DIR}"
+            if [ -f "${SCRIPT_DIR}/assets/icons/mossambi-512x512.png" ]; then
+                cp -f "${SCRIPT_DIR}/assets/icons/mossambi-512x512.png" "${PIXMAPS_DIR}/mossambi.png"
+            fi
+            echo -e "${C_GREEN}✓ Installed App Icons in Standard Resolutions (16px to 512px + SVG).${C_RESET}"
         fi
     fi
 

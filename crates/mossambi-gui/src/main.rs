@@ -780,17 +780,38 @@ pub fn open_in_file_manager(path: &Path) {
     }
 }
 
+fn load_app_icon() -> Option<egui::IconData> {
+    let icon_bytes = include_bytes!("../../../assets/icons/mossambi-256x256.png");
+    if let Ok(img) = image::load_from_memory(icon_bytes) {
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        Some(egui::IconData {
+            rgba: rgba.into_raw(),
+            width: w,
+            height: h,
+        })
+    } else {
+        None
+    }
+}
+
 fn main() -> Result<(), eframe::Error> {
     env_logger::init();
 
+    let mut builder = ViewportBuilder::default()
+        .with_title("Mossambi — Universal File Conversion Studio")
+        .with_inner_size([1040.0, 680.0])
+        .with_min_inner_size([880.0, 560.0])
+        .with_decorations(true) // Standard desktop application window
+        .with_resizable(true);
+
+    if let Some(icon) = load_app_icon() {
+        builder = builder.with_icon(icon);
+    }
+
     // Launch as the full Desktop Application Workspace window
     let options = eframe::NativeOptions {
-        viewport: ViewportBuilder::default()
-            .with_title("Mossambi — Universal File Conversion Studio")
-            .with_inner_size([1040.0, 680.0])
-            .with_min_inner_size([880.0, 560.0])
-            .with_decorations(true) // Standard desktop application window
-            .with_resizable(true),
+        viewport: builder,
         ..Default::default()
     };
 

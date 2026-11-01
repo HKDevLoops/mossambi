@@ -30,8 +30,13 @@ package() {
     fi
     install -Dm755 mossambi-tui "${pkgdir}/usr/bin/mossambi-tui"
 
-    # Install Desktop Entry
+    # Install Desktop Entry & Icons
     install -Dm644 "${startdir}/../assets/mossambi.desktop" "${pkgdir}/usr/share/applications/mossambi.desktop" 2>/dev/null || true
+    for size in 16 32 48 64 128 256 512; do
+        install -Dm644 "${startdir}/../../assets/icons/mossambi-${size}x${size}.png" "${pkgdir}/usr/share/icons/hicolor/${size}x${size}/apps/mossambi.png" 2>/dev/null || true
+    done
+    install -Dm644 "${startdir}/../../assets/icons/mossambi.svg" "${pkgdir}/usr/share/icons/hicolor/scalable/apps/mossambi.svg" 2>/dev/null || true
+    install -Dm644 "${startdir}/../assets/mossambi.png" "${pkgdir}/usr/share/pixmaps/mossambi.png" 2>/dev/null || true
 
     # Install Shell Auto-Completions
     "${pkgdir}/usr/bin/mossambi" completions bash > mossambi.bash 2>/dev/null || true

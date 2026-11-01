@@ -41,6 +41,15 @@ install -Dm755 target/release/mossambi-widget %{buildroot}%{_bindir}/mossambi-wi
 install -Dm755 target/release/mossambi-tui %{buildroot}%{_bindir}/mossambi-tui
 
 install -Dm644 packaging/assets/mossambi.desktop %{buildroot}%{_datadir}/applications/mossambi.desktop
+%{_datadir}/icons/hicolor/*/apps/mossambi.*
+%{_datadir}/pixmaps/mossambi.png
+
+# Icons
+for size in 16 32 48 64 128 256 512; do
+    install -Dm644 assets/icons/mossambi-${size}x${size}.png %{buildroot}%{_datadir}/icons/hicolor/${size}x${size}/apps/mossambi.png
+done
+install -Dm644 assets/icons/mossambi.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/mossambi.svg
+install -Dm644 packaging/assets/mossambi.png %{buildroot}%{_datadir}/pixmaps/mossambi.png
 
 # Shell completions
 install -d %{buildroot}%{_datadir}/bash-completion/completions
@@ -60,6 +69,8 @@ install -d %{buildroot}%{_datadir}/fish/vendor_completions.d
 %{_bindir}/mossambi-widget
 %{_bindir}/mossambi-tui
 %{_datadir}/applications/mossambi.desktop
+%{_datadir}/icons/hicolor/*/apps/mossambi.*
+%{_datadir}/pixmaps/mossambi.png
 %{_datadir}/bash-completion/completions/mossambi
 %{_datadir}/zsh/site-functions/_mossambi
 %{_datadir}/fish/vendor_completions.d/mossambi.fish

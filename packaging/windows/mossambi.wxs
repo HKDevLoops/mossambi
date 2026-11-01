@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" 
+           Name="Mossambi" 
+           Language="1033" 
+           Version="2.1.0" 
+           Manufacturer="Mossambi Systems Team" 
+           UpgradeCode="5E7B4B1C-1B90-449F-B937-23A9E7F6CD48">
+           
+    <Package InstallerVersion="500" 
+             Compressed="yes" 
+             InstallScope="perMachine" 
+             Platform="x64" 
+             Description="Mossambi: Universal File Conversion Platform &amp; Indian Exam Studio" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Mossambi is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="MossambiIcon" SourceFile="..\..\assets\icons\mossambi.ico" />
+    <Property Id="ARPPRODUCTICON" Value="MossambiIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/mossambi/mossambi" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/mossambi/mossambi" />
+
+    <!-- Directory Structure -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Mossambi">
+          <Directory Id="IconsFolder" Name="icons" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Mossambi" />
+      </Directory>
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+
+    <!-- Component Definitions -->
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <!-- Main CLI Executable -->
+      <Component Id="C_MossambiCli" Guid="A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D" Win64="yes">
+        <File Id="F_MossambiExe" Source="..\..\target\release\mossambi.exe" KeyPath="yes" />
+        <Environment Id="ENV_PATH" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
+      </Component>
+
+      <!-- Desktop Studio GUI Executable -->
+      <Component Id="C_MossambiGui" Guid="B2C3D4E5-F6A7-4B5C-9D0E-1F2A3B4C5D6E" Win64="yes">
+        <File Id="F_MossambiGuiExe" Source="..\..\target\release\mossambi-gui.exe" KeyPath="yes" />
+      </Component>
+
+      <!-- Standalone Radial Fruit Widget Executable -->
+      <Component Id="C_MossambiWidget" Guid="C3D4E5F6-A7B8-4C5D-0E1F-2A3B4C5D6E7F" Win64="yes">
+        <File Id="F_MossambiWidgetExe" Source="..\..\target\release\mossambi-widget.exe" KeyPath="yes" />
+      </Component>
+
+      <!-- Interactive TUI Executable -->
+      <Component Id="C_MossambiTui" Guid="D4E5F6A7-B8C9-4D5E-1F2A-3B4C5D6E7F80" Win64="yes">
+        <File Id="F_MossambiTuiExe" Source="..\..\target\release\mossambi-tui.exe" KeyPath="yes" />
+      </Component>
+
+      <!-- Icon File -->
+      <Component Id="C_MossambiIcon" Guid="E5F6A7B8-C9D0-4E5F-2A3B-4C5D6E7F8091" Win64="yes">
+        <File Id="F_MossambiIco" Source="..\..\assets\icons\mossambi.ico" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Shortcuts in Start Menu & Desktop -->
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="C_StartMenuShortcuts" Guid="F6A7B8C9-D0E1-4F5A-3B4C-5D6E7F8091A2">
+        <Shortcut Id="S_MossambiStudio" 
+                  Name="Mossambi Studio" 
+                  Description="Open Mossambi Universal File Conversion Studio" 
+                  Target="[INSTALLFOLDER]mossambi-gui.exe" 
+                  Icon="MossambiIcon" 
+                  WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="S_MossambiWidget" 
+                  Name="Mossambi Radial Widget" 
+                  Description="Summon Floating Sweet Lime Radial Widget" 
+                  Target="[INSTALLFOLDER]mossambi-widget.exe" 
+                  Icon="MossambiIcon" 
+                  WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="S_MossambiCli" 
+                  Name="Mossambi CLI" 
+                  Description="Open Mossambi Terminal Console" 
+                  Target="[SystemFolder]cmd.exe" 
+                  Arguments='/K "[INSTALLFOLDER]mossambi.exe" --help' 
+                  Icon="MossambiIcon" 
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="CleanUpShortCut" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\Mossambi\Shortcuts" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="C_DesktopShortcut" Guid="07B8C9D0-E1F2-4A5B-6C7D-8E9F0A1B2C3D">
+        <Shortcut Id="S_DesktopMossambi" 
+                  Name="Mossambi" 
+                  Description="Universal File Converter &amp; Indian Exam Studio" 
+                  Target="[INSTALLFOLDER]mossambi-gui.exe" 
+                  Icon="MossambiIcon" 
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU" Key="Software\Mossambi\Desktop" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Feature Configuration -->
+    <Feature Id="MainFeature" Title="Mossambi Core Platform" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="C_StartMenuShortcuts" />
+      <ComponentRef Id="C_DesktopShortcut" />
+    </Feature>
+  </Product>
+</Wix>
