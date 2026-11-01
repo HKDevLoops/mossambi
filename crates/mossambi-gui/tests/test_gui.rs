@@ -42,7 +42,7 @@ fn test_circle_gesture_detector() {
     for i in 0..30 {
         let x = cx + (i as f32) * 5.0;
         let y = cy;
-        if detector.update(x, y, true) {
+        if detector.update(x, y, true).is_some() {
             triggered_linear = true;
         }
     }
@@ -50,19 +50,22 @@ fn test_circle_gesture_detector() {
 
     detector.reset();
 
-    // B. Circular clockwise motion tracing 340 degrees (>= 300 threshold)
+    // B. 2-Time circular motion tracing 2 complete loops (~720 degrees)
     let mut triggered_circle = false;
-    let steps = 40;
+    let steps = 60;
     for s in 0..=steps {
-        let theta = (s as f32 / steps as f32) * ((340.0 / 180.0) * PI);
+        // 2 full circular loops = 4 * PI (~720 degrees)
+        let theta = (s as f32 / steps as f32) * (4.0 * PI);
         let x = cx + radius * theta.cos();
         let y = cy + radius * theta.sin();
-        if detector.update(x, y, true) {
+        if let Some((centroid_x, centroid_y)) = detector.update(x, y, true) {
             triggered_circle = true;
+            assert!((centroid_x - cx).abs() < 25.0, "Centroid X should match circle center");
+            assert!((centroid_y - cy).abs() < 25.0, "Centroid Y should match circle center");
             break;
         }
     }
-    assert!(triggered_circle, "Full circular drag motion must trigger circle gesture");
+    assert!(triggered_circle, "2-Time circular drag motion must trigger circle gesture with centroid");
 }
 
 #[test]

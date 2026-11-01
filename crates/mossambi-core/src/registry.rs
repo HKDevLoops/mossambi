@@ -46,9 +46,12 @@ impl UniversalRegistry {
             "MP3" | "WAV" | "FLAC" | "M4A" | "AAC" | "OGG" | "OPUS" | "AIFF" | "AIF" | "WMA"
             | "ALAC" | "DSD" | "DSF" | "APE" | "MID" | "MIDI" => FileCategory::Audio,
 
-            // Documents
+            // Documents & Structured Text/Code
             "PDF" | "DOCX" | "DOC" | "TXT" | "MD" | "HTML" | "HTM" | "RTF" | "ORG" | "TEX"
-            | "EPUB" | "ODT" | "PAGES" => FileCategory::Document,
+            | "EPUB" | "ODT" | "PAGES" | "TOML" | "JSON" | "YAML" | "YML" | "XML" | "RS"
+            | "PY" | "JS" | "C" | "CPP" | "H" | "LOG" | "RST" | "INI" | "CONF" => {
+                FileCategory::Document
+            }
 
             // Spreadsheets
             "XLSX" | "XLS" | "CSV" | "TSV" | "ODS" | "NUMBERS" => FileCategory::Spreadsheet,

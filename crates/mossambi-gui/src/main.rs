@@ -19,7 +19,7 @@ use mossambi_gui::macos_theme::*;
 use mossambi_gui::popover::PetalPopover;
 use mossambi_gui::quick_settings::QuickSettingsState;
 use mossambi_gui::studio_view::StudioView;
-use mossambi_gui::tray::ActivationManager;
+use mossambi_gui::tray::{ActivationManager, AppControlEvent};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
@@ -39,6 +39,7 @@ pub enum ConversionResult {
 
 pub struct MossambiApp {
     mode: AppViewMode,
+    theme: ThemeStyle,
     geometry: CitrusGeometry,
     quick_settings: QuickSettingsState,
     studio_view: StudioView,
@@ -72,6 +73,7 @@ impl Default for MossambiApp {
 
         Self {
             mode: AppViewMode::RadialWidget,
+            theme: ThemeStyle::LiquidGlass,
             geometry: CitrusGeometry::new(Pos2::new(180.0, 180.0), 320.0),
             quick_settings: QuickSettingsState::default(),
             studio_view: StudioView::default(),
@@ -264,18 +266,45 @@ impl eframe::App for MossambiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after(Duration::from_millis(25));
 
-        // 1. Check for activation events from global hotkey or circle gesture
-        if let Some(event) = self.activation_manager.try_recv() {
-            ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(ViewportCommand::Focus);
+        // 1. Check for activation events from global hotkey, 2-circle gesture, or system tray
+        while let Some(control_event) = self.activation_manager.try_recv() {
+            match control_event {
+                AppControlEvent::Wakeup(event) => {
+                    ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(ViewportCommand::Focus);
 
-            if self.mode == AppViewMode::RadialWidget {
-                let win_x = (event.cursor_x - 180.0).max(0.0);
-                let win_y = (event.cursor_y - 180.0).max(0.0);
-                ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Pos2::new(win_x, win_y)));
+                    if self.mode == AppViewMode::RadialWidget {
+                        let win_x = (event.cursor_x - 180.0).max(0.0);
+                        let win_y = (event.cursor_y - 180.0).max(0.0);
+                        ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Pos2::new(win_x, win_y)));
+                    }
+
+                    // Directly stage active file identified under cursor!
+                    if let Some(path) = event.active_file {
+                        self.select_file(path);
+                    }
+
+                    self.status_message = format!("Summoned at ({:.0}, {:.0})", event.cursor_x, event.cursor_y);
+                }
+                AppControlEvent::ChangeTheme(new_theme) => {
+                    self.theme = new_theme;
+                }
+                AppControlEvent::ChangeExamPreset(preset_name) => {
+                    self.quick_settings.exam_mode_enabled = true;
+                    self.quick_settings.exam_preset_name = preset_name;
+                }
+                AppControlEvent::ToggleZeroLoss(_enabled) => {
+                    // Quick settings zero loss toggle
+                }
+                AppControlEvent::OpenStudio => {
+                    self.switch_to_studio(ctx);
+                    ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(ViewportCommand::Focus);
+                }
+                AppControlEvent::QuitApp => {
+                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
             }
-
-            self.status_message = format!("Summoned at ({:.0}, {:.0})", event.cursor_x, event.cursor_y);
         }
 
         // 2. Poll for background conversion results
@@ -304,8 +333,18 @@ impl eframe::App for MossambiApp {
             }
         }
 
-        // 4. Handle Drag-and-Drop Files from Explorer
+        // 4. Handle Drag-and-Drop Files from Explorer (both active hover and drop release)
         ctx.input(|i| {
+            // A. Capture active hovered file while user drags cursor over widget!
+            if let Some(hover) = i.raw.hovered_files.first() {
+                if let Some(ref path) = hover.path {
+                    if self.current_file.as_ref() != Some(path) {
+                        self.select_file(path.clone());
+                    }
+                }
+            }
+
+            // B. Capture dropped file
             if !i.raw.dropped_files.is_empty() {
                 if let Some(drop) = i.raw.dropped_files.first() {
                     if let Some(ref path) = drop.path {
@@ -341,8 +380,9 @@ impl eframe::App for MossambiApp {
                     });
             }
             AppViewMode::Studio => {
+                let theme_palette = self.theme.colors();
                 egui::CentralPanel::default()
-                    .frame(egui::Frame::none().fill(MAC_WINDOW_BG))
+                    .frame(egui::Frame::none().fill(theme_palette.window_bg))
                     .show(ctx, |ui| {
                         let cur_file = self.current_file.clone();
                         let mut qs = self.quick_settings.clone();
@@ -355,6 +395,7 @@ impl eframe::App for MossambiApp {
                         self.studio_view.render(
                             ui,
                             ctx,
+                            &mut self.theme,
                             &cur_file,
                             &mut qs,
                             || file_to_pick = true,

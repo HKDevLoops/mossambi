@@ -48,7 +48,7 @@ pub fn transcode_file(
     let is_text_like = matches!(
         in_ext.as_str(),
         "TXT" | "MD" | "RST" | "LOG" | "JSON" | "XML" | "YAML" | "YML" | "RS" | "PY" | "JS"
-            | "TS" | "C" | "CPP" | "H" | "HTML" | "HTM" | "ORG" | "TEX"
+            | "TS" | "C" | "CPP" | "H" | "HTML" | "HTM" | "ORG" | "TEX" | "TOML" | "INI" | "CONF"
     );
 
     match category {

@@ -1,7 +1,8 @@
-//! Circle-Drag Mouse Gesture Tracker for Mossambi
+//! 2-Time Circular Motion Mouse Gesture Tracker for Mossambi
 //! Detects when a user holds down the mouse button (dragging a file) and traces
-//! a circular path (accumulated delta theta >= 300 degrees clockwise or counter-clockwise)
-//! to summon the Mossambi radial widget directly under the cursor.
+//! 2 complete circular loops (accumulated rotation >= 720 degrees / ~11.5 radians
+//! clockwise or counter-clockwise) within a 2.5-second window.
+//! Awakens the Mossambi Sweet Lime Radial Widget centered directly where the user circled.
 
 use std::collections::VecDeque;
 use std::f32::consts::PI;
@@ -33,28 +34,30 @@ impl Default for CircleGestureDetector {
 impl CircleGestureDetector {
     pub fn new() -> Self {
         Self {
-            samples: VecDeque::with_capacity(128),
-            max_history: Duration::from_millis(1500), // 1.5 second window
-            min_radius: 20.0,                         // Minimum circle radius (px)
-            max_radius: 350.0,                        // Maximum circle radius (px)
-            threshold_radians: (300.0 / 180.0) * PI,  // 300 degrees in radians (~5.24 rad)
+            samples: VecDeque::with_capacity(160),
+            max_history: Duration::from_millis(2600), // 2.6-second sliding window for 2 circles
+            min_radius: 15.0,                         // Minimum circle radius (px)
+            max_radius: 420.0,                        // Maximum circle radius (px)
+            // 2 complete revolutions = 720 degrees (4 * PI ~= 12.566 rad).
+            // We use 11.5 rad (~660 degrees) to allow natural human gesture variance while requiring 2 loops.
+            threshold_radians: 11.5,
             last_trigger: Instant::now() - Duration::from_secs(10),
-            cooldown: Duration::from_secs(2),         // 2-second cooldown between gesture triggers
+            cooldown: Duration::from_millis(1500),    // 1.5-second cooldown between gesture triggers
         }
     }
 
     /// Feeds a new mouse position sample while dragging (left button held).
-    /// Returns `true` if a full circle gesture was completed.
-    pub fn update(&mut self, x: f32, y: f32, is_dragging: bool) -> bool {
+    /// Returns `Some((center_x, center_y))` if a 2-time circular motion was completed.
+    pub fn update(&mut self, x: f32, y: f32, is_dragging: bool) -> Option<(f32, f32)> {
         let now = Instant::now();
 
         if !is_dragging {
             self.samples.clear();
-            return false;
+            return None;
         }
 
         if now.duration_since(self.last_trigger) < self.cooldown {
-            return false;
+            return None;
         }
 
         // Add new sample
@@ -73,8 +76,9 @@ impl CircleGestureDetector {
             }
         }
 
-        if self.samples.len() < 12 {
-            return false;
+        // Need at least 18 samples across time to establish 2 complete revolutions
+        if self.samples.len() < 18 {
+            return None;
         }
 
         // Calculate centroid of current samples
@@ -82,7 +86,7 @@ impl CircleGestureDetector {
         let cx: f32 = self.samples.iter().map(|s| s.x).sum::<f32>() / n;
         let cy: f32 = self.samples.iter().map(|s| s.y).sum::<f32>() / n;
 
-        // Verify radius from centroid falls within valid circle bounds
+        // Verify average radius from centroid falls within valid circle bounds
         let mut avg_radius = 0.0f32;
         for s in &self.samples {
             let dx = s.x - cx;
@@ -92,7 +96,7 @@ impl CircleGestureDetector {
         avg_radius /= n;
 
         if avg_radius < self.min_radius || avg_radius > self.max_radius {
-            return false;
+            return None;
         }
 
         // Accumulate cumulative angular displacement relative to centroid
@@ -115,14 +119,14 @@ impl CircleGestureDetector {
             prev_angle = Some(angle);
         }
 
-        // Check if absolute accumulated rotation exceeds 300 degrees
+        // Check if absolute accumulated rotation satisfies 2-time circular motion (>= 720 deg)
         if total_angle.abs() >= self.threshold_radians {
             self.last_trigger = now;
             self.samples.clear();
-            return true;
+            return Some((cx, cy));
         }
 
-        false
+        None
     }
 
     pub fn reset(&mut self) {

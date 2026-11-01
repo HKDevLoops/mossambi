@@ -1,7 +1,11 @@
 //! Mossambi Terminal User Interface (`mossambi-tui`)
-//! Full-featured keyboard-navigated terminal suite built with Ratatui.
-//! Features 5 tabs: File Transcoder (with ⭐ ALL sector), Indian Exam Form Studio, Archive Manager,
-//! Hardware Acceleration Diagnostics, and Persistent Settings / Pantone Shade Customizer.
+//! 100% Apple macOS-Styled Terminal Interface built with Ratatui.
+//! Features:
+//! - Authentic macOS Traffic Lights (Close, Min, Zoom) in the title bar
+//! - Multiple Apple Themes: Liquid Glass, Transparent Frosted Glass, Dark Anthracite, Light Aqua
+//! - 5 macOS-styled tabs: File Transcoder (with ⭐ ALL sector), Indian Exam Form Studio,
+//!   Archive Manager, Hardware Acceleration Diagnostics, and Persistent Settings & Appearance.
+//! - Keyboard navigation: [Tab] or [1-5] for tabs, [t] to cycle themes, [q] to quit.
 
 use anyhow::Result;
 use crossterm::{
@@ -12,7 +16,7 @@ use crossterm::{
 use mossambi_archive::{pack_archive, ArchiveType};
 use mossambi_codec::{transcode_file, transcode_to_all_formats, LosslessMode};
 use mossambi_core::{
-    get_system_arch_info, MossambiConfig, UniversalRegistry,
+    get_system_arch_info, MossambiConfig, ThemeMode, UniversalRegistry,
 };
 use mossambi_exam::{optimize_exam_media, ExamConstraint};
 use mossambi_hwaccel::detect_hardware_capabilities;
@@ -30,14 +34,30 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 // 100% Certified Pantone Palette Constants for ANSI RGB
-pub const PANTONE_RAW_PEEL: Color = Color::Rgb(112, 201, 34); // 376 C
+pub const PANTONE_RAW_PEEL: Color = Color::Rgb(120, 190, 32);   // 376 C
 pub const PANTONE_SWEET_ZEST: Color = Color::Rgb(228, 240, 36); // 388 C
-pub const PANTONE_RIPE_PULP: Color = Color::Rgb(209, 230, 49); // 389 C
-pub const PANTONE_CITRUS_GOLD: Color = Color::Rgb(246, 179, 36); // 1235 C
-pub const PANTONE_TANGERINE: Color = Color::Rgb(248, 143, 88); // 15-1247
-pub const PANTONE_DEEP_FOREST: Color = Color::Rgb(46, 77, 30); // 371 C
-pub const PANTONE_ANTHRACITE: Color = Color::Rgb(24, 24, 26); // 19-4007
-pub const PANTONE_WHITE: Color = Color::Rgb(245, 245, 247); // 11-4800
+pub const PANTONE_RIPE_PULP: Color = Color::Rgb(209, 230, 49);  // 389 C
+pub const PANTONE_CITRUS_GOLD: Color = Color::Rgb(255, 184, 28); // 1235 C
+pub const PANTONE_TANGERINE: Color = Color::Rgb(248, 143, 88);  // 15-1247
+pub const PANTONE_DEEP_FOREST: Color = Color::Rgb(46, 77, 30);  // 371 C
+pub const PANTONE_WHITE: Color = Color::Rgb(245, 245, 247);
+
+// macOS Traffic Lights
+pub const MAC_TRAFFIC_RED: Color = Color::Rgb(255, 95, 86);    // #FF5F56
+pub const MAC_TRAFFIC_YELLOW: Color = Color::Rgb(255, 189, 46); // #FFBD2E
+pub const MAC_TRAFFIC_GREEN: Color = Color::Rgb(39, 201, 63);   // #27C93F
+
+#[derive(Clone, Copy)]
+pub struct TuiThemePalette {
+    pub bg: Color,
+    pub surface: Color,
+    pub border: Color,
+    pub text_primary: Color,
+    pub text_secondary: Color,
+    pub text_muted: Color,
+    pub accent: Color,
+    pub gold: Color,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AppTab {
@@ -61,11 +81,11 @@ impl AppTab {
 
     pub fn title(&self) -> &'static str {
         match self {
-            AppTab::Convert => " 🍋 File Transcoder & ALL ",
+            AppTab::Convert => " ⚡ Transcoder & ALL ",
             AppTab::ExamStudio => " 🇮🇳 Indian Exam Studio ",
             AppTab::Archive => " 📦 Archive Manager ",
-            AppTab::Hardware => " ⚡ Hardware & SIMD ",
-            AppTab::Settings => " ⚙️ Settings & Pantone ",
+            AppTab::Hardware => " 🏎️ Hardware & AI ",
+            AppTab::Settings => " ⚙️ Appearance & Themes ",
         }
     }
 }
@@ -105,7 +125,7 @@ impl AppState {
         let mut app = Self {
             current_tab: AppTab::Convert,
             config,
-            status_message: "Welcome to Mossambi TUI. Use [Tab] or [1-5] to navigate, [q] to quit.".into(),
+            status_message: "Welcome to Mossambi. [Tab] Navigate | [t] Cycle Themes | [q] Quit".into(),
             status_is_error: false,
             current_dir: current_dir.clone(),
             dir_entries: Vec::new(),
@@ -121,7 +141,7 @@ impl AppState {
                 ("IBPS Bank PO Signature (140x60, 200DPI, 10-20KB)", ExamConstraint::preset_ibps_signature()),
             ],
             selected_preset_idx: 0,
-            exam_status: "Select a preset or photo to optimize for Indian entrance/recruitment portals.".into(),
+            exam_status: "Select an exam preset and press [Enter] to optimize.".into(),
             archive_types: vec![
                 ArchiveType::Zip,
                 ArchiveType::TarGz,
@@ -145,6 +165,51 @@ impl AppState {
 
         app.refresh_directory();
         app
+    }
+
+    pub fn current_theme_palette(&self) -> TuiThemePalette {
+        match self.config.theme_mode {
+            ThemeMode::LiquidGlass => TuiThemePalette {
+                bg: Color::Rgb(16, 20, 26),
+                surface: Color::Rgb(26, 32, 44),
+                border: Color::Rgb(70, 95, 125),
+                text_primary: Color::Rgb(245, 245, 250),
+                text_secondary: Color::Rgb(175, 185, 200),
+                text_muted: Color::Rgb(110, 125, 140),
+                accent: Color::Rgb(120, 190, 32),
+                gold: Color::Rgb(255, 184, 28),
+            },
+            ThemeMode::FrostedGlass => TuiThemePalette {
+                bg: Color::Rgb(24, 24, 28),
+                surface: Color::Rgb(36, 36, 42),
+                border: Color::Rgb(70, 70, 80),
+                text_primary: Color::Rgb(240, 240, 245),
+                text_secondary: Color::Rgb(165, 165, 175),
+                text_muted: Color::Rgb(115, 115, 125),
+                accent: Color::Rgb(130, 205, 40),
+                gold: Color::Rgb(255, 184, 28),
+            },
+            ThemeMode::DarkAnthracite => TuiThemePalette {
+                bg: Color::Rgb(22, 22, 24),
+                surface: Color::Rgb(34, 34, 38),
+                border: Color::Rgb(60, 60, 66),
+                text_primary: Color::Rgb(245, 245, 247),
+                text_secondary: Color::Rgb(161, 161, 166),
+                text_muted: Color::Rgb(120, 120, 126),
+                accent: PANTONE_RAW_PEEL,
+                gold: PANTONE_CITRUS_GOLD,
+            },
+            ThemeMode::LightAqua => TuiThemePalette {
+                bg: Color::Rgb(245, 245, 247),
+                surface: Color::Rgb(255, 255, 255),
+                border: Color::Rgb(190, 190, 200),
+                text_primary: Color::Rgb(28, 28, 30),
+                text_secondary: Color::Rgb(105, 105, 115),
+                text_muted: Color::Rgb(140, 140, 150),
+                accent: Color::Rgb(85, 150, 18),
+                gold: Color::Rgb(210, 140, 15),
+            },
+        }
     }
 
     pub fn refresh_directory(&mut self) {
@@ -179,17 +244,6 @@ impl AppState {
             if self.selected_format_idx >= self.available_formats.len() {
                 self.selected_format_idx = 0;
             }
-        }
-    }
-
-    pub fn current_shade_color(&self) -> Color {
-        match self.config.citrus_shade.as_str() {
-            "sweetzest" => PANTONE_SWEET_ZEST,
-            "ripepulp" => PANTONE_RIPE_PULP,
-            "citrusgold" => PANTONE_CITRUS_GOLD,
-            "tangerine" => PANTONE_TANGERINE,
-            "deepforest" => PANTONE_DEEP_FOREST,
-            _ => PANTONE_RAW_PEEL,
         }
     }
 
@@ -302,7 +356,6 @@ impl AppState {
 }
 
 fn main() -> Result<()> {
-    // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -311,11 +364,10 @@ fn main() -> Result<()> {
 
     let mut state = AppState::new();
 
-    // Event loop
     while !state.should_quit {
         terminal.draw(|f| draw_ui(f, &mut state))?;
 
-        if event::poll(Duration::from_millis(100))? {
+        if event::poll(Duration::from_millis(80))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
@@ -345,6 +397,18 @@ fn main() -> Result<()> {
                         KeyCode::Char('3') => state.current_tab = AppTab::Archive,
                         KeyCode::Char('4') => state.current_tab = AppTab::Hardware,
                         KeyCode::Char('5') => state.current_tab = AppTab::Settings,
+
+                        // Theme switch shortcut [t]
+                        KeyCode::Char('t') => {
+                            state.config.theme_mode = match state.config.theme_mode {
+                                ThemeMode::LiquidGlass => ThemeMode::FrostedGlass,
+                                ThemeMode::FrostedGlass => ThemeMode::DarkAnthracite,
+                                ThemeMode::DarkAnthracite => ThemeMode::LightAqua,
+                                ThemeMode::LightAqua => ThemeMode::LiquidGlass,
+                            };
+                            let _ = state.config.save();
+                            state.status_message = format!("Theme switched to: {:?}", state.config.theme_mode);
+                        }
 
                         // Arrow Navigation
                         KeyCode::Up | KeyCode::Char('k') => match state.current_tab {
@@ -424,7 +488,7 @@ fn main() -> Result<()> {
                             AppTab::Settings => {
                                 state.config.enforce_zero_loss = !state.config.enforce_zero_loss;
                                 let _ = state.config.save();
-                                state.status_message = format!("Saved zero-loss toggle: {}", state.config.enforce_zero_loss);
+                                state.status_message = format!("Zero-loss enforcement: {}", state.config.enforce_zero_loss);
                             }
                             _ => {}
                         },
@@ -443,7 +507,6 @@ fn main() -> Result<()> {
         }
     }
 
-    // Cleanup terminal
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -456,68 +519,79 @@ fn main() -> Result<()> {
 }
 
 fn draw_ui(f: &mut Frame, state: &mut AppState) {
-    let accent = state.current_shade_color();
+    let palette = state.current_theme_palette();
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Header & Tabs
+            Constraint::Length(3), // Header & macOS Traffic Lights + Tabs
             Constraint::Min(10),   // Main Viewport
             Constraint::Length(3), // Status & Keymap
         ])
         .split(f.area());
 
-    // 1. Tab Bar
+    // 1. macOS Chrome Header Bar with Authentic Traffic Lights
     let tab_titles: Vec<Line> = AppTab::all()
         .iter()
         .map(|t| {
             let style = if *t == state.current_tab {
-                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(palette.text_muted)
             };
             Line::from(vec![Span::styled(t.title(), style)])
         })
         .collect();
 
+    let header_title = Line::from(vec![
+        Span::styled(" ●", Style::default().fg(MAC_TRAFFIC_RED)),
+        Span::styled(" ●", Style::default().fg(MAC_TRAFFIC_YELLOW)),
+        Span::styled(" ●", Style::default().fg(MAC_TRAFFIC_GREEN)),
+        Span::raw("   "),
+        Span::styled("mossambi", Style::default().fg(palette.text_primary).add_modifier(Modifier::BOLD)),
+        Span::styled(" — macOS Sequoia Suite", Style::default().fg(palette.text_muted)),
+        Span::raw("   "),
+        Span::styled(format!("[Theme: {:?}]", state.config.theme_mode), Style::default().fg(palette.accent)),
+    ]);
+
     let tabs = Tabs::new(tab_titles)
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title(Span::styled(" 🍋 Mossambi Desktop Suite v2.1 (0.00% Lossless) ", Style::default().fg(accent).add_modifier(Modifier::BOLD))),
+                .border_style(Style::default().fg(palette.border))
+                .title(header_title),
         )
-        .highlight_style(Style::default().fg(accent).add_modifier(Modifier::UNDERLINED))
+        .highlight_style(Style::default().fg(palette.accent).add_modifier(Modifier::UNDERLINED))
         .select(state.current_tab as usize);
     f.render_widget(tabs, chunks[0]);
 
     // 2. Main Tab Viewport
     match state.current_tab {
-        AppTab::Convert => draw_convert_tab(f, chunks[1], state, accent),
-        AppTab::ExamStudio => draw_exam_tab(f, chunks[1], state, accent),
-        AppTab::Archive => draw_archive_tab(f, chunks[1], state, accent),
-        AppTab::Hardware => draw_hardware_tab(f, chunks[1], state, accent),
-        AppTab::Settings => draw_settings_tab(f, chunks[1], state, accent),
+        AppTab::Convert => draw_convert_tab(f, chunks[1], state, &palette),
+        AppTab::ExamStudio => draw_exam_tab(f, chunks[1], state, &palette),
+        AppTab::Archive => draw_archive_tab(f, chunks[1], state, &palette),
+        AppTab::Hardware => draw_hardware_tab(f, chunks[1], state, &palette),
+        AppTab::Settings => draw_settings_tab(f, chunks[1], state, &palette),
     }
 
     // 3. Status Bar & Keybindings
     let status_style = if state.status_is_error {
         Style::default().fg(Color::LightRed)
     } else {
-        Style::default().fg(accent)
+        Style::default().fg(palette.accent)
     };
 
     let status_p = Paragraph::new(Line::from(vec![
-        Span::styled(" [Status] ", Style::default().fg(Color::Gray)),
+        Span::styled(" [Status] ", Style::default().fg(palette.text_muted)),
         Span::styled(&state.status_message, status_style),
         Span::raw(" | "),
-        Span::styled("[Tab] Tab | [↑/↓] Select | [←/→] Sector | [Enter] Execute | [Bksp] Up Dir | [q] Quit", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Tab] Tab | [t] Theme | [↑/↓] Select | [←/→] Sector | [Enter] Execute | [q] Quit", Style::default().fg(palette.text_secondary)),
     ]))
-    .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::DarkGray)));
+    .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(palette.border)));
     f.render_widget(status_p, chunks[2]);
 }
 
-fn draw_convert_tab(f: &mut Frame, area: Rect, state: &AppState, accent: Color) {
+fn draw_convert_tab(f: &mut Frame, area: Rect, state: &AppState, palette: &TuiThemePalette) {
     let main_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -535,11 +609,11 @@ fn draw_convert_tab(f: &mut Frame, area: Rect, state: &AppState, accent: Color) 
             let icon = if is_dir { "📁 " } else { "📄 " };
 
             let style = if is_sel {
-                Style::default().fg(Color::Black).bg(accent).add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Black).bg(palette.accent).add_modifier(Modifier::BOLD)
             } else if is_dir {
                 Style::default().fg(PANTONE_SWEET_ZEST)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(palette.text_primary)
             };
 
             ListItem::new(format!("{}{}", icon, name)).style(style)
@@ -551,14 +625,15 @@ fn draw_convert_tab(f: &mut Frame, area: Rect, state: &AppState, accent: Color) 
             Block::default()
                 .title(Span::styled(
                     format!(" Directory: {} ", state.current_dir.display()),
-                    Style::default().fg(accent),
+                    Style::default().fg(palette.accent),
                 ))
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded),
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(palette.border)),
         );
     f.render_widget(list, main_layout[0]);
 
-    // Right: Selected File Details & 8 Radial Widget Petals + Golden ALL Sector
+    // Right: Selected File Details & Radial Widget Petals + Golden ALL Sector
     let right_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(7), Constraint::Min(8)])
@@ -569,18 +644,24 @@ fn draw_convert_tab(f: &mut Frame, area: Rect, state: &AppState, accent: Color) 
         let size = fs::metadata(file).map(|m| m.len()).unwrap_or(0);
 
         let details = Paragraph::new(vec![
-            Line::from(vec![Span::styled("File: ", Style::default().fg(Color::DarkGray)), Span::raw(file.display().to_string())]),
-            Line::from(vec![Span::styled("Category: ", Style::default().fg(Color::DarkGray)), Span::styled(format!("{:?}", cat), Style::default().fg(PANTONE_SWEET_ZEST))]),
-            Line::from(vec![Span::styled("Format: ", Style::default().fg(Color::DarkGray)), Span::raw(ext)]),
-            Line::from(vec![Span::styled("Size: ", Style::default().fg(Color::DarkGray)), Span::raw(format!("{:.2} KB ({} bytes)", size as f64 / 1024.0, size))]),
-            Line::from(vec![Span::styled("Zero-Loss Engine: ", Style::default().fg(Color::DarkGray)), Span::styled("Active (0.00% Loss)", Style::default().fg(accent))]),
+            Line::from(vec![Span::styled("File: ", Style::default().fg(palette.text_muted)), Span::raw(file.display().to_string())]),
+            Line::from(vec![Span::styled("Category: ", Style::default().fg(palette.text_muted)), Span::styled(format!("{:?}", cat), Style::default().fg(PANTONE_SWEET_ZEST))]),
+            Line::from(vec![Span::styled("Format: ", Style::default().fg(palette.text_muted)), Span::raw(ext)]),
+            Line::from(vec![Span::styled("Size: ", Style::default().fg(palette.text_muted)), Span::raw(format!("{:.2} KB ({} bytes)", size as f64 / 1024.0, size))]),
+            Line::from(vec![Span::styled("Zero-Loss Standard: ", Style::default().fg(palette.text_muted)), Span::styled("0.00% Bit-Exact", Style::default().fg(palette.accent))]),
         ])
-        .block(Block::default().title(" File Inspection ").borders(Borders::ALL).border_type(BorderType::Rounded));
-        f.render_widget(details, right_chunks[0]);
+        .block(
+            Block::default()
+                .title(" File Details ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(palette.border)),
+        );
+    f.render_widget(details, right_chunks[0]);
 
         // Sector Petals View
         let mut sector_spans = Vec::new();
-        sector_spans.push(Line::from("Radial Wheel Widget Petals (Press ← / → then Enter):"));
+        sector_spans.push(Line::from("Radial Wheel Sectors (Press ← / → then Enter):"));
         sector_spans.push(Line::from(""));
 
         for (idx, sector) in state.available_formats.iter().enumerate() {
@@ -590,47 +671,64 @@ fn draw_convert_tab(f: &mut Frame, area: Rect, state: &AppState, accent: Color) 
             let label = if is_all {
                 format!(" ⭐ ALL (Batch Transcode to Every Format) ")
             } else {
-                format!(" Petal {}: {} ", idx + 1, sector)
+                format!(" Sector {}: {} ", idx + 1, sector)
             };
 
             let style = if is_sel {
                 if is_all {
-                    Style::default().fg(Color::Black).bg(PANTONE_CITRUS_GOLD).add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Black).bg(palette.gold).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::Black).bg(accent).add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Black).bg(palette.accent).add_modifier(Modifier::BOLD)
                 }
             } else if is_all {
-                Style::default().fg(PANTONE_CITRUS_GOLD).add_modifier(Modifier::BOLD)
+                Style::default().fg(palette.gold).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(palette.text_primary)
             };
 
             sector_spans.push(Line::from(vec![Span::styled(label, style)]));
         }
 
         let petals_p = Paragraph::new(sector_spans)
-            .block(Block::default().title(" Radial Sector Selection ").borders(Borders::ALL).border_type(BorderType::Rounded));
+            .block(
+                Block::default()
+                    .title(" Radial Petal Selection ")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(palette.border)),
+            );
         f.render_widget(petals_p, right_chunks[1]);
     } else {
         let empty_p = Paragraph::new("No files in directory.")
-            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(palette.border)),
+            );
         f.render_widget(empty_p, right_chunks[0]);
     }
 }
 
-fn draw_exam_tab(f: &mut Frame, area: Rect, state: &AppState, accent: Color) {
+fn draw_exam_tab(f: &mut Frame, area: Rect, state: &AppState, palette: &TuiThemePalette) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(8), Constraint::Min(8)])
         .split(area);
 
     let intro = Paragraph::new(vec![
-        Line::from(Span::styled("🇮🇳 Indian Competitive Exam & Recruitment Form Tuner", Style::default().fg(accent).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("🇮🇳 Indian Competitive Exam & Recruitment Form Tuner", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD))),
         Line::from("Solves strict upload failures on UPSC, SSC, IBPS, GATE, and State PSC application portals."),
         Line::from("Enforces exact pixel dimensions, calibrated 200/300 DPI, and micro-converged binary search byte limits."),
-        Line::from(Span::styled(&state.exam_status, Style::default().fg(PANTONE_CITRUS_GOLD))),
+        Line::from(Span::styled(&state.exam_status, Style::default().fg(palette.gold))),
     ])
-    .block(Block::default().title(" Portal Verification Engine ").borders(Borders::ALL).border_type(BorderType::Rounded));
+    .block(
+        Block::default()
+            .title(" Portal Verification Engine ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(palette.border)),
+    );
     f.render_widget(intro, chunks[0]);
 
     let preset_items: Vec<ListItem> = state
@@ -640,9 +738,9 @@ fn draw_exam_tab(f: &mut Frame, area: Rect, state: &AppState, accent: Color) {
         .map(|(i, (title, c))| {
             let is_sel = i == state.selected_preset_idx;
             let style = if is_sel {
-                Style::default().fg(Color::Black).bg(accent).add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Black).bg(palette.accent).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(palette.text_primary)
             };
 
             let line = format!("{} | {}x{} px @ {} DPI [{:.0}KB - {:.0}KB]", title, c.width_px, c.height_px, c.dpi, c.min_bytes as f64 / 1024.0, c.max_bytes as f64 / 1024.0);
@@ -651,116 +749,134 @@ fn draw_exam_tab(f: &mut Frame, area: Rect, state: &AppState, accent: Color) {
         .collect();
 
     let list = List::new(preset_items)
-        .block(Block::default().title(" Official Exam Presets (Use ↑/↓, Enter to Optimize selected image) ").borders(Borders::ALL).border_type(BorderType::Rounded));
+        .block(
+            Block::default()
+                .title(" Official Exam Presets (Press Enter to optimize selected file) ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(palette.border)),
+        );
     f.render_widget(list, chunks[1]);
 }
 
-fn draw_archive_tab(f: &mut Frame, area: Rect, state: &AppState, accent: Color) {
+fn draw_archive_tab(f: &mut Frame, area: Rect, state: &AppState, palette: &TuiThemePalette) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(6), Constraint::Min(6)])
         .split(area);
 
     let info = Paragraph::new(vec![
-        Line::from(Span::styled("📦 Exhaustive Archive & Compression Engine", Style::default().fg(accent).add_modifier(Modifier::BOLD))),
-        Line::from("Supports ZIP, 7Z, TAR, TAR.GZ, TAR.BZ2, TAR.XZ, TAR.ZST, and safe RAR unpack."),
-        Line::from("Guarantees Zip-Slip path traversal prevention and bomb decompression limits."),
+        Line::from(Span::styled("📦 Archive Suite & Safe Extraction", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD))),
+        Line::from("Supports ZIP, TAR.GZ, TAR.XZ, TAR.ZST, TAR.BZ2 with Zip-Slip path traversal defense."),
+        Line::from("Select a file from the list, choose an archive format, and press [Enter] to pack."),
     ])
-    .block(Block::default().title(" Compression Suite ").borders(Borders::ALL).border_type(BorderType::Rounded));
+    .block(
+        Block::default()
+            .title(" Archive System ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(palette.border)),
+    );
     f.render_widget(info, chunks[0]);
 
     let mut type_spans = Vec::new();
-    type_spans.push(Line::from("Select Target Compression Container (Use ← / →, Enter to Pack current item):"));
-    type_spans.push(Line::from(""));
-
     for (i, atype) in state.archive_types.iter().enumerate() {
         let is_sel = i == state.selected_archive_type_idx;
         let style = if is_sel {
-            Style::default().fg(Color::Black).bg(accent).add_modifier(Modifier::BOLD)
+            Style::default().fg(Color::Black).bg(palette.accent).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(palette.text_primary)
         };
         type_spans.push(Line::from(Span::styled(format!(" [{:?}] ", atype), style)));
     }
 
     let p = Paragraph::new(type_spans)
-        .block(Block::default().title(" Archive Container ").borders(Borders::ALL).border_type(BorderType::Rounded));
+        .block(
+            Block::default()
+                .title(" Archive Containers (Use ← / → then Enter) ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(palette.border)),
+        );
     f.render_widget(p, chunks[1]);
 }
 
-fn draw_hardware_tab(f: &mut Frame, area: Rect, _state: &AppState, accent: Color) {
+fn draw_hardware_tab(f: &mut Frame, area: Rect, _state: &AppState, palette: &TuiThemePalette) {
     let hw = detect_hardware_capabilities();
     let (os, arch) = get_system_arch_info();
 
     let p = Paragraph::new(vec![
-        Line::from(Span::styled("⚡ Hardware Acceleration, NPU & SIMD Diagnostics", Style::default().fg(accent).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("⚡ Hardware Acceleration, NPU & SIMD Diagnostics", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD))),
         Line::from(""),
-        Line::from(vec![Span::styled("OS Platform: ", Style::default().fg(Color::DarkGray)), Span::raw(os)]),
-        Line::from(vec![Span::styled("Target CPU Arch: ", Style::default().fg(Color::DarkGray)), Span::styled(arch, Style::default().fg(PANTONE_SWEET_ZEST))]),
-        Line::from(vec![Span::styled("GPU Vendor: ", Style::default().fg(Color::DarkGray)), Span::styled(format!("{:?}", hw.vendor), Style::default().fg(accent))]),
-        Line::from(vec![Span::styled("FFmpeg HW Accel Flag: ", Style::default().fg(Color::DarkGray)), Span::raw(hw.ffmpeg_hwaccel_flag)]),
-        Line::from(vec![Span::styled("H.264 Encoder Engine: ", Style::default().fg(Color::DarkGray)), Span::raw(hw.h264_encoder)]),
-        Line::from(vec![Span::styled("HEVC Encoder Engine: ", Style::default().fg(Color::DarkGray)), Span::raw(hw.hevc_encoder)]),
-        Line::from(vec![Span::styled("NPU Neural Engine: ", Style::default().fg(Color::DarkGray)), Span::styled(hw.npu_name, Style::default().fg(PANTONE_CITRUS_GOLD))]),
-        Line::from(vec![Span::styled("NPU AI Status: ", Style::default().fg(Color::DarkGray)), Span::styled(if hw.supports_npu_ai { "Active (DirectML / NPU Accelerated)" } else { "CPU Fallback" }, Style::default().fg(PANTONE_SWEET_ZEST))]),
-        Line::from(vec![Span::styled("ARM NEON 128-bit SIMD: ", Style::default().fg(Color::DarkGray)), Span::styled(if hw.supports_neon_simd { "Active" } else { "Inactive" }, Style::default().fg(PANTONE_SWEET_ZEST))]),
-        Line::from(vec![Span::styled("x86_64 AVX2 256-bit SIMD: ", Style::default().fg(Color::DarkGray)), Span::styled(if hw.supports_avx2_simd { "Active" } else { "Inactive" }, Style::default().fg(PANTONE_SWEET_ZEST))]),
-        Line::from(vec![Span::styled("Concurrent Rayon Workers: ", Style::default().fg(Color::DarkGray)), Span::styled(format!("{} threads", hw.optimal_thread_count), Style::default().fg(accent))]),
+        Line::from(vec![Span::styled("OS Platform: ", Style::default().fg(palette.text_muted)), Span::raw(os)]),
+        Line::from(vec![Span::styled("Target CPU Arch: ", Style::default().fg(palette.text_muted)), Span::styled(arch, Style::default().fg(PANTONE_SWEET_ZEST))]),
+        Line::from(vec![Span::styled("GPU Vendor: ", Style::default().fg(palette.text_muted)), Span::styled(format!("{:?}", hw.vendor), Style::default().fg(palette.accent))]),
+        Line::from(vec![Span::styled("FFmpeg HW Accel Flag: ", Style::default().fg(palette.text_muted)), Span::raw(hw.ffmpeg_hwaccel_flag)]),
+        Line::from(vec![Span::styled("H.264 Encoder Engine: ", Style::default().fg(palette.text_muted)), Span::raw(hw.h264_encoder)]),
+        Line::from(vec![Span::styled("HEVC Encoder Engine: ", Style::default().fg(palette.text_muted)), Span::raw(hw.hevc_encoder)]),
+        Line::from(vec![Span::styled("NPU Neural Engine: ", Style::default().fg(palette.text_muted)), Span::styled(hw.npu_name, Style::default().fg(palette.gold))]),
+        Line::from(vec![Span::styled("NPU AI Status: ", Style::default().fg(palette.text_muted)), Span::styled(if hw.supports_npu_ai { "Active (DirectML / NPU Accelerated)" } else { "CPU Fallback" }, Style::default().fg(PANTONE_SWEET_ZEST))]),
+        Line::from(vec![Span::styled("ARM NEON 128-bit SIMD: ", Style::default().fg(palette.text_muted)), Span::styled(if hw.supports_neon_simd { "Active" } else { "Inactive" }, Style::default().fg(PANTONE_SWEET_ZEST))]),
+        Line::from(vec![Span::styled("x86_64 AVX2 256-bit SIMD: ", Style::default().fg(palette.text_muted)), Span::styled(if hw.supports_avx2_simd { "Active" } else { "Inactive" }, Style::default().fg(PANTONE_SWEET_ZEST))]),
+        Line::from(vec![Span::styled("Concurrent Rayon Workers: ", Style::default().fg(palette.text_muted)), Span::styled(format!("{} threads", hw.optimal_thread_count), Style::default().fg(palette.accent))]),
     ])
-    .block(Block::default().title(" Platform Capabilities ").borders(Borders::ALL).border_type(BorderType::Rounded));
+    .block(
+        Block::default()
+            .title(" Platform Hardware Telemetry ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(palette.border)),
+    );
     f.render_widget(p, area);
 }
 
-fn draw_settings_tab(f: &mut Frame, area: Rect, state: &AppState, accent: Color) {
+fn draw_settings_tab(f: &mut Frame, area: Rect, state: &AppState, palette: &TuiThemePalette) {
     let mut spans = Vec::new();
-    spans.push(Line::from(Span::styled("⚙️ Mossambi Settings & Pantone Certified Color Shades", Style::default().fg(accent).add_modifier(Modifier::BOLD))));
-    spans.push(Line::from("NOTE: Settings are isolated strictly to the System Tray and TUI."));
+    spans.push(Line::from(Span::styled("⚙️ Appearance, Themes & Configuration", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD))));
+    spans.push(Line::from("All settings persist to ~/.mossambi/config.json"));
     spans.push(Line::from(""));
-    spans.push(Line::from("Natural Mossambi Citrus Shades (Use ↑ / ↓ to switch):"));
 
-    for (i, shade) in state.shade_options.iter().enumerate() {
-        let is_sel = i == state.selected_shade_idx;
-        let shade_color = match *shade {
-            "sweetzest" => PANTONE_SWEET_ZEST,
-            "ripepulp" => PANTONE_RIPE_PULP,
-            "citrusgold" => PANTONE_CITRUS_GOLD,
-            "tangerine" => PANTONE_TANGERINE,
-            "deepforest" => PANTONE_DEEP_FOREST,
-            _ => PANTONE_RAW_PEEL,
-        };
-
-        let style = if is_sel {
-            Style::default().fg(Color::Black).bg(shade_color).add_modifier(Modifier::BOLD)
+    spans.push(Line::from(Span::styled("Apple macOS Themes (Press [t] to cycle themes):", Style::default().fg(palette.text_primary).add_modifier(Modifier::BOLD))));
+    let themes = [
+        (ThemeMode::LiquidGlass, "1. Liquid Glass (macOS Sequoia Specular Refraction)"),
+        (ThemeMode::FrostedGlass, "2. Frosted Glass (macOS Sonoma Matte Acrylic)"),
+        (ThemeMode::DarkAnthracite, "3. Dark Anthracite (macOS Pro Dark #161618)"),
+        (ThemeMode::LightAqua, "4. Light Aqua (macOS Crisp Clean Light #F5F5F7)"),
+    ];
+    for (t, label) in themes {
+        let is_active = state.config.theme_mode == t;
+        let marker = if is_active { " ● " } else { " ○ " };
+        let style = if is_active {
+            Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(shade_color)
+            Style::default().fg(palette.text_muted)
         };
-
-        spans.push(Line::from(Span::styled(format!("  ● {}", shade.to_uppercase()), style)));
+        spans.push(Line::from(Span::styled(format!("{}{}", marker, label), style)));
     }
 
     spans.push(Line::from(""));
+    spans.push(Line::from(Span::styled("Global Activation & Gestures:", Style::default().fg(palette.text_primary).add_modifier(Modifier::BOLD))));
+    spans.push(Line::from("• 2-Time Circular Motion Gesture: Drag a file and trace 2 circular loops (>=720 deg) to summon the widget with active file."));
+    spans.push(Line::from("• Global Hotkey: WIN + CTRL awakens the radial widget centered under cursor."));
+    spans.push(Line::from("• System Tray: Right-click citrus tray icon for themes, exam presets, and controls."));
+
+    spans.push(Line::from(""));
     spans.push(Line::from(vec![
-        Span::styled("Enforce Zero-Loss Standard (0.00%): ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Enforce Zero-Loss Standard (0.00%): ", Style::default().fg(palette.text_muted)),
         Span::styled(
             if state.config.enforce_zero_loss { "ENABLED (Strict Bit-Exact)" } else { "DISABLED" },
-            Style::default().fg(accent),
+            Style::default().fg(palette.accent),
         ),
         Span::raw(" (Press Enter to toggle)"),
     ]));
-    spans.push(Line::from(vec![
-        Span::styled("Win + Ctrl Global Hotkey Wakeup: ", Style::default().fg(Color::DarkGray)),
-        Span::raw(state.config.enable_hotkey_wakeup.to_string()),
-    ]));
-    spans.push(Line::from(vec![
-        Span::styled("Mouse Circle-Drag Gesture Wakeup: ", Style::default().fg(Color::DarkGray)),
-        Span::raw(state.config.enable_gesture_wakeup.to_string()),
-    ]));
-    spans.push(Line::from(vec![
-        Span::styled("Always On Top (Radial Widget): ", Style::default().fg(Color::DarkGray)),
-        Span::raw(state.config.always_on_top.to_string()),
-    ]));
 
     let p = Paragraph::new(spans)
-        .block(Block::default().title(" Persistent Configuration (~/.mossambi/config.json) ").borders(Borders::ALL).border_type(BorderType::Rounded));
+        .block(
+            Block::default()
+                .title(" Preferences (~/.mossambi/config.json) ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(palette.border)),
+        );
     f.render_widget(p, area);
 }

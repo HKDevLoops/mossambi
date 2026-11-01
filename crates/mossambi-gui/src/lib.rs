@@ -1,3 +1,4 @@
+pub mod active_file;
 pub mod citrus_geometry;
 pub mod gesture;
 pub mod macos_theme;

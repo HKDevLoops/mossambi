@@ -90,6 +90,17 @@ impl QuickSettingsState {
         }
     }
 
+    pub fn apply_exam_preset(&mut self, constraint: &mossambi_exam::ExamConstraint) {
+        self.exam_mode_enabled = true;
+        self.exam_preset_name = constraint.name.clone();
+        self.exam_width = constraint.width_px;
+        self.exam_height = constraint.height_px;
+        self.exam_dpi = constraint.dpi;
+        self.exam_min_kb = constraint.min_bytes / 1024;
+        self.exam_max_kb = constraint.max_bytes / 1024;
+        self.exam_whiten = constraint.normalize_white_balance;
+    }
+
     /// Renders the sleek macOS-styled floating quick settings panel.
     pub fn render_ui(&mut self, ui: &mut Ui) {
         let frame = Frame::none()

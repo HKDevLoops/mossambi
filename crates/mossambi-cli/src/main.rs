@@ -668,9 +668,10 @@ fn handle_config(action: &str, key: Option<&str>, value: Option<&str>, as_json: 
                 match k {
                     "shade" | "citrus_shade" => config.citrus_shade = v.to_string(),
                     "theme" | "theme_mode" => match v.to_lowercase().as_str() {
-                        "dark" => config.theme_mode = ThemeMode::Dark,
-                        "light" => config.theme_mode = ThemeMode::Light,
-                        _ => config.theme_mode = ThemeMode::System,
+                        "frosted" | "frosted_glass" | "sonoma" => config.theme_mode = ThemeMode::FrostedGlass,
+                        "dark" | "dark_anthracite" | "pro" => config.theme_mode = ThemeMode::DarkAnthracite,
+                        "light" | "light_aqua" | "aqua" => config.theme_mode = ThemeMode::LightAqua,
+                        _ => config.theme_mode = ThemeMode::LiquidGlass,
                     },
                     "always_on_top" => config.always_on_top = v.parse().unwrap_or(true),
                     "wheel_size" => config.wheel_size = v.parse().unwrap_or(440),

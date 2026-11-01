@@ -5,11 +5,16 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ThemeMode {
-    System,
-    Light,
-    Dark,
+    #[serde(alias = "system", alias = "liquidglass")]
+    LiquidGlass,
+    #[serde(alias = "frostedglass")]
+    FrostedGlass,
+    #[serde(alias = "dark", alias = "darkanthracite")]
+    DarkAnthracite,
+    #[serde(alias = "light", alias = "lightaqua")]
+    LightAqua,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,7 +42,7 @@ pub struct MossambiConfig {
 impl Default for MossambiConfig {
     fn default() -> Self {
         Self {
-            theme_mode: ThemeMode::System,
+            theme_mode: ThemeMode::LiquidGlass,
             citrus_shade: "rawpeel".to_string(),
             output_mode: OutputMode::Sibling,
             custom_output_dir: None,
