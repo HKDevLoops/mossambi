@@ -470,7 +470,7 @@ pub fn convert_image_to_pdf_vector(
     output_path: &Path,
     target_dpi: Option<f32>,
 ) -> Result<()> {
-    let img = image::open(input_path)
+    let img = crate::open_image_safe(input_path)
         .with_context(|| format!("Failed to open image for PDF embedding: {}", input_path.display()))?;
     let (width, height) = (img.width(), img.height());
 

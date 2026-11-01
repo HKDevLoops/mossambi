@@ -433,8 +433,23 @@ pub fn run() -> Result<()> {
 
     let mut state = AppState::new();
 
+    let loop_res = run_app(&mut terminal, &mut state);
+
+    let _ = disable_raw_mode();
+    let _ = execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    );
+    let _ = terminal.show_cursor();
+
+    loop_res
+}
+
+#[allow(clippy::collapsible_match)]
+fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: &mut AppState) -> Result<()> {
     while !state.should_quit {
-        terminal.draw(|f| draw_ui(f, &mut state))?;
+        terminal.draw(|f| draw_ui(f, state))?;
 
         if event::poll(Duration::from_millis(80))? {
             if let Event::Key(key) = event::read()? {
@@ -608,14 +623,6 @@ pub fn run() -> Result<()> {
             }
         }
     }
-
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
 
     Ok(())
 }

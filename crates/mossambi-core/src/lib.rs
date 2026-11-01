@@ -27,15 +27,14 @@ pub fn resolve_clean_sibling_output_path(
     let parent = custom_dir.unwrap_or_else(|| input.parent().unwrap_or_else(|| Path::new(".")));
     let stem = input
         .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("output");
+        .map(|s| s.to_string_lossy())
+        .unwrap_or_else(|| "output".into());
 
     let ext_clean = target_ext.trim_start_matches('.').to_lowercase();
     let in_ext = input
         .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
 
     let mut candidate = if in_ext != ext_clean {
         parent.join(format!("{}.{}", stem, ext_clean))
@@ -64,8 +63,8 @@ pub fn resolve_sibling_output_path(
     let parent = custom_dir.unwrap_or_else(|| input.parent().unwrap_or_else(|| Path::new(".")));
     let stem = input
         .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("output");
+        .map(|s| s.to_string_lossy())
+        .unwrap_or_else(|| "output".into());
 
     let base_stem = match suffix {
         Some(sfx) if !sfx.is_empty() => format!("{}_{}", stem, sfx),

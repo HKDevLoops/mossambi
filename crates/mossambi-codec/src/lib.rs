@@ -148,13 +148,32 @@ pub fn transcode_to_all_formats(
 // ---------------------------------------------------------------------------
 // Image Zero-Loss Pipeline (PNG, WebP Lossless, TIFF, BMP, ICO, JPG, GIF, PDF)
 // ---------------------------------------------------------------------------
+/// Safely opens and decodes an image with strict Decompression Bomb and Memory Safety limits:
+/// - Max Width: 16,384 px
+/// - Max Height: 16,384 px
+/// - Max Allocation Ceiling: 512 MB
+pub fn open_image_safe(path: &Path) -> Result<image::DynamicImage> {
+    let mut reader = image::ImageReader::open(path)
+        .with_context(|| format!("Failed to open image file: {}", path.display()))?
+        .with_guessed_format()
+        .with_context(|| format!("Failed to determine format of {}", path.display()))?;
+
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    limits.max_alloc = Some(512 * 1024 * 1024);
+    reader.limits(limits);
+
+    reader.decode().with_context(|| format!("Failed to decode image safely (exceeded safety limits or corrupted): {}", path.display()))
+}
+
 fn convert_image_zero_loss(
     input: &Path,
     output: &Path,
     target_format: &str,
     _mode: LosslessMode,
 ) -> Result<()> {
-    let img = image::open(input).context("Failed to decode source image")?;
+    let img = open_image_safe(input)?;
 
     match target_format {
         "PNG" => {
@@ -229,6 +248,13 @@ fn convert_document_native(
     src_ext: &str,
     target_format: &str,
 ) -> Result<()> {
+    // Memory Safety Ceiling: Prevent allocating arbitrary gigabytes on massive inputs
+    if let Ok(meta) = fs::metadata(input) {
+        if meta.len() > 100 * 1024 * 1024 {
+            bail!("Input document exceeds safe text conversion ceiling of 100 MB: {}", input.display());
+        }
+    }
+
     // 1. Extract plain text content from various source document formats
     let document_text = match src_ext {
         "DOCX" => extract_text_from_docx(input).unwrap_or_else(|_| fs::read_to_string(input).unwrap_or_default()),
@@ -319,11 +345,11 @@ fn convert_document_native(
 pub fn extract_text_from_docx(path: &Path) -> Result<String> {
     let file = fs::File::open(path)?;
     let mut zip = zip::ZipArchive::new(file)?;
-    let mut doc_xml = zip
+    let doc_xml = zip
         .by_name("word/document.xml")
         .context("Missing word/document.xml in DOCX")?;
     let mut xml = String::new();
-    doc_xml.read_to_string(&mut xml)?;
+    doc_xml.take(50 * 1024 * 1024).read_to_string(&mut xml)?;
 
     let mut result = String::new();
     let p_tag = regex::Regex::new(r"</w:p>")?;
@@ -516,18 +542,28 @@ fn convert_spreadsheet_to_html(input: &Path, output: &Path) -> Result<()> {
         title, title
     );
 
+    const MAX_PREVIEW_ROWS: usize = 10_000;
+
     if ["XLSX", "XLS", "ODS"].contains(&ext.as_str()) {
         let mut wb = calamine::open_workbook_auto(input)?;
         for sheet in wb.sheet_names().to_vec() {
             html.push_str(&format!("<h2>Sheet: {}</h2>\n<table>\n", sheet));
             if let Ok(range) = wb.worksheet_range(&sheet) {
+                let mut truncated = false;
                 for (r_idx, row) in range.rows().enumerate() {
+                    if r_idx >= MAX_PREVIEW_ROWS {
+                        truncated = true;
+                        break;
+                    }
                     html.push_str("<tr>");
                     for cell in row {
                         let tag = if r_idx == 0 { "th" } else { "td" };
                         html.push_str(&format!("<{}>{}</{}>", tag, cell, tag));
                     }
                     html.push_str("</tr>\n");
+                }
+                if truncated {
+                    html.push_str("<tr><td colspan=\"100\" style=\"text-align: center; color: #888; padding: 12px;\"><i>... Truncated for memory safety (displaying first 10,000 rows) ...</i></td></tr>\n");
                 }
             }
             html.push_str("</table>\n");
@@ -539,7 +575,12 @@ fn convert_spreadsheet_to_html(input: &Path, output: &Path) -> Result<()> {
             .delimiter(delim)
             .from_path(input)?;
         html.push_str("<table>\n");
+        let mut truncated = false;
         for (r_idx, result) in rdr.records().enumerate() {
+            if r_idx >= MAX_PREVIEW_ROWS {
+                truncated = true;
+                break;
+            }
             let record = result?;
             html.push_str("<tr>");
             for field in record.iter() {
@@ -547,6 +588,9 @@ fn convert_spreadsheet_to_html(input: &Path, output: &Path) -> Result<()> {
                 html.push_str(&format!("<{}>{}</{}>", tag, field, tag));
             }
             html.push_str("</tr>\n");
+        }
+        if truncated {
+            html.push_str("<tr><td colspan=\"100\" style=\"text-align: center; color: #888; padding: 12px;\"><i>... Truncated for memory safety (displaying first 10,000 rows) ...</i></td></tr>\n");
         }
         html.push_str("</table>\n");
     }
@@ -605,7 +649,9 @@ fn convert_audio_zero_loss(
     }
 
     let mut cmd = Command::new("ffmpeg");
-    cmd.args(["-y", "-threads", "0", "-i", input.to_str().unwrap()]);
+    cmd.args(["-y", "-threads", "0"]);
+    cmd.arg("-i");
+    cmd.arg(input);
 
     // Studio Quality Standards (Audacity, Logic Pro, Adobe Audition)
     match target_format {
@@ -644,7 +690,8 @@ fn convert_audio_zero_loss(
         }
     }
 
-    cmd.arg(output.to_str().unwrap());
+    cmd.arg(output);
+    cmd.stdin(std::process::Stdio::null());
 
     #[cfg(target_os = "windows")]
     {
@@ -686,7 +733,10 @@ fn convert_video_zero_loss(
 
     if is_audio_extract {
         let mut cmd = Command::new("ffmpeg");
-        cmd.args(["-y", "-threads", "0", "-i", input.to_str().unwrap(), "-vn"]);
+        cmd.args(["-y", "-threads", "0"]);
+        cmd.arg("-i");
+        cmd.arg(input);
+        cmd.arg("-vn");
         match target_format {
             "MP3" => {
                 cmd.args(["-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100", "-id3v2_version", "4"]);
@@ -710,7 +760,8 @@ fn convert_video_zero_loss(
                 cmd.args(["-c:a", "aac", "-b:a", "320k"]);
             }
         }
-        cmd.arg(output.to_str().unwrap());
+        cmd.arg(output);
+        cmd.stdin(std::process::Stdio::null());
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
@@ -735,11 +786,15 @@ fn convert_video_zero_loss(
 
     if is_video_container {
         let mut remux_cmd = Command::new("ffmpeg");
-        remux_cmd.args(["-y", "-threads", "0", "-i", input.to_str().unwrap(), "-c", "copy", "-bufsize", "64M"]);
+        remux_cmd.args(["-y", "-threads", "0"]);
+        remux_cmd.arg("-i");
+        remux_cmd.arg(input);
+        remux_cmd.args(["-c", "copy", "-bufsize", "64M"]);
         if matches!(target_format, "MP4" | "MOV" | "M4V") {
             remux_cmd.args(["-movflags", "+faststart"]);
         }
-        remux_cmd.arg(output.to_str().unwrap());
+        remux_cmd.arg(output);
+        remux_cmd.stdin(std::process::Stdio::null());
 
         #[cfg(target_os = "windows")]
         {
@@ -765,7 +820,8 @@ fn convert_video_zero_loss(
     if hw.supports_gpu_transcode {
         cmd.args(["-hwaccel", hw.ffmpeg_hwaccel_flag]);
     }
-    cmd.args(["-i", input.to_str().unwrap()]);
+    cmd.arg("-i");
+    cmd.arg(input);
 
     match target_format {
         "PRORES" => {
@@ -844,7 +900,8 @@ fn convert_video_zero_loss(
         }
     }
 
-    cmd.arg(output.to_str().unwrap());
+    cmd.arg(output);
+    cmd.stdin(std::process::Stdio::null());
 
     #[cfg(target_os = "windows")]
     {

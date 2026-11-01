@@ -200,8 +200,8 @@ pub fn verify_image_conversion(
     src_hash: &str,
     tgt_hash: &str,
 ) -> Result<MathematicalQualityReport> {
-    let src_img = image::open(source).with_context(|| format!("Failed to decode source image: {}", source.display()))?;
-    let tgt_img = image::open(target).with_context(|| format!("Failed to decode target image: {}", target.display()))?;
+    let src_img = crate::open_image_safe(source).with_context(|| format!("Failed to decode source image: {}", source.display()))?;
+    let tgt_img = crate::open_image_safe(target).with_context(|| format!("Failed to decode target image: {}", target.display()))?;
 
     let (sw, sh) = src_img.dimensions();
     let (tw, th) = tgt_img.dimensions();

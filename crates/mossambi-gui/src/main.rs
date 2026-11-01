@@ -282,7 +282,17 @@ fn execute_conversion(
 
 impl eframe::App for MossambiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after(Duration::from_millis(25));
+        // Adaptive repaint rate: 16ms (60 FPS) during conversion, active celebration, or long-press,
+        // and 200ms when idle to eliminate battery/CPU churn on idle desktops.
+        let is_animating = self.is_converting
+            || self.completion_time.is_some()
+            || self.press_start.is_some();
+        let repaint_interval = if is_animating {
+            Duration::from_millis(16)
+        } else {
+            Duration::from_millis(200)
+        };
+        ctx.request_repaint_after(repaint_interval);
 
         // 1. Check for activation events from global hotkey, 2-circle gesture, or system tray
         while let Some(control_event) = self.activation_manager.try_recv() {

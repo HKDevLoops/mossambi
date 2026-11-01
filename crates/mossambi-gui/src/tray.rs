@@ -10,7 +10,9 @@ use crate::active_file::get_active_file_under_cursor;
 use crate::gesture::CircleGestureDetector;
 use crate::macos_theme::ThemeStyle;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -42,6 +44,13 @@ pub enum AppControlEvent {
 
 pub struct ActivationManager {
     receiver: Receiver<AppControlEvent>,
+    shutdown: Arc<AtomicBool>,
+}
+
+impl Drop for ActivationManager {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+    }
 }
 
 impl Default for ActivationManager {
@@ -53,16 +62,21 @@ impl Default for ActivationManager {
 impl ActivationManager {
     pub fn new() -> Self {
         let (tx, rx) = channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
 
         #[cfg(target_os = "windows")]
         {
             let tx_loop = tx.clone();
+            let shutdown_clone = shutdown.clone();
             thread::spawn(move || {
-                run_win32_tray_and_activation_loop(tx_loop);
+                run_win32_tray_and_activation_loop(tx_loop, shutdown_clone);
             });
         }
 
-        Self { receiver: rx }
+        Self {
+            receiver: rx,
+            shutdown,
+        }
     }
 
     pub fn try_recv(&self) -> Option<AppControlEvent> {
@@ -71,7 +85,7 @@ impl ActivationManager {
 }
 
 #[cfg(target_os = "windows")]
-fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>) {
+fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown: Arc<AtomicBool>) {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
@@ -194,6 +208,10 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>) {
     let mut current_theme = ThemeStyle::LiquidGlass;
 
     loop {
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
+
         // 1. Process Win32 message queue for hotkeys and tray events
         unsafe {
             while PeekMessageW(&mut msg, hwnd, 0, 0, PM_REMOVE) != 0 {
@@ -346,6 +364,8 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>) {
                             }
                             CMD_QUIT => {
                                 let _ = sender.send(AppControlEvent::QuitApp);
+                                shutdown.store(true, Ordering::Relaxed);
+                                break;
                             }
                             _ => {}
                         }
@@ -354,6 +374,10 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>) {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
+        }
+
+        if shutdown.load(Ordering::Relaxed) {
+            break;
         }
 
         // 2. Poll cursor position and left button state for 2-time circular motion gesture
@@ -365,19 +389,20 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>) {
             if let Some((cx, cy)) = gesture_detector.update(pt.x as f32, pt.y as f32, is_lbutton_down) {
                 // When 2 circular loops are detected while dragging, resolve the active file under cursor!
                 let active_file = get_active_file_under_cursor(pt.x, pt.y);
-                let _ = sender.send(AppControlEvent::Wakeup(WakeupEvent {
+                if sender.send(AppControlEvent::Wakeup(WakeupEvent {
                     cursor_x: cx,
                     cursor_y: cy,
                     reason: WakeupReason::CircleDragGesture,
                     active_file,
-                }));
+                })).is_err() {
+                    break;
+                }
             }
         }
 
         thread::sleep(Duration::from_millis(20)); // 50 Hz sampling rate
     }
 
-    #[allow(unreachable_code)]
     unsafe {
         Shell_NotifyIconW(NIM_DELETE, &nid);
         DestroyWindow(hwnd);

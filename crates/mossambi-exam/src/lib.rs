@@ -261,6 +261,25 @@ pub fn optimize_exam_media(
     ExamOptimizer::optimize_file(input, output, constraint)
 }
 
+/// Safely opens and decodes an image with strict Decompression Bomb and Memory Safety limits:
+/// - Max Width: 16,384 px
+/// - Max Height: 16,384 px
+/// - Max Allocation Ceiling: 512 MB
+pub fn open_image_safe(path: &Path) -> Result<DynamicImage> {
+    let mut reader = image::ImageReader::open(path)
+        .with_context(|| format!("Failed to open image file: {}", path.display()))?
+        .with_guessed_format()
+        .with_context(|| format!("Failed to determine format of {}", path.display()))?;
+
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    limits.max_alloc = Some(512 * 1024 * 1024);
+    reader.limits(limits);
+
+    reader.decode().with_context(|| format!("Failed to decode image safely (exceeded safety limits or corrupted): {}", path.display()))
+}
+
 pub struct ExamOptimizer;
 
 impl ExamOptimizer {
@@ -326,7 +345,7 @@ impl ExamOptimizer {
             });
         }
 
-        let original_img = image::open(input).context("Failed to open input file for exam optimization")?;
+        let original_img = open_image_safe(input).context("Failed to open input file for exam optimization")?;
 
         let mut best_bytes: Vec<u8> = Vec::new();
         let mut best_scorecard = UploadReadyScorecard {
@@ -550,8 +569,10 @@ impl ExamOptimizer {
 
     /// Non-destructive JPEG metadata padding using compliant COM markers (0xFF, 0xFE).
     /// Guarantees 0.00% pixel distortion while satisfying strict portal minimum byte thresholds.
+    /// Caps target_bytes to 100 MB to prevent memory exhaustion attacks.
     pub fn pad_jpeg_non_destructive(mut jpeg: Vec<u8>, target_bytes: usize) -> Vec<u8> {
-        if jpeg.len() >= target_bytes {
+        const MAX_ALLOWED_PAD_BYTES: usize = 100 * 1024 * 1024; // 100 MB safety ceiling
+        if target_bytes > MAX_ALLOWED_PAD_BYTES || jpeg.len() >= target_bytes {
             return jpeg;
         }
 

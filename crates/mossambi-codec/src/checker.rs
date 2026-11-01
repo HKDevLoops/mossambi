@@ -515,7 +515,7 @@ impl FileQualityChecker {
         match category {
             FileCategory::Image => {
                 parser_used = "image-rs v0.25 (Native Pure-Rust Decoder)";
-                match image::open(path) {
+                match crate::open_image_safe(path) {
                     Ok(img) => {
                         can_parse = true;
                         let (w, h) = img.dimensions();
@@ -769,7 +769,7 @@ impl FileQualityChecker {
 
         match category {
             FileCategory::Image => {
-                if let Ok(img) = image::open(path) {
+                if let Ok(img) = crate::open_image_safe(path) {
                     let (w, h) = img.dimensions();
                     depth = format!("{:?} ({}x{})", img.color(), w, h);
                     if matches!(ext, "PNG" | "TIFF" | "BMP") {
