@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Mossambi Universal Windows Installer
     Universal File Conversion Platform, Indian Exam Studio & Archive Suite
@@ -65,10 +65,16 @@ function Install-DirectBinaries {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 
     $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
-    $localTarget = Join-Path $scriptDir "target\release"
+    $localTarget = if (Test-Path (Join-Path $scriptDir "target\release\mossambi.exe")) {
+        Join-Path $scriptDir "target\release"
+    } elseif (Test-Path "target\release\mossambi.exe") {
+        (Resolve-Path "target\release").Path
+    } else {
+        $null
+    }
 
     # 1. Check if built binaries exist locally
-    if ((Test-Path (Join-Path $localTarget "mossambi.exe")) -and (Test-Path (Join-Path $localTarget "mossambi-gui.exe"))) {
+    if ($localTarget -and (Test-Path (Join-Path $localTarget "mossambi.exe")) -and (Test-Path (Join-Path $localTarget "mossambi-gui.exe"))) {
         Write-Host "$C_GREEN✓ Found release build in $localTarget! Copying...$C_RESET"
         Copy-Item (Join-Path $localTarget "mossambi.exe") "$InstallDir\mossambi.exe" -Force
         Copy-Item (Join-Path $localTarget "mossambi-gui.exe") "$InstallDir\mossambi-gui.exe" -Force
@@ -169,18 +175,45 @@ if ($choice -eq "1") {
     Install-DirectBinaries
 }
 
+# Ask user whether they want Mossambi to run in the background (like Whisper Flow)
+if (-not $Unattended -and [Environment]::UserInteractive) {
+    Write-Host "`n$C_BOLD Background Resident Service (Whisper Flow Style):$C_RESET"
+    Write-Host "  Mossambi can run quietly in the background to listen for global hotkeys:"
+    Write-Host "    $C_GREEN Win+Shift+C$C_RESET ➔ Summon Floating Radial Wheel under cursor"
+    Write-Host "    $C_GREEN Win+Ctrl+C$C_RESET  ➔ Open Full Desktop Studio GUI"
+    $enableBg = Read-Host "`nEnable background resident service on startup? [Y/n] (default: Y)"
+    if (-not $enableBg -or $enableBg -match "^[yY]") {
+        try {
+            $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+            Set-ItemProperty -Path $runKey -Name "Mossambi" -Value "`"$InstallDir\mossambi.exe`" daemon run" -Force
+            Write-Host "$C_GREEN✓ Enabled Mossambi Background Daemon on Windows Startup!$C_RESET"
+
+            # Start daemon now
+            Start-Process -FilePath "$InstallDir\mossambi.exe" -ArgumentList "daemon", "run" -WindowStyle Hidden
+            Write-Host "$C_GREEN✓ Mossambi daemon started in background.$C_RESET"
+        } catch {
+            Write-Verbose "Could not register startup: $_"
+        }
+    } else {
+        Write-Host "$C_MUTED Skipped background startup. You can enable it anytime via 'mossambi daemon install'.$C_RESET"
+    }
+}
+
 $completionMsg = "
 $C_GREEN======================================================================$C_RESET
 $C_BOLD 🍋 Mossambi $Version installation completed successfully!$C_RESET
 
 Commands ready to run from your terminal:
   $C_CYAN mossambi <file> [target]$C_RESET   - Fast UNIX-style conversion (``mv``-grammar)
+  $C_CYAN mossambi-widget$C_RESET            - Topbarless floating radial wheel widget
+  $C_CYAN mossambi-gui$C_RESET               - Desktop studio & exam optimizer
   $C_CYAN mossambi-tui$C_RESET               - macOS-styled interactive terminal workspace
-  $C_CYAN mossambi-gui$C_RESET               - Liquid Glass desktop studio & radial widget
+  $C_CYAN mossambi daemon$C_RESET            - Manage background resident service
   $C_CYAN mossambi --table-help$C_RESET      - Comprehensive command reference & examples
 
-Global Activation:
-  Press $C_BOLD WIN + CTRL$C_RESET or $C_BOLD drag cursor in 2 loops$C_RESET to summon the widget!
+Global Hotkeys (Whisper Flow Style):
+  Press $C_BOLD Win + Shift + C$C_RESET to summon the Sweet Lime Radial Wheel under cursor!
+  Press $C_BOLD Win + Ctrl + C$C_RESET  to open Desktop Studio GUI!
 $C_GREEN======================================================================$C_RESET
 "
 Write-Host $completionMsg

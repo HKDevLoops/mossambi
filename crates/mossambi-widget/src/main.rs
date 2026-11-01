@@ -277,13 +277,31 @@ impl eframe::App for MossambiWidgetApp {
                                         self.show_context_menu = false;
                                     }
 
-                                    if ui.button("🍋 Open Studio").clicked() {
+                                    let is_autostart = mossambi_core::MossambiConfig::is_autostart_configured();
+                                    let autostart_label = if is_autostart {
+                                        "✓ Run at Startup"
+                                    } else {
+                                        "🚀 Run at Startup"
+                                    };
+                                    if ui.button(autostart_label).clicked() {
+                                        let _ = mossambi_core::MossambiConfig::set_autostart(!is_autostart);
+                                        self.show_context_menu = false;
+                                    }
+
+                                    if ui.button("🖥️ Open Studio (Win+Ctrl+C)").clicked() {
                                         self.show_context_menu = false;
                                         #[cfg(target_os = "windows")]
                                         let _ = std::process::Command::new("mossambi-gui.exe").spawn();
                                         #[cfg(not(target_os = "windows"))]
                                         let _ = std::process::Command::new("mossambi-gui").spawn();
                                     }
+
+                                    ui.separator();
+                                    ui.label(
+                                        egui::RichText::new("Win+Shift+C: Wheel\nWin+Ctrl+C: Studio")
+                                            .size(9.5)
+                                            .color(Color32::from_rgb(130, 136, 148)),
+                                    );
 
                                     if ui.button("❌ Close Widget").clicked() {
                                         ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -304,23 +322,59 @@ impl eframe::App for MossambiWidgetApp {
 fn main() -> Result<(), eframe::Error> {
     env_logger::init();
 
-    // Pure frameless, topbarless, transparent window configuration
+    let args: Vec<String> = std::env::args().collect();
+    let mut initial_pos: Option<Pos2> = None;
+    let mut initial_file: Option<PathBuf> = None;
+
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--pos" && i + 1 < args.len() {
+            let parts: Vec<&str> = args[i + 1].split(',').collect();
+            if parts.len() == 2 {
+                if let (Ok(x), Ok(y)) = (parts[0].trim().parse::<f32>(), parts[1].trim().parse::<f32>()) {
+                    initial_pos = Some(Pos2::new(x - 180.0, y - 180.0));
+                }
+            }
+            i += 2;
+        } else if !args[i].starts_with('-') {
+            let p = PathBuf::from(&args[i]);
+            if p.exists() {
+                initial_file = Some(p);
+            }
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    let mut builder = ViewportBuilder::default()
+        .with_title("Mossambi Radial Widget")
+        .with_inner_size([360.0, 360.0])
+        .with_min_inner_size([360.0, 360.0])
+        .with_max_inner_size([360.0, 360.0])
+        .with_resizable(false)
+        .with_decorations(false) // ZERO titlebar, ZERO system borders
+        .with_transparent(true)  // 100% borderless transparency
+        .with_always_on_top();
+
+    if let Some(pos) = initial_pos {
+        builder = builder.with_position([pos.x.max(0.0), pos.y.max(0.0)]);
+    }
+
     let options = eframe::NativeOptions {
-        viewport: ViewportBuilder::default()
-            .with_title("Mossambi Radial Widget")
-            .with_inner_size([360.0, 360.0])
-            .with_min_inner_size([360.0, 360.0])
-            .with_max_inner_size([360.0, 360.0])
-            .with_resizable(false)
-            .with_decorations(false) // ZERO titlebar, ZERO system borders
-            .with_transparent(true)  // 100% borderless transparency
-            .with_always_on_top(),
+        viewport: builder,
         ..Default::default()
     };
 
     eframe::run_native(
         "Mossambi Radial Widget",
         options,
-        Box::new(|_cc| Ok(Box::new(MossambiWidgetApp::default()))),
+        Box::new(move |_cc| {
+            let mut app = MossambiWidgetApp::default();
+            if let Some(file) = initial_file {
+                app.select_file(file);
+            }
+            Ok(Box::new(app))
+        }),
     )
 }

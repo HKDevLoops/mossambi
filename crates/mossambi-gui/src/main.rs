@@ -170,10 +170,32 @@ impl MossambiApp {
     }
 
     pub fn launch_radial_widget(&self) {
+        self.launch_radial_widget_at(None, None);
+    }
+
+    pub fn launch_radial_widget_at(&self, pos: Option<(f32, f32)>, file: Option<&Path>) {
         #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("mossambi-widget.exe").spawn();
+        let bin = "mossambi-widget.exe";
         #[cfg(not(target_os = "windows"))]
-        let _ = std::process::Command::new("mossambi-widget").spawn();
+        let bin = "mossambi-widget";
+
+        let mut cmd = std::process::Command::new(bin);
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                let sibling = parent.join(bin);
+                if sibling.exists() {
+                    cmd = std::process::Command::new(sibling);
+                }
+            }
+        }
+
+        if let Some((x, y)) = pos {
+            cmd.arg("--pos").arg(format!("{:.0},{:.0}", x, y));
+        }
+        if let Some(f) = file {
+            cmd.arg(f);
+        }
+        let _ = cmd.spawn();
     }
 
     pub fn switch_to_widget(&mut self, ctx: &egui::Context) {
@@ -336,6 +358,18 @@ impl eframe::App for MossambiApp {
                     self.switch_to_studio(ctx);
                     ctx.send_viewport_cmd(ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(ViewportCommand::Focus);
+                }
+                AppControlEvent::SummonWidget {
+                    cursor_x,
+                    cursor_y,
+                    active_file,
+                } => {
+                    self.launch_radial_widget_at(Some((cursor_x, cursor_y)), active_file.as_deref());
+                }
+                AppControlEvent::ToggleAutostart(enabled) => {
+                    let mut cfg = mossambi_core::MossambiConfig::load();
+                    cfg.launch_at_login = enabled;
+                    let _ = cfg.save();
                 }
                 AppControlEvent::QuitApp => {
                     ctx.send_viewport_cmd(ViewportCommand::Close);

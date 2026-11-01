@@ -638,11 +638,18 @@ impl StudioView {
             .inner_margin(egui::Margin::same(16.0));
 
         trigger_frame.show(ui, |ui| {
-            ui.label(egui::RichText::new("Global Activation Triggers").strong().color(palette.text_primary));
-            ui.label("• 2-Time Circular Motion Gesture: Drag a file and trace 2 circular loops (>=720 deg) to summon the widget with the active file immediately on cursor.");
-            ui.label("• Global Hotkey: WIN + CTRL summons the sweet lime radial widget centered under cursor.");
-            ui.label("• System Tray: Right-click the citrus tray icon for themes, exam presets, and controls.");
-            ui.label("• Long Press: Hold click on any petal (>=350ms) to inspect quick settings.");
+            ui.label(egui::RichText::new("Background Resident Daemon & Global Hotkeys (Whisper Flow Style)").strong().color(palette.text_primary));
+            ui.label("• Win + Shift + C: Summon Floating Radial Wheel centered under cursor (with file auto-detection).");
+            ui.label("• Win + Ctrl + C: Open Full Desktop Studio GUI.");
+            ui.label("• 2-Circle Gesture: Trace 2 circles with mouse while dragging a file to summon wheel.");
+            ui.label("• System Tray: Right-click citrus tray icon for themes, exam presets, and autostart toggle.");
+            ui.add_space(8.0);
+
+            let mut autostart = mossambi_core::MossambiConfig::is_autostart_configured();
+            let check_resp = ui.checkbox(&mut autostart, "🚀 Run in Background at Startup (Auto-start on boot like Whisper Flow)");
+            if check_resp.changed() {
+                let _ = mossambi_core::MossambiConfig::set_autostart(autostart);
+            }
         });
 
         ui.add_space(12.0);

@@ -18,7 +18,8 @@ use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WakeupReason {
-    HotkeyWinCtrl,
+    HotkeyWinShiftC,
+    HotkeyWinCtrlC,
     CircleDragGesture,
     TraySummonWidget,
     TrayOpenStudio,
@@ -39,6 +40,12 @@ pub enum AppControlEvent {
     ChangeExamPreset(String),
     ToggleZeroLoss(bool),
     OpenStudio,
+    SummonWidget {
+        cursor_x: f32,
+        cursor_y: f32,
+        active_file: Option<PathBuf>,
+    },
+    ToggleAutostart(bool),
     QuitApp,
 }
 
@@ -106,14 +113,19 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
     };
 
     const MOD_CONTROL: u32 = 0x0002;
+    const MOD_SHIFT: u32 = 0x0004;
     const MOD_WIN: u32 = 0x0008;
-    const HOTKEY_ID: i32 = 701;
+    const MOD_NOREPEAT: u32 = 0x4000;
+    const HOTKEY_WIDGET_ID: i32 = 701; // Win + Shift + C
+    const HOTKEY_GUI_ID: i32 = 702;    // Win + Ctrl + C
+    const VK_C: u32 = 0x43;
     const WM_TRAYICON: u32 = WM_USER + 101;
     const TRAY_UID: u32 = 1001;
 
     // Menu Command IDs
     const CMD_OPEN_STUDIO: u32 = 2001;
     const CMD_SUMMON_WIDGET: u32 = 2002;
+    const CMD_TOGGLE_AUTOSTART: u32 = 2003;
     const CMD_THEME_LIQUID_GLASS: u32 = 2010;
     const CMD_THEME_FROSTED_GLASS: u32 = 2011;
     const CMD_THEME_DARK_ANTHRACITE: u32 = 2012;
@@ -174,13 +186,20 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
         )
     };
 
-    // Register global WIN + CTRL hotkey
+    // Register global Win + Shift + C (Radial Widget) & Win + Ctrl + C (Studio GUI)
     unsafe {
-        let registered = RegisterHotKey(hwnd, HOTKEY_ID, MOD_CONTROL | MOD_WIN, 0);
-        if registered != 0 {
-            log::info!("Registered global WIN + CTRL hotkey successfully.");
+        let reg_widget = RegisterHotKey(hwnd, HOTKEY_WIDGET_ID, MOD_WIN | MOD_SHIFT | MOD_NOREPEAT, VK_C);
+        if reg_widget != 0 {
+            log::info!("Registered global Win+Shift+C hotkey (Radial Widget).");
         } else {
-            log::warn!("Could not register global WIN + CTRL hotkey; continuing with gesture tracker.");
+            log::warn!("Could not register global Win+Shift+C hotkey.");
+        }
+
+        let reg_gui = RegisterHotKey(hwnd, HOTKEY_GUI_ID, MOD_WIN | MOD_CONTROL | MOD_NOREPEAT, VK_C);
+        if reg_gui != 0 {
+            log::info!("Registered global Win+Ctrl+C hotkey (Studio GUI).");
+        } else {
+            log::warn!("Could not register global Win+Ctrl+C hotkey.");
         }
     }
 
@@ -215,16 +234,19 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
         // 1. Process Win32 message queue for hotkeys and tray events
         unsafe {
             while PeekMessageW(&mut msg, hwnd, 0, 0, PM_REMOVE) != 0 {
-                if msg.message == WM_HOTKEY && msg.wParam == HOTKEY_ID as usize {
+                if msg.message == WM_HOTKEY {
                     let mut pt: POINT = std::mem::zeroed();
                     GetCursorPos(&mut pt);
-                    let active_file = get_active_file_under_cursor(pt.x, pt.y);
-                    let _ = sender.send(AppControlEvent::Wakeup(WakeupEvent {
-                        cursor_x: pt.x as f32,
-                        cursor_y: pt.y as f32,
-                        reason: WakeupReason::HotkeyWinCtrl,
-                        active_file,
-                    }));
+                    if msg.wParam == HOTKEY_WIDGET_ID as usize {
+                        let active_file = get_active_file_under_cursor(pt.x, pt.y);
+                        let _ = sender.send(AppControlEvent::SummonWidget {
+                            cursor_x: pt.x as f32,
+                            cursor_y: pt.y as f32,
+                            active_file,
+                        });
+                    } else if msg.wParam == HOTKEY_GUI_ID as usize {
+                        let _ = sender.send(AppControlEvent::OpenStudio);
+                    }
                 } else if msg.message == WM_TRAYICON {
                     let mouse_event = msg.lParam as u32;
                     const WM_LBUTTONUP: u32 = 0x0202;
@@ -283,8 +305,16 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                         AppendMenuW(hmenu_exams, MF_STRING, CMD_EXAM_IBPS_SIGN as usize, to_u16("IBPS Bank PO Signature (140x60, 200 DPI)").as_ptr());
 
                         // Root Menu
-                        AppendMenuW(hmenu, MF_STRING, CMD_OPEN_STUDIO as usize, to_u16("🍋 Open Mossambi Studio").as_ptr());
-                        AppendMenuW(hmenu, MF_STRING, CMD_SUMMON_WIDGET as usize, to_u16("🍊 Summon Sweet Lime Radial Widget").as_ptr());
+                        AppendMenuW(hmenu, MF_STRING, CMD_SUMMON_WIDGET as usize, to_u16("🍊 Summon Radial Wheel (Win+Shift+C)").as_ptr());
+                        AppendMenuW(hmenu, MF_STRING, CMD_OPEN_STUDIO as usize, to_u16("🖥️ Open Mossambi Studio (Win+Ctrl+C)").as_ptr());
+                        AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
+                        let is_autostart = mossambi_core::MossambiConfig::is_autostart_configured();
+                        AppendMenuW(
+                            hmenu,
+                            MF_STRING | if is_autostart { MF_CHECKED } else { MF_UNCHECKED },
+                            CMD_TOGGLE_AUTOSTART as usize,
+                            to_u16("🚀 Run in Background at Startup").as_ptr(),
+                        );
                         AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
                         AppendMenuW(hmenu, MF_POPUP, hmenu_themes as usize, to_u16("🎨 Themes (Liquid & Frosted Glass)").as_ptr());
                         AppendMenuW(hmenu, MF_POPUP, hmenu_exams as usize, to_u16("🇮🇳 Indian Exam Presets (UPSC/SSC/IBPS)").as_ptr());
@@ -317,12 +347,16 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                             }
                             CMD_SUMMON_WIDGET => {
                                 let active_file = get_active_file_under_cursor(pt.x, pt.y);
-                                let _ = sender.send(AppControlEvent::Wakeup(WakeupEvent {
+                                let _ = sender.send(AppControlEvent::SummonWidget {
                                     cursor_x: pt.x as f32,
                                     cursor_y: pt.y as f32,
-                                    reason: WakeupReason::TraySummonWidget,
                                     active_file,
-                                }));
+                                });
+                            }
+                            CMD_TOGGLE_AUTOSTART => {
+                                let new_setting = !mossambi_core::MossambiConfig::is_autostart_configured();
+                                let _ = mossambi_core::MossambiConfig::set_autostart(new_setting);
+                                let _ = sender.send(AppControlEvent::ToggleAutostart(new_setting));
                             }
                             CMD_THEME_LIQUID_GLASS => {
                                 current_theme = ThemeStyle::LiquidGlass;

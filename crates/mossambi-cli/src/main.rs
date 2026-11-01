@@ -19,6 +19,8 @@ use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod daemon;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "mossambi",
@@ -234,6 +236,13 @@ pub enum Commands {
 
     /// Display MOSSAMBI sweet lime fruit ASCII art and curvy banner
     Banner,
+
+    /// Manage background resident daemon (Win+Shift+C for Wheel, Win+Ctrl+C for Studio)
+    Daemon {
+        /// Action: 'run', 'start', 'stop', 'status', 'install', 'uninstall', or 'prompt'
+        #[arg(default_value = "prompt")]
+        action: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -310,6 +319,7 @@ fn main() -> Result<()> {
                 print_welcome_banner();
                 Ok(())
             }
+            Commands::Daemon { action } => daemon::handle_daemon_command(&action),
         };
     }
 
@@ -1096,6 +1106,8 @@ fn print_table_help() {
     println!("│  tui                     │  Full-screen Apple-styled interactive TUI│  mossambi tui              │");
     println!("│  gui                     │  Launch macOS-styled studio workspace    │  mossambi gui              │");
     println!("│  widget                  │  Summon Sweet Lime radial hero overlay   │  mossambi widget           │");
+    println!("│  daemon                  │  Background service (Whisper Flow style) │  mossambi daemon           │");
+    println!("│                          │  Hotkeys: Win+Shift+C / Win+Ctrl+C       │  mossambi daemon install   │");
     println!("│  config                  │  View or edit persistent preferences     │  mossambi config list      │");
     println!("│  completions             │  Generate shell completions & Carapace   │  mossambi completions zsh  │");
     println!("├──────────────────────────┼──────────────────────────────────────────┼────────────────────────────┤");

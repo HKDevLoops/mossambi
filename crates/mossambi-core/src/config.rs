@@ -37,6 +37,8 @@ pub struct MossambiConfig {
     pub enable_gesture_wakeup: bool,
     pub enable_hotkey_wakeup: bool,
     pub enforce_zero_loss: bool,
+    #[serde(default)]
+    pub autostart_prompted: Option<bool>,
 }
 
 impl Default for MossambiConfig {
@@ -53,6 +55,7 @@ impl Default for MossambiConfig {
             enable_gesture_wakeup: true,
             enable_hotkey_wakeup: true,
             enforce_zero_loss: true,
+            autostart_prompted: None,
         }
     }
 }
@@ -87,5 +90,87 @@ impl MossambiConfig {
         let data = serde_json::to_string_pretty(self)?;
         fs::write(path, data)?;
         Ok(())
+    }
+
+    /// Configures or removes Mossambi daemon from system autostart on boot/login.
+    #[cfg(target_os = "windows")]
+    pub fn set_autostart(enabled: bool) -> anyhow::Result<()> {
+        use std::process::Command;
+        let exe_path = std::env::current_exe()?;
+        let exe_str = exe_path.to_string_lossy();
+        if enabled {
+            let cmd_str = format!("\"{}\" daemon run", exe_str);
+            let _ = Command::new("reg")
+                .args([
+                    "add",
+                    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    "/v",
+                    "Mossambi",
+                    "/t",
+                    "REG_SZ",
+                    "/d",
+                    &cmd_str,
+                    "/f",
+                ])
+                .output()?;
+        } else {
+            let _ = Command::new("reg")
+                .args([
+                    "delete",
+                    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    "/v",
+                    "Mossambi",
+                    "/f",
+                ])
+                .output()?;
+        }
+        Ok(())
+    }
+
+    /// Checks if Mossambi is configured to run at startup.
+    #[cfg(target_os = "windows")]
+    pub fn is_autostart_configured() -> bool {
+        use std::process::Command;
+        if let Ok(output) = Command::new("reg")
+            .args([
+                "query",
+                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "/v",
+                "Mossambi",
+            ])
+            .output()
+        {
+            output.status.success()
+        } else {
+            false
+        }
+    }
+
+    /// Configures or removes Mossambi daemon from system autostart on boot/login.
+    #[cfg(not(target_os = "windows"))]
+    pub fn set_autostart(enabled: bool) -> anyhow::Result<()> {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let autostart_dir = PathBuf::from(&home).join(".config").join("autostart");
+        let desktop_file = autostart_dir.join("mossambi-daemon.desktop");
+        if enabled {
+            fs::create_dir_all(&autostart_dir)?;
+            let exe_path = std::env::current_exe()?;
+            let content = format!(
+                "[Desktop Entry]\nType=Application\nName=Mossambi Daemon\nComment=Mossambi Background Service (Super+Shift+C / Super+Ctrl+C)\nExec={} daemon run\nHidden=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n",
+                exe_path.display()
+            );
+            fs::write(desktop_file, content)?;
+        } else if desktop_file.exists() {
+            let _ = fs::remove_file(desktop_file);
+        }
+        Ok(())
+    }
+
+    /// Checks if Mossambi is configured to run at startup.
+    #[cfg(not(target_os = "windows"))]
+    pub fn is_autostart_configured() -> bool {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let desktop_file = PathBuf::from(&home).join(".config").join("autostart").join("mossambi-daemon.desktop");
+        desktop_file.exists()
     }
 }

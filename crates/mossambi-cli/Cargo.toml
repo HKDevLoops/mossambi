@@ -28,5 +28,8 @@ log = { workspace = true }
 env_logger = { workspace = true }
 dunce = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+
 [dev-dependencies]
 image = { workspace = true }

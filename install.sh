@@ -249,13 +249,73 @@ main() {
         install_direct_binary
     fi
 
+    # Whisper Flow style background resident service prompt
+    if [ -t 0 ]; then
+        echo -e "\n${C_BOLD}Background Resident Service (Whisper Flow Style):${C_RESET}"
+        echo -e "  Mossambi can run quietly in the background to listen for global triggers:"
+        echo -e "    ${C_GREEN}Win+Shift+C${C_RESET} (or Super+Shift+C) ➔ Summon Floating Radial Wheel under cursor"
+        echo -e "    ${C_GREEN}Win+Ctrl+C${C_RESET}  (or Super+Ctrl+C)  ➔ Open Full Desktop Studio GUI"
+        read -r -p "Enable background resident service on startup? [Y/n] (default: Y): " BG_CHOICE
+        if [ -z "${BG_CHOICE}" ] || [[ "${BG_CHOICE}" =~ ^[Yy] ]]; then
+            if [ "${PLATFORM}" = "linux" ]; then
+                AUTOSTART_DIR="${HOME}/.config/autostart"
+                mkdir -p "${AUTOSTART_DIR}"
+                cat > "${AUTOSTART_DIR}/mossambi-daemon.desktop" <<AUTODEST
+[Desktop Entry]
+Type=Application
+Name=Mossambi Daemon
+Exec=${INSTALL_DIR}/mossambi daemon run
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+Comment=Mossambi background hotkey listener
+AUTODEST
+                echo -e "${C_GREEN}✓ Enabled Mossambi Background Daemon on Linux autostart!${C_RESET}"
+            elif [ "${PLATFORM}" = "macos" ]; then
+                PLIST_PATH="${HOME}/Library/LaunchAgents/com.mossambi.daemon.plist"
+                mkdir -p "$(dirname "${PLIST_PATH}")"
+                cat > "${PLIST_PATH}" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mossambi.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${INSTALL_DIR}/mossambi</string>
+        <string>daemon</string>
+        <string>run</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>
+PLIST
+                echo -e "${C_GREEN}✓ Enabled Mossambi Background Daemon via LaunchAgent!${C_RESET}"
+            fi
+            # Start daemon now in background
+            nohup "${INSTALL_DIR}/mossambi" daemon run >/dev/null 2>&1 &
+            echo -e "${C_GREEN}✓ Mossambi daemon started in background.${C_RESET}"
+        else
+            echo -e "${C_MUTED}Skipped background startup. You can enable it anytime via 'mossambi daemon install'.${C_RESET}"
+        fi
+    fi
+
     echo -e "\n${C_GREEN}======================================================================${C_RESET}"
     echo -e "${C_BOLD}🍋 Mossambi ${VERSION} installation complete!${C_RESET}"
     echo -e "Commands ready to use:"
     echo -e "  ${C_CYAN}mossambi <file> [target]${C_RESET}  - Fast UNIX-style conversion"
+    echo -e "  ${C_CYAN}mossambi-widget${C_RESET}           - Topbarless floating radial wheel widget"
+    echo -e "  ${C_CYAN}mossambi-gui${C_RESET}              - Desktop studio & exam optimizer"
     echo -e "  ${C_CYAN}mossambi-tui${C_RESET}              - macOS-styled interactive terminal"
-    echo -e "  ${C_CYAN}mossambi-gui${C_RESET}              - Desktop studio & sweet lime radial widget"
+    echo -e "  ${C_CYAN}mossambi daemon${C_RESET}           - Manage background resident service"
     echo -e "  ${C_CYAN}mossambi --table-help${C_RESET}     - Comprehensive command reference"
+    echo -e "\nGlobal Hotkeys (Whisper Flow Style):"
+    echo -e "  Press ${C_BOLD}Win + Shift + C${C_RESET} to summon the Sweet Lime Radial Wheel under cursor!"
+    echo -e "  Press ${C_BOLD}Win + Ctrl + C${C_RESET}  to open Desktop Studio GUI!"
     echo -e "${C_GREEN}======================================================================${C_RESET}\n"
 }
 
