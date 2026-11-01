@@ -29,6 +29,9 @@ EOF
 # Copy binaries
 cp -f target/release/mossambi "${PKG_DIR}/usr/bin/"
 cp -f target/release/mossambi-gui "${PKG_DIR}/usr/bin/"
+if [ -f target/release/mossambi-widget ]; then
+    cp -f target/release/mossambi-widget "${PKG_DIR}/usr/bin/"
+fi
 cp -f target/release/mossambi-tui "${PKG_DIR}/usr/bin/"
 chmod 755 "${PKG_DIR}/usr/bin/"*
 

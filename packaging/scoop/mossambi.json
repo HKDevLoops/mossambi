@@ -3,7 +3,7 @@
   "description": "Zero-loss native desktop file converter, archive suite, and Indian exam form tuner",
   "homepage": "https://github.com/mossambi/mossambi",
   "license": "MIT",
-  "notes": "Run 'mossambi' for CLI, 'mossambi-tui' for terminal workspace, or 'mossambi-gui' for floating radial widget & studio.",
+  "notes": "Run 'mossambi' for CLI, 'mossambi-tui' for terminal workspace, 'mossambi-gui' for Desktop Studio, or 'mossambi-widget' for frameless radial fruit widget.",
   "suggest": {
     "FFmpeg": "ffmpeg"
   },
@@ -16,12 +16,17 @@
   "bin": [
     "mossambi.exe",
     "mossambi-gui.exe",
+    "mossambi-widget.exe",
     "mossambi-tui.exe"
   ],
   "shortcuts": [
     [
       "mossambi-gui.exe",
-      "Mossambi Studio & Radial Widget"
+      "Mossambi Studio"
+    ],
+    [
+      "mossambi-widget.exe",
+      "Mossambi Radial Widget"
     ],
     [
       "mossambi-tui.exe",

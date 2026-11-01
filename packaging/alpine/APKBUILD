@@ -21,6 +21,7 @@ check() {
 package() {
 	install -Dm755 target/release/mossambi "$pkgdir"/usr/bin/mossambi
 	install -Dm755 target/release/mossambi-gui "$pkgdir"/usr/bin/mossambi-gui
+	install -Dm755 target/release/mossambi-widget "$pkgdir"/usr/bin/mossambi-widget
 	install -Dm755 target/release/mossambi-tui "$pkgdir"/usr/bin/mossambi-tui
 	install -Dm644 packaging/assets/mossambi.desktop "$pkgdir"/usr/share/applications/mossambi.desktop
 

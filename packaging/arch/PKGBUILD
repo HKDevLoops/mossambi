@@ -13,7 +13,7 @@ optdepends=(
     'cuda: NVIDIA NVENC video transcoding acceleration'
     'intel-media-driver: Intel QSV hardware transcoding acceleration'
 )
-provides=('mossambi' 'mossambi-gui' 'mossambi-tui')
+provides=('mossambi' 'mossambi-gui' 'mossambi-widget' 'mossambi-tui')
 conflicts=('mossambi')
 
 source_x86_64=("https://github.com/mossambi/mossambi/releases/download/v${pkgver}/mossambi-v${pkgver}-x86_64-unknown-linux-gnu.tar.gz")
@@ -25,6 +25,9 @@ package() {
     # Install binaries
     install -Dm755 mossambi "${pkgdir}/usr/bin/mossambi"
     install -Dm755 mossambi-gui "${pkgdir}/usr/bin/mossambi-gui"
+    if [ -f mossambi-widget ]; then
+        install -Dm755 mossambi-widget "${pkgdir}/usr/bin/mossambi-widget"
+    fi
     install -Dm755 mossambi-tui "${pkgdir}/usr/bin/mossambi-tui"
 
     # Install Desktop Entry

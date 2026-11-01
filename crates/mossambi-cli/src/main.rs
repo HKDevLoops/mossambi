@@ -795,11 +795,33 @@ fn handle_catalogue(query: &str, as_json: bool) -> Result<()> {
 
 fn handle_widget() -> Result<()> {
     println!("🍊 Summoning Mossambi Sweet Lime Resident Radial Widget overlay...");
-    handle_gui()
+    let current_exe = std::env::current_exe()?;
+    let current_dir = current_exe.parent().unwrap_or_else(|| Path::new("."));
+    let candidates = vec![
+        current_dir.join("mossambi-widget.exe"),
+        current_dir.join("mossambi-widget"),
+        PathBuf::from("mossambi-widget.exe"),
+        PathBuf::from("target/release/mossambi-widget.exe"),
+        PathBuf::from("target/debug/mossambi-widget.exe"),
+    ];
+
+    let found = candidates.into_iter().find(|p| p.exists());
+
+    if let Some(widget_path) = found {
+        Command::new(&widget_path).spawn()?;
+        println!("✓ Native Mossambi Radial Fruit Widget launched in background ({})", widget_path.display());
+    } else {
+        println!("Launching Mossambi Radial Widget via cargo run -p mossambi-widget...");
+        Command::new("cargo")
+            .args(["run", "-p", "mossambi-widget"])
+            .spawn()?;
+        println!("✓ Mossambi Radial Fruit Widget spawned.");
+    }
+    Ok(())
 }
 
 fn handle_gui() -> Result<()> {
-    println!("🍋 Summoning Mossambi Desktop Radial Widget and macOS-Styled GUI...");
+    println!("🍋 Launching Mossambi Universal File Conversion Studio...");
     // Launch native pure Rust mossambi-gui binary
     let current_exe = std::env::current_exe()?;
     let current_dir = current_exe.parent().unwrap_or_else(|| Path::new("."));
@@ -815,13 +837,13 @@ fn handle_gui() -> Result<()> {
 
     if let Some(gui_path) = found {
         Command::new(&gui_path).spawn()?;
-        println!("✓ Native Mossambi Desktop GUI launched in background ({})", gui_path.display());
+        println!("✓ Native Mossambi Desktop Studio launched in background ({})", gui_path.display());
     } else {
-        println!("Launching Mossambi GUI via cargo run -p mossambi-gui...");
+        println!("Launching Mossambi Desktop Studio via cargo run -p mossambi-gui...");
         Command::new("cargo")
             .args(["run", "-p", "mossambi-gui"])
             .spawn()?;
-        println!("✓ Mossambi Desktop GUI spawned.");
+        println!("✓ Mossambi Desktop Studio spawned.");
     }
     Ok(())
 }

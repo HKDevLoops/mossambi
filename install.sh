@@ -115,6 +115,9 @@ install_direct_binary() {
         cp -f "${SCRIPT_DIR}/target/release/mossambi" "${INSTALL_DIR}/"
         cp -f "${SCRIPT_DIR}/target/release/mossambi-gui" "${INSTALL_DIR}/"
         cp -f "${SCRIPT_DIR}/target/release/mossambi-tui" "${INSTALL_DIR}/"
+        if [ -f "${SCRIPT_DIR}/target/release/mossambi-widget" ]; then
+            cp -f "${SCRIPT_DIR}/target/release/mossambi-widget" "${INSTALL_DIR}/"
+        fi
     else
         URL="https://github.com/${REPO}/releases/download/v${VERSION}/${ASSET}"
         TMP_DIR="$(mktemp -d)"
@@ -139,9 +142,12 @@ install_direct_binary() {
         fi
     fi
 
-    chmod +x "${INSTALL_DIR}/mossambi" "${INSTALL_DIR}/mossambi-gui" "${INSTALL_DIR}/mossambi-tui"
+    chmod +x "${INSTALL_DIR}/mossambi"*
     echo -e "${C_GREEN}✓ Installed:${C_RESET} ${INSTALL_DIR}/mossambi"
     echo -e "${C_GREEN}✓ Installed:${C_RESET} ${INSTALL_DIR}/mossambi-gui"
+    if [ -f "${INSTALL_DIR}/mossambi-widget" ]; then
+        echo -e "${C_GREEN}✓ Installed:${C_RESET} ${INSTALL_DIR}/mossambi-widget"
+    fi
     echo -e "${C_GREEN}✓ Installed:${C_RESET} ${INSTALL_DIR}/mossambi-tui"
 
     # Install Desktop Entry on Linux

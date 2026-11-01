@@ -88,7 +88,7 @@ impl Default for MossambiApp {
         geometry.variety = variety;
 
         Self {
-            mode: AppViewMode::RadialWidget,
+            mode: AppViewMode::Studio,
             theme: ThemeStyle::LiquidGlass,
             geometry,
             quick_settings: QuickSettingsState::default(),
@@ -165,11 +165,19 @@ impl MossambiApp {
 
     pub fn switch_to_studio(&mut self, ctx: &egui::Context) {
         self.mode = AppViewMode::Studio;
-        ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(980.0, 640.0)));
-        ctx.send_viewport_cmd(ViewportCommand::Decorations(false));
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(1040.0, 680.0)));
+        ctx.send_viewport_cmd(ViewportCommand::Decorations(true));
+    }
+
+    pub fn launch_radial_widget(&self) {
+        #[cfg(target_os = "windows")]
+        let _ = std::process::Command::new("mossambi-widget.exe").spawn();
+        #[cfg(not(target_os = "windows"))]
+        let _ = std::process::Command::new("mossambi-widget").spawn();
     }
 
     pub fn switch_to_widget(&mut self, ctx: &egui::Context) {
+        self.launch_radial_widget();
         self.mode = AppViewMode::RadialWidget;
         self.popover_active_sector = None;
         ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(360.0, 360.0)));
@@ -740,20 +748,19 @@ pub fn open_in_file_manager(path: &Path) {
 fn main() -> Result<(), eframe::Error> {
     env_logger::init();
 
-    // Start with frameless, transparent overlay window for the Sweet Lime Radial Widget
+    // Launch as the full Desktop Application Workspace window
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
-            .with_title("Mossambi")
-            .with_inner_size([360.0, 360.0])
-            .with_min_inner_size([340.0, 340.0])
-            .with_decorations(false) // Frameless window
-            .with_transparent(true)  // Native borderless transparency
-            .with_always_on_top(),
+            .with_title("Mossambi — Universal File Conversion Studio")
+            .with_inner_size([1040.0, 680.0])
+            .with_min_inner_size([880.0, 560.0])
+            .with_decorations(true) // Standard desktop application window
+            .with_resizable(true),
         ..Default::default()
     };
 
     eframe::run_native(
-        "Mossambi",
+        "Mossambi — Universal File Conversion Studio",
         options,
         Box::new(|cc| Ok(Box::new(MossambiApp::new(cc)))),
     )

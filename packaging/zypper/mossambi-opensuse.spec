@@ -28,6 +28,7 @@ cargo build --release --workspace
 %install
 install -Dm755 target/release/mossambi %{buildroot}%{_bindir}/mossambi
 install -Dm755 target/release/mossambi-gui %{buildroot}%{_bindir}/mossambi-gui
+install -Dm755 target/release/mossambi-widget %{buildroot}%{_bindir}/mossambi-widget
 install -Dm755 target/release/mossambi-tui %{buildroot}%{_bindir}/mossambi-tui
 install -Dm644 packaging/assets/mossambi.desktop %{buildroot}%{_datadir}/applications/mossambi.desktop
 
@@ -36,6 +37,7 @@ install -Dm644 packaging/assets/mossambi.desktop %{buildroot}%{_datadir}/applica
 %doc README.md
 %{_bindir}/mossambi
 %{_bindir}/mossambi-gui
+%{_bindir}/mossambi-widget
 %{_bindir}/mossambi-tui
 %{_datadir}/applications/mossambi.desktop
 

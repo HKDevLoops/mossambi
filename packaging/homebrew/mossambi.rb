@@ -21,6 +21,7 @@ class Mossambi < Formula
     system "cargo", "install", *std_cargo_args(path: "crates/mossambi-cli")
     system "cargo", "install", *std_cargo_args(path: "crates/mossambi-tui")
     system "cargo", "install", *std_cargo_args(path: "crates/mossambi-gui")
+    system "cargo", "install", *std_cargo_args(path: "crates/mossambi-widget")
 
     # Generate and install shell completions
     generate_completions_from_executable(bin/"mossambi", "completions")

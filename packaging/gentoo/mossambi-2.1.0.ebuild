@@ -37,6 +37,7 @@ src_compile() {
 src_install() {
 	dobin "$(cargo_target_dir)/mossambi"
 	use gui && dobin "$(cargo_target_dir)/mossambi-gui"
+	use gui && dobin "$(cargo_target_dir)/mossambi-widget"
 	use tui && dobin "$(cargo_target_dir)/mossambi-tui"
 
 	if use gui; then

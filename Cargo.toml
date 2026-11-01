@@ -9,6 +9,7 @@ members = [
     "crates/mossambi-cli",
     "crates/mossambi-tui",
     "crates/mossambi-gui",
+    "crates/mossambi-widget",
 ]
 
 [workspace.package]

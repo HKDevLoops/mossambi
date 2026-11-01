@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Mossambi Universal Windows Installer
     Universal File Conversion Platform, Indian Exam Studio & Archive Suite
@@ -73,6 +73,9 @@ function Install-DirectBinaries {
         Copy-Item (Join-Path $localTarget "mossambi.exe") "$InstallDir\mossambi.exe" -Force
         Copy-Item (Join-Path $localTarget "mossambi-gui.exe") "$InstallDir\mossambi-gui.exe" -Force
         Copy-Item (Join-Path $localTarget "mossambi-tui.exe") "$InstallDir\mossambi-tui.exe" -Force
+        if (Test-Path (Join-Path $localTarget "mossambi-widget.exe")) {
+            Copy-Item (Join-Path $localTarget "mossambi-widget.exe") "$InstallDir\mossambi-widget.exe" -Force
+        }
     } else {
         # 2. Download release archive from GitHub
         $zipUrl = "https://github.com/mossambi/mossambi/releases/download/v$Version/mossambi-v$Version-x86_64-pc-windows-msvc.zip"
@@ -86,6 +89,9 @@ function Install-DirectBinaries {
     Write-Host "$C_GREEN✓ Installed:$C_RESET $InstallDir\mossambi.exe"
     Write-Host "$C_GREEN✓ Installed:$C_RESET $InstallDir\mossambi-gui.exe"
     Write-Host "$C_GREEN✓ Installed:$C_RESET $InstallDir\mossambi-tui.exe"
+    if (Test-Path "$InstallDir\mossambi-widget.exe") {
+        Write-Host "$C_GREEN✓ Installed:$C_RESET $InstallDir\mossambi-widget.exe"
+    }
 
     # Add to User PATH if not already present
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
