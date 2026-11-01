@@ -8,6 +8,7 @@ members = [
     "crates/mossambi-hwaccel",
     "crates/mossambi-cli",
     "crates/mossambi-tui",
+    "crates/mossambi-gui",
 ]
 
 [workspace.package]
@@ -46,6 +47,8 @@ regex = "1.11"
 clap = { version = "4.5", features = ["derive", "cargo"] }
 ratatui = "0.29"
 crossterm = "0.28"
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_Foundation", "Win32_Graphics_Gdi"] }
 
 # Internal Workspace Crates
 mossambi-core = { path = "crates/mossambi-core" }

@@ -26,3 +26,4 @@ rayon = { workspace = true }
 log = { workspace = true }
 regex = { workspace = true }
 dunce = { workspace = true }
+flate2 = { workspace = true }

@@ -1,6 +1,12 @@
 //! Zero-Loss Conversion & Transcoding Engine for Mossambi
 //! Implements ArtCraft-grade 0.00% loss guarantees, stream remuxing, bit-exact audio, and multi-format batch pipelines.
 
+pub mod pdf_vector;
+
+pub use pdf_vector::{
+    convert_image_to_pdf_vector, convert_text_to_pdf_vector, render_text_to_pdf, TextPdfSettings,
+};
+
 use anyhow::{Context, Result};
 use calamine::Reader;
 use mossambi_core::{
@@ -39,8 +45,23 @@ pub fn transcode_file(
 
     let output_path = resolve_sibling_output_path(input, None, &target_upper, custom_dir);
 
+    let is_text_like = matches!(
+        in_ext.as_str(),
+        "TXT" | "MD" | "RST" | "LOG" | "JSON" | "XML" | "YAML" | "YML" | "RS" | "PY" | "JS"
+            | "TS" | "C" | "CPP" | "H" | "HTML" | "HTM" | "ORG" | "TEX"
+    );
+
     match category {
-        FileCategory::Image => convert_image_zero_loss(input, &output_path, &target_upper, mode)?,
+        FileCategory::Image => {
+            if target_upper == "PDF" {
+                convert_image_to_pdf_vector(input, &output_path, None)?;
+            } else {
+                convert_image_zero_loss(input, &output_path, &target_upper, mode)?;
+            }
+        }
+        FileCategory::Document => {
+            convert_document_native(input, &output_path, &in_ext, &target_upper)?;
+        }
         FileCategory::Audio => convert_audio_zero_loss(input, &output_path, &target_upper, mode)?,
         FileCategory::Video => convert_video_zero_loss(input, &output_path, &target_upper, mode)?,
         FileCategory::Spreadsheet => {
@@ -48,8 +69,13 @@ pub fn transcode_file(
         }
         FileCategory::Subtitle => convert_subtitles(input, &output_path, &target_upper)?,
         _ => {
-            // General fallback
-            convert_image_zero_loss(input, &output_path, &target_upper, mode)?;
+            if is_text_like && target_upper == "PDF" {
+                convert_text_to_pdf_vector(input, &output_path, None)?;
+            } else if is_text_like {
+                convert_document_native(input, &output_path, &in_ext, &target_upper)?;
+            } else {
+                convert_image_zero_loss(input, &output_path, &target_upper, mode)?;
+            }
         }
     }
 
@@ -114,6 +140,9 @@ fn convert_image_zero_loss(
         "JPG" | "JPEG" => {
             let rgb = img.to_rgb8();
             rgb.save_with_format(output, image::ImageFormat::Jpeg)?;
+        }
+        "PDF" => {
+            convert_image_to_pdf_vector(input, output, None)?;
         }
         _ => {
             img.save(output)?;
@@ -339,5 +368,68 @@ fn convert_subtitles(input: &Path, output: &Path, target_ext: &str) -> Result<()
     };
 
     fs::write(output, converted)?;
+    Ok(())
+}
+
+fn convert_document_native(
+    input: &Path,
+    output: &Path,
+    src_ext: &str,
+    target_format: &str,
+) -> Result<()> {
+    match target_format {
+        "PDF" => {
+            convert_text_to_pdf_vector(input, output, None)?;
+        }
+        "HTML" | "HTM" => {
+            let text = fs::read_to_string(input).unwrap_or_default();
+            let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Document");
+            let mut html = format!(
+                "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>{}</title>\n<style>\nbody {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #222; }}\npre {{ background: #f6f8fa; padding: 16px; border-radius: 6px; overflow-x: auto; font-family: monospace; }}\nh1, h2, h3 {{ color: #111; }}\n</style>\n</head>\n<body>\n<h1>{}</h1>\n",
+                title, title
+            );
+            if src_ext == "MD" {
+                for line in text.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("# ") {
+                        html.push_str(&format!("<h2>{}</h2>\n", &trimmed[2..]));
+                    } else if trimmed.starts_with("## ") {
+                        html.push_str(&format!("<h3>{}</h3>\n", &trimmed[3..]));
+                    } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+                        html.push_str(&format!("<li>{}</li>\n", &trimmed[2..]));
+                    } else if trimmed.is_empty() {
+                        html.push_str("<br/>\n");
+                    } else {
+                        html.push_str(&format!("<p>{}</p>\n", trimmed));
+                    }
+                }
+            } else {
+                html.push_str("<pre>\n");
+                html.push_str(&text);
+                html.push_str("\n</pre>\n");
+            }
+            html.push_str("</body>\n</html>\n");
+            fs::write(output, html)?;
+        }
+        "TXT" => {
+            let content = fs::read(input)?;
+            fs::write(output, content)?;
+        }
+        "MD" => {
+            let text = fs::read_to_string(input).unwrap_or_default();
+            let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Document");
+            let mut md = format!("# {}\n\n", title);
+            md.push_str(&text);
+            fs::write(output, md)?;
+        }
+        _ => {
+            if target_format == "PDF" {
+                convert_text_to_pdf_vector(input, output, None)?;
+            } else {
+                let content = fs::read(input)?;
+                fs::write(output, content)?;
+            }
+        }
+    }
     Ok(())
 }

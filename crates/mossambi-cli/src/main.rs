@@ -612,13 +612,28 @@ fn handle_tui() -> Result<()> {
 
 fn handle_gui() -> Result<()> {
     println!("🍋 Summoning Mossambi Desktop Radial Widget and macOS-Styled GUI...");
-    // Summon via Python runner or compiled GUI binary
-    let py_path = PathBuf::from("run_widget.py");
-    if py_path.exists() {
-        let _ = Command::new("python").arg("run_widget.py").spawn()?;
-        println!("✓ Mossambi Desktop GUI launched in background.");
+    // Launch native pure Rust mossambi-gui binary
+    let current_exe = std::env::current_exe()?;
+    let current_dir = current_exe.parent().unwrap_or_else(|| Path::new("."));
+    let candidates = vec![
+        current_dir.join("mossambi-gui.exe"),
+        current_dir.join("mossambi-gui"),
+        PathBuf::from("mossambi-gui.exe"),
+        PathBuf::from("target/release/mossambi-gui.exe"),
+        PathBuf::from("target/debug/mossambi-gui.exe"),
+    ];
+
+    let found = candidates.into_iter().find(|p| p.exists());
+
+    if let Some(gui_path) = found {
+        Command::new(&gui_path).spawn()?;
+        println!("✓ Native Mossambi Desktop GUI launched in background ({})", gui_path.display());
     } else {
-        println!("Desktop launcher: please ensure run_widget.py or Mossambi.exe is in directory.");
+        println!("Launching Mossambi GUI via cargo run -p mossambi-gui...");
+        Command::new("cargo")
+            .args(["run", "-p", "mossambi-gui"])
+            .spawn()?;
+        println!("✓ Mossambi Desktop GUI spawned.");
     }
     Ok(())
 }
