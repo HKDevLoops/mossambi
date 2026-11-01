@@ -30,6 +30,14 @@ jobs:
             target: x86_64-unknown-linux-gnu
             archive_ext: tar.gz
             binary_ext: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+            binary_ext: ""
+          - os: macos-13
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+            binary_ext: ""
 
     steps:
       - name: Checkout Codebase
@@ -91,6 +99,23 @@ jobs:
 
           tar -czvf "dist/$PKG_NAME.tar.gz" -C dist "$PKG_NAME"
           cd dist && sha256sum "$PKG_NAME.tar.gz" > "$PKG_NAME.tar.gz.sha256"
+
+      - name: Prepare Release Artifacts (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          VER="${{ github.ref_name }}"
+          if [ -z "$VER" ]; then VER="${{ inputs.version }}"; fi
+          PKG_NAME="mossambi-$VER-${{ matrix.target }}"
+          mkdir -p "dist/$PKG_NAME"
+          
+          cp "target/${{ matrix.target }}/release/mossambi" "dist/$PKG_NAME/"
+          cp "target/${{ matrix.target }}/release/mossambi-gui" "dist/$PKG_NAME/"
+          cp "target/${{ matrix.target }}/release/mossambi-tui" "dist/$PKG_NAME/"
+          cp README.md "dist/$PKG_NAME/" 2>/dev/null || true
+          cp LICENSE* "dist/$PKG_NAME/" 2>/dev/null || true
+
+          tar -czvf "dist/$PKG_NAME.tar.gz" -C dist "$PKG_NAME"
+          cd dist && shasum -a 256 "$PKG_NAME.tar.gz" > "$PKG_NAME.tar.gz.sha256"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
