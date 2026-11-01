@@ -3,7 +3,7 @@
 
 use anyhow::{bail, Context, Result};
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -100,8 +100,10 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
                     if total_bytes > MAX_UNCOMPRESSED_BYTES {
                         bail!("Archive exceeds safe uncompressed size limit (Zip Bomb protection)");
                     }
-                    let mut outfile = File::create(&out_path)?;
-                    io::copy(&mut entry, &mut outfile)?;
+                    let outfile = File::create(&out_path)?;
+                    let mut buf_out = BufWriter::with_capacity(256 * 1024, outfile);
+                    io::copy(&mut entry, &mut buf_out)?;
+                    buf_out.flush()?;
                 }
             }
         }
@@ -172,9 +174,12 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
 
 fn pack_zip(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let file = File::create(output)?;
-    let mut zip_writer = zip::ZipWriter::new(file);
+    let buf = BufWriter::with_capacity(512 * 1024, file);
+    let mut zip_writer = zip::ZipWriter::new(buf);
+    // Level 9: Maximum Deflate (7-Zip Ultra / WinRAR Best equivalent)
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(9))
         .unix_permissions(0o755);
 
     for input in inputs {
@@ -200,55 +205,70 @@ fn pack_zip(inputs: &[PathBuf], output: &Path) -> Result<()> {
         }
     }
 
-    zip_writer.finish()?;
+    let mut inner = zip_writer.finish()?;
+    inner.flush()?;
     Ok(())
 }
 
 fn pack_tar_plain(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let file = File::create(output)?;
-    let mut builder = tar::Builder::new(file);
+    let buf = BufWriter::with_capacity(512 * 1024, file);
+    let mut builder = tar::Builder::new(buf);
     add_inputs_to_tar(&mut builder, inputs)?;
-    builder.finish()?;
+    let mut inner = builder.into_inner()?;
+    inner.flush()?;
     Ok(())
 }
 
 fn pack_tar_gz(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let file = File::create(output)?;
-    let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    let buf = BufWriter::with_capacity(512 * 1024, file);
+    // Maximum Gzip compression level 9
+    let enc = flate2::write::GzEncoder::new(buf, flate2::Compression::best());
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
     let enc = builder.into_inner()?;
-    enc.finish()?;
+    let mut inner = enc.finish()?;
+    inner.flush()?;
     Ok(())
 }
 
 fn pack_tar_bz2(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let file = File::create(output)?;
-    let enc = bzip2::write::BzEncoder::new(file, bzip2::Compression::default());
+    let buf = BufWriter::with_capacity(512 * 1024, file);
+    // Maximum Bzip2 compression level 9
+    let enc = bzip2::write::BzEncoder::new(buf, bzip2::Compression::best());
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
     let enc = builder.into_inner()?;
-    enc.finish()?;
+    let mut inner = enc.finish()?;
+    inner.flush()?;
     Ok(())
 }
 
 fn pack_tar_xz(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let file = File::create(output)?;
-    let enc = xz2::write::XzEncoder::new(file, 6);
+    let buf = BufWriter::with_capacity(512 * 1024, file);
+    // Maximum LZMA2 Level 9 Ultra (7-Zip Ultra standard)
+    let enc = xz2::write::XzEncoder::new(buf, 9);
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
     let enc = builder.into_inner()?;
-    enc.finish()?;
+    let mut inner = enc.finish()?;
+    inner.flush()?;
     Ok(())
 }
 
 fn pack_tar_zst(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let file = File::create(output)?;
-    let enc = zstd::stream::write::Encoder::new(file, 3)?;
+    let buf = BufWriter::with_capacity(512 * 1024, file);
+    // High-performance Zstandard Level 19 (Ultra ratio & ultra-fast decompression)
+    let enc = zstd::stream::write::Encoder::new(buf, 19)?;
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
     let enc = builder.into_inner()?;
-    enc.finish()?;
+    let mut inner = enc.finish()?;
+    inner.flush()?;
     Ok(())
 }
 

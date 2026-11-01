@@ -86,3 +86,47 @@ fn test_quick_settings_defaults_and_presets() {
     qs.set_active_format("UPSC_EXAM");
     assert!(qs.exam_mode_enabled);
 }
+
+#[test]
+fn test_citrus_varieties_and_pantone_palettes() {
+    use mossambi_gui::citrus_geometry::{CitrusColorPalette, CitrusVariety};
+    use eframe::egui::Color32;
+
+    let varieties = CitrusVariety::all();
+    assert_eq!(varieties.len(), 5);
+
+    // 1. Sweet Lime (Pantone 376 C / 123 C)
+    let lime_pal = CitrusVariety::SweetLime.colors(None);
+    assert_eq!(lime_pal.flavedo_peel, Color32::from_rgb(120, 190, 32)); // Pantone 376 C
+    assert_eq!(lime_pal.carpel_pulp, Color32::from_rgb(255, 199, 44));  // Pantone 123 C
+
+    // 2. Mandarin Tangerine (Pantone 15-1247)
+    let tang_pal = CitrusVariety::MandarinTangerine.colors(None);
+    assert_eq!(tang_pal.flavedo_peel, Color32::from_rgb(226, 109, 92)); // Pantone 15-1247
+    assert_eq!(tang_pal.carpel_pulp, Color32::from_rgb(243, 156, 18));  // Amber
+
+    // 3. Ruby Grapefruit (Pantone 18-1662)
+    let ruby_pal = CitrusVariety::RubyGrapefruit.colors(None);
+    assert_eq!(ruby_pal.flavedo_peel, Color32::from_rgb(200, 16, 46));  // Pantone 18-1662
+    assert_eq!(ruby_pal.carpel_pulp, Color32::from_rgb(217, 56, 58));   // Crimson
+
+    // 4. Persian Lime (Pantone 371 C / 389 C)
+    let persian_pal = CitrusVariety::PersianLime.colors(None);
+    assert_eq!(persian_pal.flavedo_peel, Color32::from_rgb(92, 118, 51)); // Pantone 371 C
+    assert_eq!(persian_pal.carpel_pulp, Color32::from_rgb(208, 223, 0));  // Pantone 389 C
+
+    // 5. Custom Hex Tuner
+    let custom = CitrusColorPalette {
+        flavedo_peel: Color32::from_rgb(10, 20, 30),
+        albedo_pith: Color32::from_rgb(40, 50, 60),
+        carpel_pulp: Color32::from_rgb(70, 80, 90),
+        carpel_hover: Color32::from_rgb(100, 110, 120),
+        all_sector: Color32::from_rgb(130, 140, 150),
+        columella_core: Color32::from_rgb(160, 170, 180),
+        text_dark: Color32::from_rgb(0, 0, 0),
+    };
+    let custom_pal = CitrusVariety::CustomHex.colors(Some(&custom));
+    assert_eq!(custom_pal.flavedo_peel, Color32::from_rgb(10, 20, 30));
+    assert_eq!(custom_pal.carpel_pulp, Color32::from_rgb(70, 80, 90));
+}
+

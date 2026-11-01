@@ -1,0 +1,25 @@
+Mossambi Universal Zero-Loss Transcoding Engine
+=================================================
+
+Mossambi is a high-performance native desktop conversion suite and Indian competitive examination form tuning engine written in pure Rust.
+
+Key Architectural Guarantees:
+1. Zero-Loss Standard (0.00% Loss):
+   - Linear PCM bit-exact audio reproduction
+   - Direct container stream remuxing
+   - Lossless raster quantization (PNG, WebP Lossless, TIFF)
+   - Scalable vector typography layout for PDF documents
+
+2. Certified Pantone Citrus Visual Identity:
+   - Pantone 376 C (#78BE20) - Raw Peel Green
+   - Pantone 1235 C (#FFB81C) - Citrus Gold
+   - Pantone 388 C (#E4F024) - Sweet Zest
+   - Pantone 371 C (#2E4D1E) - Deep Forest Bark
+
+3. Indian Government & Competitive Examination Portal Optimizer:
+   - 5-iteration binary convergence loop
+   - Custom DPI (200 DPI / 300 DPI) injection into EXIF/JFIF headers
+   - Dimensional constraint enforcement (e.g. 500px x 300px)
+   - File size envelope containment (e.g. min 100 KB, max 500 KB)
+
+This document is formatted for clean parsing and scalable vector PDF rendering.

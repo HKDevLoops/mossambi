@@ -7,7 +7,8 @@ use clap::{Parser, Subcommand};
 use crossterm::tty::IsTty;
 use mossambi_archive::{pack_archive, unpack_archive, ArchiveType};
 use mossambi_codec::{
-    transcode_file, transcode_to_all_formats, verify_conversion_fidelity, LosslessMode,
+    transcode_file, transcode_to_all_formats, verify_conversion_fidelity, BenchmarkEngine,
+    FileQualityChecker, LosslessMode,
 };
 use mossambi_core::{
     get_system_arch_info, MossambiConfig, ThemeMode, UniversalRegistry,
@@ -131,6 +132,20 @@ pub enum Commands {
         file: PathBuf,
     },
 
+    /// Check quality, container integrity, cross-platform compatibility, and decoder parseability
+    Check {
+        /// File path to inspect
+        file: PathBuf,
+    },
+
+    /// Benchmark conversion latency, throughput (MB/s), and speedup vs Online/CLI tools
+    Bench {
+        /// Input file to benchmark
+        file: PathBuf,
+        /// Optional target format to benchmark
+        target: Option<String>,
+    },
+
     /// Display detected hardware acceleration engines (NVENC, AMF, QSV, Adreno, VAAPI, NEON/AVX2)
     Hw,
 
@@ -193,9 +208,38 @@ pub enum Commands {
         /// New value to assign
         value: Option<String>,
     },
+
+    /// Generate shell auto-completion script or export Carapace YAML spec
+    Completions {
+        /// Target shell: bash, zsh, fish, powershell, elvish
+        shell: Option<String>,
+
+        /// Export Carapace specification (YAML)
+        #[arg(long = "carapace")]
+        carapace: bool,
+    },
+
+    /// Dynamic context-aware Carapace bridge providing dynamic format recommendations
+    #[command(name = "_carapace", hide = true)]
+    Carapace {
+        /// Shell identifier
+        shell: Option<String>,
+        /// Arguments typed by user
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
+
+    /// Display Unicode box table help and usage manual
+    HelpManual,
 }
 
 fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--table-help" || a == "help-manual") {
+        print_table_help();
+        return Ok(());
+    }
+
     let cli = Cli::parse();
 
     // Check if an explicit subcommand was requested
@@ -217,6 +261,8 @@ fn main() -> Result<()> {
                 output_dir,
             } => handle_extract(&archive, output_dir.as_deref(), cli.json),
             Commands::Info { file } => handle_info(&file, cli.json),
+            Commands::Check { file } => handle_check(&file, cli.json),
+            Commands::Bench { file, target } => handle_bench(&file, target.as_deref(), cli.json),
             Commands::Hw => handle_hw(cli.json),
             Commands::Tui => handle_tui(),
             Commands::Gui => handle_gui(),
@@ -246,6 +292,12 @@ fn main() -> Result<()> {
                 cli.json,
             ),
             Commands::Config { action, key, value } => handle_config(&action, key.as_deref(), value.as_deref(), cli.json),
+            Commands::Completions { shell, carapace } => handle_completions(shell.as_deref(), carapace),
+            Commands::Carapace { shell, args } => handle_carapace(shell.as_deref(), &args),
+            Commands::HelpManual => {
+                print_table_help();
+                Ok(())
+            }
         };
     }
 
@@ -616,6 +668,34 @@ fn handle_info(file: &Path, as_json: bool) -> Result<()> {
     Ok(())
 }
 
+fn handle_check(file: &Path, as_json: bool) -> Result<()> {
+    if !file.exists() {
+        bail!("File does not exist: {}", file.display());
+    }
+
+    let report = FileQualityChecker::inspect_file(file)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("{}", report.format_terminal());
+    }
+    Ok(())
+}
+
+fn handle_bench(file: &Path, target: Option<&str>, as_json: bool) -> Result<()> {
+    if !file.exists() {
+        bail!("File does not exist: {}", file.display());
+    }
+
+    let report = BenchmarkEngine::benchmark_file(file, target)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("{}", report.format_terminal());
+    }
+    Ok(())
+}
+
 fn handle_hw(as_json: bool) -> Result<()> {
     let hw = detect_hardware_capabilities();
     let (os, arch) = get_system_arch_info();
@@ -826,9 +906,150 @@ fn print_welcome_banner() {
     println!("  mossambi archive <files...> -o out.7z  # Pack exhaustive compression archive");
     println!("  mossambi extract <archive>          # Unpack archive safely");
     println!("  mossambi info <file>                # Inspect format, sectors & catalog");
+    println!("  mossambi check <file>               # Universal Quality, Integrity & Compatibility Inspector");
+    println!("  mossambi bench <file> [tgt]         # Benchmark speed & compare vs Online/CLI tools");
     println!("  mossambi tui                        # Launch Ratatui terminal interface");
     println!("  mossambi gui                        # Launch radial widget & Mac-styled GUI");
     println!("  mossambi hw                         # Check GPU & SIMD hardware engines");
     println!("  mossambi config                     # View or edit system settings");
+    println!("  mossambi help-manual                # Display full Unicode box table manual");
     println!("\nRun 'mossambi --help' for exhaustive options.\n");
+}
+
+fn handle_completions(shell_str: Option<&str>, carapace: bool) -> Result<()> {
+    use clap::CommandFactory;
+    use clap_complete::Shell;
+
+    if carapace {
+        let yaml = r#"name: mossambi
+description: Zero-loss native desktop file converter, archive suite, and Indian exam form tuner
+flags:
+  -a, --all: Batch convert to ALL valid formats in domain
+  -o, --output=: Destination directory for output files
+  --strict: Enforce strict 0.00% zero-loss transcode
+  --json: Output results in JSON format
+  --exam=: Indian Competitive Exam preset (e.g. upsc-photo, ssc-photo, ibps-signature)
+  --width=: Exam custom target width in pixels
+  --height=: Exam custom target height in pixels
+  --dpi=: Exam custom target DPI (200 / 300)
+  --min-kb=: Exam minimum file size in kilobytes
+  --max-kb=: Exam maximum file size in kilobytes
+  --whiten: Auto-whiten background of scanned documents or signatures
+commands:
+  - name: convert
+    description: Convert an input file to target format
+  - name: archive
+    description: Pack files or directories into an archive
+  - name: extract
+    description: Extract an archive with Zip-Slip protection
+  - name: info
+    description: Inspect file metadata and detected category
+  - name: check
+    description: Check quality, container integrity, and decoder parseability
+  - name: bench
+    description: Benchmark conversion latency and throughput vs alternatives
+  - name: hw
+    description: Display detected GPU/NPU hardware acceleration engines
+  - name: tui
+    description: Launch the interactive Terminal User Interface
+  - name: gui
+    description: Launch the Desktop Radial Widget and macOS-Styled GUI
+  - name: verify
+    description: Verify mathematical zero-loss fidelity between two files
+  - name: upload-ready
+    description: Prepare image/document for Indian competitive exam portals
+"#;
+        println!("{}", yaml);
+        return Ok(());
+    }
+
+    let shell = match shell_str.map(|s| s.to_lowercase()).as_deref() {
+        Some("bash") => Shell::Bash,
+        Some("zsh") => Shell::Zsh,
+        Some("fish") => Shell::Fish,
+        Some("powershell") | Some("pwsh") => Shell::PowerShell,
+        Some("elvish") => Shell::Elvish,
+        _ => {
+            println!("Usage: mossambi completions [bash|zsh|fish|powershell|elvish] [--carapace]");
+            return Ok(());
+        }
+    };
+
+    let mut cmd = Cli::command();
+    clap_complete::generate(shell, &mut cmd, "mossambi", &mut std::io::stdout());
+    Ok(())
+}
+
+fn handle_carapace(_shell: Option<&str>, args: &[String]) -> Result<()> {
+    if let Some(first_arg) = args.first() {
+        let path = Path::new(first_arg);
+        if path.exists() {
+            let (category, in_ext) = UniversalRegistry::classify_file(path);
+            let targets = UniversalRegistry::get_all_supported_outputs(category);
+            let mut completions = Vec::new();
+            for tgt in targets {
+                if tgt != in_ext.as_str() {
+                    completions.push(json!({
+                        "value": tgt.to_lowercase(),
+                        "display": tgt.to_uppercase(),
+                        "description": format!("Convert to {} ({:?})", tgt, category)
+                    }));
+                }
+            }
+            println!("{}", serde_json::to_string(&completions)?);
+            return Ok(());
+        }
+    }
+    println!("[]");
+    Ok(())
+}
+
+fn print_table_help() {
+    println!("┌──────────────────────────────────────────────────────────────────────────────────────────────────┐");
+    println!("│  MOSSAMBI — ZERO-LOSS CONVERSION PLATFORM & DESKTOP SUITE (v2.1.0)                               │");
+    println!("│  One Pure Rust Core · Three Operating Modalities · Apple Elegance + Linux Power                  │");
+    println!("├──────────────────────────────────────────────────────────────────────────────────────────────────┤");
+    println!("│  UNIX 'mv' POSITIONAL GRAMMAR:                                                                   │");
+    println!("│    mossambi <INPUT> [TARGET_FORMAT] [OPTIONS]                                                    │");
+    println!("│                                                                                                  │");
+    println!("│  EXAMPLES:                                                                                       │");
+    println!("│    mossambi input.wav flac                      Convert WAV to FLAC with 24-bit 0.00% Zero-Loss │");
+    println!("│    mossambi photo.png webp                      Lossless WebP raster transcoding                 │");
+    println!("│    mossambi movie.mkv mp4                       Fast-path NVMe stream remux (2hr movie in ~10s)  │");
+    println!("│    mossambi notes.txt pdf                       Vector typography PDF with embedded CMaps        │");
+    println!("│    mossambi sound.flac ALL                      Batch transcode to ALL audio formats in parallel │");
+    println!("│    mossambi check test_vault/image/photo.png    4-dimension Quality & Integrity Scorecard        │");
+    println!("│    mossambi bench test_vault/audio/sound.wav    Throughput (MB/s) & Speedup vs Online/CLI tools  │");
+    println!("│    mossambi --exam upsc-photo sign.png          Indian competitive exam 100% scorecard optimizer │");
+    println!("├──────────────────────────┬──────────────────────────────────────────┬────────────────────────────┤");
+    println!("│  COMMAND                 │  DESCRIPTION                             │  KEY USAGE / EXAMPLE       │");
+    println!("├──────────────────────────┼──────────────────────────────────────────┼────────────────────────────┤");
+    println!("│  convert                 │  Explicit file conversion                │  mossambi convert in.wav mp3│");
+    println!("│  check                   │  Quality & container integrity scorecard │  mossambi check file.png   │");
+    println!("│  bench                   │  Benchmark latency, throughput & speedup │  mossambi bench file.wav   │");
+    println!("│  archive                 │  Pack files into ZIP, 7Z, TAR, GZ, XZ, ZST│ mossambi archive -o out.zip│");
+    println!("│  extract                 │  Extract archive with Zip-Slip safety    │  mossambi extract bundle.zip│");
+    println!("│  upload-ready            │  Indian Exam Portal Optimizer            │  mossambi upload-ready in.jpg│");
+    println!("│  verify                  │  Mathematical 0.00% loss verification    │  mossambi verify a.png b.png│");
+    println!("│  catalogue               │  Search 200+ format registry             │  mossambi catalogue lossless│");
+    println!("│  hw                      │  Display GPU/NPU hardware telemetry      │  mossambi hw               │");
+    println!("│  tui                     │  Full-screen Apple-styled interactive TUI│  mossambi tui              │");
+    println!("│  gui                     │  Launch macOS-styled studio workspace    │  mossambi gui              │");
+    println!("│  widget                  │  Summon Sweet Lime radial hero overlay   │  mossambi widget           │");
+    println!("│  config                  │  View or edit persistent preferences     │  mossambi config list      │");
+    println!("│  completions             │  Generate shell completions & Carapace   │  mossambi completions zsh  │");
+    println!("├──────────────────────────┼──────────────────────────────────────────┼────────────────────────────┤");
+    println!("│  FLAG / OPTION           │  SHORT / ARG                             │  FUNCTION                  │");
+    println!("├──────────────────────────┼──────────────────────────────────────────┼────────────────────────────┤");
+    println!("│  --all                   │  -a                                      │  Batch convert to ALL valid│");
+    println!("│  --output                │  -o <DIR>                                │  Custom destination folder │");
+    println!("│  --strict                │  (default: true)                         │  Enforce 0.00% Zero-Loss   │");
+    println!("│  --json                  │  --json                                  │  Emit script-ready JSON    │");
+    println!("│  --exam                  │  --exam <PRESET>                         │  upsc/ssc/ibps photo/sign  │");
+    println!("│  --width / --height      │  --width <PX> / --height <PX>            │  Exact pixel dimensions    │");
+    println!("│  --dpi                   │  --dpi <INT>                             │  Target DPI (200 / 300)    │");
+    println!("│  --min-kb / --max-kb     │  --min-kb <N> / --max-kb <N>             │  Target byte envelope range│");
+    println!("│  --whiten                │  --whiten                                │  Background illumination   │");
+    println!("│  --help                  │  -h                                      │  Show this command table   │");
+    println!("└──────────────────────────┴──────────────────────────────────────────┴────────────────────────────┘");
 }

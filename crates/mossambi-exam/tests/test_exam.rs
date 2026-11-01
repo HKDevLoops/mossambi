@@ -90,3 +90,58 @@ fn test_exam_constraint_conflict_detection() {
     assert!(conflict.conflicting_parameters.contains(&"max_bytes".to_string()));
     let _ = fs::remove_dir_all(&test_dir);
 }
+
+#[test]
+fn test_scorecard_and_non_destructive_padding() {
+    let test_dir = std::env::temp_dir().join("mossambi_test_exam_scorecard");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).unwrap();
+
+    let input_path = test_dir.join("signature.png");
+    let mut img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::new(300, 100);
+    for pixel in img.pixels_mut() {
+        *pixel = Rgb([255, 255, 255]); // Pure white image with high compression ratio
+    }
+    img.save(&input_path).unwrap();
+
+    let output_path = test_dir.join("sig_ready.jpg");
+    // Require at least 25 KB for this small white image, forcing non-destructive COM padding!
+    let constraint = mossambi_exam::ExamConstraint {
+        name: "Test Signature Min Floor".into(),
+        target_format: "JPG".into(),
+        width_px: 300,
+        height_px: 100,
+        dpi: 300,
+        min_bytes: 25 * 1024,
+        max_bytes: 50 * 1024,
+        normalize_white_balance: true,
+        positioning: mossambi_exam::PositioningMode::AspectFit,
+        background_color: [255, 255, 255],
+    };
+
+    let report = mossambi_exam::ExamOptimizer::process_upload_ready(&input_path, &output_path, &constraint).unwrap();
+    assert!(report.constraints_satisfied);
+    assert!(report.final_size_bytes >= constraint.min_bytes);
+    assert!(report.final_size_bytes <= constraint.max_bytes);
+    assert!(report.scorecard.dimension_score >= 99.9);
+    assert!(report.scorecard.size_score >= 99.9);
+    assert!(report.scorecard.overall_score >= 95.0);
+
+    // Verify JPEG integrity by re-opening it
+    let reloaded = image::open(&output_path).unwrap();
+    assert_eq!(reloaded.width(), 300);
+    assert_eq!(reloaded.height(), 100);
+
+    let _ = fs::remove_dir_all(&test_dir);
+}
+
+#[test]
+fn test_profile_persistence() {
+    let reg = mossambi_exam::ExamProfileRegistry::load();
+    let all = reg.get_all_presets();
+    assert!(all.len() >= 10);
+    let upsc = reg.find_preset("upsc-photo");
+    assert!(upsc.is_some());
+    assert_eq!(upsc.unwrap().width_px, 350);
+}
+

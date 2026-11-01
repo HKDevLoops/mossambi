@@ -83,7 +83,11 @@ fn test_cli_text_to_pdf_mv_grammar() {
         .unwrap();
     assert!(conv_out.status.success());
 
-    let expected_pdf = test_dir.join("notes_converted.pdf");
+    let expected_pdf = if test_dir.join("notes.pdf").exists() {
+        test_dir.join("notes.pdf")
+    } else {
+        test_dir.join("notes_converted.pdf")
+    };
     assert!(expected_pdf.exists());
     assert!(fs::metadata(&expected_pdf).unwrap().len() > 100);
 
@@ -128,7 +132,11 @@ fn test_cli_verify_zero_loss() {
         .unwrap();
     assert!(conv.status.success());
 
-    let pdf_file = test_dir.join("document_converted.pdf");
+    let pdf_file = if test_dir.join("document.pdf").exists() {
+        test_dir.join("document.pdf")
+    } else {
+        test_dir.join("document_converted.pdf")
+    };
     assert!(pdf_file.exists());
 
     // Verify mathematical quality
@@ -167,4 +175,84 @@ fn test_cli_upload_ready() {
     assert!(stdout.contains("Exam") || stdout.contains("UPSC"));
 
     let _ = fs::remove_dir_all(&test_dir);
+}
+
+#[test]
+fn test_cli_check_and_bench_commands() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir.parent().unwrap().parent().unwrap().to_path_buf();
+    let sample_txt = workspace_root.join("test_vault").join("document").join("sample_notes.txt");
+
+    if sample_txt.exists() {
+        // Run: mossambi check sample_notes.txt
+        let check_out = Command::new(&bin)
+            .args(["check", sample_txt.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(check_out.status.success());
+        let stdout = String::from_utf8_lossy(&check_out.stdout);
+        assert!(stdout.contains("MOSSAMBI QUALITY & INTEGRITY INSPECTOR"));
+        assert!(stdout.contains("PASS"));
+
+        // Run with --json
+        let check_json = Command::new(&bin)
+            .args(["check", sample_txt.to_str().unwrap(), "--json"])
+            .output()
+            .unwrap();
+        assert!(check_json.status.success());
+        let json_stdout = String::from_utf8_lossy(&check_json.stdout);
+        assert!(json_stdout.contains("\"overall_score\""));
+
+        // Run: mossambi bench sample_notes.txt
+        let bench_out = Command::new(&bin)
+            .args(["bench", sample_txt.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(bench_out.status.success());
+        let bench_stdout = String::from_utf8_lossy(&bench_out.stdout);
+        assert!(bench_stdout.contains("MOSSAMBI HIGH-PERFORMANCE BENCHMARK ENGINE"));
+        assert!(bench_stdout.contains("Throughput"));
+    }
+}
+
+#[test]
+fn test_cli_completions_and_carapace() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    // Shell completions test: bash
+    let comp_out = Command::new(&bin)
+        .args(["completions", "bash"])
+        .output()
+        .unwrap();
+    assert!(comp_out.status.success());
+    let comp_str = String::from_utf8_lossy(&comp_out.stdout);
+    assert!(comp_str.contains("complete -F _mossambi mossambi") || comp_str.contains("mossambi"));
+
+    // Carapace YAML spec test
+    let cara_out = Command::new(&bin)
+        .args(["completions", "--carapace"])
+        .output()
+        .unwrap();
+    assert!(cara_out.status.success());
+    let cara_str = String::from_utf8_lossy(&cara_out.stdout);
+    assert!(cara_str.contains("name: mossambi"));
+    assert!(cara_str.contains("upload-ready"));
+
+    // Help-manual Unicode table test
+    let help_out = Command::new(&bin)
+        .arg("help-manual")
+        .output()
+        .unwrap();
+    assert!(help_out.status.success());
+    let help_str = String::from_utf8_lossy(&help_out.stdout);
+    assert!(help_str.contains("MOSSAMBI — ZERO-LOSS CONVERSION PLATFORM"));
+    assert!(help_str.contains("UNIX 'mv' POSITIONAL GRAMMAR"));
 }

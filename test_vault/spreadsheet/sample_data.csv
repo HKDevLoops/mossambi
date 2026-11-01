@@ -1,0 +1,9 @@
+ExamCode,PortalName,WidthPx,HeightPx,TargetDpi,MinSizeKB,MaxSizeKB,Background
+UPSC_01,UPSC Civil Services Photo,350,450,300,20,100,PureWhite
+UPSC_02,UPSC Civil Services Signature,350,150,300,10,40,PureWhite
+SSC_01,SSC CGL Examination Photo,100,120,200,20,50,LightGrey
+SSC_02,SSC CGL Examination Signature,140,60,200,10,20,PureWhite
+IBPS_01,IBPS Bank PO Photo,200,230,200,20,50,OffWhite
+IBPS_02,IBPS Bank PO Document,1240,1754,200,100,500,Standard
+GATE_01,GATE Graduate Aptitude Photo,240,320,200,20,200,PureWhite
+RRB_01,RRB Railway Recruitment Photo,320,400,200,20,70,LightBlue

@@ -14,6 +14,44 @@ pub use registry::{
 
 use std::path::{Path, PathBuf};
 
+/// Resolves the clean sibling output path placed directly beside the original file in the same directory.
+/// Performs collision detection and rename protection:
+/// - If <stem>.<target_ext> does not exist, uses that clean name (e.g. song.wav -> song.flac).
+/// - If <stem>.<target_ext> exists, safely increments to <stem> (1).<target_ext>, <stem> (2)... to avoid accidental overwrite.
+/// - If target_ext matches input extension, uses <stem> (1).<target_ext>.
+pub fn resolve_clean_sibling_output_path(
+    input: &Path,
+    target_ext: &str,
+    custom_dir: Option<&Path>,
+) -> PathBuf {
+    let parent = custom_dir.unwrap_or_else(|| input.parent().unwrap_or_else(|| Path::new(".")));
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+
+    let ext_clean = target_ext.trim_start_matches('.').to_lowercase();
+    let in_ext = input
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let mut candidate = if in_ext != ext_clean {
+        parent.join(format!("{}.{}", stem, ext_clean))
+    } else {
+        parent.join(format!("{} (1).{}", stem, ext_clean))
+    };
+
+    let mut counter = 1u32;
+    while candidate.exists() {
+        candidate = parent.join(format!("{} ({}).{}", stem, counter, ext_clean));
+        counter += 1;
+    }
+
+    candidate
+}
+
 /// Computes a non-destructive sibling output path.
 /// Format: <parent_dir>/<file_stem>_converted.<target_ext>
 /// Automatically appends _1, _2... if a collision occurs so original files are never overwritten.

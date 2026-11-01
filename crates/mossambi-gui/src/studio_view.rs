@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 pub enum StudioTab {
     Transcoder,
     ExamStudio,
+    QualityInspector,
     ArchiveSuite,
     HardwareTelemetry,
     Preferences,
@@ -30,6 +31,10 @@ pub struct StudioView {
     pub current_tab: StudioTab,
     pub exam_status: String,
     pub last_exam_output: Option<PathBuf>,
+    pub quality_report: Option<mossambi_codec::FileQualityReport>,
+    pub bench_report: Option<mossambi_codec::BenchmarkReport>,
+    pub inspection_status: String,
+    pub inspected_file_path: Option<PathBuf>,
 }
 
 impl Default for StudioView {
@@ -38,6 +43,10 @@ impl Default for StudioView {
             current_tab: StudioTab::Transcoder,
             exam_status: "Ready to optimize for portal boundaries.".to_string(),
             last_exam_output: None,
+            quality_report: None,
+            bench_report: None,
+            inspection_status: "Select a file to inspect.".to_string(),
+            inspected_file_path: None,
         }
     }
 }
@@ -130,6 +139,11 @@ impl StudioView {
             }
             sidebar_ui.add_space(2.0);
 
+            if render_sidebar_item(&mut sidebar_ui, &palette, "Quality Inspector", "🔬", self.current_tab == StudioTab::QualityInspector) {
+                self.current_tab = StudioTab::QualityInspector;
+            }
+            sidebar_ui.add_space(2.0);
+
             if render_sidebar_item(&mut sidebar_ui, &palette, "Archive Suite", "📦", self.current_tab == StudioTab::ArchiveSuite) {
                 self.current_tab = StudioTab::ArchiveSuite;
             }
@@ -166,6 +180,9 @@ impl StudioView {
                 }
                 StudioTab::ExamStudio => {
                     self.render_exam_studio_tab(&mut content_ui, &palette, current_file, quick_settings, on_pick_file, on_open_folder);
+                }
+                StudioTab::QualityInspector => {
+                    self.render_quality_inspector_tab(&mut content_ui, &palette, current_file, on_pick_file);
                 }
                 StudioTab::ArchiveSuite => {
                     self.render_archive_tab(&mut content_ui, &palette, current_file, quick_settings, on_pick_file, on_convert);
@@ -656,5 +673,277 @@ impl StudioView {
                 ui.label("Pantone 102 C (#FCE300) - Central Core Columella");
             });
         });
+    }
+
+    /// Dedicated Quality & Integrity Inspector Tab (GUI Studio Only)
+    fn render_quality_inspector_tab(
+        &mut self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        current_file: &Option<PathBuf>,
+        on_pick_file: impl FnOnce(),
+    ) {
+        ui.label(
+            egui::RichText::new("Universal File Quality, Integrity & Compatibility Inspector")
+                .size(18.0)
+                .strong()
+                .color(palette.text_primary),
+        );
+        ui.label(
+            egui::RichText::new("Container Integrity • Structural EOF Markers • Pure-Rust Parser • Compatibility Matrix • Speed Benchmark")
+                .size(11.5)
+                .color(palette.text_secondary),
+        );
+        ui.add_space(10.0);
+
+        // Active File Action Banner
+        let card_frame = egui::Frame::none()
+            .fill(palette.card_bg)
+            .stroke(Stroke::new(1.0_f32, palette.border))
+            .rounding(Rounding::same(10.0))
+            .inner_margin(egui::Margin::same(12.0));
+
+        card_frame.show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if let Some(ref path) = current_file {
+                    ui.label(egui::RichText::new("🔬").size(22.0));
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new(path.file_name().unwrap_or_default().to_string_lossy())
+                                .size(13.0)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
+                        ui.label(
+                            egui::RichText::new(path.display().to_string())
+                                .size(10.5)
+                                .color(palette.text_muted),
+                        );
+                    });
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("⚡ Benchmark Speed").size(11.5).strong().color(Color32::BLACK))
+                            .on_hover_text("Benchmark conversion speed against Online and CLI converters")
+                            .clicked()
+                        {
+                            match mossambi_codec::BenchmarkEngine::benchmark_file(path, None) {
+                                Ok(bench) => self.bench_report = Some(bench),
+                                Err(e) => self.inspection_status = format!("Benchmark failed: {}", e),
+                            }
+                        }
+
+                        if ui.button(egui::RichText::new("🔍 Re-Inspect").size(11.5).color(PANTONE_FLAVEDO))
+                            .clicked()
+                        {
+                            match mossambi_codec::FileQualityChecker::inspect_file(path) {
+                                Ok(rep) => {
+                                    self.quality_report = Some(rep);
+                                    self.inspected_file_path = Some(path.clone());
+                                }
+                                Err(e) => self.inspection_status = format!("Inspection failed: {}", e),
+                            }
+                        }
+                    });
+                } else {
+                    ui.label(egui::RichText::new("📂").size(22.0));
+                    ui.label(
+                        egui::RichText::new("No file staged. Choose a file to inspect its container integrity, parseability, and quality.")
+                            .size(12.0)
+                            .color(palette.text_muted),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Choose File...").size(12.0).color(PANTONE_FLAVEDO)).clicked() {
+                            on_pick_file();
+                        }
+                    });
+                }
+            });
+        });
+
+        // Automatically trigger inspection if active file changed
+        if let Some(ref path) = current_file {
+            if self.inspected_file_path.as_ref() != Some(path) {
+                if let Ok(rep) = mossambi_codec::FileQualityChecker::inspect_file(path) {
+                    self.quality_report = Some(rep);
+                    self.inspected_file_path = Some(path.clone());
+                }
+            }
+        }
+
+        ui.add_space(8.0);
+
+        // Render Report Body
+        if let Some(ref rep) = self.quality_report {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                // Scorecard Header Card
+                card_frame.show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        // Verdict badge
+                        let (badge_text, badge_color) = match rep.verdict {
+                            mossambi_codec::QualityVerdict::Pass => ("✓ PASS", Color32::from_rgb(39, 201, 63)),
+                            mossambi_codec::QualityVerdict::Warning => ("⚠️ WARN", Color32::from_rgb(255, 189, 46)),
+                            mossambi_codec::QualityVerdict::Fail => ("❌ FAIL", Color32::from_rgb(255, 95, 86)),
+                        };
+
+                        ui.label(egui::RichText::new(badge_text).size(18.0).strong().color(badge_color));
+                        ui.separator();
+                        ui.label(
+                            egui::RichText::new(format!("Overall Score: {:.1}%", rep.overall_score))
+                                .size(16.0)
+                                .strong()
+                                .color(PANTONE_FLAVEDO),
+                        );
+                        ui.separator();
+                        ui.label(
+                            egui::RichText::new(format!("Format: {}", rep.format))
+                                .size(13.0)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("Size: {:.2} KB", rep.file_size_kb))
+                                .size(12.0)
+                                .color(palette.text_secondary),
+                        );
+                    });
+
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(&rep.summary_headline)
+                            .size(11.5)
+                            .color(palette.text_secondary),
+                    );
+
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("SHA-256:").size(10.5).color(palette.text_muted));
+                        ui.label(egui::RichText::new(&rep.sha256).size(10.0).monospace().color(palette.text_secondary));
+                        ui.separator();
+                        ui.label(egui::RichText::new("CRC-32:").size(10.5).color(palette.text_muted));
+                        ui.label(egui::RichText::new(&rep.crc32).size(10.0).monospace().color(palette.text_secondary));
+                    });
+                });
+
+                ui.add_space(8.0);
+
+                // 4-Dimension Breakdown (2x2 Grid)
+                ui.columns(2, |cols| {
+                    // Column 1, Card 1: Container Integrity
+                    card_frame.show(&mut cols[0], |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("🛡️ 1. Container Integrity").size(13.0).strong().color(palette.text_primary));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("{:.1}%", rep.integrity.structural_integrity_score))
+                                        .size(12.0)
+                                        .strong()
+                                        .color(if rep.integrity.corruption_detected { Color32::RED } else { Color32::GREEN }),
+                                );
+                            });
+                        });
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(format!("Signature: {}", rep.integrity.magic_bytes_description)).size(11.0).color(palette.text_secondary));
+                        ui.label(egui::RichText::new(format!("EOF Check: {}", rep.integrity.eof_description)).size(11.0).color(palette.text_secondary));
+                        ui.label(egui::RichText::new(format!("Corruption Detected: {}", if rep.integrity.corruption_detected { "YES (Structure Damaged)" } else { "No (Bit-Exact Valid)" })).size(11.0).color(if rep.integrity.corruption_detected { Color32::RED } else { palette.text_muted }));
+                    });
+
+                    // Column 2, Card 2: Parser & Decode
+                    card_frame.show(&mut cols[1], |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("⚙️ 2. Parser & Decoder").size(13.0).strong().color(palette.text_primary));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("{:.1}%", rep.parseability.parseability_score))
+                                        .size(12.0)
+                                        .strong()
+                                        .color(if rep.parseability.can_parse { Color32::GREEN } else { Color32::RED }),
+                                );
+                            });
+                        });
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(format!("Parser: {}", rep.parseability.parser_used)).size(11.0).color(palette.text_secondary));
+                        ui.label(egui::RichText::new(format!("Decoded: {}", rep.parseability.decoded_payload_summary)).size(11.0).color(palette.text_secondary));
+                        if !rep.parseability.parse_warnings.is_empty() {
+                            ui.label(egui::RichText::new(format!("Warnings: {}", rep.parseability.parse_warnings.join(", "))).size(10.5).color(Color32::from_rgb(255, 189, 46)));
+                        } else {
+                            ui.label(egui::RichText::new("Zero decode anomalies detected").size(10.5).color(palette.text_muted));
+                        }
+                    });
+                });
+
+                ui.add_space(6.0);
+
+                ui.columns(2, |cols| {
+                    // Column 1, Card 3: Cross-Platform Compatibility
+                    card_frame.show(&mut cols[0], |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("🌐 3. Compatibility Matrix").size(13.0).strong().color(palette.text_primary));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("{:.1}%", rep.compatibility.compatibility_score))
+                                        .size(12.0)
+                                        .strong()
+                                        .color(Color32::GREEN),
+                                );
+                            });
+                        });
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(format!("Web Browsers: {:.0}% • Mobile HW: {:.0}% • Archival: {:.0}%", rep.compatibility.web_compatibility_score, rep.compatibility.mobile_compatibility_score, rep.compatibility.archival_compatibility_score)).size(11.0).color(palette.text_secondary));
+                        ui.label(egui::RichText::new(format!("Standards: {}", rep.compatibility.standards_compliance.join(" • "))).size(10.5).color(palette.text_muted));
+                    });
+
+                    // Column 2, Card 4: Quality & Visual / Audio Metrics
+                    card_frame.show(&mut cols[1], |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("💎 4. Quality & Fidelity").size(13.0).strong().color(palette.text_primary));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("{:.1}%", rep.quality.quality_score))
+                                        .size(12.0)
+                                        .strong()
+                                        .color(Color32::GREEN),
+                                );
+                            });
+                        });
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(format!("Rating: {}", rep.quality.fidelity_rating)).size(11.0).color(palette.text_secondary));
+                        ui.label(egui::RichText::new(format!("Depth/Resolution: {}", rep.quality.color_or_sample_depth)).size(11.0).color(palette.text_secondary));
+                        ui.label(egui::RichText::new(format!("Clarity Heuristic: {:.1}%", rep.quality.edge_clarity_score)).size(10.5).color(palette.text_muted));
+                    });
+                });
+
+                // Benchmark Comparison Section
+                if let Some(ref bench) = self.bench_report {
+                    ui.add_space(8.0);
+                    card_frame.show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("🏎️ Performance Benchmark Results").size(13.5).strong().color(palette.text_primary));
+                            ui.separator();
+                            ui.label(egui::RichText::new(format!("Duration: {:.2} ms ({} µs)", bench.duration_ms, bench.duration_micros)).size(12.0).strong().color(PANTONE_FLAVEDO));
+                            ui.separator();
+                            ui.label(egui::RichText::new(format!("Throughput: {:.1} MB/s", bench.throughput_mb_per_sec)).size(12.0).strong().color(Color32::GREEN));
+                            ui.separator();
+                            ui.label(egui::RichText::new(if bench.hardware_accelerated { "HW-ACCEL ACTIVE" } else { "CPU PIPELINE" }).size(11.0).color(PANTONE_GOLD));
+                        });
+
+                        ui.add_space(6.0);
+                        ui.label(egui::RichText::new("Comparison Against Industry Converters:").size(11.5).strong().color(palette.text_secondary));
+
+                        for comp in &bench.comparisons {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(format!("• {:<24}", comp.name)).size(11.0).strong().color(palette.text_primary));
+                                ui.label(egui::RichText::new(format!("({:<12})", comp.category)).size(10.5).color(palette.text_muted));
+                                ui.label(egui::RichText::new(format!("~{:.1} ms", comp.estimated_duration_ms)).size(11.0).color(palette.text_secondary));
+                                ui.label(egui::RichText::new(format!("➔ {:.1}x FASTER", comp.speedup_factor)).size(11.0).strong().color(Color32::GREEN));
+                                ui.label(egui::RichText::new(format!("— {}", comp.notes)).size(10.5).color(palette.text_muted));
+                            });
+                        }
+
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(&bench.summary).size(11.0).color(PANTONE_FLAVEDO));
+                    });
+                }
+            });
+        }
     }
 }

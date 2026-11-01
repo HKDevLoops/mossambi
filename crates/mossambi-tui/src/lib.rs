@@ -14,7 +14,10 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use mossambi_archive::{pack_archive, ArchiveType};
-use mossambi_codec::{transcode_file, transcode_to_all_formats, LosslessMode};
+use mossambi_codec::{
+    transcode_file, transcode_to_all_formats, BenchmarkEngine, BenchmarkReport, FileQualityChecker,
+    FileQualityReport, LosslessMode, QualityVerdict,
+};
 use mossambi_core::{
     get_system_arch_info, MossambiConfig, ThemeMode, UniversalRegistry,
 };
@@ -66,6 +69,7 @@ pub enum AppTab {
     Archive = 2,
     Hardware = 3,
     Settings = 4,
+    Quality = 5,
 }
 
 impl AppTab {
@@ -76,6 +80,7 @@ impl AppTab {
             AppTab::Archive,
             AppTab::Hardware,
             AppTab::Settings,
+            AppTab::Quality,
         ]
     }
 
@@ -86,6 +91,7 @@ impl AppTab {
             AppTab::Archive => " 📦 Archive Manager ",
             AppTab::Hardware => " 🏎️ Hardware & AI ",
             AppTab::Settings => " ⚙️ Appearance & Themes ",
+            AppTab::Quality => " 🔬 Quality & Benchmarks ",
         }
     }
 }
@@ -116,6 +122,11 @@ pub struct AppState {
     pub shade_options: Vec<&'static str>,
     pub selected_shade_idx: usize,
     pub should_quit: bool,
+
+    // Quality & Benchmarks
+    pub quality_report: Option<FileQualityReport>,
+    pub bench_report: Option<BenchmarkReport>,
+    pub inspection_status: String,
 }
 
 impl AppState {
@@ -161,6 +172,9 @@ impl AppState {
             ],
             selected_shade_idx: 0,
             should_quit: false,
+            quality_report: None,
+            bench_report: None,
+            inspection_status: "Select a file and press [Enter] to inspect or [b] to benchmark.".into(),
         };
 
         app.refresh_directory();
@@ -243,6 +257,54 @@ impl AppState {
             self.available_formats = UniversalRegistry::get_widget_sectors_for_category(cat);
             if self.selected_format_idx >= self.available_formats.len() {
                 self.selected_format_idx = 0;
+            }
+            if self.current_tab == AppTab::Quality {
+                self.inspect_selected_file();
+            }
+        }
+    }
+
+    pub fn inspect_selected_file(&mut self) {
+        if let Some(file) = self.dir_entries.get(self.selected_file_idx).cloned() {
+            if file.is_dir() {
+                self.inspection_status = "Directories cannot be inspected. Select a file.".into();
+                self.quality_report = None;
+                return;
+            }
+            match FileQualityChecker::inspect_file(&file) {
+                Ok(rep) => {
+                    self.inspection_status = format!("Inspected: {} [{}]", rep.file_name, rep.verdict.badge());
+                    self.quality_report = Some(rep);
+                }
+                Err(e) => {
+                    self.inspection_status = format!("Inspection failed: {}", e);
+                    self.quality_report = None;
+                }
+            }
+        }
+    }
+
+    pub fn benchmark_selected_file(&mut self) {
+        if let Some(file) = self.dir_entries.get(self.selected_file_idx).cloned() {
+            if file.is_dir() {
+                self.inspection_status = "Cannot benchmark directory. Select a file.".into();
+                self.bench_report = None;
+                return;
+            }
+            self.inspection_status = "Benchmarking conversion throughput...".into();
+            match BenchmarkEngine::benchmark_file(&file, None) {
+                Ok(bench) => {
+                    self.inspection_status = format!(
+                        "Benchmark complete: {:.2}ms ({:.1} MB/s) | {:.1}x vs Cloud",
+                        bench.duration_ms, bench.throughput_mb_per_sec,
+                        bench.comparisons.first().map(|c| c.speedup_factor).unwrap_or(1.0)
+                    );
+                    self.bench_report = Some(bench);
+                }
+                Err(e) => {
+                    self.inspection_status = format!("Benchmark error: {}", e);
+                    self.bench_report = None;
+                }
             }
         }
     }
@@ -386,24 +448,38 @@ pub fn run() -> Result<()> {
                                 1 => AppTab::Archive,
                                 2 => AppTab::Hardware,
                                 3 => AppTab::Settings,
+                                4 => AppTab::Quality,
                                 _ => AppTab::Convert,
                             };
+                            if state.current_tab == AppTab::Quality && state.quality_report.is_none() {
+                                state.inspect_selected_file();
+                            }
                         }
                         KeyCode::BackTab => {
                             let curr = state.current_tab as usize;
                             state.current_tab = match curr {
-                                0 => AppTab::Settings,
+                                0 => AppTab::Quality,
                                 1 => AppTab::Convert,
                                 2 => AppTab::ExamStudio,
                                 3 => AppTab::Archive,
-                                _ => AppTab::Hardware,
+                                4 => AppTab::Hardware,
+                                _ => AppTab::Settings,
                             };
+                            if state.current_tab == AppTab::Quality && state.quality_report.is_none() {
+                                state.inspect_selected_file();
+                            }
                         }
                         KeyCode::Char('1') => state.current_tab = AppTab::Convert,
                         KeyCode::Char('2') => state.current_tab = AppTab::ExamStudio,
                         KeyCode::Char('3') => state.current_tab = AppTab::Archive,
                         KeyCode::Char('4') => state.current_tab = AppTab::Hardware,
                         KeyCode::Char('5') => state.current_tab = AppTab::Settings,
+                        KeyCode::Char('6') => {
+                            state.current_tab = AppTab::Quality;
+                            if state.quality_report.is_none() {
+                                state.inspect_selected_file();
+                            }
+                        }
 
                         // Theme switch shortcut [t]
                         KeyCode::Char('t') => {
@@ -419,10 +495,13 @@ pub fn run() -> Result<()> {
 
                         // Arrow Navigation
                         KeyCode::Up | KeyCode::Char('k') => match state.current_tab {
-                            AppTab::Convert | AppTab::Archive => {
+                            AppTab::Convert | AppTab::Archive | AppTab::Quality => {
                                 if state.selected_file_idx > 0 {
                                     state.selected_file_idx -= 1;
                                     state.update_formats_for_selected();
+                                    if state.current_tab == AppTab::Quality {
+                                        state.inspect_selected_file();
+                                    }
                                 }
                             }
                             AppTab::ExamStudio => {
@@ -440,10 +519,13 @@ pub fn run() -> Result<()> {
                             _ => {}
                         },
                         KeyCode::Down | KeyCode::Char('j') => match state.current_tab {
-                            AppTab::Convert | AppTab::Archive => {
+                            AppTab::Convert | AppTab::Archive | AppTab::Quality => {
                                 if state.selected_file_idx + 1 < state.dir_entries.len() {
                                     state.selected_file_idx += 1;
                                     state.update_formats_for_selected();
+                                    if state.current_tab == AppTab::Quality {
+                                        state.inspect_selected_file();
+                                    }
                                 }
                             }
                             AppTab::ExamStudio => {
@@ -487,11 +569,24 @@ pub fn run() -> Result<()> {
                             _ => {}
                         },
 
+                        // Benchmark shortcut [b] and Re-inspect [r]
+                        KeyCode::Char('b') => {
+                            if state.current_tab == AppTab::Quality {
+                                state.benchmark_selected_file();
+                            }
+                        }
+                        KeyCode::Char('r') => {
+                            if state.current_tab == AppTab::Quality {
+                                state.inspect_selected_file();
+                            }
+                        }
+
                         // Enter Execution
                         KeyCode::Enter => match state.current_tab {
                             AppTab::Convert => state.execute_selected_conversion(),
                             AppTab::ExamStudio => state.execute_exam_optimization(),
                             AppTab::Archive => state.execute_archive_pack(),
+                            AppTab::Quality => state.inspect_selected_file(),
                             AppTab::Settings => {
                                 state.config.enforce_zero_loss = !state.config.enforce_zero_loss;
                                 let _ = state.config.save();
@@ -579,6 +674,7 @@ fn draw_ui(f: &mut Frame, state: &mut AppState) {
         AppTab::Archive => draw_archive_tab(f, chunks[1], state, &palette),
         AppTab::Hardware => draw_hardware_tab(f, chunks[1], state, &palette),
         AppTab::Settings => draw_settings_tab(f, chunks[1], state, &palette),
+        AppTab::Quality => draw_quality_tab(f, chunks[1], state, &palette),
     }
 
     // 3. Status Bar & Keybindings
@@ -592,7 +688,7 @@ fn draw_ui(f: &mut Frame, state: &mut AppState) {
         Span::styled(" [Status] ", Style::default().fg(palette.text_muted)),
         Span::styled(&state.status_message, status_style),
         Span::raw(" | "),
-        Span::styled("[Tab] Tab | [t] Theme | [↑/↓] Select | [←/→] Sector | [Enter] Execute | [q] Quit", Style::default().fg(palette.text_secondary)),
+        Span::styled("[Tab/1-6] Tab | [t] Theme | [↑/↓] Select | [Enter] Exec/Inspect | [b] Bench | [q] Quit", Style::default().fg(palette.text_secondary)),
     ]))
     .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(palette.border)));
     f.render_widget(status_p, chunks[2]);
@@ -886,4 +982,221 @@ fn draw_settings_tab(f: &mut Frame, area: Rect, state: &AppState, palette: &TuiT
                 .border_style(Style::default().fg(palette.border)),
         );
     f.render_widget(p, area);
+}
+
+fn draw_quality_tab(f: &mut Frame, area: Rect, state: &AppState, palette: &TuiThemePalette) {
+    let main_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(area);
+
+    // Left: File list
+    let items: Vec<ListItem> = state
+        .dir_entries
+        .iter()
+        .enumerate()
+        .map(|(i, path)| {
+            let is_sel = i == state.selected_file_idx;
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            let is_dir = path.is_dir();
+            let icon = if is_dir { "📁 " } else { "📄 " };
+
+            let style = if is_sel {
+                Style::default().fg(Color::Black).bg(palette.accent).add_modifier(Modifier::BOLD)
+            } else if is_dir {
+                Style::default().fg(PANTONE_SWEET_ZEST)
+            } else {
+                Style::default().fg(palette.text_primary)
+            };
+
+            ListItem::new(format!("{}{}", icon, name)).style(style)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title(Span::styled(
+                    format!(" Select File: {} ", state.current_dir.display()),
+                    Style::default().fg(palette.accent),
+                ))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(palette.border)),
+        );
+    f.render_widget(list, main_layout[0]);
+
+    // Right: Quality, Integrity, Compatibility & Parseability + Benchmark View
+    if let Some(rep) = &state.quality_report {
+        let right_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(5),  // Overview Header & Verdict Badge
+                Constraint::Length(10), // 4-Dimension Breakdown Cards
+                Constraint::Min(6),    // Benchmark Comparison Table
+            ])
+            .split(main_layout[1]);
+
+        // 1. Overview Header
+        let verdict_style = match rep.verdict {
+            QualityVerdict::Pass => Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
+            QualityVerdict::Warning => Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD),
+            QualityVerdict::Fail => Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD),
+        };
+
+        let overview_lines = vec![
+            Line::from(vec![
+                Span::styled("Verdict: ", Style::default().fg(palette.text_muted)),
+                Span::styled(rep.verdict.badge(), verdict_style),
+                Span::raw("   "),
+                Span::styled(format!("Overall Score: {:.1}%", rep.overall_score), Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+                Span::raw("   "),
+                Span::styled(format!("Format: {}", rep.format), Style::default().fg(palette.gold)),
+                Span::raw("   "),
+                Span::styled(format!("Size: {:.2} KB", rep.file_size_kb), Style::default().fg(palette.text_secondary)),
+            ]),
+            Line::from(vec![
+                Span::styled("SHA-256: ", Style::default().fg(palette.text_muted)),
+                Span::styled(if rep.sha256.len() > 36 { format!("{}...", &rep.sha256[..36]) } else { rep.sha256.clone() }, Style::default().fg(palette.text_secondary)),
+                Span::raw("  "),
+                Span::styled("CRC-32: ", Style::default().fg(palette.text_muted)),
+                Span::styled(&rep.crc32, Style::default().fg(palette.text_secondary)),
+            ]),
+            Line::from(Span::styled(&rep.summary_headline, Style::default().fg(palette.text_primary))),
+        ];
+
+        let overview_p = Paragraph::new(overview_lines).block(
+            Block::default()
+                .title(Span::styled(format!(" File Inspection: {} ", rep.file_name), Style::default().fg(palette.accent)))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(palette.border)),
+        );
+        f.render_widget(overview_p, right_chunks[0]);
+
+        // 2. 4-Dimension Scorecard
+        let dimension_lines = vec![
+            Line::from(vec![
+                Span::styled("1. Container Integrity: ", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{:.1}% ", rep.integrity.structural_integrity_score),
+                    Style::default().fg(if rep.integrity.corruption_detected { Color::LightRed } else { Color::LightGreen }),
+                ),
+                Span::styled(format!("| {}", rep.integrity.magic_bytes_description), Style::default().fg(palette.text_secondary)),
+            ]),
+            Line::from(vec![
+                Span::styled("   EOF Marker: ", Style::default().fg(palette.text_muted)),
+                Span::styled(&rep.integrity.eof_description, Style::default().fg(palette.text_secondary)),
+            ]),
+            Line::from(vec![
+                Span::styled("2. Parser & Decode: ", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{:.1}% ", rep.parseability.parseability_score),
+                    Style::default().fg(if rep.parseability.can_parse { Color::LightGreen } else { Color::LightRed }),
+                ),
+                Span::styled(format!("| Engine: {}", rep.parseability.parser_used), Style::default().fg(palette.text_secondary)),
+            ]),
+            Line::from(vec![
+                Span::styled("   Decoded: ", Style::default().fg(palette.text_muted)),
+                Span::styled(&rep.parseability.decoded_payload_summary, Style::default().fg(palette.text_secondary)),
+            ]),
+            Line::from(vec![
+                Span::styled("3. Compatibility: ", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{:.1}% ", rep.compatibility.compatibility_score),
+                    Style::default().fg(Color::LightGreen),
+                ),
+                Span::styled(
+                    format!("(Web: {:.0}%, Mobile: {:.0}%, Archival: {:.0}%)",
+                        rep.compatibility.web_compatibility_score,
+                        rep.compatibility.mobile_compatibility_score,
+                        rep.compatibility.archival_compatibility_score,
+                    ),
+                    Style::default().fg(palette.text_secondary),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("4. Quality & Fidelity: ", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{:.1}% ", rep.quality.quality_score), Style::default().fg(Color::LightGreen)),
+                Span::styled(format!("| {} | Depth: {}", rep.quality.fidelity_rating, rep.quality.color_or_sample_depth), Style::default().fg(palette.text_secondary)),
+            ]),
+        ];
+
+        let dim_p = Paragraph::new(dimension_lines).block(
+            Block::default()
+                .title(" 4-Dimension Quality & Standards Matrix ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(palette.border)),
+        );
+        f.render_widget(dim_p, right_chunks[1]);
+
+        // 3. Performance Benchmark & Speedup vs Online/CLI
+        let mut bench_lines = Vec::new();
+        if let Some(bench) = &state.bench_report {
+            bench_lines.push(Line::from(vec![
+                Span::styled("Mossambi Latency: ", Style::default().fg(palette.text_muted)),
+                Span::styled(format!("{:.2} ms ({} µs)", bench.duration_ms, bench.duration_micros), Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+                Span::raw("   "),
+                Span::styled("Throughput: ", Style::default().fg(palette.text_muted)),
+                Span::styled(format!("{:.1} MB/s", bench.throughput_mb_per_sec), Style::default().fg(PANTONE_SWEET_ZEST).add_modifier(Modifier::BOLD)),
+                Span::raw("   "),
+                Span::styled("HW-Accel: ", Style::default().fg(palette.text_muted)),
+                Span::styled(if bench.hardware_accelerated { "ENABLED" } else { "STANDARD" }, Style::default().fg(palette.gold)),
+            ]));
+            bench_lines.push(Line::from(""));
+            bench_lines.push(Line::from(Span::styled("Industry Converter Comparison Matrix:", Style::default().fg(palette.text_primary).add_modifier(Modifier::BOLD))));
+
+            for comp in &bench.comparisons {
+                bench_lines.push(Line::from(vec![
+                    Span::styled(format!("• {:<24} ", comp.name), Style::default().fg(palette.text_primary)),
+                    Span::styled(format!("({:<11}) ", comp.category), Style::default().fg(palette.text_muted)),
+                    Span::styled(format!("{:>7.1} ms  ", comp.estimated_duration_ms), Style::default().fg(palette.text_secondary)),
+                    Span::styled(format!("➔ {:>5.1}x FASTER", comp.speedup_factor), Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("  [{}]", comp.notes), Style::default().fg(palette.text_muted)),
+                ]));
+            }
+            bench_lines.push(Line::from(""));
+            bench_lines.push(Line::from(Span::styled(&bench.summary, Style::default().fg(palette.accent))));
+        } else {
+            bench_lines.push(Line::from(Span::styled("⚡ High-Speed Conversion Benchmark", Style::default().fg(palette.text_primary).add_modifier(Modifier::BOLD))));
+            bench_lines.push(Line::from(""));
+            bench_lines.push(Line::from(vec![
+                Span::raw("Press "),
+                Span::styled("[b]", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)),
+                Span::raw(" to run instant benchmark measuring conversion speed & comparing against:"),
+            ]));
+            bench_lines.push(Line::from("  1. Online Converters (CloudConvert, Zamzar, Convertio) — Network & cloud queue"));
+            bench_lines.push(Line::from("  2. Multi-purpose CLI Tools (FFmpeg CLI, ImageMagick, LibreOffice) — Process spawn overhead"));
+            bench_lines.push(Line::from("  3. GitHub Rust Pipelines (Symphonia, image-rs) — Algorithmic pipeline comparison"));
+            bench_lines.push(Line::from(""));
+            bench_lines.push(Line::from(Span::styled(&state.inspection_status, Style::default().fg(palette.text_muted))));
+        }
+
+        let bench_p = Paragraph::new(bench_lines).block(
+            Block::default()
+                .title(" Benchmark & Converter Speedup Matrix (Press [b] to run) ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(palette.border)),
+        );
+        f.render_widget(bench_p, right_chunks[2]);
+    } else {
+        let placeholder = Paragraph::new(vec![
+            Line::from(Span::styled("🔬 Universal Quality, Integrity & Compatibility Inspector", Style::default().fg(palette.accent).add_modifier(Modifier::BOLD))),
+            Line::from(""),
+            Line::from("Select a file from the list and press [Enter] or [r] to run full inspection."),
+            Line::from("Press [b] to run conversion performance benchmark and speedup comparison."),
+            Line::from(""),
+            Line::from(Span::styled(&state.inspection_status, Style::default().fg(palette.text_muted))),
+        ])
+        .block(
+            Block::default()
+                .title(" File Quality & Integrity Scorecard ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(palette.border)),
+        );
+        f.render_widget(placeholder, main_layout[1]);
+    }
 }

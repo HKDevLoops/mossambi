@@ -135,13 +135,65 @@ impl UniversalRegistry {
         match category {
             FileCategory::Image => vec!["PNG", "WEBP", "JPG", "TIFF", "BMP", "PDF", "MORE", "ALL"],
             FileCategory::Video => vec!["MP4", "MKV", "MOV", "WEBM", "MP3", "GIF", "MORE", "ALL"],
-            FileCategory::Audio => vec!["WAV", "ALAC", "MP3", "AAC", "OGG", "FLAC", "MORE", "ALL"],
+            FileCategory::Audio => vec!["FLAC", "WAV", "ALAC", "MP3", "AAC", "OGG", "MORE", "ALL"],
             FileCategory::Document => vec!["PDF", "DOCX", "TXT", "HTML", "MD", "EPUB", "MORE", "ALL"],
             FileCategory::Spreadsheet => vec!["XLSX", "CSV", "TSV", "PDF", "ODS", "HTML", "MORE", "ALL"],
             FileCategory::Presentation => vec!["PDF", "PPTX", "HTML", "TXT", "JPG", "ODP", "MORE", "ALL"],
             FileCategory::Archive => vec!["ZIP", "TAR.GZ", "TAR.ZST", "7Z", "TAR.XZ", "EXTRACT", "MORE", "ALL"],
             FileCategory::Subtitle => vec!["VTT", "SRT", "TXT", "ASS", "SSA", "JSON", "MORE", "ALL"],
             FileCategory::Unknown => vec!["PDF", "ZIP", "PNG", "MP4", "MP3", "TXT", "MORE", "ALL"],
+        }
+    }
+
+    /// Contextual sectors customized specifically for the detected input file path or extension.
+    pub fn get_sectors_for_file<P: AsRef<Path>>(path: P) -> Vec<&'static str> {
+        let (cat, in_ext) = Self::classify_file(path);
+        let ext = in_ext.to_uppercase();
+
+        match cat {
+            FileCategory::Audio => {
+                if ext == "WAV" {
+                    vec!["FLAC", "ALAC", "MP3", "AAC", "OGG", "WAV", "MORE", "ALL"]
+                } else if ext == "FLAC" {
+                    vec!["WAV", "ALAC", "MP3", "AAC", "OGG", "FLAC", "MORE", "ALL"]
+                } else if ext == "MP3" {
+                    vec!["WAV", "FLAC", "AAC", "OGG", "OPUS", "MP3", "MORE", "ALL"]
+                } else {
+                    vec!["FLAC", "WAV", "ALAC", "MP3", "AAC", "OGG", "MORE", "ALL"]
+                }
+            }
+            FileCategory::Image => {
+                if ext == "PNG" {
+                    vec!["WEBP", "JPG", "TIFF", "BMP", "PDF", "PNG", "MORE", "ALL"]
+                } else if ext == "JPG" || ext == "JPEG" {
+                    vec!["PNG", "WEBP", "TIFF", "BMP", "PDF", "JPG", "MORE", "ALL"]
+                } else {
+                    vec!["PNG", "WEBP", "JPG", "TIFF", "BMP", "PDF", "MORE", "ALL"]
+                }
+            }
+            FileCategory::Document => {
+                if ext == "PDF" {
+                    vec!["TXT", "DOCX", "HTML", "MD", "RTF", "PDF", "MORE", "ALL"]
+                } else if ext == "DOCX" {
+                    vec!["PDF", "TXT", "HTML", "MD", "RTF", "DOCX", "MORE", "ALL"]
+                } else {
+                    vec!["PDF", "DOCX", "TXT", "HTML", "MD", "EPUB", "MORE", "ALL"]
+                }
+            }
+            FileCategory::Spreadsheet => {
+                if ext == "XLSX" || ext == "XLS" {
+                    vec!["CSV", "TSV", "PDF", "HTML", "ODS", "XLSX", "MORE", "ALL"]
+                } else {
+                    vec!["XLSX", "CSV", "TSV", "PDF", "ODS", "HTML", "MORE", "ALL"]
+                }
+            }
+            FileCategory::Archive => {
+                vec!["EXTRACT", "ZIP", "TAR.GZ", "TAR.ZST", "7Z", "TAR.XZ", "MORE", "ALL"]
+            }
+            FileCategory::Video => {
+                vec!["MP4", "MKV", "MOV", "WEBM", "MP3", "GIF", "MORE", "ALL"]
+            }
+            _ => Self::get_widget_sectors_for_category(cat),
         }
     }
 

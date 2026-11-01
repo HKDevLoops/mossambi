@@ -6,15 +6,15 @@
 //! - Fast UNIX mv-like CLI, TUI, and global WIN+CTRL & circle-drag activation hooks
 //! - 0.00% Zero-Loss Standard, Hardware Acceleration (GPU + NPU), 16 Rayon worker threads
 
-use eframe::egui::{self, Color32, Key, Pos2, Vec2, ViewportBuilder, ViewportCommand};
+use eframe::egui::{self, Color32, Key, Pos2, Rect, Vec2, ViewportBuilder, ViewportCommand};
 use mossambi_archive::{pack_archive, unpack_archive, ArchiveType};
 use mossambi_codec::{
     convert_text_to_pdf_vector, transcode_file, transcode_to_all_formats, LosslessMode,
     TextPdfSettings,
 };
-use mossambi_core::{FileCategory, UniversalRegistry};
+use mossambi_core::{FileCategory, MossambiConfig, UniversalRegistry};
 use mossambi_exam::{optimize_exam_media, ExamConstraint};
-use mossambi_gui::citrus_geometry::CitrusGeometry;
+use mossambi_gui::citrus_geometry::{CitrusGeometry, CitrusVariety};
 use mossambi_gui::macos_theme::*;
 use mossambi_gui::popover::PetalPopover;
 use mossambi_gui::quick_settings::QuickSettingsState;
@@ -54,6 +54,7 @@ pub struct MossambiApp {
     is_converting: bool,
     progress_angle: f32,
     last_completed_output: Option<PathBuf>,
+    completion_time: Option<Instant>,
     status_message: String,
 
     // Long-Press Tracking (>=350ms triggers Quick Settings popover)
@@ -75,10 +76,21 @@ impl Default for MossambiApp {
         let default_cat = FileCategory::Document;
         let default_sectors = UniversalRegistry::get_widget_sectors_for_category(default_cat);
 
+        let config = MossambiConfig::load();
+        let variety = match config.citrus_shade.to_lowercase().as_str() {
+            "tangerine" | "mandarin" => CitrusVariety::MandarinTangerine,
+            "grapefruit" | "ruby" => CitrusVariety::RubyGrapefruit,
+            "persian" | "persianlime" | "kaffirlime" => CitrusVariety::PersianLime,
+            _ => CitrusVariety::SweetLime,
+        };
+
+        let mut geometry = CitrusGeometry::new(Pos2::new(180.0, 180.0), 320.0);
+        geometry.variety = variety;
+
         Self {
             mode: AppViewMode::RadialWidget,
             theme: ThemeStyle::LiquidGlass,
-            geometry: CitrusGeometry::new(Pos2::new(180.0, 180.0), 320.0),
+            geometry,
             quick_settings: QuickSettingsState::default(),
             studio_view: StudioView::default(),
             activation_manager: ActivationManager::new(),
@@ -91,6 +103,7 @@ impl Default for MossambiApp {
             is_converting: false,
             progress_angle: 0.0,
             last_completed_output: None,
+            completion_time: None,
             status_message: "Ready. WIN+CTRL or drag in circle to summon.".to_string(),
 
             press_start: None,
@@ -112,9 +125,9 @@ impl MossambiApp {
 
     pub fn select_file(&mut self, path: PathBuf) {
         let (cat, ext) = UniversalRegistry::classify_file(&path);
-        self.current_file = Some(path);
+        self.current_file = Some(path.clone());
         self.current_category = cat;
-        self.current_sectors = UniversalRegistry::get_widget_sectors_for_category(cat);
+        self.current_sectors = UniversalRegistry::get_sectors_for_file(&path);
         self.hub_status = if ext.is_empty() { "FILE".to_string() } else { ext };
         if let Some(first_fmt) = self.current_sectors.first() {
             self.quick_settings.set_active_format(first_fmt);
@@ -186,14 +199,7 @@ fn execute_conversion(
             background_color: [255, 255, 255],
         };
 
-        let parent = input.parent().unwrap_or_else(|| Path::new("."));
-        let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("exam_output");
-        let mut out = parent.join(format!("{}_exam.jpg", stem));
-        let mut c = 1;
-        while out.exists() {
-            out = parent.join(format!("{}_exam_{}.jpg", stem, c));
-            c += 1;
-        }
+        let out = mossambi_core::resolve_clean_sibling_output_path(input, "jpg", None);
 
         match optimize_exam_media(input, &out, &constraint) {
             Ok(p) => return ConversionResult::Success(vec![p]),
@@ -224,7 +230,7 @@ fn execute_conversion(
     );
 
     if target_upper == "PDF" && (cat == FileCategory::Document || is_text) {
-        let out_path = mossambi_core::resolve_sibling_output_path(input, None, "PDF", None);
+        let out_path = mossambi_core::resolve_clean_sibling_output_path(input, "pdf", None);
         let pdf_cfg = TextPdfSettings {
             page_size: settings.pdf_page_size.clone(),
             font_family: settings.pdf_font_family.clone(),
@@ -253,9 +259,7 @@ fn execute_conversion(
     }
 
     if ["ZIP", "7Z", "TAR", "TAR.GZ", "TAR.XZ", "TAR.ZST"].contains(&target_upper.as_str()) {
-        let parent = input.parent().unwrap_or_else(|| Path::new("."));
-        let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("archive");
-        let out_archive = parent.join(format!("{}.{}", stem, target_upper.to_lowercase()));
+        let out_archive = mossambi_core::resolve_clean_sibling_output_path(input, &target_upper, None);
         let arch_type = ArchiveType::from_extension(&target_upper).unwrap_or(ArchiveType::Zip);
         match pack_archive(&[input.to_path_buf()], &out_archive, arch_type) {
             Ok(()) => return ConversionResult::Success(vec![out_archive]),
@@ -327,6 +331,7 @@ impl eframe::App for MossambiApp {
             match res {
                 ConversionResult::Success(files) => {
                     self.hub_status = "DONE".to_string();
+                    self.completion_time = Some(Instant::now());
                     if let Some(first) = files.first() {
                         self.last_completed_output = Some(first.clone());
                     }
@@ -339,6 +344,22 @@ impl eframe::App for MossambiApp {
             }
         }
 
+        // Auto-fade celebration morph after 5 seconds of inactivity
+        if let Some(completed_at) = self.completion_time {
+            if completed_at.elapsed() >= Duration::from_secs(5) {
+                self.completion_time = None;
+                if self.hub_status == "DONE" {
+                    self.hub_status = self
+                        .current_file
+                        .as_ref()
+                        .and_then(|f| f.extension())
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("READY")
+                        .to_string();
+                }
+            }
+        }
+
         // 3. Progress angle animation
         if self.is_converting {
             self.progress_angle += 0.16;
@@ -347,7 +368,7 @@ impl eframe::App for MossambiApp {
             }
         }
 
-        // 4. Handle Drag-and-Drop Files from Explorer (both active hover and drop release)
+        // 4. Handle Drag-and-Drop Files and Radial Keyboard Shortcuts
         ctx.input(|i| {
             // A. Capture active hovered file while user drags cursor over widget!
             if let Some(hover) = i.raw.hovered_files.first() {
@@ -355,22 +376,95 @@ impl eframe::App for MossambiApp {
                     if self.current_file.as_ref() != Some(path) {
                         self.select_file(path.clone());
                     }
-                }
-            }
-
-            // B. Capture dropped file
-            if !i.raw.dropped_files.is_empty() {
-                if let Some(drop) = i.raw.dropped_files.first() {
-                    if let Some(ref path) = drop.path {
-                        self.select_file(path.clone());
-
-                        // If dropped onto a specific carpel sector, convert immediately!
-                        if let Some(carpel_idx) = self.hovered_carpel {
-                            if let Some(target) = self.current_sectors.get(carpel_idx) {
-                                self.start_conversion(target);
+                } else {
+                    // On Windows, OLE masks path during DragOver; query file under cursor from active Explorer!
+                    #[cfg(target_os = "windows")]
+                    {
+                        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+                        use windows_sys::Win32::Foundation::POINT;
+                        let mut pt = POINT { x: 0, y: 0 };
+                        unsafe { GetCursorPos(&mut pt) };
+                        if let Some(active_path) = mossambi_gui::active_file::get_active_file_under_cursor(pt.x, pt.y) {
+                            if self.current_file.as_ref() != Some(&active_path) {
+                                self.select_file(active_path);
                             }
                         }
                     }
+                }
+            }
+
+            // B. Capture dropped file & instantly convert on petal drop!
+            if !i.raw.dropped_files.is_empty() {
+                if let Some(drop) = i.raw.dropped_files.first() {
+                    let dropped_path = drop.path.clone().or_else(|| {
+                        #[cfg(target_os = "windows")]
+                        {
+                            use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+                            use windows_sys::Win32::Foundation::POINT;
+                            let mut pt = POINT { x: 0, y: 0 };
+                            unsafe { GetCursorPos(&mut pt) };
+                            mossambi_gui::active_file::get_active_file_under_cursor(pt.x, pt.y)
+                        }
+                        #[cfg(not(target_os = "windows"))]
+                        None
+                    });
+
+                    if let Some(path) = dropped_path {
+                        self.select_file(path.clone());
+
+                        let drop_pos = i.pointer.hover_pos()
+                            .or_else(|| i.pointer.latest_pos())
+                            .unwrap_or(self.geometry.center);
+
+                        // If dropped onto a specific carpel sector, convert immediately!
+                        let carpel_idx = self.geometry.hit_test_carpel(drop_pos).or(self.hovered_carpel);
+                        if let Some(idx) = carpel_idx {
+                            if let Some(target) = self.current_sectors.get(idx).copied() {
+                                self.start_conversion(target);
+                            }
+                        } else if self.geometry.hit_test_hub(drop_pos) {
+                            // Center hub drop: convert to top format for this file
+                            if let Some(first_fmt) = self.current_sectors.first().copied() {
+                                self.start_conversion(first_fmt);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // C. Radial Keyboard Shortcuts (Keys 1-8 for sectors, Tab to cycle, Space/Enter to convert)
+            let num_keys = [
+                Key::Num1, Key::Num2, Key::Num3, Key::Num4,
+                Key::Num5, Key::Num6, Key::Num7, Key::Num8,
+            ];
+            for (idx, key) in num_keys.iter().enumerate() {
+                if i.key_pressed(*key) {
+                    self.hovered_carpel = Some(idx);
+                    if let Some(target) = self.current_sectors.get(idx) {
+                        self.quick_settings.set_active_format(target);
+                        self.start_conversion(target);
+                    }
+                }
+            }
+
+            if i.key_pressed(Key::Tab) {
+                let next_idx = match self.hovered_carpel {
+                    Some(cur) => (cur + 1) % 8,
+                    None => 0,
+                };
+                self.hovered_carpel = Some(next_idx);
+                if let Some(fmt) = self.current_sectors.get(next_idx) {
+                    self.quick_settings.set_active_format(fmt);
+                }
+            }
+
+            if i.key_pressed(Key::Space) || i.key_pressed(Key::Enter) {
+                if let Some(carpel_idx) = self.hovered_carpel {
+                    if let Some(target) = self.current_sectors.get(carpel_idx) {
+                        self.start_conversion(target);
+                    }
+                } else if let Some(first_fmt) = self.current_sectors.first() {
+                    self.start_conversion(first_fmt);
                 }
             }
 
@@ -576,6 +670,43 @@ impl MossambiApp {
             if let Some(fmt) = selected_fmt {
                 self.show_catalogue_modal = false;
                 self.start_conversion(&fmt);
+            }
+        }
+
+        // 5. Celebration Morph: Action Pills ("Reveal in Explorer", "Copy Path")
+        if self.hub_status == "DONE" {
+            if let Some(ref completed_path) = self.last_completed_output {
+                let pill_rect = Rect::from_center_size(
+                    Pos2::new(self.geometry.center.x, self.geometry.center.y + 118.0),
+                    Vec2::new(280.0, 34.0),
+                );
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(pill_rect), |ui| {
+                    ui.horizontal_centered(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                        let reveal_btn = ui.add(
+                            egui::Button::new(
+                                egui::RichText::new("🔍 Reveal").size(11.0).color(Color32::WHITE),
+                            )
+                            .fill(Color32::from_rgba_premultiplied(20, 20, 24, 220))
+                            .rounding(16.0),
+                        );
+                        if reveal_btn.clicked() {
+                            open_in_file_manager(completed_path);
+                        }
+
+                        let copy_btn = ui.add(
+                            egui::Button::new(
+                                egui::RichText::new("📋 Copy Path").size(11.0).color(Color32::WHITE),
+                            )
+                            .fill(Color32::from_rgba_premultiplied(20, 20, 24, 220))
+                            .rounding(16.0),
+                        );
+                        if copy_btn.clicked() {
+                            ctx.copy_text(completed_path.display().to_string());
+                            self.status_message = "Path copied to clipboard!".to_string();
+                        }
+                    });
+                });
             }
         }
     }
