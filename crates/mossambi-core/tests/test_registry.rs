@@ -51,6 +51,40 @@ fn test_pantone_certified_swatches() {
 }
 
 #[test]
+fn test_dynamic_wheel_layout_flac_example() {
+    let sectors = UniversalRegistry::get_dynamic_wheel_sectors(FileCategory::Audio, "FLAC");
+    assert!(sectors.len() >= 6 && sectors.len() <= 8, "Wheel must have 6-8 choices");
+    
+    // Check WAV uncompressed and ALAC lossless
+    assert_eq!(sectors[0].format, "WAV");
+    assert_eq!(sectors[0].nature, mossambi_core::FormatNature::Uncompressed);
+    assert_eq!(sectors[1].format, "ALAC");
+    assert_eq!(sectors[1].nature, mossambi_core::FormatNature::Lossless);
+
+    // Check MP3 lossy warning
+    assert_eq!(sectors[2].format, "MP3");
+    assert_eq!(sectors[2].nature, mossambi_core::FormatNature::Lossy);
+    assert!(sectors[2].quality_warning.is_some());
+
+    // Check MORE and ALL
+    let has_more = sectors.iter().any(|s| s.is_more && s.format == "MORE");
+    let has_all = sectors.iter().any(|s| s.is_all && s.format == "ALL");
+    assert!(has_more, "Must have MORE action to browse catalogue");
+    assert!(has_all, "Must have ALL dynamic compatible action");
+}
+
+#[test]
+fn test_search_catalogue() {
+    let flac_results = UniversalRegistry::search_catalogue("FLAC");
+    assert!(!flac_results.is_empty());
+    assert_eq!(flac_results[0].extension, "FLAC");
+    assert!(flac_results[0].supports_zero_loss);
+
+    let all_catalog = UniversalRegistry::search_catalogue("");
+    assert!(all_catalog.len() >= 30, "Catalog must index all major formats");
+}
+
+#[test]
 fn test_platform_arch_info() {
     let (os, arch) = get_system_arch_info();
     assert!(!os.is_empty());

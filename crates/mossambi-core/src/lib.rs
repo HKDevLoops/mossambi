@@ -7,7 +7,10 @@ pub mod registry;
 
 pub use config::{MossambiConfig, OutputMode, ThemeMode};
 pub use pantone::{CitrusShade, PantoneColor, PantonePalette};
-pub use registry::{FileCategory, FormatInfo, UniversalRegistry};
+pub use registry::{
+    DynamicWheelSector, FileCategory, FormatInfo, FormatNature, FormatSpecification,
+    UniversalRegistry,
+};
 
 use std::path::{Path, PathBuf};
 

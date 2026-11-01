@@ -214,7 +214,13 @@ impl CitrusGeometry {
                 TEXT_DARK
             };
 
-            let display_text = if is_all { "⭐ ALL" } else { fmt_name };
+            let display_text = if is_all {
+                "⭐ ALL"
+            } else if fmt_name == "MORE" {
+                "🔍 MORE"
+            } else {
+                fmt_name
+            };
 
             painter.text(
                 text_pos,

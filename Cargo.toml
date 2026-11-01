@@ -56,3 +56,5 @@ mossambi-codec = { path = "crates/mossambi-codec" }
 mossambi-archive = { path = "crates/mossambi-archive" }
 mossambi-exam = { path = "crates/mossambi-exam" }
 mossambi-hwaccel = { path = "crates/mossambi-hwaccel" }
+mossambi-tui = { path = "crates/mossambi-tui" }
+mossambi-gui = { path = "crates/mossambi-gui" }

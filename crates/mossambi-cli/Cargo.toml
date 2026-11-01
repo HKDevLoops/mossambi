@@ -17,6 +17,8 @@ mossambi-codec = { workspace = true }
 mossambi-archive = { workspace = true }
 mossambi-exam = { workspace = true }
 mossambi-hwaccel = { workspace = true }
+mossambi-tui = { workspace = true }
+crossterm = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -24,3 +26,6 @@ anyhow = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 dunce = { workspace = true }
+
+[dev-dependencies]
+image = { workspace = true }

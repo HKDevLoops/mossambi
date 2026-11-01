@@ -2283,14 +2283,17 @@ version = "2.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "crossterm",
  "dunce",
  "env_logger",
+ "image",
  "log",
  "mossambi-archive",
  "mossambi-codec",
  "mossambi-core",
  "mossambi-exam",
  "mossambi-hwaccel",
+ "mossambi-tui",
  "serde",
  "serde_json",
 ]

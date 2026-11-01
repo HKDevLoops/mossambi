@@ -7,6 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 description = "Terminal User Interface (TUI) for Mossambi with Ratatui"
 
+[lib]
+name = "mossambi_tui"
+path = "src/lib.rs"
+
 [[bin]]
 name = "mossambi-tui"
 path = "src/main.rs"

@@ -4,8 +4,11 @@
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use crossterm::tty::IsTty;
 use mossambi_archive::{pack_archive, unpack_archive, ArchiveType};
-use mossambi_codec::{transcode_file, transcode_to_all_formats, LosslessMode};
+use mossambi_codec::{
+    transcode_file, transcode_to_all_formats, verify_conversion_fidelity, LosslessMode,
+};
 use mossambi_core::{
     get_system_arch_info, MossambiConfig, ThemeMode, UniversalRegistry,
 };
@@ -134,6 +137,47 @@ pub enum Commands {
     /// Launch the interactive full-screen Terminal User Interface (Ratatui)
     Tui,
 
+    /// Verify mathematical zero-loss fidelity (0.00% loss report) between two files
+    Verify {
+        /// Original source file
+        source: PathBuf,
+        /// Converted target file
+        target: PathBuf,
+    },
+
+    /// Search across the 200+ format registry and catalogue
+    Catalogue {
+        /// Search query (e.g. 'flac', 'pdf', 'lossless', 'archive')
+        #[arg(default_value = "")]
+        query: String,
+    },
+
+    /// Prepare image/document for Indian competitive exam / job recruitment portal
+    UploadReady {
+        /// Source image or document
+        input: PathBuf,
+        /// Exam preset (e.g. upsc-photo, upsc-signature, ssc-photo, ibps-document)
+        #[arg(long = "preset")]
+        preset: Option<String>,
+        #[arg(long = "width")]
+        width: Option<u32>,
+        #[arg(long = "height")]
+        height: Option<u32>,
+        #[arg(long = "dpi")]
+        dpi: Option<u32>,
+        #[arg(long = "min-kb")]
+        min_kb: Option<u64>,
+        #[arg(long = "max-kb")]
+        max_kb: Option<u64>,
+        #[arg(long = "whiten")]
+        whiten: bool,
+        #[arg(short = 'o', long = "output")]
+        output_dir: Option<PathBuf>,
+    },
+
+    /// Launch or summon the Sweet Lime Resident Radial Widget overlay
+    Widget,
+
     /// Launch or summon the Desktop Radial Widget and macOS-Styled GUI
     Gui,
 
@@ -176,6 +220,31 @@ fn main() -> Result<()> {
             Commands::Hw => handle_hw(cli.json),
             Commands::Tui => handle_tui(),
             Commands::Gui => handle_gui(),
+            Commands::Widget => handle_widget(),
+            Commands::Verify { source, target } => handle_verify(&source, &target, cli.json),
+            Commands::Catalogue { query } => handle_catalogue(&query, cli.json),
+            Commands::UploadReady {
+                input,
+                preset,
+                width,
+                height,
+                dpi,
+                min_kb,
+                max_kb,
+                whiten,
+                output_dir,
+            } => handle_exam(
+                &input,
+                preset.as_deref(),
+                width,
+                height,
+                dpi,
+                min_kb,
+                max_kb,
+                whiten,
+                output_dir.as_deref(),
+                cli.json,
+            ),
             Commands::Config { action, key, value } => handle_config(&action, key.as_deref(), value.as_deref(), cli.json),
         };
     }
@@ -219,7 +288,12 @@ fn main() -> Result<()> {
         return handle_info(&input, cli.json);
     }
 
-    // No arguments provided: print summary banner and help
+    // No arguments provided:
+    // If run interactively in a terminal, launch the full-screen Apple TUI directly!
+    if std::io::stdout().is_tty() {
+        return handle_tui();
+    }
+
     print_welcome_banner();
     Ok(())
 }
@@ -337,6 +411,8 @@ fn handle_exam(
             min_bytes: min_kb.unwrap_or(20) * 1024,
             max_bytes: max_kb.unwrap_or(50) * 1024,
             normalize_white_balance: whiten,
+            positioning: mossambi_exam::PositioningMode::AspectFit,
+            background_color: [255, 255, 255],
         },
     };
 
@@ -586,29 +662,48 @@ fn handle_hw(as_json: bool) -> Result<()> {
 }
 
 fn handle_tui() -> Result<()> {
-    // Launch mossambi-tui binary or internal runner
-    let exe = std::env::current_exe()?
-        .parent()
-        .map(|p| p.join("mossambi-tui"))
-        .unwrap_or_else(|| PathBuf::from("mossambi-tui"));
+    // Launch directly via internal pure Rust runner
+    mossambi_tui::run()
+}
 
-    if exe.exists() {
-        let status = Command::new(&exe).status()?;
-        if !status.success() {
-            bail!("TUI process exited with status: {}", status);
-        }
+fn handle_verify(source: &Path, target: &Path, as_json: bool) -> Result<()> {
+    let report = verify_conversion_fidelity(source, target)?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        // Fallback: execute cargo run -p mossambi-tui
-        println!("Launching Mossambi Terminal User Interface...");
-        let status = Command::new("cargo")
-            .args(["run", "-p", "mossambi-tui"])
-            .status()?;
-        if !status.success() {
-            bail!("Failed to launch mossambi-tui");
-        }
+        println!("{}", report.format_terminal());
     }
-
     Ok(())
+}
+
+fn handle_catalogue(query: &str, as_json: bool) -> Result<()> {
+    let results = UniversalRegistry::search_catalogue(query);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&results)?);
+    } else {
+        println!("🍋 Mossambi Universal Format Catalogue (200+ Formats)");
+        println!("Query: '{}' ({} matching format(s))", query, results.len());
+        println!("--------------------------------------------------------------------------------");
+        println!("{:<8} | {:<12} | {:<14} | {:<10} | NAME", "EXT", "CATEGORY", "NATURE", "ZERO-LOSS");
+        println!("--------------------------------------------------------------------------------");
+        for spec in results {
+            println!(
+                "{:<8} | {:<12} | {:<14} | {:<10} | {}",
+                spec.extension,
+                format!("{:?}", spec.category),
+                spec.nature.badge_label(),
+                if spec.supports_zero_loss { "✓ Guaranteed" } else { "⚠️ Lossy" },
+                spec.display_name
+            );
+        }
+        println!("--------------------------------------------------------------------------------");
+    }
+    Ok(())
+}
+
+fn handle_widget() -> Result<()> {
+    println!("🍊 Summoning Mossambi Sweet Lime Resident Radial Widget overlay...");
+    handle_gui()
 }
 
 fn handle_gui() -> Result<()> {

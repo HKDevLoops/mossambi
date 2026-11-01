@@ -89,3 +89,82 @@ fn test_cli_text_to_pdf_mv_grammar() {
 
     let _ = fs::remove_dir_all(&test_dir);
 }
+
+#[test]
+fn test_cli_catalogue_search() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    let out = Command::new(&bin)
+        .args(["catalogue", "flac"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("FLAC"));
+    assert!(stdout.contains("Guaranteed"));
+}
+
+#[test]
+fn test_cli_verify_zero_loss() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    let test_dir = std::env::temp_dir().join("mossambi_cli_test_verify");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).unwrap();
+
+    let txt_file = test_dir.join("document.txt");
+    fs::write(&txt_file, b"Fidelity test text payload\n").unwrap();
+
+    // Convert to PDF
+    let conv = Command::new(&bin)
+        .args([txt_file.to_str().unwrap(), "pdf"])
+        .output()
+        .unwrap();
+    assert!(conv.status.success());
+
+    let pdf_file = test_dir.join("document_converted.pdf");
+    assert!(pdf_file.exists());
+
+    // Verify mathematical quality
+    let ver_out = Command::new(&bin)
+        .args(["verify", txt_file.to_str().unwrap(), pdf_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(ver_out.status.success());
+    let stdout = String::from_utf8_lossy(&ver_out.stdout);
+    assert!(stdout.contains("VERIFIED 0.00% ZERO-LOSS") || stdout.contains("Vector Layout Preservation"));
+
+    let _ = fs::remove_dir_all(&test_dir);
+}
+
+#[test]
+fn test_cli_upload_ready() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    let test_dir = std::env::temp_dir().join("mossambi_cli_test_upload");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).unwrap();
+
+    let img_file = test_dir.join("applicant.png");
+    let img: image::RgbImage = image::ImageBuffer::new(500, 600);
+    img.save(&img_file).unwrap();
+
+    let out = Command::new(&bin)
+        .args(["upload-ready", img_file.to_str().unwrap(), "--preset", "upsc-photo"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Exam") || stdout.contains("UPSC"));
+
+    let _ = fs::remove_dir_all(&test_dir);
+}

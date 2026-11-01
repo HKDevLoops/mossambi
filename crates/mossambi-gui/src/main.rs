@@ -60,6 +60,10 @@ pub struct MossambiApp {
     press_start: Option<(Instant, usize)>,
     popover_active_sector: Option<usize>,
 
+    // Format Catalogue Modal
+    pub show_catalogue_modal: bool,
+    pub catalogue_search_query: String,
+
     // Background worker channels
     result_receiver: Receiver<ConversionResult>,
     result_sender: Sender<ConversionResult>,
@@ -92,6 +96,9 @@ impl Default for MossambiApp {
             press_start: None,
             popover_active_sector: None,
 
+            show_catalogue_modal: false,
+            catalogue_search_query: String::new(),
+
             result_receiver: rx,
             result_sender: tx,
         }
@@ -115,6 +122,11 @@ impl MossambiApp {
     }
 
     pub fn start_conversion(&mut self, target_format: &str) {
+        if target_format == "MORE" {
+            self.show_catalogue_modal = true;
+            return;
+        }
+
         let input_file = match self.current_file.clone() {
             Some(f) => f,
             None => {
@@ -170,6 +182,8 @@ fn execute_conversion(
             height_px: settings.exam_height,
             dpi: settings.exam_dpi,
             normalize_white_balance: settings.exam_whiten,
+            positioning: mossambi_exam::PositioningMode::CenterCrop,
+            background_color: [255, 255, 255],
         };
 
         let parent = input.parent().unwrap_or_else(|| Path::new("."));
@@ -514,6 +528,55 @@ impl MossambiApp {
                 &mut self.quick_settings,
                 || self.popover_active_sector = None,
             );
+        }
+
+        // 4. Render Format Catalogue Modal if requested via MORE sector
+        if self.show_catalogue_modal {
+            let mut close_modal = false;
+            let mut selected_fmt: Option<String> = None;
+
+            egui::Window::new("🔍 Mossambi Format Catalogue (200+ Formats)")
+                .collapsible(false)
+                .resizable(false)
+                .fixed_size(Vec2::new(330.0, 310.0))
+                .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Search:");
+                        ui.text_edit_singleline(&mut self.catalogue_search_query);
+                        if ui.button("✖ Close").clicked() {
+                            close_modal = true;
+                        }
+                    });
+                    ui.separator();
+                    egui::ScrollArea::vertical().max_height(230.0).show(ui, |ui| {
+                        let results = UniversalRegistry::search_catalogue(&self.catalogue_search_query);
+                        for spec in results {
+                            ui.horizontal(|ui| {
+                                let badge_color = match spec.nature {
+                                    mossambi_core::FormatNature::Lossless => Color32::from_rgb(40, 180, 40),
+                                    mossambi_core::FormatNature::Uncompressed => Color32::from_rgb(0, 160, 220),
+                                    mossambi_core::FormatNature::Lossy => Color32::from_rgb(230, 130, 20),
+                                    mossambi_core::FormatNature::Specialized => Color32::from_rgb(170, 90, 210),
+                                };
+
+                                if ui.button(egui::RichText::new(spec.extension).strong()).clicked() {
+                                    selected_fmt = Some(spec.extension.to_string());
+                                }
+                                ui.colored_label(badge_color, format!("[{}]", spec.nature.badge_label()));
+                                ui.label(egui::RichText::new(spec.display_name).size(11.0));
+                            });
+                        }
+                    });
+                });
+
+            if close_modal {
+                self.show_catalogue_modal = false;
+            }
+            if let Some(fmt) = selected_fmt {
+                self.show_catalogue_modal = false;
+                self.start_conversion(&fmt);
+            }
         }
     }
 }

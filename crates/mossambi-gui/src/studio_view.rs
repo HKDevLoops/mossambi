@@ -446,6 +446,8 @@ impl StudioView {
                             height_px: settings.exam_height,
                             dpi: settings.exam_dpi,
                             normalize_white_balance: settings.exam_whiten,
+                            positioning: mossambi_exam::PositioningMode::CenterCrop,
+                            background_color: [255, 255, 255],
                         };
 
                         let parent = path.parent().unwrap_or_else(|| Path::new("."));

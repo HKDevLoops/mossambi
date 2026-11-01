@@ -48,17 +48,45 @@ fn test_exam_optimizer_binary_search_convergence() {
     assert!(optimized.exists());
 
     let final_bytes = fs::metadata(&optimized).unwrap().len();
-    assert!(
-        final_bytes <= constraint.max_bytes,
-        "Final bytes ({}) must not exceed max boundary ({})",
-        final_bytes,
-        constraint.max_bytes
-    );
+    assert!(final_bytes >= constraint.min_bytes, "Size {} must be >= min {}", final_bytes, constraint.min_bytes);
+    assert!(final_bytes <= constraint.max_bytes, "Size {} must be <= max {}", final_bytes, constraint.max_bytes);
 
-    // Verify dimensions of result
-    let res_img = image::open(&optimized).unwrap();
-    assert_eq!(res_img.width(), constraint.width_px);
-    assert_eq!(res_img.height(), constraint.height_px);
+    let final_img = image::open(&optimized).unwrap();
+    assert_eq!(final_img.width(), constraint.width_px);
+    assert_eq!(final_img.height(), constraint.height_px);
+}
 
+#[test]
+fn test_exam_constraint_conflict_detection() {
+    let test_dir = std::env::temp_dir().join("mossambi_test_exam_conflict");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).unwrap();
+
+    let input_path = test_dir.join("photo.jpg");
+    let img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::new(200, 200);
+    img.save(&input_path).unwrap();
+
+    let output_path = test_dir.join("out.jpg");
+
+    // Impossible constraint: min_bytes > max_bytes
+    let impossible = mossambi_exam::ExamConstraint {
+        name: "Conflicting Constraint".into(),
+        target_format: "JPG".into(),
+        width_px: 500,
+        height_px: 300,
+        dpi: 200,
+        min_bytes: 200 * 1024,
+        max_bytes: 50 * 1024, // min > max!
+        normalize_white_balance: false,
+        positioning: mossambi_exam::PositioningMode::AspectFit,
+        background_color: [255, 255, 255],
+    };
+
+    let report = mossambi_exam::ExamOptimizer::process_upload_ready(&input_path, &output_path, &impossible).unwrap();
+    assert!(!report.constraints_satisfied, "Conflicting constraints must not be marked satisfied");
+    assert!(report.conflict.is_some(), "Must identify constraint conflict");
+    let conflict = report.conflict.unwrap();
+    assert!(conflict.conflicting_parameters.contains(&"min_bytes".to_string()));
+    assert!(conflict.conflicting_parameters.contains(&"max_bytes".to_string()));
     let _ = fs::remove_dir_all(&test_dir);
 }

@@ -3,9 +3,13 @@
 //! vector document/text PDF generation, spreadsheet table transforms, and multi-format batch pipelines.
 
 pub mod pdf_vector;
+pub mod remux;
 
 pub use pdf_vector::{
     convert_image_to_pdf_vector, convert_text_to_pdf_vector, render_text_to_pdf, TextPdfSettings,
+};
+pub use remux::{
+    calculate_sha256, verify_conversion_fidelity, MathematicalQualityReport, MathematicalRemuxType,
 };
 
 use anyhow::{bail, Context, Result};
