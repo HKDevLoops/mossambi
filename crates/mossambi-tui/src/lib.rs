@@ -29,7 +29,7 @@ use mossambi_codec::{
     FileQualityReport, LosslessMode,
 };
 use mossambi_core::{
-    get_system_arch_info, get_system_drives, spawn_async_dir_scan,
+    fuzzy_match, get_system_arch_info, get_system_drives, resolve_file_icon, spawn_async_dir_scan,
     AsyncWorkerPool, DriveInfo, FileItem, MossambiConfig, ScanBatch,
     TaskUpdate,
 };
@@ -341,14 +341,24 @@ impl AppState {
     }
 
     pub fn filtered_entries(&self) -> Vec<&FileItem> {
-        if self.search_query.is_empty() {
+        let q = self.search_query.trim();
+        if q.is_empty() {
             self.current_entries.iter().collect()
         } else {
-            let q = self.search_query.to_lowercase();
-            self.current_entries
+            let mut scored: Vec<(&FileItem, i64)> = self
+                .current_entries
                 .iter()
-                .filter(|e| e.name.to_lowercase().contains(&q))
-                .collect()
+                .filter_map(|e| {
+                    let score = fuzzy_match(q, &e.name)?;
+                    Some((e, score))
+                })
+                .collect();
+            scored.sort_by(|(a, score_a), (b, score_b)| {
+                score_b.cmp(score_a)
+                    .then_with(|| b.is_dir.cmp(&a.is_dir))
+                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            });
+            scored.into_iter().map(|(item, _)| item).collect()
         }
     }
 
@@ -1141,14 +1151,15 @@ fn draw_miller_view(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThe
         .iter()
         .take(25)
         .map(|item| {
-            let icon = if item.is_dir { "📁 " } else { "📄 " };
+            let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+            let icon = icon_spec.glyph;
             let is_curr = state.current_dir.file_name().map(|n| n == item.name.as_str()).unwrap_or(false);
             let style = if is_curr {
                 Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(palette.text_muted)
             };
-            ListItem::new(format!("{}{}", icon, item.name)).style(style)
+            ListItem::new(format!("{} {}", icon, item.name)).style(style)
         })
         .collect();
 
@@ -1177,7 +1188,8 @@ fn draw_miller_view(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThe
             let is_sel = i == state.selected_file_idx;
             let is_checked = state.selected_paths.contains(&item.path);
             let check_mark = if is_checked { "[x] " } else { "[ ] " };
-            let icon = if item.is_dir { "📁 " } else { "📄 " };
+            let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+            let icon = icon_spec.glyph;
 
             let mut style = if is_sel {
                 Style::default().fg(Color::Black).bg(palette.accent).add_modifier(Modifier::BOLD)
@@ -1191,7 +1203,7 @@ fn draw_miller_view(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThe
                 style = style.fg(palette.gold).add_modifier(Modifier::BOLD);
             }
 
-            let text = format!("{}{}{} ({})", check_mark, icon, item.name, item.formatted_size());
+            let text = format!("{}{} {} ({})", check_mark, icon, item.name, item.formatted_size());
             ListItem::new(text).style(style)
         })
         .collect();
@@ -1235,7 +1247,8 @@ fn draw_fullscreen_view(f: &mut Frame, state: &AppState, area: Rect, palette: Tu
             let is_sel = i == state.selected_file_idx;
             let is_checked = state.selected_paths.contains(&item.path);
             let check_mark = if is_checked { "[x]" } else { "[ ]" };
-            let icon = if item.is_dir { "📁" } else { "📄" };
+            let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+            let icon = icon_spec.glyph;
 
             let style = if is_sel {
                 Style::default().fg(Color::Black).bg(palette.accent).add_modifier(Modifier::BOLD)

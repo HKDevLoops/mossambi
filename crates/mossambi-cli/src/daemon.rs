@@ -427,20 +427,20 @@ fn spawn_widget_at(x: i32, y: i32) {
 }
 
 fn spawn_widget_at_with_files(x: i32, y: i32, files: &[std::path::PathBuf], active_drag: bool) {
-    #[cfg(target_os = "windows")]
-    let bin = "mossambi-widget.exe";
-    #[cfg(not(target_os = "windows"))]
-    let bin = "mossambi-widget";
+    let mut cmd = if let Ok(exe) = std::env::current_exe() {
+        let mut c = std::process::Command::new(exe);
+        c.arg("widget");
+        c
+    } else {
+        #[cfg(target_os = "windows")]
+        let bin = "mossambi.exe";
+        #[cfg(not(target_os = "windows"))]
+        let bin = "mossambi";
+        let mut c = std::process::Command::new(bin);
+        c.arg("widget");
+        c
+    };
 
-    let mut cmd = std::process::Command::new(bin);
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let local = parent.join(bin);
-            if local.exists() {
-                cmd = std::process::Command::new(local);
-            }
-        }
-    }
     cmd.arg("--pos").arg(format!("{},{}", x, y));
     if active_drag {
         cmd.arg("--active-drag");
@@ -452,19 +452,18 @@ fn spawn_widget_at_with_files(x: i32, y: i32, files: &[std::path::PathBuf], acti
 }
 
 fn spawn_gui_studio() {
-    #[cfg(target_os = "windows")]
-    let bin = "mossambi-gui.exe";
-    #[cfg(not(target_os = "windows"))]
-    let bin = "mossambi-gui";
-
-    let mut cmd = std::process::Command::new(bin);
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let local = parent.join(bin);
-            if local.exists() {
-                cmd = std::process::Command::new(local);
-            }
-        }
-    }
+    let mut cmd = if let Ok(exe) = std::env::current_exe() {
+        let mut c = std::process::Command::new(exe);
+        c.arg("gui");
+        c
+    } else {
+        #[cfg(target_os = "windows")]
+        let bin = "mossambi.exe";
+        #[cfg(not(target_os = "windows"))]
+        let bin = "mossambi";
+        let mut c = std::process::Command::new(bin);
+        c.arg("gui");
+        c
+    };
     let _ = cmd.spawn();
 }

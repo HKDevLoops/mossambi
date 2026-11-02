@@ -18,6 +18,9 @@ mossambi-archive = { workspace = true }
 mossambi-exam = { workspace = true }
 mossambi-hwaccel = { workspace = true }
 mossambi-tui = { workspace = true }
+mossambi-gui = { workspace = true }
+mossambi-widget = { workspace = true }
+eframe = { workspace = true }
 crossterm = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }

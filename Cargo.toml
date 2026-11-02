@@ -60,3 +60,4 @@ mossambi-exam = { path = "crates/mossambi-exam" }
 mossambi-hwaccel = { path = "crates/mossambi-hwaccel" }
 mossambi-tui = { path = "crates/mossambi-tui" }
 mossambi-gui = { path = "crates/mossambi-gui" }
+mossambi-widget = { path = "crates/mossambi-widget" }

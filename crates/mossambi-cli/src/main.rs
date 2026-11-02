@@ -17,7 +17,6 @@ use mossambi_exam::{optimize_exam_media, ExamConstraint};
 use mossambi_hwaccel::detect_hardware_capabilities;
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 mod daemon;
 
@@ -81,6 +80,18 @@ pub struct Cli {
     /// Output results in JSON format for scripts and integrations
     #[arg(long = "json", global = true)]
     pub json: bool,
+
+    /// Launch the full Universal File Explorer & Conversion Studio GUI
+    #[arg(long = "gui")]
+    pub gui: bool,
+
+    /// Launch the Sweet Lime Desktop Radial Widget
+    #[arg(long = "widget")]
+    pub widget: bool,
+
+    /// Launch the interactive full-screen Terminal User Interface
+    #[arg(long = "tui")]
+    pub tui: bool,
 
     /// Explicit subcommands
     #[command(subcommand)]
@@ -193,7 +204,19 @@ pub enum Commands {
     },
 
     /// Launch or summon the Sweet Lime Resident Radial Widget overlay
-    Widget,
+    Widget {
+        /// Optional X,Y spawn coordinates (e.g. 500,400)
+        #[arg(long = "pos")]
+        pos: Option<String>,
+
+        /// Flag indicating widget was awakened by active mouse drag
+        #[arg(long = "active-drag")]
+        active_drag: bool,
+
+        /// Initial file to load into the widget
+        #[arg(value_name = "FILE")]
+        file: Option<PathBuf>,
+    },
 
     /// Launch or summon the Desktop Radial Widget and macOS-Styled GUI
     Gui,
@@ -262,6 +285,16 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    if cli.gui {
+        return handle_gui();
+    }
+    if cli.widget {
+        return handle_widget(None, false, None);
+    }
+    if cli.tui {
+        return handle_tui();
+    }
+
     // Check if an explicit subcommand was requested
     if let Some(cmd) = cli.command {
         return match cmd {
@@ -286,7 +319,7 @@ fn main() -> Result<()> {
             Commands::Hw => handle_hw(cli.json),
             Commands::Tui => handle_tui(),
             Commands::Gui => handle_gui(),
-            Commands::Widget => handle_widget(),
+            Commands::Widget { pos, active_drag, file } => handle_widget(pos.as_deref(), active_drag, file),
             Commands::Verify { source, target } => handle_verify(&source, &target, cli.json),
             Commands::Catalogue { query } => handle_catalogue(&query, cli.json),
             Commands::UploadReady {
@@ -372,8 +405,8 @@ fn main() -> Result<()> {
         return handle_tui();
     }
 
-    print_welcome_banner();
-    Ok(())
+    // Double-clicked or launched without console arguments: launch full Studio GUI directly
+    handle_gui()
 }
 
 fn handle_convert(
@@ -807,59 +840,23 @@ fn handle_catalogue(query: &str, as_json: bool) -> Result<()> {
     Ok(())
 }
 
-fn handle_widget() -> Result<()> {
-    println!("🍊 Summoning Mossambi Sweet Lime Resident Radial Widget overlay...");
-    let current_exe = std::env::current_exe()?;
-    let current_dir = current_exe.parent().unwrap_or_else(|| Path::new("."));
-    let candidates = vec![
-        current_dir.join("mossambi-widget.exe"),
-        current_dir.join("mossambi-widget"),
-        PathBuf::from("mossambi-widget.exe"),
-        PathBuf::from("target/release/mossambi-widget.exe"),
-        PathBuf::from("target/debug/mossambi-widget.exe"),
-    ];
-
-    let found = candidates.into_iter().find(|p| p.exists());
-
-    if let Some(widget_path) = found {
-        Command::new(&widget_path).spawn()?;
-        println!("✓ Native Mossambi Radial Fruit Widget launched in background ({})", widget_path.display());
-    } else {
-        println!("Launching Mossambi Radial Widget via cargo run -p mossambi-widget...");
-        Command::new("cargo")
-            .args(["run", "-p", "mossambi-widget"])
-            .spawn()?;
-        println!("✓ Mossambi Radial Fruit Widget spawned.");
+fn handle_widget(pos: Option<&str>, _active_drag: bool, file: Option<PathBuf>) -> Result<()> {
+    let mut initial_pos: Option<eframe::egui::Pos2> = None;
+    if let Some(pos_str) = pos {
+        let parts: Vec<&str> = pos_str.split(',').collect();
+        if parts.len() == 2 {
+            if let (Ok(x), Ok(y)) = (parts[0].trim().parse::<f32>(), parts[1].trim().parse::<f32>()) {
+                initial_pos = Some(eframe::egui::Pos2::new(x - 200.0, y - 200.0));
+            }
+        }
     }
-    Ok(())
+    mossambi_widget::run_widget_with_args(initial_pos, file)
+        .map_err(|e| anyhow::anyhow!("Radial Widget error: {}", e))
 }
 
 fn handle_gui() -> Result<()> {
-    println!("🍋 Launching Mossambi Universal File Conversion Studio...");
-    // Launch native pure Rust mossambi-gui binary
-    let current_exe = std::env::current_exe()?;
-    let current_dir = current_exe.parent().unwrap_or_else(|| Path::new("."));
-    let candidates = vec![
-        current_dir.join("mossambi-gui.exe"),
-        current_dir.join("mossambi-gui"),
-        PathBuf::from("mossambi-gui.exe"),
-        PathBuf::from("target/release/mossambi-gui.exe"),
-        PathBuf::from("target/debug/mossambi-gui.exe"),
-    ];
-
-    let found = candidates.into_iter().find(|p| p.exists());
-
-    if let Some(gui_path) = found {
-        Command::new(&gui_path).spawn()?;
-        println!("✓ Native Mossambi Desktop Studio launched in background ({})", gui_path.display());
-    } else {
-        println!("Launching Mossambi Desktop Studio via cargo run -p mossambi-gui...");
-        Command::new("cargo")
-            .args(["run", "-p", "mossambi-gui"])
-            .spawn()?;
-        println!("✓ Mossambi Desktop Studio spawned.");
-    }
-    Ok(())
+    mossambi_gui::run_studio()
+        .map_err(|e| anyhow::anyhow!("Studio GUI error: {}", e))
 }
 
 fn handle_themes(as_json: bool) -> Result<()> {

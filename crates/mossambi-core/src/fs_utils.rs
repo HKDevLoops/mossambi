@@ -277,3 +277,74 @@ pub fn parse_breadcrumbs(path: &Path) -> Vec<BreadcrumbSegment> {
 
     segments
 }
+
+/// Recursively copies a file or directory tree to destination, returning total bytes copied.
+pub fn copy_entry_recursive(src: &Path, dest: &Path) -> std::io::Result<u64> {
+    if src.is_dir() {
+        std::fs::create_dir_all(dest)?;
+        let mut total = 0u64;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let entry_path = entry.path();
+            let dest_child = dest.join(entry.file_name());
+            total += copy_entry_recursive(&entry_path, &dest_child)?;
+        }
+        Ok(total)
+    } else {
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(src, dest)
+    }
+}
+
+/// Moves a file or directory safely.
+/// Attempts atomic rename first; if cross-device move fails, falls back to recursive copy + remove.
+pub fn move_entry(src: &Path, dest: &Path) -> std::io::Result<()> {
+    if let Err(_rename_err) = std::fs::rename(src, dest) {
+        // Fallback for cross-filesystem / cross-drive boundaries
+        copy_entry_recursive(src, dest)?;
+        remove_entry_recursive(src)?;
+    }
+    Ok(())
+}
+
+/// Recursively removes a file, symlink, or directory tree safely.
+pub fn remove_entry_recursive(path: &Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else if path.exists() {
+        std::fs::remove_file(path)
+    } else {
+        Ok(())
+    }
+}
+
+/// Resolves a non-colliding destination path for paste operations (e.g., "file - Copy.txt").
+pub fn resolve_unique_paste_path(dest: &Path) -> PathBuf {
+    if !dest.exists() {
+        return dest.to_path_buf();
+    }
+
+    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+    let stem = dest.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext_suffix = if let Some(ext) = dest.extension().and_then(|s| s.to_str()) {
+        format!(".{}", ext)
+    } else {
+        String::new()
+    };
+
+    let first_try = parent.join(format!("{} - Copy{}", stem, ext_suffix));
+    if !first_try.exists() {
+        return first_try;
+    }
+
+    let mut counter = 2;
+    loop {
+        let candidate = parent.join(format!("{} - Copy ({}){}", stem, counter, ext_suffix));
+        if !candidate.exists() {
+            return candidate;
+        }
+        counter += 1;
+    }
+}
