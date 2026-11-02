@@ -1,0 +1,3193 @@
+//! File Pilot-Grade High-Performance File Explorer for Mossambi Studio
+//!
+//! Features:
+//! - Sub-10MB Lightweight Architecture with zero-lag async directory scanning
+//! - 100% Native Translucent Acrylic & Tabbed Mica Glass integration (Zero opaque blocks)
+//! - Navigation History Engine: Back (Alt+Left), Forward (Alt+Right), Up (Alt+Up/Backspace), Refresh (F5)
+//! - System Drives Sidebar with Real-Time Storage Space Usage Meters (GB free of total)
+//! - Quick Access Bookmarks (Desktop, Downloads, Documents, Pictures, Videos, Music, Home)
+//! - Clickable Breadcrumbs Path Bar with Instant Jump & Direct Path Editing (Ctrl+L / Alt+D)
+//! - Multi-View Modes: Details / Table View and Grid / Tiles View with Toolbar Toggle
+//! - Multi-Category Filter Tabs: All, Images, Audio, Video, Docs, Archives, Code with Live Count Badges
+//! - Interactive Column Sorting: Name, Type, Size, Date with Ascending/Descending Toggle
+//! - Full File Operations: In-Place Rename (F2), New Folder (Ctrl+Shift+N), Copy (Ctrl+C), Cut (Ctrl+X), Paste (Ctrl+V), Delete
+//! - macOS Quick Look / Peek Display Modal Overlay (Images, Code/Text, Audio/Video, Archives, Hex/SHA-256)
+//! - Universal Drag & Drop Ingestion with Glowing Hover Zone Indicator
+//! - Rich Right-Click Context Menus for files, folders, and canvas background
+
+use crate::gui::macos_theme::ThemePalette;
+use eframe::egui::{self, Color32, Pos2, Rect, Rounding, Stroke, Ui, Vec2};
+use crate::core::{
+    copy_entry_recursive, format_file_size, fuzzy_match, get_system_drives, list_directory_sync, move_entry, parse_breadcrumbs,
+    remove_entry_recursive, resolve_file_icon, resolve_unique_paste_path,
+    spawn_async_dir_scan, DriveInfo, FileItem, GestureKind, KinematicGestureTracker, ScanBatch,
+};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
+use std::time::Instant;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    Details,
+    Grid,
+    Columns,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortColumn {
+    Name,
+    Size,
+    Extension,
+    Date,
+    Permissions,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+impl SortDirection {
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Ascending => Self::Descending,
+            Self::Descending => Self::Ascending,
+        }
+    }
+
+    pub fn indicator(self) -> &'static str {
+        match self {
+            Self::Ascending => "▲",
+            Self::Descending => "▼",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CategoryFilter {
+    All,
+    Images,
+    Audio,
+    Video,
+    Documents,
+    Archives,
+    Code,
+}
+
+impl CategoryFilter {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "🌐 All",
+            Self::Images => "🖼 Images",
+            Self::Audio => "🎵 Audio",
+            Self::Video => "🎬 Video",
+            Self::Documents => "📄 Docs",
+            Self::Archives => "📦 Archives",
+            Self::Code => "💻 Code",
+        }
+    }
+
+    pub fn matches(self, item: &FileItem) -> bool {
+        if self == Self::All {
+            return true;
+        }
+        if item.is_dir {
+            return false;
+        }
+        match self {
+            Self::All => true,
+            Self::Images => matches!(
+                item.extension.as_str(),
+                "JPG" | "JPEG" | "PNG" | "WEBP" | "GIF" | "AVIF" | "TIFF" | "BMP" | "ICO" | "SVG" | "HEIC" | "RAW"
+            ),
+            Self::Audio => matches!(
+                item.extension.as_str(),
+                "MP3" | "WAV" | "FLAC" | "AAC" | "OGG" | "M4A" | "OPUS" | "AIFF" | "WMA"
+            ),
+            Self::Video => matches!(
+                item.extension.as_str(),
+                "MP4" | "MKV" | "MOV" | "AVI" | "WEBM" | "FLV" | "WMV" | "M4V" | "TS"
+            ),
+            Self::Documents => matches!(
+                item.extension.as_str(),
+                "PDF" | "DOC" | "DOCX" | "XLS" | "XLSX" | "PPT" | "PPTX" | "TXT"
+                    | "MD" | "CSV" | "RTF" | "ODT" | "ODS"
+            ),
+            Self::Archives => matches!(
+                item.extension.as_str(),
+                "ZIP" | "TAR" | "GZ" | "XZ" | "ZST" | "7Z" | "BZ2" | "RAR" | "TGZ"
+            ),
+            Self::Code => matches!(
+                item.extension.as_str(),
+                "RS" | "PY" | "JS" | "TS" | "HTML" | "CSS" | "C" | "CPP" | "H"
+                    | "JSON" | "XML" | "YAML" | "YML" | "TOML" | "SH" | "BAT" | "PS1" | "LOG"
+            ),
+        }
+    }
+}
+
+pub struct ExplorerView {
+    pub current_dir: PathBuf,
+    pub entries: Vec<FileItem>,
+    pub selected_paths: HashSet<PathBuf>,
+    pub search_query: String,
+    pub drives: Vec<DriveInfo>,
+
+    // Navigation History
+    pub history: Vec<PathBuf>,
+    pub history_idx: usize,
+
+    // Sorting & View Modes
+    pub view_mode: ViewMode,
+    pub icon_size: f32,
+    pub sort_column: SortColumn,
+    pub sort_direction: SortDirection,
+    pub category_filter: CategoryFilter,
+
+    // Path Editing
+    pub is_editing_path: bool,
+    pub path_edit_buffer: String,
+
+    // File Operations State
+    pub renaming_path: Option<(PathBuf, String)>,
+    pub show_new_folder_dialog: bool,
+    pub new_folder_buffer: String,
+    pub clipboard_paths: Vec<PathBuf>,
+    pub clipboard_is_cut: bool,
+
+    // Async Scanning
+    pub scan_gen: Arc<AtomicU64>,
+    pub scan_tx: Sender<ScanBatch>,
+    pub scan_rx: Receiver<ScanBatch>,
+
+    // Quick Look / Peek Modal Overlay State
+    pub peek_item: Option<FileItem>,
+    pub peek_texture: Option<(PathBuf, egui::TextureHandle)>,
+    pub peek_text_cache: Option<(PathBuf, String)>,
+    pub peek_hash_cache: Option<(PathBuf, String)>,
+
+    // In-Explorer Gesture Tracker
+    pub gesture_tracker: KinematicGestureTracker,
+    pub gesture_active: bool,
+    pub last_triggered_gesture: Option<GestureKind>,
+
+    // Properties Modal State
+    pub properties_item: Option<FileItem>,
+
+    // Vim & Emacs Navigation State
+    pub focused_row: usize,
+    pub last_g_press: Option<Instant>,
+    pub focus_search_requested: bool,
+
+    // macOS Finder & Linux System Features
+    pub show_hidden_files: bool,
+    pub column_subfolder: Option<(PathBuf, Vec<FileItem>)>,
+    pub column_preview_item: Option<FileItem>,
+
+    // Windows 11 & macOS Home Dashboard View
+    pub is_home_view: bool,
+}
+
+impl Default for ExplorerView {
+    fn default() -> Self {
+        let (scan_tx, scan_rx) = channel();
+        let home_opt = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).ok().map(PathBuf::from);
+        let current_dir = home_opt.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let drives = get_system_drives();
+        let scan_gen = Arc::new(AtomicU64::new(1));
+
+        let mut view = Self {
+            current_dir: current_dir.clone(),
+            entries: Vec::new(),
+            selected_paths: HashSet::new(),
+            search_query: String::new(),
+            drives,
+            history: vec![current_dir.clone()],
+            history_idx: 0,
+            view_mode: ViewMode::Details,
+            icon_size: 96.0,
+            sort_column: SortColumn::Name,
+            sort_direction: SortDirection::Ascending,
+            category_filter: CategoryFilter::All,
+            is_editing_path: false,
+            path_edit_buffer: current_dir.to_string_lossy().to_string(),
+            renaming_path: None,
+            show_new_folder_dialog: false,
+            is_home_view: home_opt.is_some(),
+            new_folder_buffer: "New Folder".to_string(),
+            clipboard_paths: Vec::new(),
+            clipboard_is_cut: false,
+            scan_gen: Arc::clone(&scan_gen),
+            scan_tx: scan_tx.clone(),
+            scan_rx,
+            peek_item: None,
+            peek_texture: None,
+            peek_text_cache: None,
+            peek_hash_cache: None,
+            gesture_tracker: KinematicGestureTracker::new(true, true),
+            gesture_active: false,
+            last_triggered_gesture: None,
+            properties_item: None,
+            focused_row: 0,
+            last_g_press: None,
+            focus_search_requested: false,
+            show_hidden_files: false,
+            column_subfolder: None,
+            column_preview_item: None,
+        };
+
+        view.navigate_to(current_dir);
+        view
+    }
+}
+
+impl ExplorerView {
+    /// Navigate to a new directory asynchronously with zero UI hitching
+    pub fn navigate_to(&mut self, dir: PathBuf) {
+        if !dir.exists() {
+            return;
+        }
+
+        // Push to navigation history
+        if self.history.get(self.history_idx) != Some(&dir) {
+            self.history.truncate(self.history_idx + 1);
+            self.history.push(dir.clone());
+            self.history_idx = self.history.len() - 1;
+        }
+
+        self.current_dir = dir.clone();
+        self.path_edit_buffer = dir.to_string_lossy().to_string();
+        self.is_editing_path = false;
+        self.renaming_path = None;
+        self.focused_row = 0;
+
+        let home_opt = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).ok().map(PathBuf::from);
+        self.is_home_view = Some(&dir) == home_opt.as_ref();
+
+        let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
+        spawn_async_dir_scan(
+            dir,
+            new_gen,
+            Arc::clone(&self.scan_gen),
+            self.scan_tx.clone(),
+        );
+    }
+
+    pub fn can_go_back(&self) -> bool {
+        self.history_idx > 0
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        self.history_idx + 1 < self.history.len()
+    }
+
+    pub fn is_home_directory(&self) -> bool {
+        let home_opt = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).ok().map(PathBuf::from);
+        Some(&self.current_dir) == home_opt.as_ref()
+    }
+
+    pub fn go_back(&mut self) {
+        if self.can_go_back() {
+            self.history_idx -= 1;
+            let dir = self.history[self.history_idx].clone();
+            self.current_dir = dir.clone();
+            self.path_edit_buffer = dir.to_string_lossy().to_string();
+            self.is_editing_path = false;
+            let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
+            spawn_async_dir_scan(dir, new_gen, Arc::clone(&self.scan_gen), self.scan_tx.clone());
+        }
+    }
+
+    pub fn go_forward(&mut self) {
+        if self.can_go_forward() {
+            self.history_idx += 1;
+            let dir = self.history[self.history_idx].clone();
+            self.current_dir = dir.clone();
+            self.path_edit_buffer = dir.to_string_lossy().to_string();
+            self.is_editing_path = false;
+            let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
+            spawn_async_dir_scan(dir, new_gen, Arc::clone(&self.scan_gen), self.scan_tx.clone());
+        }
+    }
+
+    /// Process incoming background directory scanning batches
+    pub fn poll_background_scans(&mut self) {
+        while let Ok(batch) = self.scan_rx.try_recv() {
+            if batch.gen == self.scan_gen.load(Ordering::Relaxed) {
+                self.entries = batch.entries;
+            }
+        }
+    }
+
+    /// Filter and sort entries according to active filter, search query, and sort column
+    pub fn filtered_and_sorted_entries(&self) -> Vec<&FileItem> {
+        let q = self.search_query.trim();
+        let is_searching = !q.is_empty();
+
+        let mut scored_list: Vec<(&FileItem, i64)> = self
+            .entries
+            .iter()
+            .filter(|e| self.show_hidden_files || !e.is_hidden)
+            .filter(|e| self.category_filter.matches(e))
+            .filter_map(|e| {
+                if is_searching {
+                    let score = fuzzy_match(q, &e.name)?;
+                    Some((e, score))
+                } else {
+                    Some((e, 0))
+                }
+            })
+            .collect();
+
+        scored_list.sort_by(|(a, score_a), (b, score_b)| {
+            if is_searching && self.sort_column == SortColumn::Name && self.sort_direction == SortDirection::Ascending {
+                return score_b.cmp(score_a)
+                    .then_with(|| b.is_dir.cmp(&a.is_dir))
+                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            }
+
+            if a.is_dir != b.is_dir {
+                return b.is_dir.cmp(&a.is_dir);
+            }
+            let ordering = match self.sort_column {
+                SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortColumn::Size => a.size_bytes.cmp(&b.size_bytes),
+                SortColumn::Extension => a.extension.cmp(&b.extension),
+                SortColumn::Date => a.modified.cmp(&b.modified),
+                SortColumn::Permissions => a.permissions_mode.cmp(&b.permissions_mode),
+            };
+            let directed = match self.sort_direction {
+                SortDirection::Ascending => ordering,
+                SortDirection::Descending => ordering.reverse(),
+            };
+            if is_searching {
+                directed.then_with(|| score_b.cmp(score_a))
+            } else {
+                directed
+            }
+        });
+
+        scored_list.into_iter().map(|(item, _)| item).collect()
+    }
+
+    /// Returns the count of non-folder items matching a category
+    pub fn count_category(&self, filter: CategoryFilter) -> usize {
+        self.entries
+            .iter()
+            .filter(|e| !e.is_dir && filter.matches(e))
+            .count()
+    }
+
+    /// Renders the complete File Pilot-Grade Explorer interface
+    #[allow(clippy::too_many_arguments)]
+    pub fn render(
+        &mut self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        mut on_stage_file: impl FnMut(PathBuf),
+        mut on_transcode_target: impl FnMut(PathBuf, String),
+        mut on_exam_conform: impl FnMut(PathBuf),
+        mut on_pack_archive: impl FnMut(Vec<PathBuf>),
+        mut on_inspect_file: impl FnMut(PathBuf),
+    ) {
+        self.poll_background_scans();
+
+        // 1. External OS Drag & Drop Ingestion
+        let (dropped_files, is_hovered) = ui.input(|i| {
+            (i.raw.dropped_files.clone(), !i.raw.hovered_files.is_empty())
+        });
+
+        if is_hovered {
+            ui.add_space(4.0);
+            let drop_frame = egui::Frame::none()
+                .fill(Color32::from_rgba_premultiplied(120, 190, 32, 50))
+                .stroke(Stroke::new(1.5_f32, palette.accent))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(egui::Margin::symmetric(14.0, 7.0));
+            drop_frame.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("📥 Drop external files or folders here to stage, inspect, or transcode")
+                            .strong()
+                            .color(Color32::from_rgb(215, 255, 120)),
+                    );
+                });
+            });
+            ui.add_space(4.0);
+        }
+
+        if !dropped_files.is_empty() {
+            for file in dropped_files {
+                if let Some(path) = file.path {
+                    if path.is_dir() {
+                        self.navigate_to(path);
+                    } else {
+                        on_stage_file(path);
+                    }
+                }
+            }
+        }
+
+        // 2. Global Explorer Hotkey Interceptions with Vim & Emacs Navigation Engine
+        let is_typing = self.is_editing_path
+            || self.renaming_path.is_some()
+            || self.show_new_folder_dialog
+            || self.properties_item.is_some()
+            || ui.memory(|m| m.focused().is_some());
+
+        let nav_entries: Vec<FileItem> = self.filtered_and_sorted_entries().into_iter().cloned().collect();
+        let total_nav_items = nav_entries.len();
+
+        ui.input(|i| {
+            if i.key_pressed(egui::Key::Escape) {
+                self.peek_item = None;
+                self.peek_texture = None;
+                self.peek_text_cache = None;
+                self.peek_hash_cache = None;
+                self.renaming_path = None;
+                self.show_new_folder_dialog = false;
+                self.properties_item = None;
+            }
+
+            // Vim & Emacs Navigation (Active when not typing in text boxes)
+            if !is_typing {
+                // Vim `j` / Down / Emacs `Ctrl+N`: Cursor Down
+                if total_nav_items > 0
+                    && ((i.key_pressed(egui::Key::J) && !i.modifiers.command && !i.modifiers.ctrl && !i.modifiers.alt)
+                        || i.key_pressed(egui::Key::ArrowDown)
+                        || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::N)))
+                {
+                    self.focused_row = (self.focused_row + 1).min(total_nav_items - 1);
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        self.selected_paths.clear();
+                        self.selected_paths.insert(item.path.clone());
+                    }
+                }
+
+                // Vim `k` / Up / Emacs `Ctrl+P`: Cursor Up
+                if total_nav_items > 0
+                    && ((i.key_pressed(egui::Key::K) && !i.modifiers.command && !i.modifiers.ctrl && !i.modifiers.alt)
+                        || i.key_pressed(egui::Key::ArrowUp)
+                        || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::P)))
+                {
+                    self.focused_row = self.focused_row.saturating_sub(1);
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        self.selected_paths.clear();
+                        self.selected_paths.insert(item.path.clone());
+                    }
+                }
+
+                // Vim `h` / Left / Emacs `Ctrl+B`: Parent Directory
+                if (i.key_pressed(egui::Key::H) && !i.modifiers.command && !i.modifiers.ctrl && !i.modifiers.alt)
+                    || (i.modifiers.alt && i.key_pressed(egui::Key::ArrowLeft))
+                    || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::B))
+                    || i.key_pressed(egui::Key::Backspace)
+                {
+                    if let Some(parent) = self.current_dir.parent() {
+                        let p = parent.to_path_buf();
+                        if !p.as_os_str().is_empty() {
+                            self.navigate_to(p);
+                        }
+                    }
+                }
+
+                // Vim `l` / Right / Enter / Emacs `Ctrl+F`: Enter Directory or Open File
+                if (i.key_pressed(egui::Key::L) && !i.modifiers.command && !i.modifiers.ctrl && !i.modifiers.alt)
+                    || i.key_pressed(egui::Key::Enter)
+                    || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::F))
+                {
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        if item.is_dir {
+                            self.navigate_to(item.path.clone());
+                        } else {
+                            on_stage_file(item.path.clone());
+                        }
+                    }
+                }
+
+                // Vim `gg` / Emacs `Alt+<`: Jump to First Item
+                if (i.key_pressed(egui::Key::G) && !i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.command && !i.modifiers.alt)
+                    || (i.modifiers.alt && i.key_pressed(egui::Key::Comma))
+                {
+                    if i.modifiers.alt {
+                        self.focused_row = 0;
+                        if let Some(item) = nav_entries.first() {
+                            self.selected_paths.clear();
+                            self.selected_paths.insert(item.path.clone());
+                        }
+                    } else {
+                        let now = Instant::now();
+                        if let Some(prev) = self.last_g_press {
+                            if now.duration_since(prev) < std::time::Duration::from_millis(400) {
+                                self.focused_row = 0;
+                                if let Some(item) = nav_entries.first() {
+                                    self.selected_paths.clear();
+                                    self.selected_paths.insert(item.path.clone());
+                                }
+                                self.last_g_press = None;
+                            } else {
+                                self.last_g_press = Some(now);
+                            }
+                        } else {
+                            self.last_g_press = Some(now);
+                        }
+                    }
+                }
+
+                // Vim `G` (Shift+G) / Emacs `Alt+>`: Jump to Last Item
+                if total_nav_items > 0
+                    && ((i.key_pressed(egui::Key::G) && i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.command)
+                        || (i.modifiers.alt && i.key_pressed(egui::Key::Period)))
+                {
+                    self.focused_row = total_nav_items - 1;
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        self.selected_paths.clear();
+                        self.selected_paths.insert(item.path.clone());
+                    }
+                }
+
+                // Vim `/` / Emacs `Ctrl+S`: Focus Search Bar
+                if (i.key_pressed(egui::Key::Slash) && !i.modifiers.ctrl && !i.modifiers.command && !i.modifiers.alt)
+                    || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::S))
+                {
+                    self.focus_search_requested = true;
+                }
+
+                // Vim `v`: Visual Multi-Selection Toggle
+                if i.key_pressed(egui::Key::V) && !i.modifiers.ctrl && !i.modifiers.command && !i.modifiers.alt {
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        if self.selected_paths.contains(&item.path) {
+                            self.selected_paths.remove(&item.path);
+                        } else {
+                            self.selected_paths.insert(item.path.clone());
+                        }
+                    }
+                }
+
+                // Vim `y` / Emacs `Alt+W`: Yank / Copy
+                if (i.key_pressed(egui::Key::Y) && !i.modifiers.ctrl && !i.modifiers.command && !i.modifiers.alt)
+                    || (i.modifiers.alt && i.key_pressed(egui::Key::W))
+                {
+                    if self.selected_paths.is_empty() {
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            self.clipboard_paths = vec![item.path.clone()];
+                        }
+                    } else {
+                        self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+                    }
+                    self.clipboard_is_cut = false;
+                }
+
+                // Emacs `Ctrl+W`: Cut Region
+                if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::W) {
+                    if self.selected_paths.is_empty() {
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            self.clipboard_paths = vec![item.path.clone()];
+                        }
+                    } else {
+                        self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+                    }
+                    self.clipboard_is_cut = true;
+                }
+
+                // Vim `p` / Emacs `Ctrl+Y`: Put / Paste
+                if (i.key_pressed(egui::Key::P) && !i.modifiers.ctrl && !i.modifiers.command && !i.modifiers.alt)
+                    || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::Y))
+                {
+                    let mut pasted = false;
+                    for src in &self.clipboard_paths {
+                        if let Some(file_name) = src.file_name() {
+                            let dest = self.current_dir.join(file_name);
+                            if self.clipboard_is_cut {
+                                let _ = move_entry(src, &dest);
+                            } else {
+                                let unique = resolve_unique_paste_path(&dest);
+                                let _ = copy_entry_recursive(src, &unique);
+                            }
+                            pasted = true;
+                        }
+                    }
+                    if self.clipboard_is_cut {
+                        self.clipboard_paths.clear();
+                        self.clipboard_is_cut = false;
+                    }
+                    if pasted {
+                        self.navigate_to(self.current_dir.clone());
+                    }
+                }
+
+                // Vim `d` (without modifiers): Delete focused/selected
+                if i.key_pressed(egui::Key::D) && !i.modifiers.ctrl && !i.modifiers.command && !i.modifiers.alt {
+                    let mut deleted = false;
+                    if self.selected_paths.is_empty() {
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            let _ = remove_entry_recursive(&item.path);
+                            deleted = true;
+                        }
+                    } else {
+                        for path in &self.selected_paths {
+                            let _ = remove_entry_recursive(path);
+                            deleted = true;
+                        }
+                        self.selected_paths.clear();
+                    }
+                    if deleted {
+                        self.navigate_to(self.current_dir.clone());
+                    }
+                }
+
+                // Vim `r`: In-place Rename
+                if i.key_pressed(egui::Key::R) && !i.modifiers.ctrl && !i.modifiers.command && !i.modifiers.alt {
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        self.renaming_path = Some((item.path.clone(), item.name.clone()));
+                    }
+                }
+
+                // Space: Quick Look / Peek Toggle
+                if i.key_pressed(egui::Key::Space) {
+                    if self.peek_item.is_some() {
+                        self.peek_item = None;
+                        self.peek_texture = None;
+                        self.peek_text_cache = None;
+                        self.peek_hash_cache = None;
+                    } else if let Some(item) = nav_entries.get(self.focused_row) {
+                        self.peek_item = Some(item.clone());
+                    }
+                }
+
+                // Alt+Enter / Cmd+I: Properties Dialog
+                if ((i.modifiers.alt && i.key_pressed(egui::Key::Enter)) || (i.modifiers.command && i.key_pressed(egui::Key::I)))
+                    && !is_typing
+                {
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        self.properties_item = Some(item.clone());
+                    }
+                }
+            }
+
+            // Ctrl+H (Linux) / Cmd+Shift+. (macOS): Toggle Hidden Files
+            if ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::H))
+                || (i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Period))
+            {
+                self.show_hidden_files = !self.show_hidden_files;
+            }
+
+            // Ctrl+Shift+T: Open Terminal in Directory
+            if (i.modifiers.ctrl || i.modifiers.command) && i.modifiers.shift && i.key_pressed(egui::Key::T) {
+                open_terminal_in_dir(&self.current_dir);
+            }
+
+            // Standard Explorer Hotkeys
+            if i.key_pressed(egui::Key::F5) {
+                self.navigate_to(self.current_dir.clone());
+            }
+            if i.modifiers.alt && i.key_pressed(egui::Key::ArrowRight) {
+                self.go_forward();
+            }
+            if (i.modifiers.ctrl || i.modifiers.command) && i.modifiers.shift && i.key_pressed(egui::Key::N) {
+                self.show_new_folder_dialog = true;
+            }
+            if i.key_pressed(egui::Key::F2) {
+                if let Some(item) = nav_entries.get(self.focused_row) {
+                    self.renaming_path = Some((item.path.clone(), item.name.clone()));
+                }
+            }
+            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::L) {
+                self.path_edit_buffer = self.current_dir.to_string_lossy().to_string();
+                self.is_editing_path = true;
+            }
+            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::C) {
+                if self.selected_paths.is_empty() {
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        self.clipboard_paths = vec![item.path.clone()];
+                    }
+                } else {
+                    self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+                }
+                self.clipboard_is_cut = false;
+            }
+            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::X) {
+                if self.selected_paths.is_empty() {
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        self.clipboard_paths = vec![item.path.clone()];
+                    }
+                } else {
+                    self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+                }
+                self.clipboard_is_cut = true;
+            }
+            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::V) {
+                let mut pasted = false;
+                for src in &self.clipboard_paths {
+                    if let Some(file_name) = src.file_name() {
+                        let dest = self.current_dir.join(file_name);
+                        if self.clipboard_is_cut {
+                            let _ = move_entry(src, &dest);
+                        } else {
+                            let unique = resolve_unique_paste_path(&dest);
+                            let _ = copy_entry_recursive(src, &unique);
+                        }
+                        pasted = true;
+                    }
+                }
+                if self.clipboard_is_cut {
+                    self.clipboard_paths.clear();
+                    self.clipboard_is_cut = false;
+                }
+                if pasted {
+                    self.navigate_to(self.current_dir.clone());
+                }
+            }
+            if i.key_pressed(egui::Key::Delete) {
+                let mut deleted = false;
+                if self.selected_paths.is_empty() {
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        let _ = remove_entry_recursive(&item.path);
+                        deleted = true;
+                    }
+                } else {
+                    for path in &self.selected_paths {
+                        let _ = remove_entry_recursive(path);
+                        deleted = true;
+                    }
+                    self.selected_paths.clear();
+                }
+                if deleted {
+                    self.navigate_to(self.current_dir.clone());
+                }
+            }
+        });
+
+        // 3. New Folder Modal Dialog
+        if self.show_new_folder_dialog {
+            let mut close_dialog = false;
+            let mut create_folder = false;
+
+            egui::Window::new("📁 Create New Folder")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .frame(
+                    egui::Frame::window(&ui.ctx().style())
+                        .fill(palette.card_bg)
+                        .stroke(Stroke::new(1.0_f32, palette.border))
+                        .rounding(Rounding::same(10.0))
+                        .inner_margin(egui::Margin::same(16.0)),
+                )
+                .show(ui.ctx(), |ui| {
+                    ui.label(egui::RichText::new("Enter new folder name:").color(palette.text_primary));
+                    ui.add_space(6.0);
+                    let resp = ui.text_edit_singleline(&mut self.new_folder_buffer);
+                    resp.request_focus();
+                    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        create_folder = true;
+                    }
+
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(egui::RichText::new("Create").strong().color(Color32::WHITE)).clicked() {
+                            create_folder = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close_dialog = true;
+                        }
+                    });
+                });
+
+            if create_folder {
+                let clean_name = self.new_folder_buffer.trim();
+                if !clean_name.is_empty() {
+                    let target_dir = self.current_dir.join(clean_name);
+                    let _ = std::fs::create_dir_all(&target_dir);
+                    self.navigate_to(self.current_dir.clone());
+                }
+                self.show_new_folder_dialog = false;
+                self.new_folder_buffer = "New Folder".to_string();
+            } else if close_dialog {
+                self.show_new_folder_dialog = false;
+            }
+        }
+
+        // 4. Rename Item Modal Dialog
+        if let Some((old_path, mut new_name)) = self.renaming_path.clone() {
+            let mut close_dialog = false;
+            let mut do_rename = false;
+
+            egui::Window::new("✏ Rename Item")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .frame(
+                    egui::Frame::window(&ui.ctx().style())
+                        .fill(palette.card_bg)
+                        .stroke(Stroke::new(1.0_f32, palette.border))
+                        .rounding(Rounding::same(10.0))
+                        .inner_margin(egui::Margin::same(16.0)),
+                )
+                .show(ui.ctx(), |ui| {
+                    ui.label(egui::RichText::new("Enter new name:").color(palette.text_primary));
+                    ui.add_space(6.0);
+                    let resp = ui.text_edit_singleline(&mut new_name);
+                    resp.request_focus();
+                    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        do_rename = true;
+                    }
+
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(egui::RichText::new("Rename").strong().color(Color32::WHITE)).clicked() {
+                            do_rename = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close_dialog = true;
+                        }
+                    });
+                });
+
+            if do_rename {
+                let trimmed = new_name.trim();
+                if !trimmed.is_empty() {
+                    if let Some(parent) = old_path.parent() {
+                        let new_path = parent.join(trimmed);
+                        let _ = std::fs::rename(&old_path, &new_path);
+                        self.navigate_to(self.current_dir.clone());
+                    }
+                }
+                self.renaming_path = None;
+            } else if close_dialog {
+                self.renaming_path = None;
+            } else {
+                self.renaming_path = Some((old_path, new_name));
+            }
+        }
+
+        // 5. Explorer Layout: Full Width macOS Finder Canvas
+        ui.vertical(|ui| {
+            // Top Navigation & Breadcrumbs Bar (macOS Toolbar style)
+            self.render_breadcrumb_bar(ui, palette);
+            ui.add_space(6.0);
+
+            // Category Filter Tabs Bar & View Mode Toggle (Segmented control)
+            self.render_category_filter_bar(ui, palette);
+            ui.add_space(6.0);
+
+            // File Table, Grid, or Miller Columns View
+            let avail_h = (ui.available_height() - 28.0).max(120.0);
+            ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), avail_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+                self.render_file_view(
+                    ui,
+                    palette,
+                    &mut on_stage_file,
+                    &mut on_transcode_target,
+                    &mut on_exam_conform,
+                    &mut on_pack_archive,
+                    &mut on_inspect_file,
+                );
+            });
+
+            // macOS Finder Bottom Status Bar (Items, Available Space, Zoom)
+            self.render_status_bar(ui, palette);
+        });
+
+        // 5. Modal Quick Look / Peek Display Overlay (macOS Finder style)
+        self.render_peek_overlay(
+            ui.ctx(),
+            palette,
+            &mut on_transcode_target,
+            &mut on_exam_conform,
+            &mut on_pack_archive,
+            &mut on_inspect_file,
+        );
+
+        // 6. Properties Modal Overlay (Alt+Enter / Right-Click)
+        self.render_properties_modal(ui.ctx(), palette);
+    }
+
+    fn render_breadcrumb_bar(&mut self, ui: &mut Ui, palette: &ThemePalette) {
+        let avail_w = ui.available_width();
+        let search_w = 185.0_f32;
+        let is_compact = avail_w < 700.0;
+
+        if !is_compact {
+            ui.horizontal(|ui| {
+                // Pin Search Box on the Right, give remaining left space to breadcrumb navigation
+                let nav_w = (avail_w - search_w - 20.0).max(180.0);
+                ui.allocate_ui_with_layout(Vec2::new(nav_w, 28.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    self.render_breadcrumb_nav_buttons(ui, palette, nav_w);
+                });
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if !self.search_query.is_empty()
+                        && ui.button("✕").on_hover_text("Clear filter (Esc)").clicked()
+                    {
+                        self.search_query.clear();
+                    }
+                    let box_w = if self.search_query.is_empty() { search_w } else { search_w - 28.0 };
+                    let search_resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.search_query)
+                            .hint_text("🔍 Filter files...")
+                            .desired_width(box_w),
+                    );
+                    if self.focus_search_requested {
+                        search_resp.request_focus();
+                        self.focus_search_requested = false;
+                    }
+                });
+            });
+        } else {
+            // Stacked layout for compact / mobile / narrow viewports
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    self.render_breadcrumb_nav_buttons(ui, palette, avail_w);
+                });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if !self.search_query.is_empty()
+                        && ui.button("✕").on_hover_text("Clear filter (Esc)").clicked()
+                    {
+                        self.search_query.clear();
+                    }
+                    let box_w = if self.search_query.is_empty() { avail_w } else { avail_w - 28.0 };
+                    let search_resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.search_query)
+                            .hint_text("🔍 Filter files...")
+                            .desired_width(box_w),
+                    );
+                    if self.focus_search_requested {
+                        search_resp.request_focus();
+                        self.focus_search_requested = false;
+                    }
+                });
+            });
+        }
+    }
+
+    fn render_breadcrumb_nav_buttons(&mut self, ui: &mut Ui, palette: &ThemePalette, max_w: f32) {
+        // macOS Segmented Navigation Pill: Back & Forward
+        let can_back = self.can_go_back();
+        let back_btn = egui::Button::new("◀")
+            .fill(if can_back { palette.card_bg } else { Color32::TRANSPARENT })
+            .rounding(Rounding { nw: 6.0, sw: 6.0, ne: 0.0, se: 0.0 });
+        if ui.add_enabled(can_back, back_btn).on_hover_text("Back (Alt+Left / h)").clicked() {
+            self.go_back();
+        }
+
+        let can_fwd = self.can_go_forward();
+        let fwd_btn = egui::Button::new("▶")
+            .fill(if can_fwd { palette.card_bg } else { Color32::TRANSPARENT })
+            .rounding(Rounding { nw: 0.0, sw: 0.0, ne: 6.0, se: 6.0 });
+        if ui.add_enabled(can_fwd, fwd_btn).on_hover_text("Forward (Alt+Right)").clicked() {
+            self.go_forward();
+        }
+
+        // Up Folder Button
+        if ui.button(egui::RichText::new("⬆ Up").strong()).on_hover_text("Parent Folder (Alt+Up / Backspace / h)").clicked() {
+            if let Some(parent) = self.current_dir.parent() {
+                let p = parent.to_path_buf();
+                if !p.as_os_str().is_empty() {
+                    self.navigate_to(p);
+                }
+            }
+        }
+
+        // Refresh Button
+        if ui.button("🔄").on_hover_text("Refresh directory (F5)").clicked() {
+            self.navigate_to(self.current_dir.clone());
+        }
+
+        // New Folder Button
+        if ui.button("+ 📁").on_hover_text("New Folder (Ctrl+Shift+N)").clicked() {
+            self.show_new_folder_dialog = true;
+        }
+
+        // Toggle Hidden Dotfiles Button
+        let dot_bg = if self.show_hidden_files { palette.accent } else { palette.card_bg };
+        let dot_fg = if self.show_hidden_files { Color32::WHITE } else { palette.text_secondary };
+        let dot_btn = egui::Button::new(
+            egui::RichText::new(".dotfiles")
+                .size(11.0)
+                .color(dot_fg)
+        )
+        .fill(dot_bg)
+        .rounding(Rounding::same(6.0));
+        if ui.add(dot_btn).on_hover_text("Toggle Hidden / Dotfiles (Ctrl+H / Cmd+Shift+.)").clicked() {
+            self.show_hidden_files = !self.show_hidden_files;
+        }
+
+        ui.separator();
+
+        if self.is_editing_path {
+            let edit_w = (max_w - 220.0).max(120.0);
+            let text_resp = ui.add(
+                egui::TextEdit::singleline(&mut self.path_edit_buffer)
+                    .desired_width(edit_w)
+                    .font(egui::TextStyle::Monospace),
+            );
+            if text_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                let new_p = PathBuf::from(&self.path_edit_buffer);
+                if new_p.exists() {
+                    self.navigate_to(new_p);
+                }
+                self.is_editing_path = false;
+            }
+            if ui.button("Cancel").clicked() {
+                self.is_editing_path = false;
+            }
+        } else {
+            // Interactive Breadcrumb Segments
+            let segments = parse_breadcrumbs(&self.current_dir);
+            let seg_count = segments.len();
+            let (to_skip, has_ellipsis) = if seg_count > 4 && max_w < 550.0 {
+                (seg_count - 3, true)
+            } else {
+                (0, false)
+            };
+
+            if has_ellipsis {
+                if ui.button("…").on_hover_text("Intermediate folders").clicked() {
+                    if let Some(first) = segments.first() {
+                        self.navigate_to(first.target_path.clone());
+                    }
+                }
+                ui.label(egui::RichText::new("›").color(palette.text_muted));
+            }
+
+            for seg in segments.into_iter().skip(to_skip) {
+                let is_current = seg.target_path == self.current_dir;
+                let btn = egui::Button::new(
+                    egui::RichText::new(&seg.label)
+                        .strong()
+                        .color(if is_current { palette.accent } else { palette.text_primary }),
+                )
+                .fill(if is_current { palette.card_hover } else { palette.card_bg })
+                .rounding(Rounding::same(6.0));
+
+                if ui.add(btn).clicked() {
+                    self.navigate_to(seg.target_path);
+                }
+                ui.label(egui::RichText::new("›").color(palette.text_muted));
+            }
+
+            // Edit Path button
+            if ui.button("✏").on_hover_text("Edit path directly (Ctrl+L / Alt+D)").clicked() {
+                self.path_edit_buffer = self.current_dir.to_string_lossy().to_string();
+                self.is_editing_path = true;
+            }
+        }
+    }
+
+    fn render_category_filter_bar(&mut self, ui: &mut Ui, palette: &ThemePalette) {
+        let avail_w = ui.available_width();
+        let is_grid = self.view_mode == ViewMode::Grid;
+        let toggle_w = if is_grid { 290.0_f32 } else { 210.0_f32 };
+        let pills_w = (avail_w - toggle_w - 12.0).max(180.0);
+
+        ui.horizontal(|ui| {
+            // Left Container: Category Tabs with Wrapping
+            ui.allocate_ui_with_layout(
+                Vec2::new(pills_w, 28.0),
+                egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
+                |ui| {
+                    if self.is_home_directory() {
+                        let btn_dash = egui::Button::new(
+                            egui::RichText::new("🏠 Home Dashboard")
+                                .size(11.0)
+                                .strong()
+                                .color(if self.is_home_view { Color32::WHITE } else { palette.text_secondary }),
+                        )
+                        .fill(if self.is_home_view { palette.accent } else { palette.card_bg })
+                        .rounding(Rounding::same(6.0));
+                        if ui.add(btn_dash).on_hover_text("Show Quick Access & System Drives Dashboard").clicked() {
+                            self.is_home_view = true;
+                        }
+
+                        let btn_files = egui::Button::new(
+                            egui::RichText::new("📂 Folder Files")
+                                .size(11.0)
+                                .strong()
+                                .color(if !self.is_home_view { Color32::WHITE } else { palette.text_secondary }),
+                        )
+                        .fill(if !self.is_home_view { palette.accent } else { palette.card_bg })
+                        .rounding(Rounding::same(6.0));
+                        if ui.add(btn_files).on_hover_text("Browse all raw files in folder").clicked() {
+                            self.is_home_view = false;
+                        }
+
+                        ui.separator();
+                    }
+
+                    let categories = [
+                        CategoryFilter::All,
+                        CategoryFilter::Images,
+                        CategoryFilter::Audio,
+                        CategoryFilter::Video,
+                        CategoryFilter::Documents,
+                        CategoryFilter::Archives,
+                        CategoryFilter::Code,
+                    ];
+
+                    for cat in categories {
+                        let is_active = self.category_filter == cat;
+                        let count = match cat {
+                            CategoryFilter::All => self.entries.len(),
+                            _ => self.count_category(cat),
+                        };
+
+                        let label_text = format!("{} ({})", cat.label(), count);
+                        let btn = egui::Button::new(
+                            egui::RichText::new(label_text)
+                                .size(11.0)
+                                .strong()
+                                .color(if is_active { Color32::WHITE } else { palette.text_secondary }),
+                        )
+                        .fill(if is_active { palette.accent } else { palette.card_bg })
+                        .rounding(Rounding::same(6.0));
+
+                        if ui.add(btn).clicked() {
+                            self.category_filter = cat;
+                        }
+                    }
+                },
+            );
+
+            // Right Pinned Container: macOS 3-Segmented Switcher (List / Icons / Columns) & Icon Size
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let is_columns = self.view_mode == ViewMode::Columns;
+                let btn_columns = egui::Button::new("||| Columns")
+                    .fill(if is_columns { palette.accent } else { palette.card_bg })
+                    .rounding(Rounding { nw: 0.0, sw: 0.0, ne: 6.0, se: 6.0 });
+                if ui.add(btn_columns).on_hover_text("Miller Columns View").clicked() {
+                    self.view_mode = ViewMode::Columns;
+                }
+
+                let is_grid = self.view_mode == ViewMode::Grid;
+                let btn_grid = egui::Button::new("⊞ Icons")
+                    .fill(if is_grid { palette.accent } else { palette.card_bg })
+                    .rounding(Rounding::ZERO);
+                if ui.add(btn_grid).on_hover_text("Grid / Tiles View").clicked() {
+                    self.view_mode = ViewMode::Grid;
+                }
+
+                let is_details = self.view_mode == ViewMode::Details;
+                let btn_details = egui::Button::new("☰ List")
+                    .fill(if is_details { palette.accent } else { palette.card_bg })
+                    .rounding(Rounding { nw: 6.0, sw: 6.0, ne: 0.0, se: 0.0 });
+                if ui.add(btn_details).on_hover_text("Details Table View").clicked() {
+                    self.view_mode = ViewMode::Details;
+                }
+
+                if is_grid {
+                    ui.add_space(4.0);
+                    ui.add_sized([75.0, 18.0], egui::Slider::new(&mut self.icon_size, 64.0..=160.0).show_value(false));
+                    ui.label(egui::RichText::new(format!("{:.0}px", self.icon_size)).size(10.0).color(palette.text_muted));
+                }
+            });
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_file_view(
+        &mut self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        on_stage_file: &mut impl FnMut(PathBuf),
+        on_transcode_target: &mut impl FnMut(PathBuf, String),
+        on_exam_conform: &mut impl FnMut(PathBuf),
+        on_pack_archive: &mut impl FnMut(Vec<PathBuf>),
+        on_inspect_file: &mut impl FnMut(PathBuf),
+    ) {
+        if self.is_home_view {
+            self.render_home_dashboard(
+                ui,
+                palette,
+                on_stage_file,
+                on_transcode_target,
+                on_exam_conform,
+                on_pack_archive,
+                on_inspect_file,
+            );
+            return;
+        }
+
+        match self.view_mode {
+            ViewMode::Details => self.render_details_table(
+                ui,
+                palette,
+                on_stage_file,
+                on_transcode_target,
+                on_exam_conform,
+                on_pack_archive,
+                on_inspect_file,
+            ),
+            ViewMode::Grid => self.render_grid_view(
+                ui,
+                palette,
+                on_stage_file,
+                on_transcode_target,
+                on_exam_conform,
+                on_pack_archive,
+                on_inspect_file,
+            ),
+            ViewMode::Columns => self.render_columns_view(
+                ui,
+                palette,
+                on_stage_file,
+                on_transcode_target,
+                on_exam_conform,
+                on_pack_archive,
+                on_inspect_file,
+            ),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_home_dashboard(
+        &mut self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        _on_stage_file: &mut impl FnMut(PathBuf),
+        _on_transcode_target: &mut impl FnMut(PathBuf, String),
+        _on_exam_conform: &mut impl FnMut(PathBuf),
+        _on_pack_archive: &mut impl FnMut(Vec<PathBuf>),
+        _on_inspect_file: &mut impl FnMut(PathBuf),
+    ) {
+        let home_opt = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).ok().map(PathBuf::from);
+        let base = home_opt.unwrap_or_else(|| PathBuf::from("."));
+
+        let mut nav_to: Option<PathBuf> = None;
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.add_space(8.0);
+
+                // ==========================================
+                // 1. Quick access Header & Cards Grid
+                // ==========================================
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("⌃").size(12.0).color(palette.text_muted));
+                    ui.label(egui::RichText::new("Quick access").size(12.5).strong().color(palette.text_primary));
+                });
+                ui.add_space(8.0);
+
+                let mut pinned_folders = vec![
+                    ("Desktop".to_string(), "🖥", [0, 122, 255], base.join("Desktop")),
+                    ("Downloads".to_string(), "📥", [20, 184, 166], base.join("Downloads")),
+                    ("Documents".to_string(), "📄", [59, 130, 246], base.join("Documents")),
+                    ("Pictures".to_string(), "🖼", [14, 165, 233], base.join("Pictures")),
+                    ("Music".to_string(), "🎵", [244, 63, 94], base.join("Music")),
+                    ("Videos".to_string(), "🎬", [139, 92, 246], base.join("Videos")),
+                ];
+
+                // Append custom subdirectories found in home folder (like between_pcs, wallpapers)
+                for entry in &self.entries {
+                    if entry.is_dir && !entry.is_hidden {
+                        let lower = entry.name.to_lowercase();
+                        if !["desktop", "downloads", "documents", "pictures", "music", "videos", "appdata", "contacts", "searches", "saved games", "links"].contains(&lower.as_str()) {
+                            pinned_folders.push((entry.name.clone(), "📁", [235, 175, 60], entry.path.clone()));
+                        }
+                    }
+                }
+
+                // Append Recycle Bin (or home root)
+                pinned_folders.push(("Recycle Bin".to_string(), "🗑", [16, 185, 129], base.clone()));
+
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(12.0, 12.0);
+
+                    for (label, glyph, rgb, path) in &pinned_folders {
+                        let card_size = Vec2::new(104.0, 78.0);
+                        let (rect, resp) = ui.allocate_exact_size(card_size, egui::Sense::click());
+
+                        let is_hovered = resp.hovered();
+                        let bg = if is_hovered {
+                            palette.card_hover
+                        } else {
+                            palette.card_bg
+                        };
+                        let border_stroke = Stroke::new(
+                            1.0_f32,
+                            if is_hovered { palette.accent } else { palette.border },
+                        );
+
+                        // Card frame with subtle depth
+                        ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
+                        ui.painter().rect_stroke(rect, Rounding::same(8.0), border_stroke);
+
+                        // Pin icon in top-right
+                        ui.painter().text(
+                            rect.right_top() + Vec2::new(-8.0, 8.0),
+                            egui::Align2::RIGHT_TOP,
+                            "📌",
+                            egui::FontId::proportional(9.0),
+                            palette.text_muted,
+                        );
+
+                        // 3D-styled Squircle Badge in center top
+                        let badge_center = Pos2::new(rect.center().x, rect.top() + 28.0);
+                        let badge_rect = Rect::from_center_size(badge_center, Vec2::splat(32.0));
+                        ui.painter().rect_filled(
+                            badge_rect,
+                            Rounding::same(8.0),
+                            Color32::from_rgba_premultiplied(rgb[0], rgb[1], rgb[2], 30),
+                        );
+                        ui.painter().rect_stroke(
+                            badge_rect,
+                            Rounding::same(8.0),
+                            Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(rgb[0], rgb[1], rgb[2], 80)),
+                        );
+                        ui.painter().text(
+                            badge_center,
+                            egui::Align2::CENTER_CENTER,
+                            *glyph,
+                            egui::FontId::proportional(16.0),
+                            Color32::from_rgb(rgb[0], rgb[1], rgb[2]),
+                        );
+
+                        // Label below badge
+                        ui.painter().text(
+                            Pos2::new(rect.center().x, rect.bottom() - 12.0),
+                            egui::Align2::CENTER_CENTER,
+                            label,
+                            egui::FontId::proportional(10.5),
+                            palette.text_primary,
+                        );
+
+                        if resp.clicked() || resp.double_clicked() {
+                            nav_to = Some(path.clone());
+                        }
+                    }
+                });
+
+                ui.add_space(20.0);
+
+                // ==========================================
+                // 2. Drives Header & Storage Meter Cards
+                // ==========================================
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("⌃").size(12.0).color(palette.text_muted));
+                    ui.label(egui::RichText::new("Drives").size(12.5).strong().color(palette.text_primary));
+                });
+                ui.add_space(8.0);
+
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(14.0, 12.0);
+
+                    for drive in &self.drives {
+                        let card_size = Vec2::new(230.0, 70.0);
+                        let (rect, resp) = ui.allocate_exact_size(card_size, egui::Sense::click());
+
+                        let is_hovered = resp.hovered();
+                        let bg = if is_hovered {
+                            palette.card_hover
+                        } else {
+                            palette.card_bg
+                        };
+                        let border_stroke = Stroke::new(
+                            1.0_f32,
+                            if is_hovered { palette.accent } else { palette.border },
+                        );
+
+                        ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
+                        ui.painter().rect_stroke(rect, Rounding::same(8.0), border_stroke);
+
+                        // Left: 3D Drive / Windows Icon Badge
+                        let badge_center = Pos2::new(rect.left() + 26.0, rect.center().y);
+                        let icon_glyph = if drive.is_system { "🪟" } else { "💾" };
+                        let drive_rgb = if drive.is_system { [0, 122, 255] } else { [100, 116, 139] };
+
+                        let badge_rect = Rect::from_center_size(badge_center, Vec2::splat(32.0));
+                        ui.painter().rect_filled(
+                            badge_rect,
+                            Rounding::same(6.0),
+                            Color32::from_rgba_premultiplied(drive_rgb[0], drive_rgb[1], drive_rgb[2], 25),
+                        );
+                        ui.painter().rect_stroke(
+                            badge_rect,
+                            Rounding::same(6.0),
+                            Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(drive_rgb[0], drive_rgb[1], drive_rgb[2], 70)),
+                        );
+                        ui.painter().text(
+                            badge_center,
+                            egui::Align2::CENTER_CENTER,
+                            icon_glyph,
+                            egui::FontId::proportional(15.0),
+                            Color32::from_rgb(drive_rgb[0], drive_rgb[1], drive_rgb[2]),
+                        );
+
+                        // Right: Title, Progress Bar, and Space details
+                        let text_left = rect.left() + 52.0;
+                        ui.painter().text(
+                            Pos2::new(text_left, rect.top() + 14.0),
+                            egui::Align2::LEFT_TOP,
+                            &drive.display_name,
+                            egui::FontId::proportional(11.5),
+                            palette.text_primary,
+                        );
+
+                        // Usage progress bar
+                        let bar_y = rect.top() + 34.0;
+                        let bar_w = 160.0_f32;
+                        let bar_h = 4.5_f32;
+                        let bar_rect = Rect::from_min_size(Pos2::new(text_left, bar_y), Vec2::new(bar_w, bar_h));
+                        ui.painter().rect_filled(
+                            bar_rect,
+                            Rounding::same(2.0),
+                            Color32::from_rgba_premultiplied(palette.border.r(), palette.border.g(), palette.border.b(), 120),
+                        );
+                        let fill_w = (bar_w * drive.usage_ratio().clamp(0.0, 1.0)).max(2.0);
+                        let fill_rect = Rect::from_min_size(Pos2::new(text_left, bar_y), Vec2::new(fill_w, bar_h));
+                        ui.painter().rect_filled(fill_rect, Rounding::same(2.0), palette.accent);
+
+                        // Storage text
+                        ui.painter().text(
+                            Pos2::new(text_left, rect.top() + 44.0),
+                            egui::Align2::LEFT_TOP,
+                            drive.formatted_space(),
+                            egui::FontId::proportional(9.5),
+                            palette.text_secondary,
+                        );
+
+                        if resp.clicked() || resp.double_clicked() {
+                            nav_to = Some(drive.path.clone());
+                        }
+                    }
+                });
+
+                ui.add_space(20.0);
+
+                // ==========================================
+                // 3. Network locations
+                // ==========================================
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("⌃").size(12.0).color(palette.text_muted));
+                    ui.label(egui::RichText::new("Network locations").size(12.5).strong().color(palette.text_primary));
+                });
+                ui.add_space(6.0);
+
+                let banner_h = 40.0;
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width() - 14.0, banner_h), egui::Sense::hover());
+                ui.painter().rect_filled(rect, Rounding::same(6.0), palette.card_bg);
+                ui.painter().rect_stroke(rect, Rounding::same(6.0), Stroke::new(1.0_f32, palette.border));
+
+                ui.allocate_ui_with_layout(Vec2::new(ui.available_width() - 14.0, banner_h), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("ℹ").size(13.0).color(palette.accent));
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new("There are no network locations configured on this workstation.").size(10.5).color(palette.text_secondary));
+                });
+
+                ui.add_space(20.0);
+
+                // ==========================================
+                // 4. Recent Files List
+                // ==========================================
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("⌄").size(12.0).color(palette.text_muted));
+                    ui.label(egui::RichText::new("Recent files").size(12.5).strong().color(palette.text_primary));
+                });
+                ui.add_space(8.0);
+
+                let recent_files: Vec<&FileItem> = self.entries.iter().filter(|e| !e.is_dir).take(15).collect();
+                if recent_files.is_empty() {
+                    ui.label(egui::RichText::new("No recent standalone files in home directory. Choose a folder above to browse.").size(10.5).color(palette.text_muted));
+                } else {
+                    for item in recent_files {
+                        let row_h = 24.0;
+                        let (row_rect, row_resp) = ui.allocate_exact_size(Vec2::new(ui.available_width() - 14.0, row_h), egui::Sense::click());
+
+                        if row_resp.hovered() {
+                            ui.painter().rect_filled(row_rect, Rounding::same(4.0), palette.card_hover);
+                        }
+
+                        let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+                        let icon_tint = Color32::from_rgb(icon_spec.color_rgb[0], icon_spec.color_rgb[1], icon_spec.color_rgb[2]);
+
+                        // Icon badge
+                        ui.painter().text(
+                            Pos2::new(row_rect.left() + 10.0, row_rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            icon_spec.glyph,
+                            egui::FontId::proportional(13.0),
+                            icon_tint,
+                        );
+
+                        // File name
+                        ui.painter().text(
+                            Pos2::new(row_rect.left() + 32.0, row_rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            &item.name,
+                            egui::FontId::proportional(11.0),
+                            palette.text_primary,
+                        );
+
+                        // Size and Modified date on right
+                        ui.painter().text(
+                            Pos2::new(row_rect.right() - 12.0, row_rect.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            item.formatted_size(),
+                            egui::FontId::monospace(10.0),
+                            palette.text_muted,
+                        );
+
+                        if row_resp.double_clicked() {
+                            open_in_default_app(&item.path);
+                        }
+                    }
+                }
+            });
+
+        if let Some(path) = nav_to {
+            self.navigate_to(path);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_details_table(
+        &mut self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        _on_stage_file: &mut impl FnMut(PathBuf),
+        on_transcode_target: &mut impl FnMut(PathBuf, String),
+        on_exam_conform: &mut impl FnMut(PathBuf),
+        on_pack_archive: &mut impl FnMut(Vec<PathBuf>),
+        on_inspect_file: &mut impl FnMut(PathBuf),
+    ) {
+        let entries: Vec<FileItem> = self.filtered_and_sorted_entries().into_iter().cloned().collect();
+        let total_items = entries.len();
+        let sel_count = self.selected_paths.len();
+
+        let mut clear_all = false;
+        let mut select_all = false;
+        let mut pack_all = false;
+        let mut convert_all = false;
+
+        // Top summary & batch actions bar
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(format!("{} item(s)", total_items)).color(palette.text_secondary));
+            if sel_count > 0 {
+                ui.label(egui::RichText::new(format!("• {} selected", sel_count)).color(palette.accent).strong());
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if sel_count > 0 {
+                    if ui.button("Clear Selection").clicked() {
+                        clear_all = true;
+                    }
+                    if ui.button("📦 Pack Selected (ZIP)").clicked() {
+                        pack_all = true;
+                    }
+                    if ui.button("⭐ Convert Selected (ALL)").clicked() {
+                        convert_all = true;
+                    }
+                } else if ui.button("Select All").clicked() {
+                    select_all = true;
+                }
+            });
+        });
+
+        if clear_all {
+            self.selected_paths.clear();
+        }
+        if select_all {
+            for e in &entries {
+                self.selected_paths.insert(e.path.clone());
+            }
+        }
+        if pack_all {
+            let list: Vec<PathBuf> = self.selected_paths.iter().cloned().collect();
+            on_pack_archive(list);
+        }
+        if convert_all {
+            for p in &self.selected_paths {
+                on_transcode_target(p.clone(), "ALL".into());
+            }
+        }
+
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(2.0);
+
+        // Fixed Column Layout Constants (Exact Pixel Budgeting - Zero Collision)
+        let scrollbar_reserve = 14.0;
+        let content_width = (ui.available_width() - scrollbar_reserve).max(300.0);
+        let chk_w = 26.0;
+        let type_w = 60.0;
+        let perm_w = 75.0;
+        let size_w = 80.0;
+        let date_w = 120.0;
+        let spacing = 8.0;
+        let fixed_total = chk_w + type_w + perm_w + size_w + date_w + (spacing * 5.0);
+        let name_w = (content_width - fixed_total).max(180.0);
+
+        // 1. Table Column Header Row with Interactive Sorting Indicators
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(spacing, 0.0);
+
+            // Checkbox Header
+            let all_checked = total_items > 0 && sel_count == total_items;
+            let mut chk = all_checked;
+            ui.allocate_ui_with_layout(Vec2::new(chk_w, 24.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                if ui.checkbox(&mut chk, "").changed() {
+                    if chk {
+                        for e in &entries {
+                            self.selected_paths.insert(e.path.clone());
+                        }
+                    } else {
+                        self.selected_paths.clear();
+                    }
+                }
+            });
+
+            // Name Column Header
+            ui.allocate_ui_with_layout(Vec2::new(name_w, 24.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let text = if self.sort_column == SortColumn::Name {
+                    format!("Name {}", self.sort_direction.indicator())
+                } else {
+                    "Name".to_string()
+                };
+                if ui.button(egui::RichText::new(text).size(11.0).strong().color(palette.text_primary)).clicked() {
+                    if self.sort_column == SortColumn::Name {
+                        self.sort_direction = self.sort_direction.toggle();
+                    } else {
+                        self.sort_column = SortColumn::Name;
+                        self.sort_direction = SortDirection::Ascending;
+                    }
+                }
+            });
+
+            // Type Column Header
+            ui.allocate_ui_with_layout(Vec2::new(type_w, 24.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let text = if self.sort_column == SortColumn::Extension {
+                    format!("Type {}", self.sort_direction.indicator())
+                } else {
+                    "Type".to_string()
+                };
+                if ui.button(egui::RichText::new(text).size(11.0).strong().color(palette.text_primary)).clicked() {
+                    if self.sort_column == SortColumn::Extension {
+                        self.sort_direction = self.sort_direction.toggle();
+                    } else {
+                        self.sort_column = SortColumn::Extension;
+                        self.sort_direction = SortDirection::Ascending;
+                    }
+                }
+            });
+
+            // Permissions Column Header
+            ui.allocate_ui_with_layout(Vec2::new(perm_w, 24.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let text = if self.sort_column == SortColumn::Permissions {
+                    format!("Mode {}", self.sort_direction.indicator())
+                } else {
+                    "Mode".to_string()
+                };
+                if ui.button(egui::RichText::new(text).size(11.0).strong().color(palette.text_primary)).clicked() {
+                    if self.sort_column == SortColumn::Permissions {
+                        self.sort_direction = self.sort_direction.toggle();
+                    } else {
+                        self.sort_column = SortColumn::Permissions;
+                        self.sort_direction = SortDirection::Ascending;
+                    }
+                }
+            });
+
+            // Size Column Header (Right-Aligned)
+            ui.allocate_ui_with_layout(Vec2::new(size_w, 24.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let text = if self.sort_column == SortColumn::Size {
+                    format!("Size {}", self.sort_direction.indicator())
+                } else {
+                    "Size".to_string()
+                };
+                if ui.button(egui::RichText::new(text).size(11.0).strong().color(palette.text_primary)).clicked() {
+                    if self.sort_column == SortColumn::Size {
+                        self.sort_direction = self.sort_direction.toggle();
+                    } else {
+                        self.sort_column = SortColumn::Size;
+                        self.sort_direction = SortDirection::Ascending;
+                    }
+                }
+            });
+
+            // Date Modified Header (Right-Aligned)
+            ui.allocate_ui_with_layout(Vec2::new(date_w, 24.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let text = if self.sort_column == SortColumn::Date {
+                    format!("Date {}", self.sort_direction.indicator())
+                } else {
+                    "Date".to_string()
+                };
+                if ui.button(egui::RichText::new(text).size(11.0).strong().color(palette.text_primary)).clicked() {
+                    if self.sort_column == SortColumn::Date {
+                        self.sort_direction = self.sort_direction.toggle();
+                    } else {
+                        self.sort_column = SortColumn::Date;
+                        self.sort_direction = SortDirection::Ascending;
+                    }
+                }
+            });
+        });
+
+        ui.separator();
+
+        let mut nav_into_dir: Option<PathBuf> = None;
+        let mut toggled_paths: Vec<(PathBuf, bool)> = Vec::new();
+        let mut peek_to_open: Option<FileItem> = None;
+
+        let scroll_output = egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+
+                for (idx, item) in entries.iter().enumerate() {
+                    let is_checked = self.selected_paths.contains(&item.path);
+                    let row_height = 26.0;
+
+                    let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+                    let icon = icon_spec.glyph;
+                    let icon_color = Color32::from_rgb(icon_spec.color_rgb[0], icon_spec.color_rgb[1], icon_spec.color_rgb[2]);
+
+                    let row_rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(content_width, row_height));
+                    let _ = ui.allocate_rect(row_rect, egui::Sense::hover());
+                    let row_resp = ui.interact(row_rect, ui.make_persistent_id(("row_item", &item.path)), egui::Sense::click());
+
+                    if row_resp.hovered() {
+                        ui.painter().rect_filled(
+                            row_rect,
+                            Rounding::same(4.0),
+                            Color32::from_rgba_premultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 30),
+                        );
+                    } else if is_checked {
+                        ui.painter().rect_filled(
+                            row_rect,
+                            Rounding::same(4.0),
+                            Color32::from_rgba_premultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 45),
+                        );
+                        ui.painter().rect_stroke(
+                            row_rect,
+                            Rounding::same(4.0),
+                            Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 120)),
+                        );
+                    }
+
+                    if row_resp.double_clicked() {
+                        if item.is_dir {
+                            nav_into_dir = Some(item.path.clone());
+                        } else {
+                            open_in_default_app(&item.path);
+                        }
+                    } else if row_resp.clicked() {
+                        self.focused_row = idx;
+                        if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                            toggled_paths.push((item.path.clone(), !is_checked));
+                        } else {
+                            self.selected_paths.clear();
+                            self.selected_paths.insert(item.path.clone());
+                        }
+                    }
+
+                    // Render columns inside the row
+                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(row_rect), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(spacing, 0.0);
+
+                            // 1. Checkbox
+                            let mut checked = is_checked;
+                            ui.allocate_ui_with_layout(Vec2::new(chk_w, row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                if ui.checkbox(&mut checked, "").changed() {
+                                    toggled_paths.push((item.path.clone(), checked));
+                                }
+                            });
+
+                            // 2. Name Column (Label with icon, truncation & tooltip)
+                            ui.allocate_ui_with_layout(Vec2::new(name_w, row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                let label_color = if is_checked {
+                                    palette.accent
+                                } else {
+                                    palette.text_primary
+                                };
+
+                                let symlink_suffix = if item.is_symlink { " ↗" } else { "" };
+                                let display_text = format!("{} {}{}", icon, item.name, symlink_suffix);
+                                let mut rt = egui::RichText::new(display_text).color(label_color);
+                                if item.is_dir {
+                                    rt = rt.strong();
+                                }
+                                if item.is_hidden {
+                                    rt = rt.color(Color32::from_rgba_premultiplied(label_color.r(), label_color.g(), label_color.b(), 120));
+                                }
+                                ui.add(
+                                    egui::Label::new(rt)
+                                        .truncate()
+                                ).on_hover_text(format!("{} • {}", item.name, icon_spec.category));
+                            });
+
+                            // 3. Type Badge
+                            ui.allocate_ui_with_layout(Vec2::new(type_w, row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                let type_text = if item.is_dir { "DIR" } else if item.extension.is_empty() { "—" } else { &item.extension };
+                                ui.label(
+                                    egui::RichText::new(type_text)
+                                        .size(10.5)
+                                        .color(if item.is_dir { Color32::from_rgb(79, 168, 255) } else { icon_color }),
+                                );
+                            });
+
+                            // 4. Permissions / Mode Column
+                            ui.allocate_ui_with_layout(Vec2::new(perm_w, row_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                let perm_color = if item.is_hidden {
+                                    Color32::from_rgba_premultiplied(palette.text_muted.r(), palette.text_muted.g(), palette.text_muted.b(), 120)
+                                } else {
+                                    palette.text_muted
+                                };
+                                ui.label(
+                                    egui::RichText::new(item.formatted_permissions())
+                                        .size(10.5)
+                                        .monospace()
+                                        .color(perm_color),
+                                ).on_hover_text(format!("Mode: {} (octal: {})", item.formatted_permissions(), item.formatted_octal_permissions()));
+                            });
+
+                            // 5. Size Column (Right-Aligned)
+                            ui.allocate_ui_with_layout(Vec2::new(size_w, row_height), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new(item.formatted_size())
+                                        .size(11.0)
+                                        .monospace()
+                                        .color(palette.text_secondary),
+                                );
+                            });
+
+                            // 6. Date Modified Column (Right-Aligned)
+                            ui.allocate_ui_with_layout(Vec2::new(date_w, row_height), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new(item.formatted_date())
+                                        .size(10.5)
+                                        .color(palette.text_muted),
+                                );
+                            });
+                        });
+                    });
+
+                    // Comprehensive Right-Click Context Menu for the File Row (matching bug5.png)
+                    let path_clone = item.path.clone();
+                    let is_dir = item.is_dir;
+                    let item_clone = item.clone();
+
+                    row_resp.context_menu(|menu_ui| {
+                        menu_ui.label(egui::RichText::new(&item_clone.name).strong());
+                        menu_ui.separator();
+
+                        if is_dir {
+                            if menu_ui.button("📁 Open Folder").clicked() {
+                                nav_into_dir = Some(path_clone.clone());
+                                menu_ui.close_menu();
+                            }
+                        } else {
+                            if menu_ui.button("▶ Open").clicked() {
+                                open_in_default_app(&path_clone);
+                                menu_ui.close_menu();
+                            }
+                            if menu_ui.button("📝 Edit in Default Editor").clicked() {
+                                open_in_default_editor(&path_clone);
+                                menu_ui.close_menu();
+                            }
+                        }
+
+                        if menu_ui.button("Quick Look (Space)").clicked() {
+                            peek_to_open = Some(item_clone.clone());
+                            menu_ui.close_menu();
+                        }
+
+                        menu_ui.separator();
+
+                        if is_dir {
+                            if menu_ui.button("📦 Pack into ZIP Archive").clicked() {
+                                on_pack_archive(vec![path_clone.clone()]);
+                                menu_ui.close_menu();
+                            }
+                        } else {
+                            menu_ui.menu_button("Transcode With", |sub_ui| {
+                                if sub_ui.button("Transcode to JPG").clicked() {
+                                    on_transcode_target(path_clone.clone(), "JPG".into());
+                                    sub_ui.close_menu();
+                                }
+                                if sub_ui.button("Transcode to PNG").clicked() {
+                                    on_transcode_target(path_clone.clone(), "PNG".into());
+                                    sub_ui.close_menu();
+                                }
+                                if sub_ui.button("Transcode to WEBP").clicked() {
+                                    on_transcode_target(path_clone.clone(), "WEBP".into());
+                                    sub_ui.close_menu();
+                                }
+                                if sub_ui.button("Transcode to PDF").clicked() {
+                                    on_transcode_target(path_clone.clone(), "PDF".into());
+                                    sub_ui.close_menu();
+                                }
+                                if sub_ui.button("Transcode to MP3").clicked() {
+                                    on_transcode_target(path_clone.clone(), "MP3".into());
+                                    sub_ui.close_menu();
+                                }
+                                if sub_ui.button("⭐ Transcode to ALL Formats").clicked() {
+                                    on_transcode_target(path_clone.clone(), "ALL".into());
+                                    sub_ui.close_menu();
+                                }
+                            });
+
+                            if menu_ui.button("🎯 Conform to Custom Exam Specification").clicked() {
+                                on_exam_conform(path_clone.clone());
+                                menu_ui.close_menu();
+                            }
+                            if menu_ui.button("📦 Pack into ZIP Archive").clicked() {
+                                on_pack_archive(vec![path_clone.clone()]);
+                                menu_ui.close_menu();
+                            }
+                            if menu_ui.button("🔬 Quality & Integrity Inspect").clicked() {
+                                on_inspect_file(path_clone.clone());
+                                menu_ui.close_menu();
+                            }
+                        }
+
+                        menu_ui.separator();
+                        if menu_ui.button("📋 Copy Full Path").clicked() {
+                            ui.output_mut(|o| o.copied_text = path_clone.to_string_lossy().to_string());
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("📂 Reveal in System Explorer").clicked() {
+                            reveal_in_file_manager(&path_clone);
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("💻 Open Terminal Here").clicked() {
+                            let dir_target = if is_dir { &path_clone } else { path_clone.parent().unwrap_or(&path_clone) };
+                            open_terminal_in_dir(dir_target);
+                            menu_ui.close_menu();
+                        }
+
+                        menu_ui.separator();
+                        if menu_ui.button("✂ Cut (Ctrl+X)").clicked() {
+                            self.clipboard_paths = vec![path_clone.clone()];
+                            self.clipboard_is_cut = true;
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("📄 Copy (Ctrl+C)").clicked() {
+                            self.clipboard_paths = vec![path_clone.clone()];
+                            self.clipboard_is_cut = false;
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("✏ Rename (F2)").clicked() {
+                            if let Some(name) = path_clone.file_name() {
+                                self.renaming_path = Some((path_clone.clone(), name.to_string_lossy().to_string()));
+                            }
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("🗑 Delete (Del)").clicked() {
+                            let _ = remove_entry_recursive(&path_clone);
+                            self.selected_paths.remove(&path_clone);
+                            self.navigate_to(self.current_dir.clone());
+                            menu_ui.close_menu();
+                        }
+
+                        menu_ui.separator();
+                        if menu_ui.button("ℹ Properties (Alt+Enter)").clicked() {
+                            self.properties_item = Some(item_clone.clone());
+                            menu_ui.close_menu();
+                        }
+                    });
+                }
+            });
+
+        // Background Empty Canvas Context Menu
+        let canvas_rect = scroll_output.inner_rect;
+        let canvas_resp = ui.interact(canvas_rect, ui.make_persistent_id("explorer_canvas_bg"), egui::Sense::click());
+        canvas_resp.context_menu(|menu_ui| {
+            menu_ui.label(egui::RichText::new("Explorer Options").strong());
+            menu_ui.separator();
+            if menu_ui.button("📁 New Folder (Ctrl+Shift+N)").clicked() {
+                self.show_new_folder_dialog = true;
+                menu_ui.close_menu();
+            }
+            if menu_ui.button("🔄 Refresh Directory (F5)").clicked() {
+                self.navigate_to(self.current_dir.clone());
+                menu_ui.close_menu();
+            }
+            if menu_ui.button("⬆ Go to Parent Folder").clicked() {
+                if let Some(parent) = self.current_dir.parent() {
+                    let p = parent.to_path_buf();
+                    if !p.as_os_str().is_empty() {
+                        self.navigate_to(p);
+                    }
+                }
+                menu_ui.close_menu();
+            }
+            menu_ui.separator();
+            if menu_ui.button("✓ Select All (Ctrl+A)").clicked() {
+                for e in &entries {
+                    self.selected_paths.insert(e.path.clone());
+                }
+                menu_ui.close_menu();
+            }
+            if menu_ui.button("✕ Clear Selection").clicked() {
+                self.selected_paths.clear();
+                menu_ui.close_menu();
+            }
+            menu_ui.separator();
+            let has_clip = !self.clipboard_paths.is_empty();
+            let paste_btn = egui::Button::new("📋 Paste (Ctrl+V)");
+            if menu_ui.add_enabled(has_clip, paste_btn).clicked() {
+                for src in &self.clipboard_paths {
+                    if let Some(file_name) = src.file_name() {
+                        let dest = self.current_dir.join(file_name);
+                        if self.clipboard_is_cut {
+                            let _ = move_entry(src, &dest);
+                        } else {
+                            let unique = resolve_unique_paste_path(&dest);
+                            let _ = copy_entry_recursive(src, &unique);
+                        }
+                    }
+                }
+                if self.clipboard_is_cut {
+                    self.clipboard_paths.clear();
+                    self.clipboard_is_cut = false;
+                }
+                self.navigate_to(self.current_dir.clone());
+                menu_ui.close_menu();
+            }
+            menu_ui.separator();
+            if menu_ui.button("💻 Open in Terminal").clicked() {
+                open_terminal_in_dir(&self.current_dir);
+                menu_ui.close_menu();
+            }
+            if menu_ui.button("📂 Open in System Explorer").clicked() {
+                open_in_file_manager(&self.current_dir);
+                menu_ui.close_menu();
+            }
+            if menu_ui.button("ℹ Properties (Alt+Enter)").clicked() {
+                self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
+                menu_ui.close_menu();
+            }
+        });
+
+        // Apply toggles
+        for (path, checked) in toggled_paths {
+            if checked {
+                self.selected_paths.insert(path);
+            } else {
+                self.selected_paths.remove(&path);
+            }
+        }
+
+        if let Some(dir) = nav_into_dir {
+            self.navigate_to(dir);
+        }
+
+        if let Some(item) = peek_to_open {
+            self.peek_item = Some(item);
+            self.peek_texture = None;
+            self.peek_text_cache = None;
+            self.peek_hash_cache = None;
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_grid_view(
+        &mut self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        _on_stage_file: &mut impl FnMut(PathBuf),
+        on_transcode_target: &mut impl FnMut(PathBuf, String),
+        on_exam_conform: &mut impl FnMut(PathBuf),
+        on_pack_archive: &mut impl FnMut(Vec<PathBuf>),
+        on_inspect_file: &mut impl FnMut(PathBuf),
+    ) {
+        let entries: Vec<FileItem> = self.filtered_and_sorted_entries().into_iter().cloned().collect();
+        let mut nav_into_dir: Option<PathBuf> = None;
+        let mut peek_to_open: Option<FileItem> = None;
+
+        let icon_sz = self.icon_size.clamp(64.0, 160.0);
+        let tile_w = icon_sz * 1.18;
+        let tile_h = icon_sz * 1.15;
+        let tile_size = Vec2::new(tile_w, tile_h);
+
+        let icon_font_sz = (icon_sz * 0.32).clamp(20.0, 52.0);
+        let name_font_sz = (icon_sz * 0.115).clamp(10.0, 13.0);
+        let size_font_sz = (icon_sz * 0.095).clamp(8.5, 11.0);
+
+        let scroll_output = egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(10.0, 10.0);
+
+                for item in &entries {
+                    let is_checked = self.selected_paths.contains(&item.path);
+                    let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+                    let icon = icon_spec.glyph;
+                    let icon_color = Color32::from_rgb(icon_spec.color_rgb[0], icon_spec.color_rgb[1], icon_spec.color_rgb[2]);
+
+                    let (rect, resp) = ui.allocate_exact_size(tile_size, egui::Sense::click());
+                    let bg = if resp.hovered() {
+                        Color32::from_rgba_premultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 30)
+                    } else if is_checked {
+                        Color32::from_rgba_premultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 50)
+                    } else {
+                        Color32::from_rgba_premultiplied(255, 255, 255, 4)
+                    };
+
+                    ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
+                    ui.painter().rect_stroke(
+                        rect,
+                        Rounding::same(8.0),
+                        Stroke::new(1.0_f32, if is_checked { palette.accent } else { palette.border }),
+                    );
+
+                    // Center 3D-styled Material/Apple badge icon and file name
+                    let center = rect.center();
+                    let icon_y_offset = tile_h * 0.16;
+                    let badge_center = center - Vec2::new(0.0, icon_y_offset);
+                    let badge_sz = (icon_font_sz * 1.3).clamp(24.0, 64.0);
+                    let badge_rect = Rect::from_center_size(badge_center, Vec2::splat(badge_sz));
+                    let icon_tint = if item.is_dir { Color32::from_rgb(79, 168, 255) } else { icon_color };
+
+                    // Subtle 3D squircle background badge with depth
+                    ui.painter().rect_filled(
+                        badge_rect,
+                        Rounding::same(8.0),
+                        Color32::from_rgba_premultiplied(icon_tint.r(), icon_tint.g(), icon_tint.b(), 26),
+                    );
+                    ui.painter().rect_stroke(
+                        badge_rect,
+                        Rounding::same(8.0),
+                        Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(icon_tint.r(), icon_tint.g(), icon_tint.b(), 65)),
+                    );
+
+                    ui.painter().text(
+                        badge_center,
+                        egui::Align2::CENTER_CENTER,
+                        icon,
+                        egui::FontId::proportional(icon_font_sz),
+                        icon_tint,
+                    );
+
+                    let max_chars = ((tile_w / 8.0) as usize).clamp(8, 22);
+                    let display_name = if item.name.len() > max_chars {
+                        format!("{}...", &item.name[..max_chars.saturating_sub(2)])
+                    } else {
+                        item.name.clone()
+                    };
+
+                    let name_y_offset = tile_h * 0.18;
+                    ui.painter().text(
+                        center + Vec2::new(0.0, name_y_offset),
+                        egui::Align2::CENTER_CENTER,
+                        display_name,
+                        egui::FontId::proportional(name_font_sz),
+                        palette.text_primary,
+                    );
+
+                    let size_y_offset = tile_h * 0.33;
+                    ui.painter().text(
+                        center + Vec2::new(0.0, size_y_offset),
+                        egui::Align2::CENTER_CENTER,
+                        item.formatted_size(),
+                        egui::FontId::monospace(size_font_sz),
+                        palette.text_muted,
+                    );
+
+                    if resp.double_clicked() {
+                        if item.is_dir {
+                            nav_into_dir = Some(item.path.clone());
+                        } else {
+                            open_in_default_app(&item.path);
+                        }
+                    } else if resp.clicked() {
+                        if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                            if is_checked {
+                                self.selected_paths.remove(&item.path);
+                            } else {
+                                self.selected_paths.insert(item.path.clone());
+                            }
+                        } else {
+                            self.selected_paths.clear();
+                            self.selected_paths.insert(item.path.clone());
+                        }
+                    }
+
+                    // Rich Context Menu on Grid Tile (matching bug5.png)
+                    let item_clone = item.clone();
+                    let path_clone = item.path.clone();
+                    let is_dir = item.is_dir;
+                    resp.context_menu(|menu_ui| {
+                        menu_ui.label(egui::RichText::new(&item_clone.name).strong());
+                        menu_ui.separator();
+
+                        if is_dir {
+                            if menu_ui.button("📁 Open Folder").clicked() {
+                                nav_into_dir = Some(path_clone.clone());
+                                menu_ui.close_menu();
+                            }
+                        } else {
+                            if menu_ui.button("▶ Open").clicked() {
+                                open_in_default_app(&path_clone);
+                                menu_ui.close_menu();
+                            }
+                            if menu_ui.button("📝 Edit in Default Editor").clicked() {
+                                open_in_default_editor(&path_clone);
+                                menu_ui.close_menu();
+                            }
+                        }
+
+                        if menu_ui.button("Quick Look (Space)").clicked() {
+                            peek_to_open = Some(item_clone.clone());
+                            menu_ui.close_menu();
+                        }
+
+                        menu_ui.separator();
+
+                        if is_dir {
+                            if menu_ui.button("📦 Pack into ZIP Archive").clicked() {
+                                on_pack_archive(vec![path_clone.clone()]);
+                                menu_ui.close_menu();
+                            }
+                        } else {
+                            menu_ui.menu_button("Transcode With", |sub_ui| {
+                                if sub_ui.button("Transcode to JPG").clicked() {
+                                    on_transcode_target(path_clone.clone(), "JPG".into());
+                                    sub_ui.close_menu();
+                                }
+                                if sub_ui.button("Transcode to PNG").clicked() {
+                                    on_transcode_target(path_clone.clone(), "PNG".into());
+                                    sub_ui.close_menu();
+                                }
+                                if sub_ui.button("Transcode to WEBP").clicked() {
+                                    on_transcode_target(path_clone.clone(), "WEBP".into());
+                                    sub_ui.close_menu();
+                                }
+                                if sub_ui.button("Transcode to PDF").clicked() {
+                                    on_transcode_target(path_clone.clone(), "PDF".into());
+                                    sub_ui.close_menu();
+                                }
+                                if sub_ui.button("Transcode to MP3").clicked() {
+                                    on_transcode_target(path_clone.clone(), "MP3".into());
+                                    sub_ui.close_menu();
+                                }
+                                if sub_ui.button("⭐ Transcode to ALL Formats").clicked() {
+                                    on_transcode_target(path_clone.clone(), "ALL".into());
+                                    sub_ui.close_menu();
+                                }
+                            });
+
+                            if menu_ui.button("🎯 Conform to Custom Exam Specification").clicked() {
+                                on_exam_conform(path_clone.clone());
+                                menu_ui.close_menu();
+                            }
+                            if menu_ui.button("📦 Pack into ZIP Archive").clicked() {
+                                on_pack_archive(vec![path_clone.clone()]);
+                                menu_ui.close_menu();
+                            }
+                            if menu_ui.button("🔬 Quality & Integrity Inspect").clicked() {
+                                on_inspect_file(path_clone.clone());
+                                menu_ui.close_menu();
+                            }
+                        }
+
+                        menu_ui.separator();
+                        if menu_ui.button("📋 Copy Full Path").clicked() {
+                            ui.output_mut(|o| o.copied_text = path_clone.to_string_lossy().to_string());
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("📂 Reveal in System Explorer").clicked() {
+                            reveal_in_file_manager(&path_clone);
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("💻 Open Terminal Here").clicked() {
+                            let dir_target = if is_dir { &path_clone } else { path_clone.parent().unwrap_or(&path_clone) };
+                            open_terminal_in_dir(dir_target);
+                            menu_ui.close_menu();
+                        }
+
+                        menu_ui.separator();
+                        if menu_ui.button("✂ Cut (Ctrl+X)").clicked() {
+                            self.clipboard_paths = vec![path_clone.clone()];
+                            self.clipboard_is_cut = true;
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("📄 Copy (Ctrl+C)").clicked() {
+                            self.clipboard_paths = vec![path_clone.clone()];
+                            self.clipboard_is_cut = false;
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("✏ Rename (F2)").clicked() {
+                            if let Some(name) = path_clone.file_name() {
+                                self.renaming_path = Some((path_clone.clone(), name.to_string_lossy().to_string()));
+                            }
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("🗑 Delete (Del)").clicked() {
+                            let _ = remove_entry_recursive(&path_clone);
+                            self.selected_paths.remove(&path_clone);
+                            self.navigate_to(self.current_dir.clone());
+                            menu_ui.close_menu();
+                        }
+
+                        menu_ui.separator();
+                        if menu_ui.button("ℹ Properties (Alt+Enter)").clicked() {
+                            self.properties_item = Some(item_clone.clone());
+                            menu_ui.close_menu();
+                        }
+                    });
+                }
+            });
+        });
+
+        // Background Context Menu for Grid View Empty Canvas
+        let canvas_rect = scroll_output.inner_rect;
+        let canvas_resp = ui.interact(canvas_rect, ui.make_persistent_id("explorer_grid_canvas_bg"), egui::Sense::click());
+        canvas_resp.context_menu(|menu_ui| {
+            menu_ui.label(egui::RichText::new("Explorer Options").strong());
+            menu_ui.separator();
+            if menu_ui.button("📁 New Folder (Ctrl+Shift+N)").clicked() {
+                self.show_new_folder_dialog = true;
+                menu_ui.close_menu();
+            }
+            if menu_ui.button("🔄 Refresh Directory (F5)").clicked() {
+                self.navigate_to(self.current_dir.clone());
+                menu_ui.close_menu();
+            }
+            if menu_ui.button("⬆ Go to Parent Folder").clicked() {
+                if let Some(parent) = self.current_dir.parent() {
+                    let p = parent.to_path_buf();
+                    if !p.as_os_str().is_empty() {
+                        self.navigate_to(p);
+                    }
+                }
+                menu_ui.close_menu();
+            }
+            menu_ui.separator();
+            if menu_ui.button("✓ Select All (Ctrl+A)").clicked() {
+                for e in &entries {
+                    self.selected_paths.insert(e.path.clone());
+                }
+                menu_ui.close_menu();
+            }
+            if menu_ui.button("✕ Clear Selection").clicked() {
+                self.selected_paths.clear();
+                menu_ui.close_menu();
+            }
+            menu_ui.separator();
+            let has_clip = !self.clipboard_paths.is_empty();
+            let paste_btn = egui::Button::new("📋 Paste (Ctrl+V)");
+            if menu_ui.add_enabled(has_clip, paste_btn).clicked() {
+                for src in &self.clipboard_paths {
+                    if let Some(file_name) = src.file_name() {
+                        let dest = self.current_dir.join(file_name);
+                        if self.clipboard_is_cut {
+                            let _ = move_entry(src, &dest);
+                        } else {
+                            let unique = resolve_unique_paste_path(&dest);
+                            let _ = copy_entry_recursive(src, &unique);
+                        }
+                    }
+                }
+                if self.clipboard_is_cut {
+                    self.clipboard_paths.clear();
+                    self.clipboard_is_cut = false;
+                }
+                self.navigate_to(self.current_dir.clone());
+                menu_ui.close_menu();
+            }
+            menu_ui.separator();
+            if menu_ui.button("💻 Open in Terminal").clicked() {
+                open_terminal_in_dir(&self.current_dir);
+                menu_ui.close_menu();
+            }
+            if menu_ui.button("📂 Open in System Explorer").clicked() {
+                open_in_file_manager(&self.current_dir);
+                menu_ui.close_menu();
+            }
+            if menu_ui.button("ℹ Properties (Alt+Enter)").clicked() {
+                self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
+                menu_ui.close_menu();
+            }
+        });
+
+        if let Some(dir) = nav_into_dir {
+            self.navigate_to(dir);
+        }
+        if let Some(item) = peek_to_open {
+            self.peek_item = Some(item);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_columns_view(
+        &mut self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        _on_stage_file: &mut impl FnMut(PathBuf),
+        on_transcode_target: &mut impl FnMut(PathBuf, String),
+        _on_exam_conform: &mut impl FnMut(PathBuf),
+        on_pack_archive: &mut impl FnMut(Vec<PathBuf>),
+        _on_inspect_file: &mut impl FnMut(PathBuf),
+    ) {
+        let entries: Vec<FileItem> = self.filtered_and_sorted_entries().into_iter().cloned().collect();
+        let mut nav_into_dir: Option<PathBuf> = None;
+        let mut subfolder_to_load: Option<PathBuf> = None;
+        let mut preview_to_set: Option<FileItem> = None;
+        let mut peek_to_open: Option<FileItem> = None;
+
+        egui::ScrollArea::horizontal()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(1.0, 0.0);
+
+                    // ==========================================
+                    // COLUMN 1: Current Directory
+                    // ==========================================
+                    let col1_w = 240.0_f32;
+                    let col_h = ui.available_height();
+
+                    egui::Frame::none()
+                        .fill(Color32::from_rgba_premultiplied(palette.card_bg.r(), palette.card_bg.g(), palette.card_bg.b(), 180))
+                        .stroke(Stroke::new(1.0_f32, palette.border))
+                        .show(ui, |ui| {
+                            ui.set_width(col1_w);
+                            ui.set_height(col_h);
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    for (idx, item) in entries.iter().enumerate() {
+                                        let is_selected = self.selected_paths.contains(&item.path) || self.focused_row == idx;
+                                        let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+
+                                        let symlink_suffix = if item.is_symlink { " ↗" } else { "" };
+                                        let text_label = if item.is_dir {
+                                            format!("{} {}{}  ›", icon_spec.glyph, item.name, symlink_suffix)
+                                        } else {
+                                            format!("{} {}{}", icon_spec.glyph, item.name, symlink_suffix)
+                                        };
+
+                                        let mut rt = egui::RichText::new(text_label)
+                                            .size(11.5)
+                                            .color(if is_selected { palette.accent } else { palette.text_primary });
+                                        if item.is_dir {
+                                            rt = rt.strong();
+                                        }
+                                        if item.is_hidden {
+                                            rt = rt.color(palette.text_muted);
+                                        }
+
+                                        let btn = egui::Button::new(rt)
+                                            .fill(if is_selected { palette.card_hover } else { Color32::TRANSPARENT })
+                                            .rounding(Rounding::same(4.0));
+
+                                        let resp = ui.add_sized([col1_w - 12.0, 24.0], btn);
+                                        if resp.clicked() {
+                                            self.focused_row = idx;
+                                            self.selected_paths.clear();
+                                            self.selected_paths.insert(item.path.clone());
+                                            if item.is_dir {
+                                                subfolder_to_load = Some(item.path.clone());
+                                                preview_to_set = None;
+                                            } else {
+                                                preview_to_set = Some(item.clone());
+                                                self.column_subfolder = None;
+                                            }
+                                        }
+                                        if resp.double_clicked() {
+                                            if item.is_dir {
+                                                nav_into_dir = Some(item.path.clone());
+                                            } else {
+                                                open_in_default_app(&item.path);
+                                            }
+                                        }
+                                    }
+                                });
+                        });
+
+                    // ==========================================
+                    // COLUMN 2: Subfolder Contents (if any)
+                    // ==========================================
+                    if let Some((sub_path, sub_items)) = &self.column_subfolder {
+                        let col2_w = 240.0_f32;
+                        egui::Frame::none()
+                            .fill(Color32::from_rgba_premultiplied(palette.card_bg.r(), palette.card_bg.g(), palette.card_bg.b(), 180))
+                            .stroke(Stroke::new(1.0_f32, palette.border))
+                            .show(ui, |ui| {
+                                ui.set_width(col2_w);
+                                ui.set_height(col_h);
+                                egui::ScrollArea::vertical()
+                                    .auto_shrink([false; 2])
+                                    .show(ui, |ui| {
+                                        let sub_name = sub_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "Folder".into());
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            ui.add_space(6.0);
+                                            ui.label(egui::RichText::new(&sub_name).size(10.5).strong().color(palette.text_muted));
+                                        });
+                                        ui.separator();
+
+                                        for sub_item in sub_items {
+                                            let is_sel = self.selected_paths.contains(&sub_item.path);
+                                            let icon_spec = resolve_file_icon(&sub_item.name, &sub_item.extension, sub_item.is_dir);
+
+                                            let symlink_suffix = if sub_item.is_symlink { " ↗" } else { "" };
+                                            let text_label = if sub_item.is_dir {
+                                                format!("{} {}{}  ›", icon_spec.glyph, sub_item.name, symlink_suffix)
+                                            } else {
+                                                format!("{} {}{}", icon_spec.glyph, sub_item.name, symlink_suffix)
+                                            };
+
+                                            let mut rt = egui::RichText::new(text_label)
+                                                .size(11.5)
+                                                .color(if is_sel { palette.accent } else { palette.text_primary });
+                                            if sub_item.is_dir {
+                                                rt = rt.strong();
+                                            }
+
+                                            let btn = egui::Button::new(rt)
+                                                .fill(if is_sel { palette.card_hover } else { Color32::TRANSPARENT })
+                                                .rounding(Rounding::same(4.0));
+
+                                            let resp = ui.add_sized([col2_w - 12.0, 24.0], btn);
+                                            if resp.clicked() {
+                                                self.selected_paths.clear();
+                                                self.selected_paths.insert(sub_item.path.clone());
+                                                preview_to_set = Some(sub_item.clone());
+                                            }
+                                            if resp.double_clicked() {
+                                                if sub_item.is_dir {
+                                                    nav_into_dir = Some(sub_item.path.clone());
+                                                } else {
+                                                    open_in_default_app(&sub_item.path);
+                                                }
+                                            }
+                                        }
+                                    });
+                            });
+                    }
+
+                    // ==========================================
+                    // COLUMN 3: macOS Inspector Card / File Preview
+                    // ==========================================
+                    let active_preview = self.column_preview_item.as_ref().or_else(|| {
+                        entries.get(self.focused_row)
+                    });
+
+                    if let Some(item) = active_preview {
+                        let inspector_w = 280.0_f32;
+                        let item_clone = item.clone();
+
+                        egui::Frame::none()
+                            .fill(Color32::from_rgba_premultiplied(palette.card_bg.r(), palette.card_bg.g(), palette.card_bg.b(), 220))
+                            .stroke(Stroke::new(1.0_f32, palette.border))
+                            .inner_margin(egui::Margin::same(14.0))
+                            .show(ui, |ui| {
+                                ui.set_width(inspector_w);
+                                ui.set_height(col_h);
+                                egui::ScrollArea::vertical()
+                                    .auto_shrink([false; 2])
+                                    .show(ui, |ui| {
+                                        let icon_spec = resolve_file_icon(&item_clone.name, &item_clone.extension, item_clone.is_dir);
+                                        let icon_color = Color32::from_rgb(icon_spec.color_rgb[0], icon_spec.color_rgb[1], icon_spec.color_rgb[2]);
+
+                                        // Big 48px Centered Icon
+                                        ui.vertical_centered(|ui| {
+                                            ui.add_space(8.0);
+                                            ui.label(egui::RichText::new(icon_spec.glyph).size(48.0).color(icon_color));
+                                            ui.add_space(4.0);
+                                            ui.label(egui::RichText::new(&item_clone.name).size(13.0).strong().color(palette.text_primary));
+                                            ui.label(egui::RichText::new(icon_spec.category).size(10.5).color(palette.text_muted));
+                                        });
+
+                                        ui.add_space(10.0);
+                                        ui.separator();
+                                        ui.add_space(8.0);
+
+                                        // File Properties / Key-Value Grid
+                                        egui::Grid::new("column_inspector_grid")
+                                            .num_columns(2)
+                                            .spacing([12.0, 6.0])
+                                            .show(ui, |ui| {
+                                                ui.label(egui::RichText::new("Kind:").size(11.0).color(palette.text_muted));
+                                                ui.label(egui::RichText::new(if item_clone.is_dir { "Folder" } else { &item_clone.extension }).size(11.0).strong().color(palette.text_primary));
+                                                ui.end_row();
+
+                                                ui.label(egui::RichText::new("Size:").size(11.0).color(palette.text_muted));
+                                                ui.label(egui::RichText::new(item_clone.formatted_size()).size(11.0).color(palette.text_secondary));
+                                                ui.end_row();
+
+                                                ui.label(egui::RichText::new("Modified:").size(11.0).color(palette.text_muted));
+                                                ui.label(egui::RichText::new(item_clone.formatted_date()).size(10.5).color(palette.text_secondary));
+                                                ui.end_row();
+
+                                                ui.label(egui::RichText::new("Permissions:").size(11.0).color(palette.text_muted));
+                                                ui.label(egui::RichText::new(format!("{} ({})", item_clone.formatted_permissions(), item_clone.formatted_octal_permissions())).size(10.5).monospace().color(palette.text_secondary));
+                                                ui.end_row();
+
+                                                if item_clone.is_symlink {
+                                                    ui.label(egui::RichText::new("Symlink:").size(11.0).color(palette.text_muted));
+                                                    let target_str = item_clone.symlink_target.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "unknown".into());
+                                                    ui.label(egui::RichText::new(format!("↗ {}", target_str)).size(10.5).color(palette.accent));
+                                                    ui.end_row();
+                                                }
+
+                                                ui.label(egui::RichText::new("Hidden:").size(11.0).color(palette.text_muted));
+                                                ui.label(egui::RichText::new(if item_clone.is_hidden { "Yes" } else { "No" }).size(11.0).color(palette.text_secondary));
+                                                ui.end_row();
+                                            });
+
+                                        ui.add_space(12.0);
+                                        ui.separator();
+                                        ui.add_space(8.0);
+
+                                        // Quick Action Buttons
+                                        ui.vertical_centered_justified(|ui| {
+                                            if ui.button(egui::RichText::new("Quick Look (Space)").strong()).clicked() {
+                                                peek_to_open = Some(item_clone.clone());
+                                            }
+                                            if !item_clone.is_dir {
+                                                if ui.button("Transcode / Convert").clicked() {
+                                                    on_transcode_target(item_clone.path.clone(), "ALL".into());
+                                                }
+                                            } else if ui.button("📦 Pack into ZIP Archive").clicked() {
+                                                on_pack_archive(vec![item_clone.path.clone()]);
+                                            }
+                                            if ui.button("📂 Reveal in System Explorer").clicked() {
+                                                reveal_in_file_manager(&item_clone.path);
+                                            }
+                                            if ui.button("📋 Copy Full Path").clicked() {
+                                                ui.ctx().output_mut(|o| o.copied_text = item_clone.path.to_string_lossy().to_string());
+                                            }
+                                            if ui.button("💻 Open Terminal Here").clicked() {
+                                                let dir_target = if item_clone.is_dir { &item_clone.path } else { item_clone.path.parent().unwrap_or(&item_clone.path) };
+                                                open_terminal_in_dir(dir_target);
+                                            }
+                                        });
+                                    });
+                            });
+                    }
+                });
+            });
+
+        if let Some(sub_path) = subfolder_to_load {
+            let sub_entries = list_directory_sync(&sub_path);
+            self.column_subfolder = Some((sub_path, sub_entries));
+        }
+        if let Some(preview_item) = preview_to_set {
+            self.column_preview_item = Some(preview_item);
+        }
+        if let Some(peek_item) = peek_to_open {
+            self.peek_item = Some(peek_item);
+        }
+        if let Some(new_dir) = nav_into_dir {
+            self.navigate_to(new_dir);
+        }
+    }
+
+    fn render_status_bar(&mut self, ui: &mut Ui, palette: &ThemePalette) {
+        let bar_h = 24.0_f32;
+        let entries = self.filtered_and_sorted_entries();
+        let total_items = entries.len();
+        let total_hidden = self.entries.iter().filter(|e| e.is_hidden).count();
+        let sel_count = self.selected_paths.len();
+
+        let total_selected_bytes: u64 = self
+            .entries
+            .iter()
+            .filter(|e| self.selected_paths.contains(&e.path) && !e.is_dir)
+            .map(|e| e.size_bytes)
+            .sum();
+
+        // Find drive space for current path
+        let drive_info = self
+            .drives
+            .iter()
+            .find(|d| self.current_dir.starts_with(&d.path))
+            .map(|d| format!("💾 {} available on {}", d.formatted_space(), d.display_name));
+
+        egui::Frame::none()
+            .fill(Color32::from_rgba_premultiplied(palette.card_bg.r(), palette.card_bg.g(), palette.card_bg.b(), 220))
+            .stroke(Stroke::new(1.0_f32, palette.border))
+            .inner_margin(egui::Margin::symmetric(10.0, 3.0))
+            .show(ui, |ui| {
+                ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), bar_h),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        // Left: Item count & selection
+                        let count_text = if total_hidden > 0 && !self.show_hidden_files {
+                            format!("{} items ({} hidden)", total_items, total_hidden)
+                        } else {
+                            format!("{} items", total_items)
+                        };
+                        ui.label(egui::RichText::new(count_text).size(10.5).color(palette.text_secondary));
+
+                        if sel_count > 0 {
+                            ui.label(egui::RichText::new("•").size(10.5).color(palette.text_muted));
+                            let sel_text = format!("{} selected ({})", sel_count, format_file_size(total_selected_bytes));
+                            ui.label(egui::RichText::new(sel_text).size(10.5).strong().color(palette.accent));
+                        }
+
+                        // Right: Drive available space, zoom slider (if Grid), dotfiles indicator
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if self.view_mode == ViewMode::Grid {
+                                ui.add_sized([70.0, 16.0], egui::Slider::new(&mut self.icon_size, 64.0..=160.0).show_value(false));
+                                ui.label(egui::RichText::new(format!("{:.0}px", self.icon_size)).size(10.0).color(palette.text_muted));
+                                ui.label(egui::RichText::new("•").size(10.5).color(palette.text_muted));
+                            }
+
+                            if self.show_hidden_files {
+                                ui.label(egui::RichText::new("Dotfiles visible").size(10.0).color(palette.accent));
+                                ui.label(egui::RichText::new("•").size(10.5).color(palette.text_muted));
+                            }
+
+                            if let Some(info) = drive_info {
+                                ui.label(egui::RichText::new(info).size(10.5).color(palette.text_muted));
+                            }
+                        });
+                    },
+                );
+            });
+    }
+
+    /// Renders the macOS Quick Look / Peek Display Modal Overlay
+    fn render_peek_overlay(
+        &mut self,
+        ctx: &egui::Context,
+        palette: &ThemePalette,
+        on_transcode_target: &mut impl FnMut(PathBuf, String),
+        on_exam_conform: &mut impl FnMut(PathBuf),
+        on_pack_archive: &mut impl FnMut(Vec<PathBuf>),
+        on_inspect_file: &mut impl FnMut(PathBuf),
+    ) {
+        let item = match self.peek_item.clone() {
+            Some(i) => i,
+            None => return,
+        };
+
+        let mut close_peek = false;
+        let mut transcode_to: Option<String> = None;
+        let mut exam_to_open = false;
+        let mut pack_to_open = false;
+        let mut inspect_to_open = false;
+
+        let window_title = format!("Quick Look — {}", item.name);
+
+        egui::Window::new(window_title)
+            .collapsible(false)
+            .resizable(true)
+            .default_size([620.0, 480.0])
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .frame(
+                egui::Frame::window(&ctx.style())
+                    .fill(palette.card_bg)
+                    .stroke(Stroke::new(1.0_f32, palette.border))
+                    .rounding(Rounding::same(12.0))
+                    .inner_margin(egui::Margin::same(16.0)),
+            )
+            .show(ctx, |ui| {
+                // 1. Top Meta Header
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(&item.name).size(15.0).strong().color(palette.text_primary));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("✕ Close (Esc)").clicked() {
+                            close_peek = true;
+                        }
+                    });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("Size: {}", item.formatted_size())).color(palette.text_secondary));
+                    ui.label("•");
+                    ui.label(egui::RichText::new(format!("Modified: {}", item.formatted_date())).color(palette.text_secondary));
+                    if !item.extension.is_empty() {
+                        ui.label("•");
+                        ui.label(egui::RichText::new(&item.extension).color(palette.accent).strong());
+                    }
+                });
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                // 2. Category-Specific Deep Preview
+                let is_image = matches!(
+                    item.extension.as_str(),
+                    "JPG" | "JPEG" | "PNG" | "WEBP" | "GIF" | "AVIF" | "TIFF" | "BMP" | "ICO"
+                );
+                let is_text = matches!(
+                    item.extension.as_str(),
+                    "TXT" | "MD" | "RS" | "PY" | "JSON" | "XML" | "YAML" | "YML" | "LOG" | "CSV" | "TOML" | "HTML" | "CSS" | "C" | "CPP" | "H" | "JS" | "TS"
+                );
+
+                if is_image {
+                    if self.peek_texture.as_ref().map(|(p, _)| p) != Some(&item.path) {
+                        self.peek_texture = load_image_thumbnail(ctx, &item.path).map(|tex| (item.path.clone(), tex));
+                    }
+
+                    if let Some((_, ref tex)) = self.peek_texture {
+                        ui.vertical_centered(|ui| {
+                            ui.add(
+                                egui::Image::new(tex)
+                                    .max_size(Vec2::new(560.0, 260.0))
+                                    .rounding(Rounding::same(8.0)),
+                            );
+                        });
+                    } else {
+                        ui.label(egui::RichText::new("📷 Image preview not available or unsupported raw format.").color(palette.text_muted));
+                    }
+                } else if is_text {
+                    if self.peek_text_cache.as_ref().map(|(p, _)| p) != Some(&item.path) {
+                        let text = std::fs::read(&item.path)
+                            .map(|b| String::from_utf8_lossy(&b[..b.len().min(16384)]).to_string())
+                            .unwrap_or_else(|e| format!("Failed to read file: {}", e));
+                        self.peek_text_cache = Some((item.path.clone(), text));
+                    }
+
+                    if let Some((_, ref text)) = self.peek_text_cache {
+                        egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
+                            for (idx, line) in text.lines().take(100).enumerate() {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(format!("{:3} |", idx + 1)).color(palette.text_muted).monospace());
+                                    ui.label(egui::RichText::new(line).color(palette.text_primary).monospace());
+                                });
+                            }
+                        });
+                    }
+                } else {
+                    ui.label(egui::RichText::new(format!("File Path: {}", item.path.display())).size(11.5).monospace().color(palette.text_primary));
+
+                    if self.peek_hash_cache.as_ref().map(|(p, _)| p) != Some(&item.path) {
+                        let hash = crate::codec::calculate_sha256(&item.path).unwrap_or_else(|_| "Unavailable".to_string());
+                        self.peek_hash_cache = Some((item.path.clone(), hash));
+                    }
+
+                    if let Some((_, ref hash)) = self.peek_hash_cache {
+                        ui.add_space(6.0);
+                        ui.label(egui::RichText::new(format!("SHA-256: {}", hash)).size(11.0).monospace().color(palette.accent));
+                    }
+
+                    if let Ok(bytes) = std::fs::read(&item.path) {
+                        let sample = &bytes[..bytes.len().min(48)];
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Binary Header Hex Dump:").size(11.0).strong().color(palette.text_secondary));
+                        egui::Frame::none().fill(Color32::from_black_alpha(80)).inner_margin(egui::Margin::same(8.0)).show(ui, |ui| {
+                            for chunk in sample.chunks(16) {
+                                let hex_str = chunk.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" ");
+                                let ascii_str: String = chunk.iter().map(|b| if b.is_ascii_graphic() { *b as char } else { '.' }).collect();
+                                ui.label(egui::RichText::new(format!("{:<48}  |  {}", hex_str, ascii_str)).size(10.5).monospace().color(Color32::from_rgb(180, 215, 255)));
+                            }
+                        });
+                    }
+                }
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                // 3. Action Toolbar at bottom of Quick Look
+                ui.horizontal_wrapped(|ui| {
+                    if !item.is_dir {
+                        if ui.button("Transcode JPG").clicked() {
+                            transcode_to = Some("JPG".into());
+                        }
+                        if ui.button("Transcode PNG").clicked() {
+                            transcode_to = Some("PNG".into());
+                        }
+                        if ui.button("Transcode WEBP").clicked() {
+                            transcode_to = Some("WEBP".into());
+                        }
+                        if ui.button("Transcode PDF").clicked() {
+                            transcode_to = Some("PDF".into());
+                        }
+                        if ui.button("🎯 Exam Conform").clicked() {
+                            exam_to_open = true;
+                        }
+                        if ui.button("🔬 Quality Inspect").clicked() {
+                            inspect_to_open = true;
+                        }
+                    }
+                    if ui.button("📦 Pack (ZIP)").clicked() {
+                        pack_to_open = true;
+                    }
+                    if ui.button("📂 Open Folder").clicked() {
+                        if let Some(parent) = item.path.parent() {
+                            open_in_file_manager(parent);
+                        }
+                    }
+                });
+            });
+
+        if close_peek {
+            self.peek_item = None;
+            self.peek_texture = None;
+            self.peek_text_cache = None;
+            self.peek_hash_cache = None;
+        }
+        if let Some(target) = transcode_to {
+            on_transcode_target(item.path.clone(), target);
+            self.peek_item = None;
+        }
+        if exam_to_open {
+            on_exam_conform(item.path.clone());
+            self.peek_item = None;
+        }
+        if pack_to_open {
+            on_pack_archive(vec![item.path.clone()]);
+            self.peek_item = None;
+        }
+        if inspect_to_open {
+            on_inspect_file(item.path.clone());
+            self.peek_item = None;
+        }
+    }
+
+    fn render_properties_modal(&mut self, ctx: &egui::Context, palette: &ThemePalette) {
+        let item = match &self.properties_item {
+            Some(i) => i.clone(),
+            None => return,
+        };
+
+        let mut close_modal = false;
+        let mut reveal_path: Option<PathBuf> = None;
+        let mut peek_item: Option<FileItem> = None;
+
+        let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+        let icon = icon_spec.glyph;
+        let icon_color = Color32::from_rgb(icon_spec.color_rgb[0], icon_spec.color_rgb[1], icon_spec.color_rgb[2]);
+
+        egui::Window::new(format!("ℹ Properties — {}", item.name))
+            .collapsible(false)
+            .resizable(false)
+            .default_width(380.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .frame(
+                egui::Frame::window(&ctx.style())
+                    .fill(palette.card_bg)
+                    .stroke(Stroke::new(1.0_f32, palette.border))
+                    .rounding(Rounding::same(12.0))
+                    .inner_margin(egui::Margin::same(18.0)),
+            )
+            .show(ctx, |ui| {
+                // Header with large icon and name
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(icon).size(36.0).color(if item.is_dir { Color32::from_rgb(79, 168, 255) } else { icon_color }));
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new(&item.name).size(15.0).strong().color(palette.text_primary));
+                        ui.label(
+                            egui::RichText::new(if item.is_dir {
+                                "Folder".to_string()
+                            } else {
+                                format!("{} File", item.extension)
+                            })
+                            .size(11.0)
+                            .color(palette.text_secondary),
+                        );
+                    });
+                });
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                // Properties Grid
+                egui::Grid::new("properties_info_grid")
+                    .num_columns(2)
+                    .spacing([12.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Location:").color(palette.text_muted));
+                        let parent_str = item.path.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "—".to_string());
+                        ui.label(egui::RichText::new(parent_str).color(palette.text_primary));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Size:").color(palette.text_muted));
+                        let size_detail = format!("{} ({} bytes)", item.formatted_size(), item.size_bytes);
+                        ui.label(egui::RichText::new(size_detail).monospace().color(palette.text_primary));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Modified:").color(palette.text_muted));
+                        ui.label(egui::RichText::new(item.formatted_date()).color(palette.text_primary));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Category:").color(palette.text_muted));
+                        ui.label(egui::RichText::new(icon_spec.category).color(palette.accent));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Full Path:").color(palette.text_muted));
+                        ui.horizontal(|ui| {
+                            let path_str = item.path.to_string_lossy().to_string();
+                            if ui.button("📋 Copy Path").clicked() {
+                                ui.output_mut(|o| o.copied_text = path_str);
+                            }
+                        });
+                        ui.end_row();
+                    });
+
+                ui.add_space(14.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                // Action Buttons Footer
+                ui.horizontal(|ui| {
+                    if ui.button("📂 Reveal in Explorer").clicked() {
+                        reveal_path = item.path.parent().map(|p| p.to_path_buf());
+                    }
+
+                    if !item.is_dir && ui.button("Quick Look").clicked() {
+                        peek_item = Some(item.clone());
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Close").clicked() {
+                            close_modal = true;
+                        }
+                    });
+                });
+            });
+
+        if let Some(parent) = reveal_path {
+            open_in_file_manager(&parent);
+        }
+        if let Some(p) = peek_item {
+            self.peek_item = Some(p);
+            self.properties_item = None;
+        }
+        if close_modal {
+            self.properties_item = None;
+        }
+    }
+}
+
+fn load_image_thumbnail(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
+    if let Ok(bytes) = std::fs::read(path) {
+        if let Ok(img) = image::load_from_memory(&bytes) {
+            let thumb = img.thumbnail(520, 320).to_rgba8();
+            let (w, h) = thumb.dimensions();
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                [w as usize, h as usize],
+                &thumb.into_raw(),
+            );
+            return Some(ctx.load_texture(
+                path.to_string_lossy(),
+                color_image,
+                egui::TextureOptions::LINEAR,
+            ));
+        }
+    }
+    None
+}
+
+fn open_in_file_manager(path: &Path) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer").arg(path).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(path).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+    }
+}
+
+fn open_in_default_app(path: &Path) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path.to_string_lossy()])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(path).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+    }
+}
+
+fn open_in_default_editor(path: &Path) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("notepad.exe").arg(path).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg("-t").arg(path).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(editor) = std::env::var("EDITOR") {
+            let _ = std::process::Command::new(editor).arg(path).spawn();
+        } else {
+            let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+        }
+    }
+}
+
+fn reveal_in_file_manager(path: &Path) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer")
+            .arg(format!("/select,\"{}\"", path.display()))
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(parent) = path.parent() {
+            let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+        } else {
+            let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+        }
+    }
+}
+
+fn open_terminal_in_dir(path: &Path) {
+    #[cfg(target_os = "windows")]
+    {
+        let wt_result = std::process::Command::new("wt.exe")
+            .arg("-d")
+            .arg(path)
+            .spawn();
+
+        if wt_result.is_err() {
+            let _ = std::process::Command::new("powershell.exe")
+                .arg("-NoExit")
+                .arg("-Command")
+                .arg(format!("Set-Location -LiteralPath '{}'", path.display()))
+                .spawn();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("-a")
+            .arg("Terminal")
+            .arg(path)
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let terminals = ["x-terminal-emulator", "gnome-terminal", "konsole", "alacritty", "kitty", "xfce4-terminal"];
+        let mut launched = false;
+        for term in terminals {
+            if std::process::Command::new(term).current_dir(path).spawn().is_ok() {
+                launched = true;
+                break;
+            }
+        }
+        if !launched {
+            let _ = std::process::Command::new("sh").current_dir(path).spawn();
+        }
+    }
+}

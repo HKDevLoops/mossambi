@@ -1,25 +1,21 @@
-[workspace]
-resolver = "2"
-members = [
-    "crates/mossambi-core",
-    "crates/mossambi-codec",
-    "crates/mossambi-archive",
-    "crates/mossambi-exam",
-    "crates/mossambi-hwaccel",
-    "crates/mossambi-cli",
-    "crates/mossambi-tui",
-    "crates/mossambi-gui",
-    "crates/mossambi-widget",
-]
-
-[workspace.package]
+[package]
+name = "mossambi"
 version = "2.1.0"
 authors = ["Mossambi Systems Team"]
 edition = "2021"
 rust-version = "1.82"
 license = "MIT OR Apache-2.0"
+description = "Zero-loss native desktop file converter, archive suite, Indian exam form tuner, and macOS-style Universal File Explorer"
 
-[workspace.dependencies]
+[lib]
+name = "mossambi"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mossambi"
+path = "src/main.rs"
+
+[dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
@@ -47,17 +43,26 @@ sha2 = "0.10"
 regex = "1.11"
 clap = { version = "4.5", features = ["derive", "cargo"] }
 clap_complete = "4.5"
-ratatui = "0.29"
-crossterm = "0.28"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
-windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_Storage_FileSystem", "Win32_System_DataExchange"] }
+rfd = "0.15"
+walkdir = "2.5"
 
-# Internal Workspace Crates
-mossambi-core = { path = "crates/mossambi-core" }
-mossambi-codec = { path = "crates/mossambi-codec" }
-mossambi-archive = { path = "crates/mossambi-archive" }
-mossambi-exam = { path = "crates/mossambi-exam" }
-mossambi-hwaccel = { path = "crates/mossambi-hwaccel" }
-mossambi-tui = { path = "crates/mossambi-tui" }
-mossambi-gui = { path = "crates/mossambi-gui" }
-mossambi-widget = { path = "crates/mossambi-widget" }
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_Storage_FileSystem",
+    "Win32_System_DataExchange",
+    "Win32_System_Threading",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+] }
+
+[dev-dependencies]
+tempfile = "3.16"
