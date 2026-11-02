@@ -235,7 +235,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
 
     let mut msg: MSG = unsafe { std::mem::zeroed() };
     let mut zero_loss_enabled = true;
-    let mut current_theme = ThemeStyle::LiquidGlass;
+    let mut current_theme = ThemeStyle::from(cfg.theme_mode);
 
     loop {
         if shutdown.load(Ordering::Relaxed) {

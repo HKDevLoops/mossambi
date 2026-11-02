@@ -225,7 +225,19 @@ impl eframe::App for MossambiWidgetApp {
         self.frame_count = self.frame_count.saturating_add(1);
 
         if self.frame_count == 1 {
-            let mut visuals = egui::Visuals::light();
+            let cfg = mossambi_core::MossambiConfig::load();
+            let is_dark = cfg.theme_mode.is_dark();
+            self.geometry.theme = if is_dark {
+                WidgetTheme::Dark
+            } else {
+                WidgetTheme::Light
+            };
+
+            let mut visuals = if is_dark {
+                egui::Visuals::dark()
+            } else {
+                egui::Visuals::light()
+            };
             visuals.window_fill = Color32::TRANSPARENT;
             visuals.panel_fill = Color32::TRANSPARENT;
             visuals.extreme_bg_color = Color32::TRANSPARENT;
@@ -444,6 +456,13 @@ impl eframe::App for MossambiWidgetApp {
                                         } else {
                                             WidgetTheme::Dark
                                         };
+                                        let mut cfg = mossambi_core::MossambiConfig::load();
+                                        cfg.theme_mode = if self.geometry.theme == WidgetTheme::Dark {
+                                            mossambi_core::ThemeMode::DarkAnthracite
+                                        } else {
+                                            mossambi_core::ThemeMode::LightBrilliant
+                                        };
+                                        let _ = cfg.save();
                                         let mut visuals = if self.geometry.theme == WidgetTheme::Dark {
                                             egui::Visuals::dark()
                                         } else {

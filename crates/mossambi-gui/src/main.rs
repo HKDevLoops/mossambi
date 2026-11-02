@@ -56,8 +56,11 @@ impl Default for MossambiApp {
         let default_cat = FileCategory::Document;
         let default_sectors = UniversalRegistry::get_widget_sectors_for_category(default_cat);
 
+        let cfg = mossambi_core::MossambiConfig::load();
+        let current_theme = ThemeStyle::from(cfg.theme_mode);
+
         Self {
-            theme: ThemeStyle::DarkAnthracite,
+            theme: current_theme,
             quick_settings: QuickSettingsState::default(),
             studio_view: StudioView::default(),
             activation_manager: ActivationManager::new(),
@@ -287,6 +290,10 @@ fn execute_conversion(
 }
 
 impl eframe::App for MossambiApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let is_animating = self.is_converting || self.completion_time.is_some();
         let repaint_interval = if is_animating {
@@ -310,6 +317,9 @@ impl eframe::App for MossambiApp {
                 }
                 AppControlEvent::ChangeTheme(new_theme) => {
                     self.theme = new_theme;
+                    let mut cfg = mossambi_core::MossambiConfig::load();
+                    cfg.theme_mode = new_theme.into();
+                    let _ = cfg.save();
                 }
                 AppControlEvent::ChangeExamPreset(preset_name) => {
                     self.quick_settings.exam_mode_enabled = true;
@@ -472,6 +482,7 @@ fn main() -> Result<(), eframe::Error> {
         .with_inner_size([1120.0, 720.0])
         .with_min_inner_size([920.0, 580.0])
         .with_decorations(true) // Full Desktop Studio Window
+        .with_transparent(true)
         .with_resizable(true);
 
     if let Some(icon) = load_app_icon() {

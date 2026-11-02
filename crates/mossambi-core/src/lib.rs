@@ -11,7 +11,7 @@ pub mod pantone;
 pub mod registry;
 
 pub use async_worker::{AsyncWorkerPool, TaskUpdate};
-pub use config::{MossambiConfig, OutputMode, ThemeMode};
+pub use config::{GlassEffect, MossambiConfig, OutputMode, ThemeMode};
 pub use drag_listener::{extract_clipboard_files, DragGestureEvent, DragGestureListener};
 #[cfg(target_os = "windows")]
 pub use drag_listener::query_active_explorer_files;
@@ -21,7 +21,10 @@ pub use fs_utils::{
 };
 pub use gesture::{GestureKind, GesturePoint, KinematicGestureTracker};
 pub use linux_dna::{discover_linux_mounts, install_linux_desktop_integration, send_linux_notification};
-pub use pantone::{CitrusShade, PantoneColor, PantonePalette};
+pub use pantone::{
+    all_pantone_themes, get_pantone_theme, CitrusShade, PantoneColor, PantonePalette, PantoneTheme,
+    DARK_THEMES, LIGHT_THEMES,
+};
 pub use registry::{
     DynamicWheelSector, FileCategory, FormatInfo, FormatNature, FormatSpecification,
     UniversalRegistry,

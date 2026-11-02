@@ -31,7 +31,7 @@ use mossambi_codec::{
 use mossambi_core::{
     get_system_arch_info, get_system_drives, spawn_async_dir_scan,
     AsyncWorkerPool, DriveInfo, FileItem, MossambiConfig, ScanBatch,
-    TaskUpdate, ThemeMode,
+    TaskUpdate,
 };
 use mossambi_exam::{optimize_exam_media, ExamConstraint};
 use mossambi_hwaccel::detect_hardware_capabilities;
@@ -634,47 +634,25 @@ impl AppState {
     }
 
     pub fn current_theme_palette(&self) -> TuiThemePalette {
-        match self.config.theme_mode {
-            ThemeMode::LiquidGlass => TuiThemePalette {
-                bg: Color::Rgb(16, 20, 26),
-                surface: Color::Rgb(26, 32, 44),
-                border: Color::Rgb(70, 95, 125),
-                text_primary: Color::Rgb(245, 245, 250),
-                text_secondary: Color::Rgb(175, 185, 200),
-                text_muted: Color::Rgb(110, 125, 140),
-                accent: Color::Rgb(120, 190, 32),
-                gold: Color::Rgb(255, 184, 28),
-            },
-            ThemeMode::FrostedGlass => TuiThemePalette {
-                bg: Color::Rgb(24, 24, 28),
-                surface: Color::Rgb(36, 36, 42),
-                border: Color::Rgb(70, 70, 80),
-                text_primary: Color::Rgb(240, 240, 245),
-                text_secondary: Color::Rgb(165, 165, 175),
-                text_muted: Color::Rgb(115, 115, 125),
-                accent: Color::Rgb(130, 205, 40),
-                gold: Color::Rgb(255, 184, 28),
-            },
-            ThemeMode::DarkAnthracite => TuiThemePalette {
-                bg: Color::Rgb(22, 22, 24),
-                surface: Color::Rgb(34, 34, 38),
-                border: Color::Rgb(60, 60, 66),
-                text_primary: Color::Rgb(245, 245, 247),
-                text_secondary: Color::Rgb(161, 161, 166),
-                text_muted: Color::Rgb(120, 120, 126),
-                accent: PANTONE_RAW_PEEL,
-                gold: PANTONE_CITRUS_GOLD,
-            },
-            ThemeMode::LightAqua => TuiThemePalette {
-                bg: Color::Rgb(245, 245, 247),
-                surface: Color::Rgb(255, 255, 255),
-                border: Color::Rgb(190, 190, 200),
-                text_primary: Color::Rgb(28, 28, 30),
-                text_secondary: Color::Rgb(105, 105, 115),
-                text_muted: Color::Rgb(140, 140, 150),
-                accent: Color::Rgb(85, 150, 18),
-                gold: Color::Rgb(210, 140, 15),
-            },
+        let pt = self.config.theme_mode.to_pantone_theme();
+        let (bg_r, bg_g, bg_b) = pt.bg.to_rgb();
+        let (surf_r, surf_g, surf_b) = pt.surface.to_rgb();
+        let (bord_r, bord_g, bord_b) = pt.border.to_rgb();
+        let (tp_r, tp_g, tp_b) = pt.text_primary.to_rgb();
+        let (ts_r, ts_g, ts_b) = pt.text_secondary.to_rgb();
+        let (tm_r, tm_g, tm_b) = pt.text_muted.to_rgb();
+        let (acc_r, acc_g, acc_b) = pt.accent.to_rgb();
+        let (hi_r, hi_g, hi_b) = pt.highlight.to_rgb();
+
+        TuiThemePalette {
+            bg: Color::Rgb(bg_r, bg_g, bg_b),
+            surface: Color::Rgb(surf_r, surf_g, surf_b),
+            border: Color::Rgb(bord_r, bord_g, bord_b),
+            text_primary: Color::Rgb(tp_r, tp_g, tp_b),
+            text_secondary: Color::Rgb(ts_r, ts_g, ts_b),
+            text_muted: Color::Rgb(tm_r, tm_g, tm_b),
+            accent: Color::Rgb(acc_r, acc_g, acc_b),
+            gold: Color::Rgb(hi_r, hi_g, hi_b),
         }
     }
 }
@@ -888,16 +866,26 @@ fn handle_key_event(state: &mut AppState, code: KeyCode) {
             }
         }
 
-        // Theme Toggle [t]
+        // Theme Cycle [t]
         KeyCode::Char('t') => {
-            state.config.theme_mode = match state.config.theme_mode {
-                ThemeMode::LiquidGlass => ThemeMode::FrostedGlass,
-                ThemeMode::FrostedGlass => ThemeMode::DarkAnthracite,
-                ThemeMode::DarkAnthracite => ThemeMode::LightAqua,
-                ThemeMode::LightAqua => ThemeMode::LiquidGlass,
-            };
+            state.config.theme_mode = state.config.theme_mode.next();
             let _ = state.config.save();
-            state.status_message = format!("Theme switched to: {:?}", state.config.theme_mode);
+            state.status_message = format!(
+                "🎨 Pantone: {} ({})",
+                state.config.theme_mode.name(),
+                if state.config.theme_mode.is_dark() { "Dark" } else { "Light" }
+            );
+        }
+
+        // Theme Set Toggle [T] (Shift+T)
+        KeyCode::Char('T') => {
+            state.config.theme_mode = state.config.theme_mode.toggle_dark_light();
+            let _ = state.config.save();
+            state.status_message = format!(
+                "🎨 Toggled Set: {} ({})",
+                state.config.theme_mode.name(),
+                if state.config.theme_mode.is_dark() { "10 Dark Themes" } else { "10 Light Themes" }
+            );
         }
 
         // Arrow & Vim Navigation
@@ -1474,9 +1462,15 @@ fn draw_hardware_tab(f: &mut Frame, area: Rect, palette: TuiThemePalette) {
 }
 
 fn draw_settings_tab(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThemePalette) {
+    let pt = state.config.theme_mode.to_pantone_theme();
     let p = Paragraph::new(format!(
-        "⚙️ Appearance & Persistent Settings\n\nTheme: {:?} (Press [t] to cycle)\nCitrus Shade: {}\nZero-Loss Enforcement: {}\nGesture Wakeup: {}\n\nPress [Enter] to toggle zero-loss.",
-        state.config.theme_mode,
+        "⚙️ Appearance & Persistent Settings\n\n🎨 Active Pantone Theme: {} ({})\n   • Background: {} ({}, {})\n   • Surface:    {} ({}, {})\n   • Accent:     {} ({}, {})\n   • Highlight:  {} ({}, {})\n\n💡 Theme Hotkeys:\n   • [t] Cycle sequentially across all 20 certified Pantone themes\n   • [T] Switch between 10 Dark Themes and 10 Light Themes\n\nCitrus Shade: {}\nZero-Loss Enforcement: {}\nGesture Wakeup: {}\n\nPress [Enter] to toggle zero-loss.",
+        pt.name,
+        if pt.is_dark { "Certified Dark Theme" } else { "Certified Light Theme" },
+        pt.bg.name, pt.bg.code, pt.bg.hex,
+        pt.surface.name, pt.surface.code, pt.surface.hex,
+        pt.accent.name, pt.accent.code, pt.accent.hex,
+        pt.highlight.name, pt.highlight.code, pt.highlight.hex,
         state.config.citrus_shade,
         state.config.enforce_zero_loss,
         state.config.enable_gesture_wakeup

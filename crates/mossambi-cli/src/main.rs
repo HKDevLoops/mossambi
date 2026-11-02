@@ -198,6 +198,9 @@ pub enum Commands {
     /// Launch or summon the Desktop Radial Widget and macOS-Styled GUI
     Gui,
 
+    /// List all 20 certified Pantone themes (10 Dark & 10 Light) with official Pantone codes and hex
+    Themes,
+
     /// View or edit persistent configuration settings (~/.mossambi/config.json)
     Config {
         /// Action: 'get', 'set', or 'list'
@@ -308,6 +311,7 @@ fn main() -> Result<()> {
                 output_dir.as_deref(),
                 cli.json,
             ),
+            Commands::Themes => handle_themes(cli.json),
             Commands::Config { action, key, value } => handle_config(&action, key.as_deref(), value.as_deref(), cli.json),
             Commands::Completions { shell, carapace } => handle_completions(shell.as_deref(), carapace),
             Commands::Carapace { shell, args } => handle_carapace(shell.as_deref(), &args),
@@ -858,6 +862,71 @@ fn handle_gui() -> Result<()> {
     Ok(())
 }
 
+fn handle_themes(as_json: bool) -> Result<()> {
+    use mossambi_core::{DARK_THEMES, LIGHT_THEMES};
+
+    if as_json {
+        let all = mossambi_core::all_pantone_themes();
+        println!("{}", serde_json::to_string_pretty(all)?);
+    } else {
+        println!("╔══════════════════════════════════════════════════════════════════════════════════════════════╗");
+        println!("║                      🎨 20 CERTIFIED PANTONE THEMES (10 DARK & 10 LIGHT)                     ║");
+        println!("║          100% Pantone-Certified Matching System (PMS) & FHI Standards Architecture           ║");
+        println!("╚══════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+
+        println!("🌙 10 CERTIFIED DARK PANTONE THEMES:");
+        println!("────────────────────────────────────────────────────────────────────────────────────────────────");
+        for (idx, theme) in DARK_THEMES.iter().enumerate() {
+            println!(
+                "  {:2}. {:<24} [ID: {:<16}]",
+                idx + 1,
+                theme.name,
+                theme.id
+            );
+            println!(
+                "      BG:      {:<18} ({:<20}) [{}]",
+                theme.bg.name, theme.bg.code, theme.bg.hex
+            );
+            println!(
+                "      Surface: {:<18} ({:<20}) [{}]",
+                theme.surface.name, theme.surface.code, theme.surface.hex
+            );
+            println!(
+                "      Accent:  {:<18} ({:<20}) [{}]",
+                theme.accent.name, theme.accent.code, theme.accent.hex
+            );
+            println!();
+        }
+
+        println!("☀️ 10 CERTIFIED LIGHT PANTONE THEMES:");
+        println!("────────────────────────────────────────────────────────────────────────────────────────────────");
+        for (idx, theme) in LIGHT_THEMES.iter().enumerate() {
+            println!(
+                "  {:2}. {:<24} [ID: {:<16}]",
+                idx + 1,
+                theme.name,
+                theme.id
+            );
+            println!(
+                "      BG:      {:<18} ({:<20}) [{}]",
+                theme.bg.name, theme.bg.code, theme.bg.hex
+            );
+            println!(
+                "      Surface: {:<18} ({:<20}) [{}]",
+                theme.surface.name, theme.surface.code, theme.surface.hex
+            );
+            println!(
+                "      Accent:  {:<18} ({:<20}) [{}]",
+                theme.accent.name, theme.accent.code, theme.accent.hex
+            );
+            println!();
+        }
+        println!("💡 Tip: Switch themes in CLI using 'mossambi config set theme <id_or_name>'");
+        println!("        or press [t] in TUI / select from Preferences tab in Desktop Studio.\n");
+    }
+    Ok(())
+}
+
 fn handle_config(action: &str, key: Option<&str>, value: Option<&str>, as_json: bool) -> Result<()> {
     let mut config = MossambiConfig::load();
 
@@ -887,12 +956,17 @@ fn handle_config(action: &str, key: Option<&str>, value: Option<&str>, as_json: 
             if let (Some(k), Some(v)) = (key, value) {
                 match k {
                     "shade" | "citrus_shade" => config.citrus_shade = v.to_string(),
-                    "theme" | "theme_mode" => match v.to_lowercase().as_str() {
-                        "frosted" | "frosted_glass" | "sonoma" => config.theme_mode = ThemeMode::FrostedGlass,
-                        "dark" | "dark_anthracite" | "pro" => config.theme_mode = ThemeMode::DarkAnthracite,
-                        "light" | "light_aqua" | "aqua" => config.theme_mode = ThemeMode::LightAqua,
-                        _ => config.theme_mode = ThemeMode::LiquidGlass,
-                    },
+                    "theme" | "theme_mode" => {
+                        if let Some(mode) = ThemeMode::from_id_or_name(v) {
+                            config.theme_mode = mode;
+                        } else {
+                            match v.to_lowercase().as_str() {
+                                "dark" => config.theme_mode = ThemeMode::DarkAnthracite,
+                                "light" => config.theme_mode = ThemeMode::LightBrilliant,
+                                _ => bail!("Unknown Pantone theme: '{}'. Use 'mossambi themes' to see all 20 certified Pantone themes.", v),
+                            }
+                        }
+                    }
                     "always_on_top" => config.always_on_top = v.parse().unwrap_or(true),
                     "wheel_size" => config.wheel_size = v.parse().unwrap_or(440),
                     "gesture" | "enable_gesture_wakeup" => config.enable_gesture_wakeup = v.parse().unwrap_or(true),
