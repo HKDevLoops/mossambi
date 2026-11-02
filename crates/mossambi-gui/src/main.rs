@@ -399,6 +399,7 @@ impl eframe::App for MossambiApp {
         let mut qs = self.quick_settings.clone();
 
         let mut file_to_pick = false;
+        let mut file_to_stage: Option<PathBuf> = None;
         let mut convert_to_target: Option<String> = None;
         let mut open_target_folder: Option<PathBuf> = None;
 
@@ -408,11 +409,16 @@ impl eframe::App for MossambiApp {
             &cur_file,
             &mut qs,
             || file_to_pick = true,
+            |p| file_to_stage = Some(p),
             |t| convert_to_target = Some(t),
             |p| open_target_folder = Some(p.to_path_buf()),
         );
 
         self.quick_settings = qs;
+
+        if let Some(path) = file_to_stage {
+            self.select_file(path);
+        }
 
         if file_to_pick {
             if let Some(path) = rfd::FileDialog::new().pick_file() {

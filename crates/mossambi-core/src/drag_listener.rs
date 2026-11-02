@@ -165,18 +165,18 @@ fn run_listener_loop(
 
                 match msg {
                     WM_LBUTTONDOWN => {
-                        // GATED SYSTEM-LEVEL FILE DRAG CHECK:
-                        // Deep check: Is the cursor pressing down on a File Explorer, Desktop, or File Dialog window?
-                        let is_file_window = is_shell_or_explorer_window(pt);
-                        if is_file_window {
-                            ctx.is_holding_files = true;
-                            ctx.tracker.reset();
-                            // Attempt to query active selected files from Shell
-                            ctx.cached_files = query_active_explorer_files(pt);
-                        } else {
-                            ctx.is_holding_files = false;
-                            ctx.cached_files.clear();
+                        // UNIVERSAL SYSTEM-LEVEL FILE DRAG CHECK:
+                        // Supports Total Commander, Directory Opus, OneCommander, FreeCommander,
+                        // 7-Zip, Web Browsers (Chrome, Edge, Firefox), Explorer, and Desktop.
+                        ctx.is_holding_files = true;
+                        ctx.tracker.reset();
+                        // 1. Try clipboard/OLE first (Total Commander, Directory Opus, 7-Zip populate this)
+                        let mut files = extract_clipboard_files();
+                        // 2. Try Explorer COM
+                        if files.is_empty() {
+                            files = query_active_explorer_files(pt);
                         }
+                        ctx.cached_files = files;
                     }
                     WM_LBUTTONUP => {
                         // User dropped or released button - reset drag state immediately
@@ -186,9 +186,13 @@ fn run_listener_loop(
                     }
                     WM_MOUSEMOVE if ctx.is_holding_files => {
                         // ULTRA-LIGHTWEIGHT FAST PATH:
-                        // Only active when user is holding files/folders!
+                        // Only active when user is dragging mouse with button pressed!
                         let now_ms = current_timestamp_ms();
                         if let Some(gesture) = ctx.tracker.feed(pt.x as f32, pt.y as f32, now_ms) {
+                            // If cached files were empty at mousedown, re-probe clipboard in case drag source populated it mid-drag
+                            if ctx.cached_files.is_empty() {
+                                ctx.cached_files = extract_clipboard_files();
+                            }
                             maybe_event = Some(DragGestureEvent {
                                 gesture,
                                 cursor_pos: (pt.x as f32, pt.y as f32),
@@ -238,56 +242,38 @@ fn run_listener_loop(
     }
 }
 
+
 #[cfg(target_os = "windows")]
-fn is_shell_or_explorer_window(pt: windows_sys::Win32::Foundation::POINT) -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetAncestor, GetClassNameW, WindowFromPoint, GA_ROOT,
-    };
+pub fn extract_clipboard_files() -> Vec<PathBuf> {
+    use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+    use windows_sys::Win32::UI::Shell::DragQueryFileW;
+
+    const CF_HDROP: u32 = 15;
+    let mut files = Vec::new();
 
     unsafe {
-        let hwnd_under = WindowFromPoint(pt);
-        if hwnd_under.is_null() {
-            return false;
-        }
-
-        let mut class_buf = [0u16; 256];
-        let len = GetClassNameW(hwnd_under, class_buf.as_mut_ptr(), 256);
-        if len > 0 {
-            let class_name = String::from_utf16_lossy(&class_buf[..len as usize]);
-            if is_shell_class_name(&class_name) {
-                return true;
-            }
-        }
-
-        // Also check the root ancestor window
-        let root = GetAncestor(hwnd_under, GA_ROOT);
-        if !root.is_null() && root != hwnd_under {
-            let len_root = GetClassNameW(root, class_buf.as_mut_ptr(), 256);
-            if len_root > 0 {
-                let root_name = String::from_utf16_lossy(&class_buf[..len_root as usize]);
-                if is_shell_class_name(&root_name) {
-                    return true;
+        if OpenClipboard(std::ptr::null_mut()) != 0 {
+            let hdrop = GetClipboardData(CF_HDROP);
+            if !hdrop.is_null() {
+                let count = DragQueryFileW(hdrop as _, 0xFFFFFFFF, std::ptr::null_mut(), 0);
+                for i in 0..count {
+                    let mut buf = [0u16; 512];
+                    let len = DragQueryFileW(hdrop as _, i, buf.as_mut_ptr(), 512);
+                    if len > 0 {
+                        let s = String::from_utf16_lossy(&buf[..len as usize]);
+                        files.push(PathBuf::from(s));
+                    }
                 }
             }
+            CloseClipboard();
         }
     }
-
-    false
+    files
 }
 
-#[cfg(target_os = "windows")]
-fn is_shell_class_name(name: &str) -> bool {
-    matches!(
-        name,
-        "CabinetWClass"            // File Explorer window
-        | "ExploreWClass"          // Legacy Explorer
-        | "Progman"                // Windows Desktop Program Manager
-        | "WorkerW"                // Desktop Wallpaper Worker
-        | "SHELLDLL_DefView"       // Shell Folder View inside Explorer or Desktop
-        | "SysListView32"          // File List View
-        | "DirectUIHWND"           // Modern Explorer Folder view
-        | "#32770"                 // File Open/Save Dialog
-    )
+#[cfg(not(target_os = "windows"))]
+pub fn extract_clipboard_files() -> Vec<PathBuf> {
+    Vec::new()
 }
 
 #[cfg(target_os = "windows")]

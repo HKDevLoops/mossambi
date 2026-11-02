@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StudioTab {
+    FileExplorer,
     Transcoder,
     ExamStudio,
     QualityInspector,
@@ -30,6 +31,7 @@ pub enum StudioTab {
 
 pub struct StudioView {
     pub current_tab: StudioTab,
+    pub explorer_view: crate::explorer_view::ExplorerView,
     pub exam_status: String,
     pub last_exam_output: Option<PathBuf>,
     pub quality_report: Option<mossambi_codec::FileQualityReport>,
@@ -43,7 +45,8 @@ pub struct StudioView {
 impl Default for StudioView {
     fn default() -> Self {
         Self {
-            current_tab: StudioTab::Transcoder,
+            current_tab: StudioTab::FileExplorer,
+            explorer_view: crate::explorer_view::ExplorerView::default(),
             exam_status: "Ready to optimize for portal boundaries.".to_string(),
             last_exam_output: None,
             quality_report: None,
@@ -66,6 +69,7 @@ impl StudioView {
         current_file: &Option<PathBuf>,
         quick_settings: &mut QuickSettingsState,
         mut on_pick_file: impl FnMut(),
+        mut on_stage_file: impl FnMut(PathBuf),
         mut on_convert: impl FnMut(String),
         on_open_folder: impl FnMut(&Path),
     ) {
@@ -113,6 +117,11 @@ impl StudioView {
                 ui.add_space(10.0);
 
                 // Sidebar Navigation Pills
+                if render_sidebar_item(ui, &palette, "File Explorer", "📁", self.current_tab == StudioTab::FileExplorer) {
+                    self.current_tab = StudioTab::FileExplorer;
+                }
+                ui.add_space(2.0);
+
                 if render_sidebar_item(ui, &palette, "Transcoder", "⚡", self.current_tab == StudioTab::Transcoder) {
                     self.current_tab = StudioTab::Transcoder;
                 }
@@ -168,6 +177,48 @@ impl StudioView {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         match self.current_tab {
+                            StudioTab::FileExplorer => {
+                                let mut staged: Option<PathBuf> = None;
+                                let mut transcode_req: Option<(PathBuf, String)> = None;
+                                let mut exam_req: Option<PathBuf> = None;
+                                let mut pack_req: Option<Vec<PathBuf>> = None;
+                                let mut inspect_req: Option<PathBuf> = None;
+
+                                self.explorer_view.render(
+                                    ui,
+                                    |p| staged = Some(p),
+                                    |p, t| transcode_req = Some((p, t)),
+                                    |p| exam_req = Some(p),
+                                    |list| pack_req = Some(list),
+                                    |p| inspect_req = Some(p),
+                                );
+
+                                if let Some(p) = staged {
+                                    on_stage_file(p);
+                                }
+                                if let Some((p, t)) = transcode_req {
+                                    on_stage_file(p);
+                                    on_convert(t);
+                                }
+                                if let Some(p) = exam_req {
+                                    on_stage_file(p);
+                                    self.current_tab = StudioTab::ExamStudio;
+                                    quick_settings.exam_mode_enabled = true;
+                                }
+                                if let Some(list) = pack_req {
+                                    if let Some(first) = list.first() {
+                                        on_stage_file(first.clone());
+                                    }
+                                    self.current_tab = StudioTab::ArchiveSuite;
+                                }
+                                if let Some(p) = inspect_req {
+                                    on_stage_file(p.clone());
+                                    self.current_tab = StudioTab::QualityInspector;
+                                    if let Ok(rep) = mossambi_codec::FileQualityChecker::inspect_file(&p) {
+                                        self.quality_report = Some(rep);
+                                    }
+                                }
+                            }
                             StudioTab::Transcoder => {
                                 self.render_transcoder_tab(ui, &palette, current_file, quick_settings, &mut on_pick_file, &mut on_convert);
                             }

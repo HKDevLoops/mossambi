@@ -231,6 +231,14 @@ impl eframe::App for MossambiWidgetApp {
             visuals.extreme_bg_color = Color32::TRANSPARENT;
             visuals.faint_bg_color = Color32::TRANSPARENT;
             ctx.set_visuals(visuals);
+
+            // Automatically check clipboard for copied files if none was passed via CLI
+            if self.current_file.is_none() {
+                let clip_files = mossambi_core::extract_clipboard_files();
+                if let Some(first) = clip_files.first() {
+                    self.select_file(first.clone());
+                }
+            }
         }
 
         // Continuously hammer Win32 styles for the first 60 frames (first ~1s of lifecycle)
@@ -320,6 +328,14 @@ impl eframe::App for MossambiWidgetApp {
                             }
                         }
                     }
+                }
+            }
+
+            // Clipboard paste shortcut (Ctrl+V / Cmd+V)
+            if i.modifiers.command && i.key_pressed(Key::V) {
+                let clip_files = mossambi_core::extract_clipboard_files();
+                if let Some(first) = clip_files.first() {
+                    self.select_file(first.clone());
                 }
             }
 
