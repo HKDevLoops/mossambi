@@ -112,6 +112,10 @@ pub struct FileItem {
     pub size_bytes: u64,
     pub modified: Option<SystemTime>,
     pub extension: String,
+    pub is_hidden: bool,
+    pub is_symlink: bool,
+    pub symlink_target: Option<PathBuf>,
+    pub permissions_mode: u32,
 }
 
 impl FileItem {
@@ -123,13 +127,46 @@ impl FileItem {
         let is_dir = path.is_dir();
         let metadata = std::fs::metadata(&path).ok();
         let size_bytes = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-        let modified = metadata.and_then(|m| m.modified().ok());
+        let modified = metadata.as_ref().and_then(|m| m.modified().ok());
         let extension = if is_dir {
             String::new()
         } else {
             path.extension()
                 .map(|e| e.to_string_lossy().to_string().to_uppercase())
                 .unwrap_or_default()
+        };
+
+        let sym_meta = std::fs::symlink_metadata(&path).ok();
+        let is_symlink = sym_meta.as_ref().map(|m| m.is_symlink()).unwrap_or(false);
+        let symlink_target = if is_symlink {
+            std::fs::read_link(&path).ok()
+        } else {
+            None
+        };
+
+        #[cfg(target_os = "windows")]
+        let is_hidden = name.starts_with('.') || {
+            use std::os::windows::fs::MetadataExt;
+            metadata.as_ref().map(|m| m.file_attributes() & 0x2 != 0).unwrap_or(false)
+        };
+        #[cfg(not(target_os = "windows"))]
+        let is_hidden = name.starts_with('.');
+
+        #[cfg(unix)]
+        let permissions_mode = {
+            use std::os::unix::fs::PermissionsExt;
+            metadata.as_ref().map(|m| m.permissions().mode()).unwrap_or(0o644)
+        };
+        #[cfg(not(unix))]
+        let permissions_mode = {
+            let readonly = metadata.as_ref().map(|m| m.permissions().readonly()).unwrap_or(false);
+            if is_dir {
+                if readonly { 0o555 } else { 0o755 }
+            } else if readonly {
+                0o444
+            } else {
+                0o644
+            }
         };
 
         Self {
@@ -139,23 +176,45 @@ impl FileItem {
             size_bytes,
             modified,
             extension,
+            is_hidden,
+            is_symlink,
+            symlink_target,
+            permissions_mode,
         }
+    }
+
+    pub fn formatted_permissions(&self) -> String {
+        let mode = self.permissions_mode;
+        let file_type = if self.is_symlink {
+            'l'
+        } else if self.is_dir {
+            'd'
+        } else {
+            '-'
+        };
+
+        let r = |bit: u32| if mode & bit != 0 { 'r' } else { '-' };
+        let w = |bit: u32| if mode & bit != 0 { 'w' } else { '-' };
+        let x = |bit: u32| if mode & bit != 0 { 'x' } else { '-' };
+
+        format!(
+            "{}{}{}{}{}{}{}{}{}{}",
+            file_type,
+            r(0o400), w(0o200), x(0o100),
+            r(0o040), w(0o020), x(0o010),
+            r(0o004), w(0o002), x(0o001),
+        )
+    }
+
+    pub fn formatted_octal_permissions(&self) -> String {
+        format!("{:04o}", self.permissions_mode & 0o777)
     }
 
     pub fn formatted_size(&self) -> String {
         if self.is_dir {
             return "Folder".to_string();
         }
-        let bytes = self.size_bytes;
-        if bytes < 1024 {
-            format!("{} B", bytes)
-        } else if bytes < 1024 * 1024 {
-            format!("{:.1} KB", bytes as f64 / 1024.0)
-        } else if bytes < 1024 * 1024 * 1024 {
-            format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-        } else {
-            format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-        }
+        format_file_size(self.size_bytes)
     }
 
     pub fn formatted_date(&self) -> String {
@@ -174,6 +233,19 @@ impl FileItem {
             }
         }
         "—".to_string()
+    }
+}
+
+/// Formats a raw byte count into human-readable B, KB, MB, or GB
+pub fn format_file_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
     }
 }
 
@@ -242,6 +314,30 @@ pub fn spawn_async_dir_scan(
             }
         })
         .ok();
+}
+
+/// Synchronous directory reader returning sorted FileItem vector (directories first, then case-insensitive names)
+pub fn list_directory_sync(dir: &Path) -> Vec<FileItem> {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    let mut items = Vec::new();
+    for entry in read_dir.flatten() {
+        items.push(FileItem::from_path(entry.path()));
+    }
+
+    items.sort_by(|a, b| {
+        if a.is_dir && !b.is_dir {
+            std::cmp::Ordering::Less
+        } else if !a.is_dir && b.is_dir {
+            std::cmp::Ordering::Greater
+        } else {
+            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+        }
+    });
+
+    items
 }
 
 /// Clickable Breadcrumb Segment (File Pilot style)

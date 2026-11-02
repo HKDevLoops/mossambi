@@ -19,7 +19,7 @@ pub use drag_listener::{extract_clipboard_files, DragGestureEvent, DragGestureLi
 pub use drag_listener::query_active_explorer_files;
 pub use file_icons::{resolve_file_icon, FileIconSpec};
 pub use fs_utils::{
-    copy_entry_recursive, get_system_drives, move_entry, parse_breadcrumbs,
+    copy_entry_recursive, format_file_size, get_system_drives, list_directory_sync, move_entry, parse_breadcrumbs,
     remove_entry_recursive, resolve_unique_paste_path, spawn_async_dir_scan,
     BreadcrumbSegment, DriveInfo, FileItem, ScanBatch,
 };

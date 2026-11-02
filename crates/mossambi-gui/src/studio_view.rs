@@ -82,7 +82,7 @@ impl StudioView {
 
         egui::SidePanel::left("studio_sidebar")
             .resizable(false)
-            .exact_width(240.0)
+            .exact_width(230.0)
             .frame(sidebar_frame)
             .show(ctx, |ui| {
                 // Top Traffic Lights (Red = Close, Yellow = Min, Green = Maximize Toggle)
@@ -104,7 +104,7 @@ impl StudioView {
                     }
                 });
 
-                ui.add_space(16.0);
+                ui.add_space(14.0);
 
                 // Brand Header with Pantone 376 C
                 ui.horizontal(|ui| {
@@ -122,57 +122,150 @@ impl StudioView {
                     );
                 });
 
-                ui.add_space(14.0);
+                ui.add_space(12.0);
                 ui.separator();
-                ui.add_space(10.0);
+                ui.add_space(6.0);
 
-                // Sidebar Navigation Pills
-                if render_sidebar_item(ui, &palette, "File Explorer", "📁", self.current_tab == StudioTab::FileExplorer) {
-                    self.current_tab = StudioTab::FileExplorer;
-                }
-                ui.add_space(2.0);
+                // Scrollable macOS Finder Sidebar (Favorites, Locations/Drives, Tools, Tags)
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        // Section 1: FAVORITES
+                        ui.label(egui::RichText::new("FAVORITES").size(10.0).strong().color(palette.text_muted));
+                        ui.add_space(3.0);
 
-                if render_sidebar_item(ui, &palette, "Transcoder", "⚡", self.current_tab == StudioTab::Transcoder) {
-                    self.current_tab = StudioTab::Transcoder;
-                }
-                ui.add_space(2.0);
+                        let home_opt = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).ok();
+                        if let Some(home_str) = home_opt {
+                            let base = PathBuf::from(home_str);
+                            let favs = [
+                                ("Home", "🏠", base.clone()),
+                                ("Desktop", "🖥", base.join("Desktop")),
+                                ("Downloads", "📥", base.join("Downloads")),
+                                ("Documents", "📄", base.join("Documents")),
+                                ("Pictures", "🖼", base.join("Pictures")),
+                                ("Videos", "🎬", base.join("Videos")),
+                                ("Music", "🎵", base.join("Music")),
+                            ];
+                            for (name, icon, path) in favs {
+                                if path.exists() {
+                                    let is_active = self.current_tab == StudioTab::FileExplorer && self.explorer_view.current_dir == path;
+                                    if render_sidebar_item(ui, &palette, name, icon, is_active) {
+                                        self.current_tab = StudioTab::FileExplorer;
+                                        self.explorer_view.navigate_to(path);
+                                    }
+                                    ui.add_space(1.0);
+                                }
+                            }
+                        }
 
-                if render_sidebar_item(ui, &palette, "Custom Conformer", "🎯", self.current_tab == StudioTab::ExamStudio) {
-                    self.current_tab = StudioTab::ExamStudio;
-                    quick_settings.exam_mode_enabled = true;
-                }
-                ui.add_space(2.0);
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(6.0);
 
-                if render_sidebar_item(ui, &palette, "Quality Inspector", "🔬", self.current_tab == StudioTab::QualityInspector) {
-                    self.current_tab = StudioTab::QualityInspector;
-                }
-                ui.add_space(2.0);
+                        // Section 2: LOCATIONS / DRIVES
+                        ui.label(egui::RichText::new("LOCATIONS").size(10.0).strong().color(palette.text_muted));
+                        ui.add_space(3.0);
 
-                if render_sidebar_item(ui, &palette, "Archive Suite", "📦", self.current_tab == StudioTab::ArchiveSuite) {
-                    self.current_tab = StudioTab::ArchiveSuite;
-                }
-                ui.add_space(2.0);
+                        let drives = self.explorer_view.drives.clone();
+                        for drive in &drives {
+                            let is_active = self.current_tab == StudioTab::FileExplorer && self.explorer_view.current_dir.starts_with(&drive.path);
+                            if render_sidebar_item(ui, &palette, &drive.display_name, "💾", is_active) {
+                                self.current_tab = StudioTab::FileExplorer;
+                                self.explorer_view.navigate_to(drive.path.clone());
+                            }
+                            if drive.total_bytes > 0 {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(14.0);
+                                    ui.label(
+                                        egui::RichText::new(drive.formatted_space())
+                                            .size(9.0)
+                                            .color(palette.text_muted),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.add_space(14.0);
+                                    let ratio = drive.usage_ratio();
+                                    crate::custom_widgets::render_custom_progress_bar(ui, ratio, None, &palette, 4.0, Some(150.0));
+                                });
+                                ui.add_space(3.0);
+                            }
+                        }
 
-                if render_sidebar_item(ui, &palette, "Hardware & AI", "💻", self.current_tab == StudioTab::HardwareTelemetry) {
-                    self.current_tab = StudioTab::HardwareTelemetry;
-                }
-                ui.add_space(2.0);
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(6.0);
 
-                if render_sidebar_item(ui, &palette, "Preferences", "⚙", self.current_tab == StudioTab::Preferences) {
-                    self.current_tab = StudioTab::Preferences;
-                }
+                        // Section 3: TOOLS & CONVERTERS
+                        ui.label(egui::RichText::new("TOOLS & CONVERTERS").size(10.0).strong().color(palette.text_muted));
+                        ui.add_space(3.0);
 
-                // Bottom Sidebar Area
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new("Mossambi Universal Transcoder\nWin+Ctrl+C: Studio")
-                            .size(9.5)
-                            .color(palette.text_muted),
-                    );
-                    ui.add_space(8.0);
-                    ui.separator();
-                });
+                        if render_sidebar_item(ui, &palette, "File Explorer", "📁", self.current_tab == StudioTab::FileExplorer) {
+                            self.current_tab = StudioTab::FileExplorer;
+                        }
+                        ui.add_space(1.0);
+
+                        if render_sidebar_item(ui, &palette, "Transcoder", "⚡", self.current_tab == StudioTab::Transcoder) {
+                            self.current_tab = StudioTab::Transcoder;
+                        }
+                        ui.add_space(1.0);
+
+                        if render_sidebar_item(ui, &palette, "Custom Conformer", "🎯", self.current_tab == StudioTab::ExamStudio) {
+                            self.current_tab = StudioTab::ExamStudio;
+                            quick_settings.exam_mode_enabled = true;
+                        }
+                        ui.add_space(1.0);
+
+                        if render_sidebar_item(ui, &palette, "Quality Inspector", "🔬", self.current_tab == StudioTab::QualityInspector) {
+                            self.current_tab = StudioTab::QualityInspector;
+                        }
+                        ui.add_space(1.0);
+
+                        if render_sidebar_item(ui, &palette, "Archive Suite", "📦", self.current_tab == StudioTab::ArchiveSuite) {
+                            self.current_tab = StudioTab::ArchiveSuite;
+                        }
+                        ui.add_space(1.0);
+
+                        if render_sidebar_item(ui, &palette, "Hardware & AI", "💻", self.current_tab == StudioTab::HardwareTelemetry) {
+                            self.current_tab = StudioTab::HardwareTelemetry;
+                        }
+                        ui.add_space(1.0);
+
+                        if render_sidebar_item(ui, &palette, "Preferences", "⚙", self.current_tab == StudioTab::Preferences) {
+                            self.current_tab = StudioTab::Preferences;
+                        }
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+
+                        // Section 4: TAGS
+                        ui.label(egui::RichText::new("TAGS").size(10.0).strong().color(palette.text_muted));
+                        ui.add_space(4.0);
+
+                        let tags = [
+                            ("Red", Color32::from_rgb(255, 69, 58)),
+                            ("Orange", Color32::from_rgb(255, 159, 10)),
+                            ("Yellow", Color32::from_rgb(255, 214, 10)),
+                            ("Green", Color32::from_rgb(48, 209, 88)),
+                            ("Blue", Color32::from_rgb(10, 132, 255)),
+                            ("Purple", Color32::from_rgb(191, 90, 242)),
+                            ("Gray", Color32::from_rgb(142, 142, 147)),
+                        ];
+
+                        for (tag_name, tag_col) in tags {
+                            ui.horizontal(|ui| {
+                                ui.add_space(8.0);
+                                ui.painter().circle_filled(ui.cursor().min + Vec2::new(6.0, 8.0), 4.5, tag_col);
+                                ui.add_space(16.0);
+                                if ui.link(egui::RichText::new(tag_name).size(11.0).color(palette.text_secondary)).clicked() {
+                                    self.current_tab = StudioTab::FileExplorer;
+                                }
+                            });
+                            ui.add_space(2.0);
+                        }
+
+                        ui.add_space(12.0);
+                    });
             });
 
         // 2. Central Content Panel with smooth vertical ScrollArea
