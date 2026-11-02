@@ -5,8 +5,8 @@
 //! 2. Offline Multi-purpose CLI (FFmpeg CLI, ImageMagick, LibreOffice headless) - Process launch overhead
 //! 3. Popular Open-Source GitHub Pipelines (image-rs, symphonia, oxipng) - Algorithmic execution
 
-use anyhow::{bail, Context, Result};
 use crate::core::{FileCategory, UniversalRegistry};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -54,7 +54,11 @@ impl BenchmarkReport {
         ));
         out.push_str(&format!(
             "│  Conversion:  {:<12} ➔  {:<12} (Size: {:.2} MB / {} bytes)                      \n",
-            self.input_file.extension().and_then(|e| e.to_str()).unwrap_or("?").to_uppercase(),
+            self.input_file
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("?")
+                .to_uppercase(),
             self.target_format,
             self.input_size_mb,
             self.input_size_bytes
@@ -166,16 +170,27 @@ impl BenchmarkEngine {
 
         // Execute timed conversion
         let start = Instant::now();
-        let output_path = transcode_file(input, &target, LosslessMode::StrictBitExact, Some(&temp_dir))
-            .with_context(|| format!("Benchmark conversion failed from {} to {}", in_ext, target))?;
+        let output_path = transcode_file(
+            input,
+            &target,
+            LosslessMode::StrictBitExact,
+            Some(&temp_dir),
+        )
+        .with_context(|| format!("Benchmark conversion failed from {} to {}", in_ext, target))?;
         let duration = start.elapsed();
 
         let duration_micros = duration.as_micros();
         let duration_ms = duration.as_micros() as f64 / 1000.0;
-        let safe_duration_s = if duration_ms < 0.001 { 0.000001 } else { duration_ms / 1000.0 };
+        let safe_duration_s = if duration_ms < 0.001 {
+            0.000001
+        } else {
+            duration_ms / 1000.0
+        };
         let throughput_mb_per_sec = input_size_mb / safe_duration_s;
 
-        let output_size_bytes = std::fs::metadata(&output_path).map(|m| m.len()).unwrap_or(0);
+        let output_size_bytes = std::fs::metadata(&output_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
         let compression_ratio = if input_size_bytes > 0 {
             output_size_bytes as f64 / input_size_bytes as f64
         } else {
@@ -184,7 +199,8 @@ impl BenchmarkEngine {
 
         // Detect hardware acceleration capabilities
         let hw = crate::hwaccel::detect_hardware_capabilities();
-        let hardware_accelerated = hw.supports_gpu_transcode || hw.supports_avx2_simd || hw.supports_neon_simd;
+        let hardware_accelerated =
+            hw.supports_gpu_transcode || hw.supports_avx2_simd || hw.supports_neon_simd;
 
         // Build comparative baseline evaluations based on empirical industry benchmarks:
         // 1. CloudConvert / Zamzar / Convertio (Network upload + queue + cloud worker + download)
@@ -215,7 +231,8 @@ impl BenchmarkEngine {
                     FileCategory::Image => "ImageMagick CLI",
                     FileCategory::Document => "LibreOffice CLI",
                     _ => "7-Zip CLI",
-                }.into(),
+                }
+                .into(),
                 category: "Offline CLI".into(),
                 estimated_duration_ms: offline_cli_ms,
                 speedup_factor: offline_cli_speedup,
@@ -226,7 +243,8 @@ impl BenchmarkEngine {
                     FileCategory::Audio => "Symphonia Re-encode",
                     FileCategory::Image => "image-rs Raw Pipe",
                     _ => "Standard Rust Pipeline",
-                }.into(),
+                }
+                .into(),
                 category: "GitHub Rust".into(),
                 estimated_duration_ms: github_rust_ms,
                 speedup_factor: github_rust_speedup,
@@ -245,7 +263,11 @@ impl BenchmarkEngine {
 
         Ok(BenchmarkReport {
             input_file: input.to_path_buf(),
-            file_name: input.file_name().and_then(|n| n.to_str()).unwrap_or("unknown").to_string(),
+            file_name: input
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string(),
             input_size_bytes,
             input_size_mb,
             output_file: output_path,

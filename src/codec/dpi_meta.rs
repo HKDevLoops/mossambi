@@ -91,8 +91,8 @@ pub fn inject_png_dpi(bytes: &[u8], dpi: u32) -> Vec<u8> {
 
     let mut chunk = Vec::with_capacity(21);
     chunk.extend_from_slice(&9u32.to_be_bytes()); // Length
-    chunk.extend_from_slice(b"pHYs");            // Type
-    chunk.extend_from_slice(&phys_data);         // Data
+    chunk.extend_from_slice(b"pHYs"); // Type
+    chunk.extend_from_slice(&phys_data); // Data
     chunk.extend_from_slice(&crc.to_be_bytes()); // CRC
 
     // Check if an existing pHYs chunk is already present

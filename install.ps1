@@ -74,14 +74,9 @@ function Install-DirectBinaries {
     }
 
     # 1. Check if built binaries exist locally
-    if ($localTarget -and (Test-Path (Join-Path $localTarget "mossambi.exe")) -and (Test-Path (Join-Path $localTarget "mossambi-gui.exe"))) {
+    if ($localTarget -and (Test-Path (Join-Path $localTarget "mossambi.exe"))) {
         Write-Host "$C_GREEN✓ Found release build in $localTarget! Copying...$C_RESET"
         Copy-Item (Join-Path $localTarget "mossambi.exe") "$InstallDir\mossambi.exe" -Force
-        Copy-Item (Join-Path $localTarget "mossambi-gui.exe") "$InstallDir\mossambi-gui.exe" -Force
-        Copy-Item (Join-Path $localTarget "mossambi-tui.exe") "$InstallDir\mossambi-tui.exe" -Force
-        if (Test-Path (Join-Path $localTarget "mossambi-widget.exe")) {
-            Copy-Item (Join-Path $localTarget "mossambi-widget.exe") "$InstallDir\mossambi-widget.exe" -Force
-        }
     } else {
         # 2. Download release archive from GitHub
         $zipUrl = "https://github.com/mossambi/mossambi/releases/download/v$Version/mossambi-v$Version-x86_64-pc-windows-msvc.zip"
@@ -93,11 +88,6 @@ function Install-DirectBinaries {
     }
 
     Write-Host "$C_GREEN✓ Installed:$C_RESET $InstallDir\mossambi.exe"
-    Write-Host "$C_GREEN✓ Installed:$C_RESET $InstallDir\mossambi-gui.exe"
-    Write-Host "$C_GREEN✓ Installed:$C_RESET $InstallDir\mossambi-tui.exe"
-    if (Test-Path "$InstallDir\mossambi-widget.exe") {
-        Write-Host "$C_GREEN✓ Installed:$C_RESET $InstallDir\mossambi-widget.exe"
-    }
 
     # Copy Icon Assets
     $installIconDir = Join-Path $InstallDir "icons"
@@ -129,31 +119,32 @@ function Install-DirectBinaries {
         # 1. Start Menu Studio Shortcut
         $shortcutPath = Join-Path $startMenuDir "Mossambi Studio.lnk"
         $shortcut = $wshShell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = "$InstallDir\mossambi-gui.exe"
+        $shortcut.TargetPath = "$InstallDir\mossambi.exe"
+        $shortcut.Arguments = "--app"
         $shortcut.WorkingDirectory = $InstallDir
-        $shortcut.Description = "Mossambi — Sweet Lime Transcoder & Indian Exam Studio"
+        $shortcut.Description = "Mossambi — Universal File Explorer & Conversion Studio"
         if (Test-Path $icoFile) { $shortcut.IconLocation = "$icoFile,0" }
         $shortcut.Save()
         Write-Host "$C_GREEN✓ Created Start Menu Shortcut:$C_RESET $shortcutPath"
 
         # 2. Start Menu Radial Widget Shortcut
-        if (Test-Path "$InstallDir\mossambi-widget.exe") {
-            $widgetShortcutPath = Join-Path $startMenuDir "Mossambi Radial Widget.lnk"
-            $wShortcut = $wshShell.CreateShortcut($widgetShortcutPath)
-            $wShortcut.TargetPath = "$InstallDir\mossambi-widget.exe"
-            $wShortcut.WorkingDirectory = $InstallDir
-            $wShortcut.Description = "Summon Floating Sweet Lime Radial Widget"
-            if (Test-Path $icoFile) { $wShortcut.IconLocation = "$icoFile,0" }
-            $wShortcut.Save()
-            Write-Host "$C_GREEN✓ Created Start Menu Widget Shortcut:$C_RESET $widgetShortcutPath"
-        }
+        $widgetShortcutPath = Join-Path $startMenuDir "Mossambi Radial Widget.lnk"
+        $wShortcut = $wshShell.CreateShortcut($widgetShortcutPath)
+        $wShortcut.TargetPath = "$InstallDir\mossambi.exe"
+        $wShortcut.Arguments = "--widget"
+        $wShortcut.WorkingDirectory = $InstallDir
+        $wShortcut.Description = "Summon Floating Sweet Lime Radial Widget"
+        if (Test-Path $icoFile) { $wShortcut.IconLocation = "$icoFile,0" }
+        $wShortcut.Save()
+        Write-Host "$C_GREEN✓ Created Start Menu Widget Shortcut:$C_RESET $widgetShortcutPath"
 
         # 3. Desktop Shortcut
         $desktopShortcutPath = Join-Path $desktopDir "Mossambi.lnk"
         $dShortcut = $wshShell.CreateShortcut($desktopShortcutPath)
-        $dShortcut.TargetPath = "$InstallDir\mossambi-gui.exe"
+        $dShortcut.TargetPath = "$InstallDir\mossambi.exe"
+        $dShortcut.Arguments = "--app"
         $dShortcut.WorkingDirectory = $InstallDir
-        $dShortcut.Description = "Mossambi — Universal File Conversion Studio"
+        $dShortcut.Description = "Mossambi — Universal File Explorer & Conversion Studio"
         if (Test-Path $icoFile) { $dShortcut.IconLocation = "$icoFile,0" }
         $dShortcut.Save()
         Write-Host "$C_GREEN✓ Created Desktop Shortcut:$C_RESET $desktopShortcutPath"

@@ -113,11 +113,6 @@ install_direct_binary() {
     if [ -f "${SCRIPT_DIR}/target/release/mossambi" ]; then
         echo -e "${C_GREEN}✓ Found local build in ${SCRIPT_DIR}/target/release! Installing...${C_RESET}"
         cp -f "${SCRIPT_DIR}/target/release/mossambi" "${INSTALL_DIR}/"
-        cp -f "${SCRIPT_DIR}/target/release/mossambi-gui" "${INSTALL_DIR}/"
-        cp -f "${SCRIPT_DIR}/target/release/mossambi-tui" "${INSTALL_DIR}/"
-        if [ -f "${SCRIPT_DIR}/target/release/mossambi-widget" ]; then
-            cp -f "${SCRIPT_DIR}/target/release/mossambi-widget" "${INSTALL_DIR}/"
-        fi
     else
         URL="https://github.com/${REPO}/releases/download/v${VERSION}/${ASSET}"
         TMP_DIR="$(mktemp -d)"

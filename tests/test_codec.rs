@@ -125,18 +125,22 @@ fn test_transcode_to_all_formats_batch() {
     img.save(&png_path).unwrap();
 
     // Execute ALL sector
-    let outputs = transcode_to_all_formats(
-        &png_path,
-        LosslessMode::StrictBitExact,
-        Some(&test_dir),
-    )
-    .unwrap();
+    let outputs =
+        transcode_to_all_formats(&png_path, LosslessMode::StrictBitExact, Some(&test_dir)).unwrap();
 
-    assert!(outputs.len() >= 5, "ALL sector must generate multiple valid formats, got {}", outputs.len());
+    assert!(
+        outputs.len() >= 5,
+        "ALL sector must generate multiple valid formats, got {}",
+        outputs.len()
+    );
     for out in &outputs {
         assert!(out.exists(), "Output {} must exist", out.display());
         let meta = fs::metadata(out).unwrap();
-        assert!(meta.len() > 0, "Output {} must not be 0 bytes", out.display());
+        assert!(
+            meta.len() > 0,
+            "Output {} must not be 0 bytes",
+            out.display()
+        );
     }
 
     let _ = fs::remove_dir_all(&test_dir);
@@ -171,20 +175,38 @@ fn test_docx_extraction_and_conversion() {
     assert!(text.contains("Zero loss document conversion & typesetting."));
 
     // 2. Transcode DOCX -> TXT
-    let txt_out = transcode_file(&docx_path, "TXT", LosslessMode::StrictBitExact, Some(&test_dir)).unwrap();
+    let txt_out = transcode_file(
+        &docx_path,
+        "TXT",
+        LosslessMode::StrictBitExact,
+        Some(&test_dir),
+    )
+    .unwrap();
     assert!(txt_out.exists());
     let txt_content = fs::read_to_string(&txt_out).unwrap();
     assert!(txt_content.contains("Mossambi Publication Standard"));
 
     // 3. Transcode DOCX -> HTML
-    let html_out = transcode_file(&docx_path, "HTML", LosslessMode::StrictBitExact, Some(&test_dir)).unwrap();
+    let html_out = transcode_file(
+        &docx_path,
+        "HTML",
+        LosslessMode::StrictBitExact,
+        Some(&test_dir),
+    )
+    .unwrap();
     assert!(html_out.exists());
     let html_content = fs::read_to_string(&html_out).unwrap();
     assert!(html_content.contains("<h1>mock_sample</h1>"));
     assert!(html_content.contains("<p>Mossambi Publication Standard</p>"));
 
     // 4. Transcode DOCX -> PDF (Vector)
-    let pdf_out = transcode_file(&docx_path, "PDF", LosslessMode::StrictBitExact, Some(&test_dir)).unwrap();
+    let pdf_out = transcode_file(
+        &docx_path,
+        "PDF",
+        LosslessMode::StrictBitExact,
+        Some(&test_dir),
+    )
+    .unwrap();
     assert!(pdf_out.exists());
     let pdf_meta = fs::metadata(&pdf_out).unwrap();
     assert!(pdf_meta.len() > 100);
@@ -200,22 +222,41 @@ fn test_spreadsheet_conversions() {
 
     // Create a CSV file
     let csv_path = test_dir.join("financial_data.csv");
-    let csv_content = "Year,Revenue,Profit,Growth\n2024,1000000,250000,25%\n2025,1500000,450000,50%\n";
+    let csv_content =
+        "Year,Revenue,Profit,Growth\n2024,1000000,250000,25%\n2025,1500000,450000,50%\n";
     fs::write(&csv_path, csv_content).unwrap();
 
     // 1. CSV -> TSV
-    let tsv_out = transcode_file(&csv_path, "TSV", LosslessMode::StrictBitExact, Some(&test_dir)).unwrap();
+    let tsv_out = transcode_file(
+        &csv_path,
+        "TSV",
+        LosslessMode::StrictBitExact,
+        Some(&test_dir),
+    )
+    .unwrap();
     assert!(tsv_out.exists());
     let tsv_content = fs::read_to_string(&tsv_out).unwrap();
     assert!(tsv_content.contains("Year\tRevenue\tProfit\tGrowth"));
 
     // 2. CSV -> XLSX
-    let xlsx_out = transcode_file(&csv_path, "XLSX", LosslessMode::StrictBitExact, Some(&test_dir)).unwrap();
+    let xlsx_out = transcode_file(
+        &csv_path,
+        "XLSX",
+        LosslessMode::StrictBitExact,
+        Some(&test_dir),
+    )
+    .unwrap();
     assert!(xlsx_out.exists());
     assert!(fs::metadata(&xlsx_out).unwrap().len() > 100);
 
     // 3. CSV -> HTML (Table)
-    let html_out = transcode_file(&csv_path, "HTML", LosslessMode::StrictBitExact, Some(&test_dir)).unwrap();
+    let html_out = transcode_file(
+        &csv_path,
+        "HTML",
+        LosslessMode::StrictBitExact,
+        Some(&test_dir),
+    )
+    .unwrap();
     assert!(html_out.exists());
     let html_content = fs::read_to_string(&html_out).unwrap();
     assert!(html_content.contains("<table>"));
@@ -223,7 +264,13 @@ fn test_spreadsheet_conversions() {
     assert!(html_content.contains("<td>2024</td>"));
 
     // 4. CSV -> PDF (Vector Table)
-    let pdf_out = transcode_file(&csv_path, "PDF", LosslessMode::StrictBitExact, Some(&test_dir)).unwrap();
+    let pdf_out = transcode_file(
+        &csv_path,
+        "PDF",
+        LosslessMode::StrictBitExact,
+        Some(&test_dir),
+    )
+    .unwrap();
     assert!(pdf_out.exists());
     assert!(fs::metadata(&pdf_out).unwrap().len() > 100);
 
@@ -242,11 +289,18 @@ fn test_archive_transcode_via_codec() {
     fs::write(data_dir.join("report.txt"), b"Quarterly Audit Data").unwrap();
 
     // Pack directory to ZIP via transcode_file
-    let zip_out = transcode_file(&data_dir, "ZIP", LosslessMode::StrictBitExact, Some(&test_dir)).unwrap();
+    let zip_out = transcode_file(
+        &data_dir,
+        "ZIP",
+        LosslessMode::StrictBitExact,
+        Some(&test_dir),
+    )
+    .unwrap();
     assert!(zip_out.exists());
 
     // Extract ZIP via transcode_file (target "EXTRACT")
-    let extract_out = transcode_file(&zip_out, "EXTRACT", LosslessMode::StrictBitExact, None).unwrap();
+    let extract_out =
+        transcode_file(&zip_out, "EXTRACT", LosslessMode::StrictBitExact, None).unwrap();
     assert!(extract_out.exists());
     assert!(extract_out.join("bundle_data").join("report.txt").exists());
 
@@ -260,9 +314,19 @@ fn test_pdf_text_extraction() {
     fs::create_dir_all(&test_dir).unwrap();
 
     let txt_path = test_dir.join("sample.txt");
-    fs::write(&txt_path, b"Hello PDF Vector Text\nSecond Line of Content\n").unwrap();
+    fs::write(
+        &txt_path,
+        b"Hello PDF Vector Text\nSecond Line of Content\n",
+    )
+    .unwrap();
 
-    let pdf_out = transcode_file(&txt_path, "PDF", LosslessMode::StrictBitExact, Some(&test_dir)).unwrap();
+    let pdf_out = transcode_file(
+        &txt_path,
+        "PDF",
+        LosslessMode::StrictBitExact,
+        Some(&test_dir),
+    )
+    .unwrap();
     assert!(pdf_out.exists());
 
     let extracted = extract_text_from_pdf(&pdf_out).unwrap();

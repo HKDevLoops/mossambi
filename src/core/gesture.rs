@@ -53,10 +53,10 @@ impl KinematicGestureTracker {
             points: Vec::with_capacity(64),
             capacity: 64,
             window_ms: 450,
-            min_shake_amplitude: 22.0, // Minimum 22 pixels peak-to-peak
-            min_shake_reversals: 3,    // 3 direction flips (left-right-left)
+            min_shake_amplitude: 22.0,  // Minimum 22 pixels peak-to-peak
+            min_shake_reversals: 3,     // 3 direction flips (left-right-left)
             min_circle_angle_rad: 5.23, // ~300 degrees swept arc
-            min_circle_radius: 18.0,   // Minimum 18 px radius
+            min_circle_radius: 18.0,    // Minimum 18 px radius
             allow_shake,
             allow_circle,
             last_trigger_ms: 0,
@@ -228,9 +228,9 @@ mod tests {
 
         let x_steps = [
             0.0, 15.0, 30.0, 45.0, // Rightward (+45)
-            35.0, 15.0, -5.0,      // Leftward (-50)
-            10.0, 25.0, 45.0,      // Rightward (+50)
-            30.0, 10.0, -5.0,      // Leftward (-50)
+            35.0, 15.0, -5.0, // Leftward (-50)
+            10.0, 25.0, 45.0, // Rightward (+50)
+            30.0, 10.0, -5.0, // Leftward (-50)
         ];
 
         for &x in &x_steps {
@@ -282,7 +282,10 @@ mod tests {
             let y = (i * 10) as f32;
             time += 15;
             let res = tracker.feed(x, y, time);
-            assert!(res.is_none(), "Straight line drag should not trigger any gesture");
+            assert!(
+                res.is_none(),
+                "Straight line drag should not trigger any gesture"
+            );
         }
     }
 

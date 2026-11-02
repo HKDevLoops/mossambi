@@ -42,7 +42,7 @@ impl CircleGestureDetector {
             // We use 11.5 rad (~660 degrees) to allow natural human gesture variance while requiring 2 loops.
             threshold_radians: 11.5,
             last_trigger: Instant::now() - Duration::from_secs(10),
-            cooldown: Duration::from_millis(1500),    // 1.5-second cooldown between gesture triggers
+            cooldown: Duration::from_millis(1500), // 1.5-second cooldown between gesture triggers
         }
     }
 

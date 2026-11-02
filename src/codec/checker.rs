@@ -5,11 +5,11 @@
 //! 3. Compatibility: Web, Mobile, Archival, and Government portal compatibility score.
 //! 4. Quality: Dynamic resolution, clarity, bit depth, channel configuration, fidelity rating.
 
+use crate::core::{FileCategory, UniversalRegistry};
 use anyhow::{Context, Result};
 use calamine::Reader;
 use crc32fast::Hasher as Crc32Hasher;
 use image::GenericImageView;
-use crate::core::{FileCategory, UniversalRegistry};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
@@ -100,8 +100,17 @@ impl FileQualityReport {
             self.overall_score
         ));
         out.push_str("├──────────────────────────────────────────────────────────────────────────────────────────────────┤\n");
-        out.push_str(&format!("│  File:        {:<82} │\n", truncate_str(&self.file_path.display().to_string(), 82)));
-        out.push_str(&format!("│  Format:      {:<16} Category: {:<16} Size: {:.2} KB ({} bytes)\n", self.format, format!("{:?}", self.category), self.file_size_kb, self.file_size_bytes));
+        out.push_str(&format!(
+            "│  File:        {:<82} │\n",
+            truncate_str(&self.file_path.display().to_string(), 82)
+        ));
+        out.push_str(&format!(
+            "│  Format:      {:<16} Category: {:<16} Size: {:.2} KB ({} bytes)\n",
+            self.format,
+            format!("{:?}", self.category),
+            self.file_size_kb,
+            self.file_size_bytes
+        ));
         out.push_str(&format!("│  SHA-256:     {:<82} │\n", self.sha256));
         out.push_str(&format!("│  CRC-32:      {:<82} │\n", self.crc32));
         out.push_str("├──────────────────────────┬──────────────────────────────────────────┬────────────────────────────┤\n");
@@ -109,33 +118,76 @@ impl FileQualityReport {
         out.push_str("├──────────────────────────┼──────────────────────────────────────────┼────────────────────────────┤\n");
         out.push_str(&format!(
             "│  1. Container Integrity  │  {:<40} │  {:<26} │\n",
-            format!("{:.1}% [{}]", self.integrity.structural_integrity_score, if self.integrity.corruption_detected { "CORRUPT" } else { "VALID" }),
+            format!(
+                "{:.1}% [{}]",
+                self.integrity.structural_integrity_score,
+                if self.integrity.corruption_detected {
+                    "CORRUPT"
+                } else {
+                    "VALID"
+                }
+            ),
             truncate_str(&self.integrity.magic_bytes_description, 26)
         ));
         out.push_str(&format!(
             "│  2. Parser & Decode      │  {:<40} │  {:<26} │\n",
-            format!("{:.1}% [{}]", self.parseability.parseability_score, if self.parseability.can_parse { "PARSED 100%" } else { "DECODE FAILED" }),
+            format!(
+                "{:.1}% [{}]",
+                self.parseability.parseability_score,
+                if self.parseability.can_parse {
+                    "PARSED 100%"
+                } else {
+                    "DECODE FAILED"
+                }
+            ),
             truncate_str(&self.parseability.parser_used, 26)
         ));
         out.push_str(&format!(
             "│  3. Cross Compatibility  │  {:<40} │  {:<26} │\n",
-            format!("{:.1}% [Web:{:.0}% Mob:{:.0}%]", self.compatibility.compatibility_score, self.compatibility.web_compatibility_score, self.compatibility.mobile_compatibility_score),
-            truncate_str(self.compatibility.standards_compliance.first().map(|s| s.as_str()).unwrap_or("Standard Format"), 26)
+            format!(
+                "{:.1}% [Web:{:.0}% Mob:{:.0}%]",
+                self.compatibility.compatibility_score,
+                self.compatibility.web_compatibility_score,
+                self.compatibility.mobile_compatibility_score
+            ),
+            truncate_str(
+                self.compatibility
+                    .standards_compliance
+                    .first()
+                    .map(|s| s.as_str())
+                    .unwrap_or("Standard Format"),
+                26
+            )
         ));
         out.push_str(&format!(
             "│  4. Quality & Fidelity   │  {:<40} │  {:<26} │\n",
-            format!("{:.1}% [{}]", self.quality.quality_score, self.quality.fidelity_rating),
+            format!(
+                "{:.1}% [{}]",
+                self.quality.quality_score, self.quality.fidelity_rating
+            ),
             truncate_str(&self.quality.color_or_sample_depth, 26)
         ));
         out.push_str("├──────────────────────────┴──────────────────────────────────────────┴────────────────────────────┤\n");
-        out.push_str(&format!("│  Payload Summary: {:<78} │\n", truncate_str(&self.parseability.decoded_payload_summary, 78)));
+        out.push_str(&format!(
+            "│  Payload Summary: {:<78} │\n",
+            truncate_str(&self.parseability.decoded_payload_summary, 78)
+        ));
         if !self.integrity.issues.is_empty() {
-            out.push_str(&format!("│  ⚠️ Integrity Issue: {:<76} │\n", truncate_str(&self.integrity.issues.join("; "), 76)));
+            out.push_str(&format!(
+                "│  ⚠️ Integrity Issue: {:<76} │\n",
+                truncate_str(&self.integrity.issues.join("; "), 76)
+            ));
         }
         if !self.parseability.parse_warnings.is_empty() {
-            out.push_str(&format!("│  ℹ️ Parser Warning: {:<76} │\n", truncate_str(&self.parseability.parse_warnings.join("; "), 76)));
+            out.push_str(&format!(
+                "│  ℹ️ Parser Warning: {:<76} │\n",
+                truncate_str(&self.parseability.parse_warnings.join("; "), 76)
+            ));
         }
-        out.push_str(&format!("│  Verdict Summary: {:<78} │\n", truncate_str(&self.summary_headline, 78)));
+        out.push_str(&format!(
+            "│  Verdict Summary: {:<78} │\n",
+            truncate_str(&self.summary_headline, 78)
+        ));
         out.push_str("└──────────────────────────────────────────────────────────────────────────────────────────────────┘\n");
         out
     }
@@ -159,7 +211,8 @@ impl FileQualityChecker {
     /// Uses 1 MB chunk streaming for SHA-256 and CRC-32 to eliminate memory spikes on multi-GB movies,
     /// and 64 KB header/trailer sampling for instantaneous structural container verification.
     pub fn inspect_file(path: &Path) -> Result<FileQualityReport> {
-        let meta = fs::metadata(path).with_context(|| format!("Cannot access file: {}", path.display()))?;
+        let meta = fs::metadata(path)
+            .with_context(|| format!("Cannot access file: {}", path.display()))?;
         let size_bytes = meta.len();
         let size_kb = (size_bytes as f64 / 1024.0 * 10.0).round() / 10.0;
 
@@ -172,7 +225,8 @@ impl FileQualityChecker {
         let ext_upper = ext.to_uppercase();
 
         // 1. Buffered streaming hash calculation (1 MB chunks, zero RAM spike for multi-GB movies)
-        let mut file = File::open(path).with_context(|| format!("Failed to open file: {}", path.display()))?;
+        let mut file =
+            File::open(path).with_context(|| format!("Failed to open file: {}", path.display()))?;
         let mut sha_hasher = Sha256::new();
         let mut crc_hasher = Crc32Hasher::new();
         let mut stream_buf = vec![0u8; 1024 * 1024]; // 1 MB chunk buffer
@@ -191,7 +245,8 @@ impl FileQualityChecker {
 
         // 2. Sample 64 KB Header & 64 KB Trailer for instant structural integrity checking
         let mut head = vec![0u8; 64 * 1024];
-        let mut file_seek = File::open(path).with_context(|| format!("Failed to reopen file: {}", path.display()))?;
+        let mut file_seek = File::open(path)
+            .with_context(|| format!("Failed to reopen file: {}", path.display()))?;
         let head_read = file_seek.read(&mut head)?;
         head.truncate(head_read);
 
@@ -209,7 +264,8 @@ impl FileQualityChecker {
         let integrity = Self::evaluate_integrity(&head, &tail, &ext_upper, size_bytes);
 
         // 4. Native Parseability Analysis
-        let parseability = Self::evaluate_parseability(&head, path, &ext_upper, category, size_bytes);
+        let parseability =
+            Self::evaluate_parseability(&head, path, &ext_upper, category, size_bytes);
 
         // 5. Compatibility Standards Analysis
         let compatibility = Self::evaluate_compatibility(&ext_upper, category, &parseability);
@@ -326,7 +382,9 @@ impl FileQualityChecker {
                     eof_valid = true;
                     eof_desc = "EOI (FF D9) Marker Verified".into();
                 } else {
-                    issues.push("Missing JPEG End of Image (EOI) marker (possible truncation)".into());
+                    issues.push(
+                        "Missing JPEG End of Image (EOI) marker (possible truncation)".into(),
+                    );
                     eof_desc = "Missing EOI Trailer".into();
                 }
             }
@@ -342,7 +400,11 @@ impl FileQualityChecker {
 
                 // Search last 1024 bytes for %%EOF
                 let len = tail.len();
-                let end_slice = if len > 1024 { &tail[len - 1024..] } else { tail };
+                let end_slice = if len > 1024 {
+                    &tail[len - 1024..]
+                } else {
+                    tail
+                };
                 if end_slice.windows(5).any(|w| w == b"%%EOF") {
                     eof_valid = true;
                     eof_desc = "%%EOF Trailer Marker Verified".into();
@@ -361,7 +423,11 @@ impl FileQualityChecker {
                         eof_valid = true;
                         eof_desc = "RIFF Chunk Size Matches Payload".into();
                     } else {
-                        issues.push(format!("RIFF size header ({} bytes) mismatches actual file size ({} bytes)", riff_len + 8, file_size));
+                        issues.push(format!(
+                            "RIFF size header ({} bytes) mismatches actual file size ({} bytes)",
+                            riff_len + 8,
+                            file_size
+                        ));
                         eof_desc = "Payload Length Mismatch".into();
                     }
                 } else {
@@ -381,7 +447,9 @@ impl FileQualityChecker {
                 }
             }
             "MP3" => {
-                if head.starts_with(b"ID3") || (head.len() >= 2 && head[0] == 0xFF && (head[1] & 0xE0) == 0xE0) {
+                if head.starts_with(b"ID3")
+                    || (head.len() >= 2 && head[0] == 0xFF && (head[1] & 0xE0) == 0xE0)
+                {
                     magic_valid = true;
                     magic_desc = "Valid MP3 / ID3 Stream Header".into();
                     eof_valid = true;
@@ -402,12 +470,18 @@ impl FileQualityChecker {
 
                 // Check for Central Directory End Record PK\x05\x06 in last 1024 bytes of tail
                 let len = tail.len();
-                let end_slice = if len > 1024 { &tail[len - 1024..] } else { tail };
+                let end_slice = if len > 1024 {
+                    &tail[len - 1024..]
+                } else {
+                    tail
+                };
                 if end_slice.windows(4).any(|w| w == b"PK\x05\x06") {
                     eof_valid = true;
                     eof_desc = "Central Directory End Record Verified".into();
                 } else {
-                    issues.push("Missing Zip End-of-Central-Directory record (truncated archive)".into());
+                    issues.push(
+                        "Missing Zip End-of-Central-Directory record (truncated archive)".into(),
+                    );
                     eof_desc = "Truncated Archive".into();
                 }
             }
@@ -423,7 +497,12 @@ impl FileQualityChecker {
                 }
             }
             "MP4" | "M4V" | "MOV" => {
-                let is_mp4_box = head.len() >= 8 && (&head[4..8] == b"ftyp" || &head[4..8] == b"moov" || &head[4..8] == b"wide" || &head[4..8] == b"mdat" || &head[4..8] == b"free");
+                let is_mp4_box = head.len() >= 8
+                    && (&head[4..8] == b"ftyp"
+                        || &head[4..8] == b"moov"
+                        || &head[4..8] == b"wide"
+                        || &head[4..8] == b"mdat"
+                        || &head[4..8] == b"free");
                 if is_mp4_box {
                     magic_valid = true;
                     let brand = if head.len() >= 12 {
@@ -481,9 +560,16 @@ impl FileQualityChecker {
             }
         };
 
-        let corruption = !magic_valid || issues.iter().any(|i| i.contains("Missing") || i.contains("Truncated") || i.contains("Corrupted"));
+        let corruption = !magic_valid
+            || issues.iter().any(|i| {
+                i.contains("Missing") || i.contains("Truncated") || i.contains("Corrupted")
+            });
         let score = if corruption {
-            if magic_valid { 55.0 } else { 20.0 }
+            if magic_valid {
+                55.0
+            } else {
+                20.0
+            }
         } else if !issues.is_empty() {
             80.0
         } else {
@@ -521,7 +607,8 @@ impl FileQualityChecker {
                     Ok(img) => {
                         can_parse = true;
                         let (w, h) = img.dimensions();
-                        summary = format!("Decoded {}x{} px image | Color: {:?}", w, h, img.color());
+                        summary =
+                            format!("Decoded {}x{} px image | Color: {:?}", w, h, img.color());
                     }
                     Err(e) => {
                         warnings.push(format!("Image decode error: {}", e));
@@ -537,7 +624,11 @@ impl FileQualityChecker {
                             can_parse = true;
                             let pages = doc.get_pages();
                             let num_pages = pages.len();
-                            summary = format!("Parsed {} page(s) | {} indirect objects", num_pages, doc.objects.len());
+                            summary = format!(
+                                "Parsed {} page(s) | {} indirect objects",
+                                num_pages,
+                                doc.objects.len()
+                            );
                         }
                         Err(e) => {
                             warnings.push(format!("PDF tree parsing failed: {}", e));
@@ -574,7 +665,10 @@ impl FileQualityChecker {
                             can_parse = true;
                             let line_count = s.lines().count();
                             let word_count = s.split_whitespace().count();
-                            summary = format!("UTF-8 Text Stream: ~{} lines, ~{} words (sampled)", line_count, word_count);
+                            summary = format!(
+                                "UTF-8 Text Stream: ~{} lines, ~{} words (sampled)",
+                                line_count, word_count
+                            );
                         }
                         Err(_) => {
                             warnings.push("File contains non-UTF-8 binary sequences".into());
@@ -587,7 +681,11 @@ impl FileQualityChecker {
                 parser_used = "calamine v0.28 (Native Spreadsheet Parser)";
                 if ext == "CSV" || ext == "TSV" {
                     let delim = if ext == "TSV" { b'\t' } else { b',' };
-                    match csv::ReaderBuilder::new().delimiter(delim).has_headers(false).from_path(path) {
+                    match csv::ReaderBuilder::new()
+                        .delimiter(delim)
+                        .has_headers(false)
+                        .from_path(path)
+                    {
                         Ok(mut rdr) => {
                             let mut row_count = 0;
                             let mut col_count = 0;
@@ -596,7 +694,8 @@ impl FileQualityChecker {
                                 row_count += 1;
                             }
                             can_parse = row_count > 0;
-                            summary = format!("Tabular text: {} rows, {} columns", row_count, col_count);
+                            summary =
+                                format!("Tabular text: {} rows, {} columns", row_count, col_count);
                         }
                         Err(e) => {
                             warnings.push(format!("CSV parse error: {}", e));
@@ -608,7 +707,11 @@ impl FileQualityChecker {
                         Ok(wb) => {
                             can_parse = true;
                             let sheets = wb.sheet_names();
-                            summary = format!("Spreadsheet Workbook: {} sheet(s) ({})", sheets.len(), sheets.join(", "));
+                            summary = format!(
+                                "Spreadsheet Workbook: {} sheet(s) ({})",
+                                sheets.len(),
+                                sheets.join(", ")
+                            );
                         }
                         Err(e) => {
                             warnings.push(format!("Spreadsheet workbook parse error: {}", e));
@@ -643,7 +746,12 @@ impl FileQualityChecker {
             FileCategory::Audio | FileCategory::Video => {
                 parser_used = "Native Media Container Parser";
                 can_parse = true;
-                summary = format!("{} media stream ({:.2} MB, {} bytes) with verified container syntax", ext, size_bytes as f64 / (1024.0 * 1024.0), size_bytes);
+                summary = format!(
+                    "{} media stream ({:.2} MB, {} bytes) with verified container syntax",
+                    ext,
+                    size_bytes as f64 / (1024.0 * 1024.0),
+                    size_bytes
+                );
             }
             _ => {
                 can_parse = true;
@@ -652,7 +760,11 @@ impl FileQualityChecker {
         }
 
         let score = if can_parse {
-            if warnings.is_empty() { 100.0 } else { 85.0 }
+            if warnings.is_empty() {
+                100.0
+            } else {
+                85.0
+            }
         } else {
             15.0
         };
@@ -667,7 +779,11 @@ impl FileQualityChecker {
     }
 
     /// Evaluates cross-platform portability and compliance with open standards.
-    fn evaluate_compatibility(ext: &str, category: FileCategory, parse: &ParseabilityReport) -> CompatibilityReport {
+    fn evaluate_compatibility(
+        ext: &str,
+        category: FileCategory,
+        parse: &ParseabilityReport,
+    ) -> CompatibilityReport {
         let mut standards = Vec::new();
         let (web, mob, arch) = match ext {
             "PNG" => {

@@ -76,7 +76,10 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
             let mut archive = zip::ZipArchive::new(file)?;
 
             if archive.len() > MAX_ARCHIVE_ENTRIES {
-                bail!("Archive exceeds maximum entry limit ({})", MAX_ARCHIVE_ENTRIES);
+                bail!(
+                    "Archive exceeds maximum entry limit ({})",
+                    MAX_ARCHIVE_ENTRIES
+                );
             }
 
             let mut total_bytes = 0u64;
@@ -117,7 +120,10 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
             if unpack_tar_safe(gz, &canonical_dest).is_err() {
                 let file = File::open(archive_path)?;
                 let gz = flate2::read::GzDecoder::new(file);
-                let stem = archive_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "decompressed".to_string());
+                let stem = archive_path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "decompressed".to_string());
                 let out_file = canonical_dest.join(stem);
                 extract_single_file_safe(gz, &out_file)?;
             }
@@ -128,7 +134,10 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
             if unpack_tar_safe(bz, &canonical_dest).is_err() {
                 let file = File::open(archive_path)?;
                 let bz = bzip2::read::BzDecoder::new(file);
-                let stem = archive_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "decompressed".to_string());
+                let stem = archive_path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "decompressed".to_string());
                 let out_file = canonical_dest.join(stem);
                 extract_single_file_safe(bz, &out_file)?;
             }
@@ -139,7 +148,10 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
             if unpack_tar_safe(xz, &canonical_dest).is_err() {
                 let file = File::open(archive_path)?;
                 let xz = xz2::read::XzDecoder::new(file);
-                let stem = archive_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "decompressed".to_string());
+                let stem = archive_path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "decompressed".to_string());
                 let out_file = canonical_dest.join(stem);
                 extract_single_file_safe(xz, &out_file)?;
             }
@@ -150,7 +162,10 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
             if unpack_tar_safe(zst, &canonical_dest).is_err() {
                 let file = File::open(archive_path)?;
                 let zst = zstd::stream::read::Decoder::new(file)?;
-                let stem = archive_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "decompressed".to_string());
+                let stem = archive_path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "decompressed".to_string());
                 let out_file = canonical_dest.join(stem);
                 extract_single_file_safe(zst, &out_file)?;
             }
@@ -182,10 +197,16 @@ fn unpack_tar_safe<R: Read>(reader: R, canonical_dest: &Path) -> Result<()> {
         for component in path.components() {
             match component {
                 std::path::Component::ParentDir => {
-                    bail!("Zip-Slip / Directory Traversal attack detected in tar archive: {:?}", path);
+                    bail!(
+                        "Zip-Slip / Directory Traversal attack detected in tar archive: {:?}",
+                        path
+                    );
                 }
                 std::path::Component::RootDir | std::path::Component::Prefix(_) => {
-                    bail!("Absolute path traversal attack detected in tar archive: {:?}", path);
+                    bail!(
+                        "Absolute path traversal attack detected in tar archive: {:?}",
+                        path
+                    );
                 }
                 _ => {}
             }
@@ -197,8 +218,15 @@ fn unpack_tar_safe<R: Read>(reader: R, canonical_dest: &Path) -> Result<()> {
         // 2. Symlink & Hardlink Escape Protection
         if entry_type.is_symlink() || entry_type.is_hard_link() {
             if let Some(link_target) = entry.link_name()? {
-                if link_target.is_absolute() || link_target.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-                    bail!("Malicious link target escaping archive destination: {:?}", link_target);
+                if link_target.is_absolute()
+                    || link_target
+                        .components()
+                        .any(|c| matches!(c, std::path::Component::ParentDir))
+                {
+                    bail!(
+                        "Malicious link target escaping archive destination: {:?}",
+                        link_target
+                    );
                 }
             }
         }
@@ -218,7 +246,8 @@ fn unpack_tar_safe<R: Read>(reader: R, canonical_dest: &Path) -> Result<()> {
 
             let outfile = File::create(&out_path)?;
             let mut buf_out = BufWriter::with_capacity(256 * 1024, outfile);
-            let mut limited = io::Read::by_ref(&mut entry).take(MAX_UNCOMPRESSED_BYTES.saturating_sub(total_bytes) + entry_size + 1);
+            let mut limited = io::Read::by_ref(&mut entry)
+                .take(MAX_UNCOMPRESSED_BYTES.saturating_sub(total_bytes) + entry_size + 1);
             let copied = io::copy(&mut limited, &mut buf_out)?;
             buf_out.flush()?;
 
@@ -258,7 +287,10 @@ fn pack_zip(inputs: &[PathBuf], output: &Path) -> Result<()> {
 
     for input in inputs {
         if input.is_file() {
-            let name = input.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "entry".to_string());
+            let name = input
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "entry".to_string());
             zip_writer.start_file(name, options)?;
             let mut f = File::open(input)?;
             io::copy(&mut f, &mut zip_writer)?;
@@ -348,7 +380,10 @@ fn pack_tar_zst(inputs: &[PathBuf], output: &Path) -> Result<()> {
 
 fn add_inputs_to_tar<W: Write>(builder: &mut tar::Builder<W>, inputs: &[PathBuf]) -> Result<()> {
     for input in inputs {
-        let name = input.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "entry".to_string());
+        let name = input
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "entry".to_string());
         if input.is_file() {
             builder.append_path_with_name(input, &name)?;
         } else if input.is_dir() {

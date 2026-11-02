@@ -1,9 +1,44 @@
+# Rust compilation artifacts
 /target/
-**/__pycache__/
-*.pyc
-*.pyo
-.mossambi/
-.idea/
+**/*.rs.bk
+*.pdb
+
+# Operating System Files
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE & Editor Configurations
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# Runtime Configurations & Logs
+.mossambi/
 *.log
-brain/*.exe
+*.tmp
+*.bak
+
+# Dist and Packaging Outputs
+/dist/
+*.msi
+*.deb
+*.rpm
+*.apk
+*.pkg.tar.zst
+
+# AI and scratch files
+.planning/
+brain/
+UI-bugs/
+.agents/
+.cursor/

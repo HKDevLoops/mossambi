@@ -84,14 +84,22 @@ fn test_directory_recursive_pack_and_unpack() {
     fs::write(sub_dir.join("inner.txt"), b"Inner file content").unwrap();
 
     let zip_file = test_dir.join("archive.zip");
-    pack_archive(&[test_dir.join("source_folder")], &zip_file, ArchiveType::Zip).unwrap();
+    pack_archive(
+        &[test_dir.join("source_folder")],
+        &zip_file,
+        ArchiveType::Zip,
+    )
+    .unwrap();
     assert!(zip_file.exists());
 
     let extract_dir = test_dir.join("unpack_out");
     extract_archive_safe(&zip_file, &extract_dir).unwrap();
 
     // Verify nested file is unpacked
-    let inner_unpacked = extract_dir.join("source_folder").join("nested").join("inner.txt");
+    let inner_unpacked = extract_dir
+        .join("source_folder")
+        .join("nested")
+        .join("inner.txt");
     assert!(inner_unpacked.exists());
     assert_eq!(fs::read(&inner_unpacked).unwrap(), b"Inner file content");
 

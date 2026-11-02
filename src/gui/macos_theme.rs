@@ -162,7 +162,11 @@ impl ThemeStyle {
         self.colors_with_glass(cfg.glass_effect, cfg.window_opacity)
     }
 
-    pub fn colors_with_glass(&self, effect: crate::core::GlassEffect, opacity: f32) -> ThemePalette {
+    pub fn colors_with_glass(
+        &self,
+        effect: crate::core::GlassEffect,
+        opacity: f32,
+    ) -> ThemePalette {
         let pt = self.to_pantone();
         let (bg_r, bg_g, bg_b) = pt.bg.to_rgb();
         let (surf_r, surf_g, surf_b) = pt.surface.to_rgb();
@@ -216,7 +220,7 @@ impl ThemeStyle {
                             bg_g.saturating_sub(6),
                             bg_b.saturating_sub(6),
                         ),
-                        card_bg: Color32::from_rgb(surf_r, surf_g, surf_b),
+                        card_bg: Color32::from_rgb(255, 255, 255), // Pure crisp white cards for Fluent light aesthetic
                         card_hover: Color32::from_rgb(card_hover_r, card_hover_g, card_hover_b),
                         border: Color32::from_rgb(bord_r, bord_g, bord_b),
                         specular: Color32::from_rgba_premultiplied(255, 255, 255, 120),
@@ -259,7 +263,12 @@ impl ThemeStyle {
                     } else {
                         Color32::from_rgba_premultiplied(255, 255, 255, 140)
                     },
-                    divider: Color32::from_rgba_premultiplied(bord_r, bord_g, bord_b, (bord_a / 2).max(20)),
+                    divider: Color32::from_rgba_premultiplied(
+                        bord_r,
+                        bord_g,
+                        bord_b,
+                        (bord_a / 2).max(20),
+                    ),
                     text_primary: Color32::from_rgb(tp_r, tp_g, tp_b),
                     text_secondary: Color32::from_rgb(ts_r, ts_g, ts_b),
                     text_muted: Color32::from_rgb(tm_r, tm_g, tm_b),
@@ -297,7 +306,12 @@ impl ThemeStyle {
                     } else {
                         Color32::from_rgba_premultiplied(255, 255, 255, 190)
                     },
-                    divider: Color32::from_rgba_premultiplied(bord_r, bord_g, bord_b, (bord_a / 2).max(25)),
+                    divider: Color32::from_rgba_premultiplied(
+                        bord_r,
+                        bord_g,
+                        bord_b,
+                        (bord_a / 2).max(25),
+                    ),
                     text_primary: Color32::from_rgb(tp_r, tp_g, tp_b),
                     text_secondary: Color32::from_rgb(ts_r, ts_g, ts_b),
                     text_muted: Color32::from_rgb(tm_r, tm_g, tm_b),
@@ -314,10 +328,14 @@ impl ThemeStyle {
 impl From<crate::core::ThemeMode> for ThemeStyle {
     fn from(m: crate::core::ThemeMode) -> Self {
         match m {
-            crate::core::ThemeMode::DarkAnthracite | crate::core::ThemeMode::LiquidGlass => ThemeStyle::DarkAnthracite,
+            crate::core::ThemeMode::DarkAnthracite | crate::core::ThemeMode::LiquidGlass => {
+                ThemeStyle::DarkAnthracite
+            }
             crate::core::ThemeMode::DarkForest => ThemeStyle::DarkForest,
             crate::core::ThemeMode::DarkEclipse => ThemeStyle::DarkEclipse,
-            crate::core::ThemeMode::DarkPewter | crate::core::ThemeMode::FrostedGlass => ThemeStyle::DarkPewter,
+            crate::core::ThemeMode::DarkPewter | crate::core::ThemeMode::FrostedGlass => {
+                ThemeStyle::DarkPewter
+            }
             crate::core::ThemeMode::DarkTangerine => ThemeStyle::DarkTangerine,
             crate::core::ThemeMode::DarkCaviar => ThemeStyle::DarkCaviar,
             crate::core::ThemeMode::DarkIndigo => ThemeStyle::DarkIndigo,
@@ -328,7 +346,9 @@ impl From<crate::core::ThemeMode> for ThemeStyle {
             crate::core::ThemeMode::LightBrilliant => ThemeStyle::LightBrilliant,
             crate::core::ThemeMode::LightZest => ThemeStyle::LightZest,
             crate::core::ThemeMode::LightBlanc => ThemeStyle::LightBlanc,
-            crate::core::ThemeMode::LightGlacier | crate::core::ThemeMode::LightAqua => ThemeStyle::LightGlacier,
+            crate::core::ThemeMode::LightGlacier | crate::core::ThemeMode::LightAqua => {
+                ThemeStyle::LightGlacier
+            }
             crate::core::ThemeMode::LightTangerine => ThemeStyle::LightTangerine,
             crate::core::ThemeMode::LightAlbedo => ThemeStyle::LightAlbedo,
             crate::core::ThemeMode::LightQuartz => ThemeStyle::LightQuartz,
@@ -342,7 +362,9 @@ impl From<crate::core::ThemeMode> for ThemeStyle {
 impl From<ThemeStyle> for crate::core::ThemeMode {
     fn from(s: ThemeStyle) -> Self {
         match s {
-            ThemeStyle::DarkAnthracite | ThemeStyle::LiquidGlass => crate::core::ThemeMode::DarkAnthracite,
+            ThemeStyle::DarkAnthracite | ThemeStyle::LiquidGlass => {
+                crate::core::ThemeMode::DarkAnthracite
+            }
             ThemeStyle::DarkForest => crate::core::ThemeMode::DarkForest,
             ThemeStyle::DarkEclipse => crate::core::ThemeMode::DarkEclipse,
             ThemeStyle::DarkPewter | ThemeStyle::FrostedGlass => crate::core::ThemeMode::DarkPewter,
@@ -356,7 +378,9 @@ impl From<ThemeStyle> for crate::core::ThemeMode {
             ThemeStyle::LightBrilliant => crate::core::ThemeMode::LightBrilliant,
             ThemeStyle::LightZest => crate::core::ThemeMode::LightZest,
             ThemeStyle::LightBlanc => crate::core::ThemeMode::LightBlanc,
-            ThemeStyle::LightGlacier | ThemeStyle::LightAqua => crate::core::ThemeMode::LightGlacier,
+            ThemeStyle::LightGlacier | ThemeStyle::LightAqua => {
+                crate::core::ThemeMode::LightGlacier
+            }
             ThemeStyle::LightTangerine => crate::core::ThemeMode::LightTangerine,
             ThemeStyle::LightAlbedo => crate::core::ThemeMode::LightAlbedo,
             ThemeStyle::LightQuartz => crate::core::ThemeMode::LightQuartz,
@@ -484,7 +508,7 @@ pub fn render_traffic_lights(
     });
 }
 
-/// Renders an authentic macOS sidebar item with smooth pill highlight and theme awareness.
+/// Renders an authentic Fluent & macOS sidebar item with smooth pill highlight and theme awareness.
 pub fn render_sidebar_item(
     ui: &mut Ui,
     theme: &ThemePalette,
@@ -492,30 +516,51 @@ pub fn render_sidebar_item(
     icon: &str,
     is_selected: bool,
 ) -> bool {
-    let desired_size = Vec2::new(ui.available_width(), 32.0);
+    render_sidebar_item_with_pin(ui, theme, label, icon, is_selected, false)
+}
+
+/// Renders a Fluent & macOS sidebar item with optional pin indicator.
+pub fn render_sidebar_item_with_pin(
+    ui: &mut Ui,
+    theme: &ThemePalette,
+    label: &str,
+    icon: &str,
+    is_selected: bool,
+    show_pin: bool,
+) -> bool {
+    let desired_size = Vec2::new(ui.available_width(), 30.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
     let painter = ui.painter_at(rect);
 
     let is_hovered = response.hovered();
 
     let bg_color = if is_selected {
-        Color32::from_rgba_premultiplied(120, 190, 32, 45) // Pantone 376 C translucent pill
+        Color32::from_rgba_premultiplied(
+            theme.accent.r(),
+            theme.accent.g(),
+            theme.accent.b(),
+            if theme.is_dark { 45 } else { 26 },
+        )
     } else if is_hovered {
         theme.card_hover
     } else {
         Color32::TRANSPARENT
     };
 
-    painter.rect_filled(rect, Rounding::same(8.0), bg_color);
+    painter.rect_filled(rect, Rounding::same(6.0), bg_color);
 
     if is_selected {
-        // Active vertical indicator bar
-        let bar_rect = Rect::from_min_size(rect.min + Vec2::new(2.0, 7.0), Vec2::new(3.0, 18.0));
-        painter.rect_filled(bar_rect, Rounding::same(2.0), PANTONE_FLAVEDO);
+        // Active vertical indicator bar in accent color
+        let bar_rect = Rect::from_min_size(rect.min + Vec2::new(2.0, 6.0), Vec2::new(3.0, 18.0));
+        painter.rect_filled(bar_rect, Rounding::same(1.5), theme.accent);
     }
 
     let text_color = if is_selected {
-        PANTONE_FLAVEDO
+        if theme.is_dark {
+            theme.accent
+        } else {
+            theme.text_primary
+        }
     } else if is_hovered {
         theme.text_primary
     } else {
@@ -523,26 +568,151 @@ pub fn render_sidebar_item(
     };
 
     // Render Icon
-    let icon_pos = Pos2::new(rect.min.x + 16.0, rect.center().y);
+    let icon_pos = Pos2::new(rect.min.x + 14.0, rect.center().y);
     painter.text(
         icon_pos,
         egui::Align2::LEFT_CENTER,
         icon,
-        FontId::proportional(14.0),
+        FontId::proportional(13.5),
         text_color,
     );
 
     // Render Label
-    let label_pos = Pos2::new(rect.min.x + 40.0, rect.center().y);
+    let label_pos = Pos2::new(rect.min.x + 36.0, rect.center().y);
     painter.text(
         label_pos,
         egui::Align2::LEFT_CENTER,
         label,
-        FontId::proportional(12.5),
+        FontId::proportional(11.5),
         text_color,
     );
 
+    if show_pin {
+        let pin_pos = Pos2::new(rect.max.x - 12.0, rect.center().y);
+        painter.text(
+            pin_pos,
+            egui::Align2::RIGHT_CENTER,
+            "📌",
+            FontId::proportional(9.0),
+            if is_hovered {
+                theme.text_secondary
+            } else {
+                theme.text_muted
+            },
+        );
+    }
+
     response.clicked()
+}
+
+/// Renders native Windows 11 Fluent style window control buttons (Minimize, Maximize, Close).
+pub fn render_fluent_window_controls(
+    ui: &mut Ui,
+    theme: &ThemePalette,
+    is_max: bool,
+    on_min: impl FnOnce(),
+    on_max: impl FnOnce(),
+    on_close: impl FnOnce(),
+) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+
+        // Minimize Button
+        let min_btn = egui::Button::new(
+            egui::RichText::new("—")
+                .size(10.5)
+                .color(theme.text_secondary),
+        )
+        .min_size(Vec2::new(42.0, 28.0))
+        .fill(Color32::TRANSPARENT)
+        .rounding(Rounding::ZERO);
+        if ui.add(min_btn).on_hover_text("Minimize").clicked() {
+            on_min();
+        }
+
+        // Maximize / Restore Button
+        let max_glyph = if is_max { "❐" } else { "🗖" };
+        let max_btn = egui::Button::new(
+            egui::RichText::new(max_glyph)
+                .size(10.5)
+                .color(theme.text_secondary),
+        )
+        .min_size(Vec2::new(42.0, 28.0))
+        .fill(Color32::TRANSPARENT)
+        .rounding(Rounding::ZERO);
+        if ui
+            .add(max_btn)
+            .on_hover_text(if is_max { "Restore" } else { "Maximize" })
+            .clicked()
+        {
+            on_max();
+        }
+
+        // Close Button
+        let close_btn = egui::Button::new(
+            egui::RichText::new("✕")
+                .size(11.0)
+                .color(theme.text_secondary),
+        )
+        .min_size(Vec2::new(44.0, 28.0))
+        .fill(Color32::TRANSPARENT)
+        .rounding(Rounding::ZERO);
+        let resp = ui.add(close_btn).on_hover_text("Close");
+        if resp.hovered() {
+            ui.painter()
+                .rect_filled(resp.rect, Rounding::ZERO, Color32::from_rgb(232, 17, 35));
+            ui.painter().text(
+                resp.rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "✕",
+                egui::FontId::proportional(11.0),
+                Color32::WHITE,
+            );
+        }
+        if resp.clicked() {
+            on_close();
+        }
+    });
+}
+
+/// Applies eye-safe theme colors to global egui context visuals.
+pub fn apply_theme_visuals(ctx: &egui::Context, palette: &ThemePalette) {
+    let mut visuals = if palette.is_dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+
+    visuals.window_fill = palette.window_bg;
+    visuals.panel_fill = palette.sidebar_bg;
+    visuals.faint_bg_color = palette.card_bg;
+    visuals.extreme_bg_color = palette.window_bg;
+
+    visuals.widgets.noninteractive.bg_fill = palette.card_bg;
+    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, palette.text_secondary);
+    visuals.widgets.noninteractive.rounding = Rounding::same(6.0);
+
+    visuals.widgets.inactive.bg_fill = palette.card_bg;
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, palette.text_primary);
+    visuals.widgets.inactive.rounding = Rounding::same(6.0);
+
+    visuals.widgets.hovered.bg_fill = palette.card_hover;
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.2_f32, palette.text_primary);
+    visuals.widgets.hovered.rounding = Rounding::same(6.0);
+
+    visuals.widgets.active.bg_fill = palette.accent;
+    visuals.widgets.active.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
+    visuals.widgets.active.rounding = Rounding::same(6.0);
+
+    visuals.selection.bg_fill = Color32::from_rgba_premultiplied(
+        palette.accent.r(),
+        palette.accent.g(),
+        palette.accent.b(),
+        60,
+    );
+    visuals.selection.stroke = Stroke::new(1.0_f32, palette.accent);
+
+    ctx.set_visuals(visuals);
 }
 
 /// Renders a macOS-style pill segmented control switch with theme awareness.
@@ -564,15 +734,11 @@ pub fn render_segmented_switch(
             for (val, label) in options {
                 let is_active = selected.as_str() == *val;
                 let btn = ui.add(
-                    egui::Button::new(
-                        egui::RichText::new(*label)
-                            .size(11.0)
-                            .color(if is_active {
-                                Color32::WHITE
-                            } else {
-                                theme.text_muted
-                            }),
-                    )
+                    egui::Button::new(egui::RichText::new(*label).size(11.0).color(if is_active {
+                        Color32::WHITE
+                    } else {
+                        theme.text_muted
+                    }))
                     .fill(if is_active {
                         PANTONE_FLAVEDO
                     } else {

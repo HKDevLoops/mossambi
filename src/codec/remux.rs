@@ -5,9 +5,9 @@
 //! 3. Video Containers (Bitstream packet transmuxing with 0 re-encoding)
 //! 4. Vector Documents (Adobe Type 1 scalable vector pagination, 0 rasterization)
 
+use crate::core::{FileCategory, UniversalRegistry};
 use anyhow::{bail, Context, Result};
 use image::GenericImageView;
-use crate::core::{FileCategory, UniversalRegistry};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -35,7 +35,9 @@ impl MathematicalRemuxType {
             Self::BitExactPcm => "Bit-Exact PCM Sample Remux (0.00% Audio Loss)",
             Self::LosslessRasterMatrix => "Bit-Exact Raster Matrix Remux (0.00% Pixel Loss)",
             Self::VectorLayoutPreservation => "Vector Layout Preservation (Zero Raster Distortion)",
-            Self::LossyTranscodeWithConsent => "Perceptual Lossy Transcoding (User Explicit Consent)",
+            Self::LossyTranscodeWithConsent => {
+                "Perceptual Lossy Transcoding (User Explicit Consent)"
+            }
         }
     }
 }
@@ -105,7 +107,11 @@ impl MathematicalQualityReport {
             self.source_path.display(),
             self.target_path.display(),
             self.remux_type.description(),
-            if self.is_zero_loss { "VERIFIED ZERO-LOSS (0.00%)" } else { "LOSSY" },
+            if self.is_zero_loss {
+                "VERIFIED ZERO-LOSS (0.00%)"
+            } else {
+                "LOSSY"
+            },
             loss_str,
             psnr_str,
             ssim_str,
@@ -129,7 +135,8 @@ impl MathematicalQualityReport {
 
 /// Calculate the SHA-256 digest of a file.
 pub fn calculate_sha256(path: &Path) -> Result<String> {
-    let mut file = File::open(path).with_context(|| format!("Failed to open file for SHA-256: {}", path.display()))?;
+    let mut file = File::open(path)
+        .with_context(|| format!("Failed to open file for SHA-256: {}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 65536];
 
@@ -145,7 +152,10 @@ pub fn calculate_sha256(path: &Path) -> Result<String> {
 }
 
 /// Mathematically verify fidelity between a source file and its converted output.
-pub fn verify_conversion_fidelity(source: &Path, target: &Path) -> Result<MathematicalQualityReport> {
+pub fn verify_conversion_fidelity(
+    source: &Path,
+    target: &Path,
+) -> Result<MathematicalQualityReport> {
     if !source.exists() {
         bail!("Source file does not exist: {}", source.display());
     }
@@ -161,8 +171,12 @@ pub fn verify_conversion_fidelity(source: &Path, target: &Path) -> Result<Mathem
 
     match src_cat {
         FileCategory::Image => verify_image_conversion(source, target, &src_hash, &tgt_hash),
-        FileCategory::Audio => verify_audio_conversion(source, target, &src_ext, &tgt_ext, &src_hash, &tgt_hash),
-        FileCategory::Video => verify_video_conversion(source, target, &src_ext, &tgt_ext, &src_hash, &tgt_hash),
+        FileCategory::Audio => {
+            verify_audio_conversion(source, target, &src_ext, &tgt_ext, &src_hash, &tgt_hash)
+        }
+        FileCategory::Video => {
+            verify_video_conversion(source, target, &src_ext, &tgt_ext, &src_hash, &tgt_hash)
+        }
         FileCategory::Document | FileCategory::Spreadsheet => {
             verify_document_conversion(source, target, &src_ext, &tgt_ext, &src_hash, &tgt_hash)
         }
@@ -179,14 +193,19 @@ pub fn verify_conversion_fidelity(source: &Path, target: &Path) -> Result<Mathem
                 },
                 is_zero_loss: is_identical,
                 loss_percentage: 0.0,
-                psnr_db: if is_identical { Some(f64::INFINITY) } else { None },
+                psnr_db: if is_identical {
+                    Some(f64::INFINITY)
+                } else {
+                    None
+                },
                 ssim: if is_identical { Some(1.0) } else { None },
                 max_sample_delta: 0.0,
                 rms_error: 0.0,
                 source_sha256: src_hash,
                 target_sha256: tgt_hash,
                 verified_zero_loss: is_identical,
-                status_summary: "File container processed with structural integrity check".to_string(),
+                status_summary: "File container processed with structural integrity check"
+                    .to_string(),
                 warnings: Vec::new(),
             })
         }
@@ -200,8 +219,10 @@ pub fn verify_image_conversion(
     src_hash: &str,
     tgt_hash: &str,
 ) -> Result<MathematicalQualityReport> {
-    let src_img = crate::codec::open_image_safe(source).with_context(|| format!("Failed to decode source image: {}", source.display()))?;
-    let tgt_img = crate::codec::open_image_safe(target).with_context(|| format!("Failed to decode target image: {}", target.display()))?;
+    let src_img = crate::codec::open_image_safe(source)
+        .with_context(|| format!("Failed to decode source image: {}", source.display()))?;
+    let tgt_img = crate::codec::open_image_safe(target)
+        .with_context(|| format!("Failed to decode target image: {}", target.display()))?;
 
     let (sw, sh) = src_img.dimensions();
     let (tw, th) = tgt_img.dimensions();
@@ -220,7 +241,10 @@ pub fn verify_image_conversion(
             source_sha256: src_hash.to_string(),
             target_sha256: tgt_hash.to_string(),
             verified_zero_loss: false,
-            status_summary: format!("Image dimensions differ: source is {}x{}, target is {}x{}", sw, sh, tw, th),
+            status_summary: format!(
+                "Image dimensions differ: source is {}x{}, target is {}x{}",
+                sw, sh, tw, th
+            ),
             warnings: vec!["Geometric downsampling or crop detected".to_string()],
         });
     }
@@ -263,12 +287,20 @@ pub fn verify_image_conversion(
         )
     };
 
-    let loss_pct = if is_lossless { 0.0 } else { (1.0 - ssim) * 100.0 };
+    let loss_pct = if is_lossless {
+        0.0
+    } else {
+        (1.0 - ssim) * 100.0
+    };
 
     let summary = if is_lossless {
-        "Bit-exact mathematical pixel preservation verified. MSE = 0.00, PSNR = ∞ dB, 0.00% Loss.".to_string()
+        "Bit-exact mathematical pixel preservation verified. MSE = 0.00, PSNR = ∞ dB, 0.00% Loss."
+            .to_string()
     } else {
-        format!("Perceptual loss detected: PSNR = {:.2} dB, MSE = {:.4}", psnr, mse)
+        format!(
+            "Perceptual loss detected: PSNR = {:.2} dB, MSE = {:.4}",
+            psnr, mse
+        )
     };
 
     let mut warnings = Vec::new();
@@ -402,7 +434,10 @@ pub fn verify_video_conversion(
             source_sha256: src_hash.to_string(),
             target_sha256: tgt_hash.to_string(),
             verified_zero_loss: false,
-            status_summary: format!("Video transcode targeting {} with hardware acceleration.", tgt_ext),
+            status_summary: format!(
+                "Video transcode targeting {} with hardware acceleration.",
+                tgt_ext
+            ),
             warnings: vec![format!(
                 "Video container change from {} to {} required re-encoding. Loss: < 1.00%.",
                 src_ext, tgt_ext
@@ -454,7 +489,10 @@ pub fn verify_document_conversion(
             source_sha256: src_hash.to_string(),
             target_sha256: tgt_hash.to_string(),
             verified_zero_loss: true,
-            status_summary: format!("Structured text/tabular data transformed from {} to {}.", src_ext, tgt_ext),
+            status_summary: format!(
+                "Structured text/tabular data transformed from {} to {}.",
+                src_ext, tgt_ext
+            ),
             warnings: Vec::new(),
         })
     }

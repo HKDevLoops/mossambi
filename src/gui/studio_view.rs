@@ -10,12 +10,12 @@
 //! - Hardware & AI telemetry (NVENC, AMF, QSV, DirectML NPU)
 //! - Certified Pantone Citrus Palette tokens
 
-use crate::gui::macos_theme::*;
-use crate::gui::quick_settings::QuickSettingsState;
-use eframe::egui::{self, Color32, Rounding, Sense, Stroke, Ui, Vec2, ViewportCommand};
 use crate::core::{FileCategory, UniversalRegistry};
 use crate::exam::{optimize_exam_media, ExamConstraint};
+use crate::gui::macos_theme::*;
+use crate::gui::quick_settings::QuickSettingsState;
 use crate::hwaccel::detect_hardware_capabilities;
+use eframe::egui::{self, Color32, Rect, Rounding, Sense, Stroke, Ui, Vec2, ViewportCommand};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +40,13 @@ pub struct StudioView {
     pub inspected_file_path: Option<PathBuf>,
     pub catalogue_search: String,
     pub catalogue_category: Option<FileCategory>,
+
+    // Sidebar Collapsible Sections
+    pub drives_expanded: bool,
+    pub cloud_expanded: bool,
+    pub network_expanded: bool,
+    pub tags_expanded: bool,
+    pub tools_expanded: bool,
 }
 
 impl Default for StudioView {
@@ -55,6 +62,12 @@ impl Default for StudioView {
             inspected_file_path: None,
             catalogue_search: String::new(),
             catalogue_category: None,
+
+            drives_expanded: true,
+            cloud_expanded: false,
+            network_expanded: false,
+            tags_expanded: true,
+            tools_expanded: true,
         }
     }
 }
@@ -75,193 +88,723 @@ impl StudioView {
     ) {
         let palette = current_theme.colors();
 
-        // 1. Fixed Left Sidebar Panel (240px wide, pinned to top-left)
+        // 1. Unified Top Panel (Windows 11 Fluent Tabs + Navigation Toolbar)
+        let top_frame = egui::Frame::none()
+            .fill(palette.sidebar_bg)
+            .inner_margin(egui::Margin::symmetric(14.0, 8.0));
+
+        let is_max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+
+        egui::TopBottomPanel::top("studio_unified_header")
+            .frame(top_frame)
+            .show(ctx, |ui| {
+                // ==============================================================
+                // ROW 1: Tabs + Drag Window Area + Window Controls
+                // ==============================================================
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+
+                    // Brand Icon
+                    ui.label(egui::RichText::new("🍋").size(15.0));
+
+                    // Tabs
+                    let mut tab_to_select: Option<usize> = None;
+                    let mut tab_to_close: Option<usize> = None;
+                    let tabs_count = self.explorer_view.tabs.len();
+
+                    for (idx, tab) in self.explorer_view.tabs.iter().enumerate() {
+                        let is_active = self.current_tab == StudioTab::FileExplorer
+                            && idx == self.explorer_view.active_tab_index;
+                        let tab_bg = if is_active {
+                            palette.card_bg
+                        } else {
+                            Color32::TRANSPARENT
+                        };
+                        let tab_stroke = if is_active {
+                            Stroke::new(1.0_f32, palette.border)
+                        } else {
+                            Stroke::NONE
+                        };
+
+                        let (rect, resp) =
+                            ui.allocate_exact_size(Vec2::new(130.0, 26.0), Sense::click());
+                        let is_hovered = resp.hovered();
+
+                        let bg = if is_active {
+                            tab_bg
+                        } else if is_hovered {
+                            palette.card_hover
+                        } else {
+                            tab_bg
+                        };
+
+                        ui.painter().rect_filled(rect, Rounding::same(6.0), bg);
+                        if is_active {
+                            ui.painter()
+                                .rect_stroke(rect, Rounding::same(6.0), tab_stroke);
+                        }
+
+                        // Tab icon
+                        ui.painter().text(
+                            rect.left_center() + Vec2::new(10.0, 0.0),
+                            egui::Align2::LEFT_CENTER,
+                            tab.icon,
+                            egui::FontId::proportional(12.0),
+                            if is_active {
+                                palette.accent
+                            } else {
+                                palette.text_secondary
+                            },
+                        );
+
+                        // Tab title (truncated)
+                        let max_title_chars = 10;
+                        let title_display = if tab.title.chars().count() > max_title_chars {
+                            format!(
+                                "{}…",
+                                tab.title.chars().take(max_title_chars).collect::<String>()
+                            )
+                        } else {
+                            tab.title.clone()
+                        };
+
+                        ui.painter().text(
+                            rect.left_center() + Vec2::new(28.0, 0.0),
+                            egui::Align2::LEFT_CENTER,
+                            title_display,
+                            egui::FontId::proportional(11.0),
+                            if is_active {
+                                palette.text_primary
+                            } else {
+                                palette.text_secondary
+                            },
+                        );
+
+                        // Close button on tab
+                        if tabs_count > 1 {
+                            let close_rect = Rect::from_center_size(
+                                rect.right_center() + Vec2::new(-12.0, 0.0),
+                                Vec2::splat(14.0),
+                            );
+                            let close_resp = ui.interact(
+                                close_rect,
+                                ui.make_persistent_id(("tab_close", tab.id)),
+                                Sense::click(),
+                            );
+                            if close_resp.hovered() {
+                                ui.painter().circle_filled(
+                                    close_rect.center(),
+                                    7.0,
+                                    palette.card_hover,
+                                );
+                            }
+                            ui.painter().text(
+                                close_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "✕",
+                                egui::FontId::proportional(8.5),
+                                if close_resp.hovered() {
+                                    palette.text_primary
+                                } else {
+                                    palette.text_muted
+                                },
+                            );
+                            if close_resp.clicked() {
+                                tab_to_close = Some(idx);
+                            }
+                        }
+
+                        if resp.clicked() {
+                            tab_to_select = Some(idx);
+                        }
+                    }
+
+                    if let Some(idx) = tab_to_close {
+                        self.explorer_view.close_tab(idx);
+                    } else if let Some(idx) = tab_to_select {
+                        self.current_tab = StudioTab::FileExplorer;
+                        self.explorer_view.switch_to_tab(idx);
+                    }
+
+                    // Plus button for new tab
+                    let new_tab_btn = egui::Button::new(
+                        egui::RichText::new("+")
+                            .size(12.0)
+                            .color(palette.text_secondary),
+                    )
+                    .min_size(Vec2::splat(24.0))
+                    .fill(Color32::TRANSPARENT)
+                    .rounding(Rounding::same(4.0));
+                    if ui
+                        .add(new_tab_btn)
+                        .on_hover_text("New tab (Ctrl+T)")
+                        .clicked()
+                    {
+                        let target = self.explorer_view.current_dir.clone();
+                        self.explorer_view.add_tab(target);
+                        self.current_tab = StudioTab::FileExplorer;
+                    }
+
+                    // Draggable Window Title Region
+                    let drag_w = (ui.available_width() - 130.0).max(20.0);
+                    let (_drag_rect, drag_resp) =
+                        ui.allocate_exact_size(Vec2::new(drag_w, 26.0), Sense::click_and_drag());
+                    if drag_resp.drag_started() {
+                        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                    }
+                    if drag_resp.double_clicked() {
+                        ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max));
+                    }
+
+                    // Window Controls (Minimize, Maximize, Close)
+                    render_fluent_window_controls(
+                        ui,
+                        &palette,
+                        is_max,
+                        || ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
+                        || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
+                        || ctx.send_viewport_cmd(ViewportCommand::Close),
+                    );
+                });
+
+                ui.add_space(6.0);
+
+                // ==============================================================
+                // ROW 2: Navigation Buttons + Breadcrumbs + Search + Utilities
+                // ==============================================================
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+
+                    // Back Button
+                    let can_back = self.explorer_view.can_go_back();
+                    let back_btn = egui::Button::new("←")
+                        .min_size(Vec2::splat(26.0))
+                        .fill(if can_back {
+                            palette.card_bg
+                        } else {
+                            Color32::TRANSPARENT
+                        })
+                        .rounding(Rounding::same(4.0));
+                    if ui
+                        .add_enabled(can_back, back_btn)
+                        .on_hover_text("Back (Alt+Left)")
+                        .clicked()
+                    {
+                        self.current_tab = StudioTab::FileExplorer;
+                        self.explorer_view.go_back();
+                    }
+
+                    // Forward Button
+                    let can_fwd = self.explorer_view.can_go_forward();
+                    let fwd_btn = egui::Button::new("→")
+                        .min_size(Vec2::splat(26.0))
+                        .fill(if can_fwd {
+                            palette.card_bg
+                        } else {
+                            Color32::TRANSPARENT
+                        })
+                        .rounding(Rounding::same(4.0));
+                    if ui
+                        .add_enabled(can_fwd, fwd_btn)
+                        .on_hover_text("Forward (Alt+Right)")
+                        .clicked()
+                    {
+                        self.current_tab = StudioTab::FileExplorer;
+                        self.explorer_view.go_forward();
+                    }
+
+                    // Up Folder Button
+                    let up_btn = egui::Button::new("↑")
+                        .min_size(Vec2::splat(26.0))
+                        .fill(palette.card_bg)
+                        .rounding(Rounding::same(4.0));
+                    if ui
+                        .add(up_btn)
+                        .on_hover_text("Up to parent folder (Alt+Up)")
+                        .clicked()
+                    {
+                        self.current_tab = StudioTab::FileExplorer;
+                        if let Some(parent) = self.explorer_view.current_dir.parent() {
+                            let p = parent.to_path_buf();
+                            if !p.as_os_str().is_empty() {
+                                self.explorer_view.navigate_to(p);
+                            }
+                        }
+                    }
+
+                    // Refresh Button
+                    let ref_btn = egui::Button::new("↻")
+                        .min_size(Vec2::splat(26.0))
+                        .fill(palette.card_bg)
+                        .rounding(Rounding::same(4.0));
+                    if ui.add(ref_btn).on_hover_text("Refresh (F5)").clicked() {
+                        self.explorer_view
+                            .navigate_to(self.explorer_view.current_dir.clone());
+                    }
+
+                    ui.add_space(4.0);
+
+                    // Address / Breadcrumb Bar
+                    let search_area_w = 280.0_f32;
+                    let breadcrumb_w = (ui.available_width() - search_area_w - 10.0).max(160.0);
+
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(breadcrumb_w, 28.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            let (bc_rect, _) = ui
+                                .allocate_exact_size(Vec2::new(breadcrumb_w, 28.0), Sense::hover());
+                            ui.painter()
+                                .rect_filled(bc_rect, Rounding::same(6.0), palette.card_bg);
+                            ui.painter().rect_stroke(
+                                bc_rect,
+                                Rounding::same(6.0),
+                                Stroke::new(1.0_f32, palette.border),
+                            );
+
+                            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bc_rect), |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(8.0);
+                                    if self.explorer_view.is_home_view {
+                                        ui.label(
+                                            egui::RichText::new("📁 Home")
+                                                .strong()
+                                                .color(palette.accent),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new("⌄")
+                                                .size(10.0)
+                                                .color(palette.text_muted),
+                                        );
+                                    } else if self.explorer_view.is_editing_path {
+                                        let text_resp = ui.add(
+                                            egui::TextEdit::singleline(
+                                                &mut self.explorer_view.path_edit_buffer,
+                                            )
+                                            .desired_width(breadcrumb_w - 40.0)
+                                            .font(egui::TextStyle::Monospace),
+                                        );
+                                        if text_resp.lost_focus()
+                                            && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                        {
+                                            let new_p =
+                                                PathBuf::from(&self.explorer_view.path_edit_buffer);
+                                            if new_p.exists() {
+                                                self.explorer_view.navigate_to(new_p);
+                                            }
+                                            self.explorer_view.is_editing_path = false;
+                                        }
+                                    } else {
+                                        let segments = crate::core::parse_breadcrumbs(
+                                            &self.explorer_view.current_dir,
+                                        );
+                                        for seg in segments {
+                                            let is_current =
+                                                seg.target_path == self.explorer_view.current_dir;
+                                            if ui
+                                                .link(egui::RichText::new(&seg.label).color(
+                                                    if is_current {
+                                                        palette.accent
+                                                    } else {
+                                                        palette.text_primary
+                                                    },
+                                                ))
+                                                .clicked()
+                                            {
+                                                self.explorer_view.navigate_to(seg.target_path);
+                                            }
+                                            ui.label(
+                                                egui::RichText::new("›").color(palette.text_muted),
+                                            );
+                                        }
+                                        if ui
+                                            .small_button("✏")
+                                            .on_hover_text("Edit path (Ctrl+L)")
+                                            .clicked()
+                                        {
+                                            self.explorer_view.path_edit_buffer = self
+                                                .explorer_view
+                                                .current_dir
+                                                .to_string_lossy()
+                                                .to_string();
+                                            self.explorer_view.is_editing_path = true;
+                                        }
+                                    }
+                                });
+                            });
+                        },
+                    );
+
+                    // Search Box & Action Icons on Right
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Settings Gear
+                        if ui
+                            .button(
+                                egui::RichText::new("⚙")
+                                    .size(13.0)
+                                    .color(palette.text_secondary),
+                            )
+                            .on_hover_text("Settings & Themes")
+                            .clicked()
+                        {
+                            self.current_tab = StudioTab::Preferences;
+                        }
+
+                        // View layout toggle
+                        let view_glyph = match self.explorer_view.view_mode {
+                            crate::gui::explorer_view::ViewMode::Details => "☰",
+                            crate::gui::explorer_view::ViewMode::Grid => "⊞",
+                            crate::gui::explorer_view::ViewMode::Columns => "☷",
+                        };
+                        if ui
+                            .button(
+                                egui::RichText::new(view_glyph)
+                                    .size(13.0)
+                                    .color(palette.text_secondary),
+                            )
+                            .on_hover_text("Change View Mode (Details, Grid, Columns)")
+                            .clicked()
+                        {
+                            self.explorer_view.view_mode = match self.explorer_view.view_mode {
+                                crate::gui::explorer_view::ViewMode::Details => {
+                                    crate::gui::explorer_view::ViewMode::Grid
+                                }
+                                crate::gui::explorer_view::ViewMode::Grid => {
+                                    crate::gui::explorer_view::ViewMode::Columns
+                                }
+                                crate::gui::explorer_view::ViewMode::Columns => {
+                                    crate::gui::explorer_view::ViewMode::Details
+                                }
+                            };
+                        }
+
+                        // Ready / Sync Checkmark
+                        ui.label(egui::RichText::new("✓").size(13.0).color(palette.accent))
+                            .on_hover_text("System Ready • Bit-Exact Standard Active");
+
+                        // Search box
+                        if !self.explorer_view.search_query.is_empty()
+                            && ui.button("✕").on_hover_text("Clear search").clicked()
+                        {
+                            self.explorer_view.search_query.clear();
+                        }
+
+                        let search_w = 160.0_f32;
+                        let search_resp = ui.add(
+                            egui::TextEdit::singleline(&mut self.explorer_view.search_query)
+                                .hint_text("🔍 Search")
+                                .desired_width(search_w),
+                        );
+                        if self.explorer_view.focus_search_requested {
+                            search_resp.request_focus();
+                            self.explorer_view.focus_search_requested = false;
+                        }
+                    });
+                });
+            });
+
+        // 2. Left Sidebar Panel (Pinned, Drives, Cloud, Network, Tags, Tools)
         let sidebar_frame = egui::Frame::none()
             .fill(palette.sidebar_bg)
-            .inner_margin(egui::Margin::same(16.0));
+            .inner_margin(egui::Margin::symmetric(12.0, 10.0));
 
         egui::SidePanel::left("studio_sidebar")
             .resizable(false)
-            .exact_width(230.0)
+            .exact_width(220.0)
             .frame(sidebar_frame)
             .show(ctx, |ui| {
-                // Top Traffic Lights (Red = Close, Yellow = Min, Green = Maximize Toggle)
-                let is_max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-                ui.horizontal(|ui| {
-                    render_traffic_lights(
-                        ui,
-                        || ctx.send_viewport_cmd(ViewportCommand::Close),
-                        || ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
-                        || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
-                    );
-                    let side_drag_rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), 16.0));
-                    let side_drag_resp = ui.allocate_rect(side_drag_rect, Sense::click_and_drag());
-                    if side_drag_resp.drag_started() {
-                        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
-                    }
-                    if side_drag_resp.double_clicked() {
-                        ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max));
-                    }
-                });
-
-                ui.add_space(14.0);
-
-                // Brand Header with Pantone 376 C
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("🍋").size(22.0));
-                    ui.label(
-                        egui::RichText::new("Mossambi")
-                            .size(17.5)
-                            .strong()
-                            .color(PANTONE_FLAVEDO),
-                    );
-                    ui.label(
-                        egui::RichText::new("v2.2")
-                            .size(10.5)
-                            .color(palette.text_muted),
-                    );
-                });
-
-                ui.add_space(12.0);
-                ui.separator();
-                ui.add_space(6.0);
-
-                // Scrollable macOS Finder Sidebar (Favorites, Locations/Drives, Tools, Tags)
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        // Section 1: FAVORITES
-                        ui.label(egui::RichText::new("FAVORITES").size(10.0).strong().color(palette.text_muted));
-                        ui.add_space(3.0);
+                        // 1. Home Item (with vertical accent indicator when active)
+                        let is_home_active = self.current_tab == StudioTab::FileExplorer
+                            && self.explorer_view.is_home_view;
+                        if render_sidebar_item_with_pin(
+                            ui,
+                            &palette,
+                            "Home",
+                            "🏠",
+                            is_home_active,
+                            false,
+                        ) {
+                            self.current_tab = StudioTab::FileExplorer;
+                            let home_opt = std::env::var("USERPROFILE")
+                                .or_else(|_| std::env::var("HOME"))
+                                .ok()
+                                .map(PathBuf::from);
+                            let target = home_opt.unwrap_or_else(|| PathBuf::from("."));
+                            self.explorer_view.navigate_to(target);
+                            self.explorer_view.is_home_view = true;
+                        }
 
-                        let home_opt = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).ok();
+                        ui.add_space(8.0);
+
+                        // 2. PINNED Section
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("Pinned")
+                                    .size(10.5)
+                                    .strong()
+                                    .color(palette.text_muted),
+                            );
+                        });
+                        ui.add_space(2.0);
+
+                        let home_opt = std::env::var("USERPROFILE")
+                            .or_else(|_| std::env::var("HOME"))
+                            .ok();
                         if let Some(home_str) = home_opt {
                             let base = PathBuf::from(home_str);
-                            let favs = [
-                                ("Home", "🏠", base.clone()),
+                            let pinned = [
                                 ("Desktop", "🖥", base.join("Desktop")),
                                 ("Downloads", "📥", base.join("Downloads")),
                                 ("Documents", "📄", base.join("Documents")),
                                 ("Pictures", "🖼", base.join("Pictures")),
-                                ("Videos", "🎬", base.join("Videos")),
                                 ("Music", "🎵", base.join("Music")),
+                                ("Videos", "🎬", base.join("Videos")),
+                                ("between_pcs", "📁", base.join("between_pcs")),
+                                ("wallpapers", "📁", base.join("wallpapers")),
+                                ("Recycle Bin", "🗑", base.clone()),
                             ];
-                            for (name, icon, path) in favs {
-                                if path.exists() {
-                                    let is_active = self.current_tab == StudioTab::FileExplorer && self.explorer_view.current_dir == path;
-                                    if render_sidebar_item(ui, &palette, name, icon, is_active) {
-                                        self.current_tab = StudioTab::FileExplorer;
-                                        self.explorer_view.navigate_to(path);
-                                    }
-                                    ui.add_space(1.0);
+
+                            for (name, icon, path) in pinned {
+                                let is_active = self.current_tab == StudioTab::FileExplorer
+                                    && !self.explorer_view.is_home_view
+                                    && self.explorer_view.current_dir == path;
+                                if render_sidebar_item_with_pin(
+                                    ui, &palette, name, icon, is_active, true,
+                                ) {
+                                    self.current_tab = StudioTab::FileExplorer;
+                                    self.explorer_view.navigate_to(path);
+                                    self.explorer_view.is_home_view = false;
                                 }
+                                ui.add_space(1.0);
                             }
                         }
 
                         ui.add_space(8.0);
                         ui.separator();
-                        ui.add_space(6.0);
-
-                        // Section 2: LOCATIONS / DRIVES
-                        ui.label(egui::RichText::new("LOCATIONS").size(10.0).strong().color(palette.text_muted));
-                        ui.add_space(3.0);
-
-                        let drives = self.explorer_view.drives.clone();
-                        for drive in &drives {
-                            let is_active = self.current_tab == StudioTab::FileExplorer && self.explorer_view.current_dir.starts_with(&drive.path);
-                            if render_sidebar_item(ui, &palette, &drive.display_name, "💾", is_active) {
-                                self.current_tab = StudioTab::FileExplorer;
-                                self.explorer_view.navigate_to(drive.path.clone());
-                            }
-                            if drive.total_bytes > 0 {
-                                ui.horizontal(|ui| {
-                                    ui.add_space(14.0);
-                                    ui.label(
-                                        egui::RichText::new(drive.formatted_space())
-                                            .size(9.0)
-                                            .color(palette.text_muted),
-                                    );
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.add_space(14.0);
-                                    let ratio = drive.usage_ratio();
-                                    crate::gui::custom_widgets::render_custom_progress_bar(ui, ratio, None, &palette, 4.0, Some(150.0));
-                                });
-                                ui.add_space(3.0);
-                            }
-                        }
-
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(6.0);
-
-                        // Section 3: TOOLS & CONVERTERS
-                        ui.label(egui::RichText::new("TOOLS & CONVERTERS").size(10.0).strong().color(palette.text_muted));
-                        ui.add_space(3.0);
-
-                        if render_sidebar_item(ui, &palette, "File Explorer", "📁", self.current_tab == StudioTab::FileExplorer) {
-                            self.current_tab = StudioTab::FileExplorer;
-                        }
-                        ui.add_space(1.0);
-
-                        if render_sidebar_item(ui, &palette, "Transcoder", "🔄", self.current_tab == StudioTab::Transcoder) {
-                            self.current_tab = StudioTab::Transcoder;
-                        }
-                        ui.add_space(1.0);
-
-                        if render_sidebar_item(ui, &palette, "Custom Conformer", "🎯", self.current_tab == StudioTab::ExamStudio) {
-                            self.current_tab = StudioTab::ExamStudio;
-                            quick_settings.exam_mode_enabled = true;
-                        }
-                        ui.add_space(1.0);
-
-                        if render_sidebar_item(ui, &palette, "Quality Inspector", "🔬", self.current_tab == StudioTab::QualityInspector) {
-                            self.current_tab = StudioTab::QualityInspector;
-                        }
-                        ui.add_space(1.0);
-
-                        if render_sidebar_item(ui, &palette, "Archive Suite", "📦", self.current_tab == StudioTab::ArchiveSuite) {
-                            self.current_tab = StudioTab::ArchiveSuite;
-                        }
-                        ui.add_space(1.0);
-
-                        if render_sidebar_item(ui, &palette, "Hardware & AI", "💻", self.current_tab == StudioTab::HardwareTelemetry) {
-                            self.current_tab = StudioTab::HardwareTelemetry;
-                        }
-                        ui.add_space(1.0);
-
-                        if render_sidebar_item(ui, &palette, "Preferences", "⚙", self.current_tab == StudioTab::Preferences) {
-                            self.current_tab = StudioTab::Preferences;
-                        }
-
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(6.0);
-
-                        // Section 4: TAGS
-                        ui.label(egui::RichText::new("TAGS").size(10.0).strong().color(palette.text_muted));
                         ui.add_space(4.0);
 
-                        let tags = [
-                            ("Red", Color32::from_rgb(255, 69, 58)),
-                            ("Orange", Color32::from_rgb(255, 159, 10)),
-                            ("Yellow", Color32::from_rgb(255, 214, 10)),
-                            ("Green", Color32::from_rgb(48, 209, 88)),
-                            ("Blue", Color32::from_rgb(10, 132, 255)),
-                            ("Purple", Color32::from_rgb(191, 90, 242)),
-                            ("Gray", Color32::from_rgb(142, 142, 147)),
-                        ];
+                        // 3. DRIVES Section (Collapsible)
+                        let drives_header =
+                            format!("{} Drives", if self.drives_expanded { "⌄" } else { "›" });
+                        if ui
+                            .selectable_label(
+                                self.drives_expanded,
+                                egui::RichText::new(drives_header)
+                                    .size(10.5)
+                                    .strong()
+                                    .color(palette.text_muted),
+                            )
+                            .clicked()
+                        {
+                            self.drives_expanded = !self.drives_expanded;
+                        }
+                        ui.add_space(2.0);
 
-                        for (tag_name, tag_col) in tags {
-                            ui.horizontal(|ui| {
-                                ui.add_space(8.0);
-                                ui.painter().circle_filled(ui.cursor().min + Vec2::new(6.0, 8.0), 4.5, tag_col);
-                                ui.add_space(16.0);
-                                if ui.link(egui::RichText::new(tag_name).size(11.0).color(palette.text_secondary)).clicked() {
+                        if self.drives_expanded {
+                            let drives = self.explorer_view.drives.clone();
+                            for drive in &drives {
+                                let is_active = self.current_tab == StudioTab::FileExplorer
+                                    && self.explorer_view.current_dir.starts_with(&drive.path);
+                                let icon = if drive.is_system { "🪟" } else { "💾" };
+                                if render_sidebar_item(
+                                    ui,
+                                    &palette,
+                                    &drive.display_name,
+                                    icon,
+                                    is_active,
+                                ) {
                                     self.current_tab = StudioTab::FileExplorer;
+                                    self.explorer_view.navigate_to(drive.path.clone());
+                                    self.explorer_view.is_home_view = false;
                                 }
-                            });
+                                ui.add_space(1.0);
+                            }
+                        }
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+
+                        // 4. CLOUD DRIVES Section (Collapsible)
+                        let cloud_header = format!(
+                            "{} Cloud Drives",
+                            if self.cloud_expanded { "⌄" } else { "›" }
+                        );
+                        if ui
+                            .selectable_label(
+                                self.cloud_expanded,
+                                egui::RichText::new(cloud_header)
+                                    .size(10.5)
+                                    .strong()
+                                    .color(palette.text_muted),
+                            )
+                            .clicked()
+                        {
+                            self.cloud_expanded = !self.cloud_expanded;
+                        }
+                        if self.cloud_expanded {
                             ui.add_space(2.0);
+                            if let Ok(userprofile) = std::env::var("USERPROFILE") {
+                                let od = PathBuf::from(&userprofile).join("OneDrive");
+                                if od.exists() {
+                                    let is_active = self.current_tab == StudioTab::FileExplorer
+                                        && self.explorer_view.current_dir == od;
+                                    if render_sidebar_item(ui, &palette, "OneDrive", "☁", is_active)
+                                    {
+                                        self.current_tab = StudioTab::FileExplorer;
+                                        self.explorer_view.navigate_to(od);
+                                    }
+                                }
+                            }
+                        }
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+
+                        // 5. NETWORK Section (Collapsible)
+                        let net_header =
+                            format!("{} Network", if self.network_expanded { "⌄" } else { "›" });
+                        if ui
+                            .selectable_label(
+                                self.network_expanded,
+                                egui::RichText::new(net_header)
+                                    .size(10.5)
+                                    .strong()
+                                    .color(palette.text_muted),
+                            )
+                            .clicked()
+                        {
+                            self.network_expanded = !self.network_expanded;
+                        }
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+
+                        // 6. TAGS Section (Collapsible)
+                        let tags_header =
+                            format!("{} Tags", if self.tags_expanded { "⌄" } else { "›" });
+                        if ui
+                            .selectable_label(
+                                self.tags_expanded,
+                                egui::RichText::new(tags_header)
+                                    .size(10.5)
+                                    .strong()
+                                    .color(palette.text_muted),
+                            )
+                            .clicked()
+                        {
+                            self.tags_expanded = !self.tags_expanded;
+                        }
+                        if self.tags_expanded {
+                            ui.add_space(2.0);
+                            let tags = [
+                                ("Home", Color32::from_rgb(0, 122, 255)),
+                                ("Work", Color32::from_rgb(255, 149, 0)),
+                                ("Photos", Color32::from_rgb(255, 149, 0)),
+                                ("Important", Color32::from_rgb(52, 199, 89)),
+                            ];
+                            for (tag_name, tag_col) in tags {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(14.0);
+                                    ui.painter().circle_filled(
+                                        ui.cursor().min + Vec2::new(4.0, 7.0),
+                                        4.0,
+                                        tag_col,
+                                    );
+                                    ui.add_space(12.0);
+                                    ui.label(
+                                        egui::RichText::new(tag_name)
+                                            .size(11.0)
+                                            .color(palette.text_secondary),
+                                    );
+                                });
+                                ui.add_space(2.0);
+                            }
+                        }
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+
+                        // 7. TOOLS & CONVERTERS Section (Collapsible)
+                        let tools_header = format!(
+                            "{} Tools & Converters",
+                            if self.tools_expanded { "⌄" } else { "›" }
+                        );
+                        if ui
+                            .selectable_label(
+                                self.tools_expanded,
+                                egui::RichText::new(tools_header)
+                                    .size(10.5)
+                                    .strong()
+                                    .color(palette.text_muted),
+                            )
+                            .clicked()
+                        {
+                            self.tools_expanded = !self.tools_expanded;
+                        }
+                        if self.tools_expanded {
+                            ui.add_space(2.0);
+                            if render_sidebar_item(
+                                ui,
+                                &palette,
+                                "Transcoder",
+                                "🔄",
+                                self.current_tab == StudioTab::Transcoder,
+                            ) {
+                                self.current_tab = StudioTab::Transcoder;
+                            }
+                            if render_sidebar_item(
+                                ui,
+                                &palette,
+                                "Custom Conformer",
+                                "🎯",
+                                self.current_tab == StudioTab::ExamStudio,
+                            ) {
+                                self.current_tab = StudioTab::ExamStudio;
+                                quick_settings.exam_mode_enabled = true;
+                            }
+                            if render_sidebar_item(
+                                ui,
+                                &palette,
+                                "Quality Inspector",
+                                "🔬",
+                                self.current_tab == StudioTab::QualityInspector,
+                            ) {
+                                self.current_tab = StudioTab::QualityInspector;
+                            }
+                            if render_sidebar_item(
+                                ui,
+                                &palette,
+                                "Archive Suite",
+                                "📦",
+                                self.current_tab == StudioTab::ArchiveSuite,
+                            ) {
+                                self.current_tab = StudioTab::ArchiveSuite;
+                            }
+                            if render_sidebar_item(
+                                ui,
+                                &palette,
+                                "Hardware & AI",
+                                "💻",
+                                self.current_tab == StudioTab::HardwareTelemetry,
+                            ) {
+                                self.current_tab = StudioTab::HardwareTelemetry;
+                            }
+                            if render_sidebar_item(
+                                ui,
+                                &palette,
+                                "Preferences",
+                                "⚙",
+                                self.current_tab == StudioTab::Preferences,
+                            ) {
+                                self.current_tab = StudioTab::Preferences;
+                            }
                         }
 
                         ui.add_space(12.0);
@@ -275,87 +818,105 @@ impl StudioView {
 
         egui::CentralPanel::default()
             .frame(central_frame)
-            .show(ctx, |ui| {
-                // Top Draggable Window Header Region
-                let is_max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-                let drag_rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), 16.0));
-                let drag_resp = ui.allocate_rect(drag_rect, Sense::click_and_drag());
-                if drag_resp.drag_started() {
-                    ctx.send_viewport_cmd(ViewportCommand::StartDrag);
-                }
-                if drag_resp.double_clicked() {
-                    ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max));
-                }
+            .show(ctx, |ui| match self.current_tab {
+                StudioTab::FileExplorer => {
+                    let mut staged: Option<PathBuf> = None;
+                    let mut transcode_req: Option<(PathBuf, String)> = None;
+                    let mut exam_req: Option<PathBuf> = None;
+                    let mut pack_req: Option<Vec<PathBuf>> = None;
+                    let mut inspect_req: Option<PathBuf> = None;
 
-                match self.current_tab {
-                    StudioTab::FileExplorer => {
-                        let mut staged: Option<PathBuf> = None;
-                        let mut transcode_req: Option<(PathBuf, String)> = None;
-                        let mut exam_req: Option<PathBuf> = None;
-                        let mut pack_req: Option<Vec<PathBuf>> = None;
-                        let mut inspect_req: Option<PathBuf> = None;
+                    self.explorer_view.render(
+                        ui,
+                        &palette,
+                        |p| staged = Some(p),
+                        |p, t| transcode_req = Some((p, t)),
+                        |p| exam_req = Some(p),
+                        |list| pack_req = Some(list),
+                        |p| inspect_req = Some(p),
+                    );
 
-                        self.explorer_view.render(
-                            ui,
-                            &palette,
-                            |p| staged = Some(p),
-                            |p, t| transcode_req = Some((p, t)),
-                            |p| exam_req = Some(p),
-                            |list| pack_req = Some(list),
-                            |p| inspect_req = Some(p),
-                        );
-
-                        if let Some(p) = staged {
-                            on_stage_file(p);
+                    if let Some(p) = staged {
+                        on_stage_file(p);
+                    }
+                    if let Some((p, t)) = transcode_req {
+                        on_stage_file(p);
+                        on_convert(t);
+                    }
+                    if let Some(p) = exam_req {
+                        on_stage_file(p);
+                        self.current_tab = StudioTab::ExamStudio;
+                        quick_settings.exam_mode_enabled = true;
+                    }
+                    if let Some(list) = pack_req {
+                        if let Some(first) = list.first() {
+                            on_stage_file(first.clone());
                         }
-                        if let Some((p, t)) = transcode_req {
-                            on_stage_file(p);
-                            on_convert(t);
-                        }
-                        if let Some(p) = exam_req {
-                            on_stage_file(p);
-                            self.current_tab = StudioTab::ExamStudio;
-                            quick_settings.exam_mode_enabled = true;
-                        }
-                        if let Some(list) = pack_req {
-                            if let Some(first) = list.first() {
-                                on_stage_file(first.clone());
-                            }
-                            self.current_tab = StudioTab::ArchiveSuite;
-                        }
-                        if let Some(p) = inspect_req {
-                            on_stage_file(p.clone());
-                            self.current_tab = StudioTab::QualityInspector;
-                            if let Ok(rep) = crate::codec::FileQualityChecker::inspect_file(&p) {
-                                self.quality_report = Some(rep);
-                            }
+                        self.current_tab = StudioTab::ArchiveSuite;
+                    }
+                    if let Some(p) = inspect_req {
+                        on_stage_file(p.clone());
+                        self.current_tab = StudioTab::QualityInspector;
+                        if let Ok(rep) = crate::codec::FileQualityChecker::inspect_file(&p) {
+                            self.quality_report = Some(rep);
                         }
                     }
-                    other => {
-                        egui::ScrollArea::vertical()
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| match other {
-                                StudioTab::FileExplorer => unreachable!(),
-                                StudioTab::Transcoder => {
-                                    self.render_transcoder_tab(ui, &palette, current_file, quick_settings, &mut on_pick_file, &mut on_convert);
-                                }
-                                StudioTab::ExamStudio => {
-                                    self.render_exam_studio_tab(ui, &palette, current_file, quick_settings, &mut on_pick_file, on_open_folder);
-                                }
-                                StudioTab::QualityInspector => {
-                                    self.render_quality_inspector_tab(ui, &palette, current_file, &mut on_pick_file);
-                                }
-                                StudioTab::ArchiveSuite => {
-                                    self.render_archive_tab(ui, &palette, current_file, quick_settings, &mut on_pick_file, on_convert);
-                                }
-                                StudioTab::HardwareTelemetry => {
-                                    self.render_telemetry_tab(ui, &palette);
-                                }
-                                StudioTab::Preferences => {
-                                    self.render_preferences_tab(ui, &palette, current_theme, quick_settings);
-                                }
-                            });
-                    }
+                }
+                other => {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| match other {
+                            StudioTab::FileExplorer => unreachable!(),
+                            StudioTab::Transcoder => {
+                                self.render_transcoder_tab(
+                                    ui,
+                                    &palette,
+                                    current_file,
+                                    quick_settings,
+                                    &mut on_pick_file,
+                                    &mut on_convert,
+                                );
+                            }
+                            StudioTab::ExamStudio => {
+                                self.render_exam_studio_tab(
+                                    ui,
+                                    &palette,
+                                    current_file,
+                                    quick_settings,
+                                    &mut on_pick_file,
+                                    on_open_folder,
+                                );
+                            }
+                            StudioTab::QualityInspector => {
+                                self.render_quality_inspector_tab(
+                                    ui,
+                                    &palette,
+                                    current_file,
+                                    &mut on_pick_file,
+                                );
+                            }
+                            StudioTab::ArchiveSuite => {
+                                self.render_archive_tab(
+                                    ui,
+                                    &palette,
+                                    current_file,
+                                    quick_settings,
+                                    &mut on_pick_file,
+                                    on_convert,
+                                );
+                            }
+                            StudioTab::HardwareTelemetry => {
+                                self.render_telemetry_tab(ui, &palette);
+                            }
+                            StudioTab::Preferences => {
+                                self.render_preferences_tab(
+                                    ui,
+                                    &palette,
+                                    current_theme,
+                                    quick_settings,
+                                );
+                            }
+                        });
                 }
             });
     }
@@ -406,20 +967,28 @@ impl StudioView {
                     ui.label(egui::RichText::new("📄").size(32.0));
                     ui.vertical(|ui| {
                         ui.label(
-                            egui::RichText::new(path.file_name().unwrap_or_default().to_string_lossy())
-                                .size(15.0)
-                                .strong()
-                                .color(palette.text_primary),
+                            egui::RichText::new(
+                                path.file_name().unwrap_or_default().to_string_lossy(),
+                            )
+                            .size(15.0)
+                            .strong()
+                            .color(palette.text_primary),
                         );
                         ui.label(
-                            egui::RichText::new(format!("Category: {:?} | Format: .{} | Size: {}", cat, in_ext, size_str))
-                                .size(11.5)
-                                .color(palette.text_muted),
+                            egui::RichText::new(format!(
+                                "Category: {:?} | Format: .{} | Size: {}",
+                                cat, in_ext, size_str
+                            ))
+                            .size(11.5)
+                            .color(palette.text_muted),
                         );
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("📂 Change File").size(11.5)).clicked() {
+                        if ui
+                            .button(egui::RichText::new("📂 Change File").size(11.5))
+                            .clicked()
+                        {
                             on_pick_file();
                         }
                     });
@@ -431,14 +1000,27 @@ impl StudioView {
             // Target Formats Grid
             let available = UniversalRegistry::get_all_supported_outputs(cat);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Select Target Output Format:").size(13.5).strong().color(palette.text_primary));
+                ui.label(
+                    egui::RichText::new("Select Target Output Format:")
+                        .size(13.5)
+                        .strong()
+                        .color(palette.text_primary),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let all_btn = ui.add(
-                        egui::Button::new(egui::RichText::new("⭐ Convert to ALL Formats").size(11.5).strong().color(Color32::from_rgb(50, 35, 0)))
-                            .fill(PANTONE_GOLD)
-                            .rounding(Rounding::same(8.0)),
+                        egui::Button::new(
+                            egui::RichText::new("⭐ Convert to ALL Formats")
+                                .size(11.5)
+                                .strong()
+                                .color(Color32::from_rgb(50, 35, 0)),
+                        )
+                        .fill(PANTONE_GOLD)
+                        .rounding(Rounding::same(8.0)),
                     );
-                    if all_btn.on_hover_text("Generate output in all supported formats simultaneously").clicked() {
+                    if all_btn
+                        .on_hover_text("Generate output in all supported formats simultaneously")
+                        .clicked()
+                    {
                         on_convert("ALL".to_string());
                     }
                 });
@@ -454,14 +1036,26 @@ impl StudioView {
                     }
                     let is_sel = settings.active_format == *fmt;
                     let chip = ui.add(
-                        egui::Button::new(
-                            egui::RichText::new(*fmt)
-                                .size(12.0)
-                                .strong()
-                                .color(if is_sel { Color32::WHITE } else { palette.text_secondary }),
-                        )
-                        .fill(if is_sel { PANTONE_FLAVEDO } else { palette.card_bg })
-                        .stroke(Stroke::new(1.0_f32, if is_sel { PANTONE_FLAVEDO } else { palette.border }))
+                        egui::Button::new(egui::RichText::new(*fmt).size(12.0).strong().color(
+                            if is_sel {
+                                Color32::WHITE
+                            } else {
+                                palette.text_secondary
+                            },
+                        ))
+                        .fill(if is_sel {
+                            PANTONE_FLAVEDO
+                        } else {
+                            palette.card_bg
+                        })
+                        .stroke(Stroke::new(
+                            1.0_f32,
+                            if is_sel {
+                                PANTONE_FLAVEDO
+                            } else {
+                                palette.border
+                            },
+                        ))
                         .rounding(Rounding::same(8.0)),
                     );
                     if chip.clicked() {
@@ -481,14 +1075,24 @@ impl StudioView {
 
             fmt_box.show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("⚙️ Conversion Tuning for {}:", settings.active_format)).strong().color(PANTONE_FLAVEDO));
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "⚙️ Conversion Tuning for {}:",
+                            settings.active_format
+                        ))
+                        .strong()
+                        .color(PANTONE_FLAVEDO),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let convert_btn = ui.add(
                             egui::Button::new(
-                                egui::RichText::new(format!("Convert to {} ➔", settings.active_format))
-                                    .size(13.0)
-                                    .strong()
-                                    .color(Color32::WHITE),
+                                egui::RichText::new(format!(
+                                    "Convert to {} ➔",
+                                    settings.active_format
+                                ))
+                                .size(13.0)
+                                .strong()
+                                .color(Color32::WHITE),
                             )
                             .fill(PANTONE_FLAVEDO)
                             .rounding(Rounding::same(8.0)),
@@ -504,30 +1108,65 @@ impl StudioView {
                     "PDF" => {
                         ui.horizontal(|ui| {
                             ui.label("Page Size:");
-                            ui.selectable_value(&mut settings.pdf_page_size, "A4".to_string(), "A4");
-                            ui.selectable_value(&mut settings.pdf_page_size, "Letter".to_string(), "Letter");
+                            ui.selectable_value(
+                                &mut settings.pdf_page_size,
+                                "A4".to_string(),
+                                "A4",
+                            );
+                            ui.selectable_value(
+                                &mut settings.pdf_page_size,
+                                "Letter".to_string(),
+                                "Letter",
+                            );
                             ui.add_space(16.0);
                             ui.label("Font Size:");
-                            ui.add(egui::Slider::new(&mut settings.pdf_font_size, 8.0..=18.0).suffix(" pt"));
+                            ui.add(
+                                egui::Slider::new(&mut settings.pdf_font_size, 8.0..=18.0)
+                                    .suffix(" pt"),
+                            );
                         });
                     }
                     "MP3" | "AAC" | "OGG" => {
                         ui.horizontal(|ui| {
                             ui.label("Bitrate:");
-                            ui.selectable_value(&mut settings.audio_bitrate, "128k".to_string(), "128 kbps");
-                            ui.selectable_value(&mut settings.audio_bitrate, "192k".to_string(), "192 kbps");
-                            ui.selectable_value(&mut settings.audio_bitrate, "320k".to_string(), "320 kbps (Max)");
+                            ui.selectable_value(
+                                &mut settings.audio_bitrate,
+                                "128k".to_string(),
+                                "128 kbps",
+                            );
+                            ui.selectable_value(
+                                &mut settings.audio_bitrate,
+                                "192k".to_string(),
+                                "192 kbps",
+                            );
+                            ui.selectable_value(
+                                &mut settings.audio_bitrate,
+                                "320k".to_string(),
+                                "320 kbps (Max)",
+                            );
                         });
                     }
                     "JPG" | "WEBP" | "AVIF" => {
                         ui.horizontal(|ui| {
                             ui.label("Quality:");
-                            ui.add(egui::Slider::new(&mut settings.image_quality, 50..=100).suffix("%"));
-                            ui.checkbox(&mut settings.image_lossless, "Strict Lossless (Bit-Exact)");
+                            ui.add(
+                                egui::Slider::new(&mut settings.image_quality, 50..=100)
+                                    .suffix("%"),
+                            );
+                            ui.checkbox(
+                                &mut settings.image_lossless,
+                                "Strict Lossless (Bit-Exact)",
+                            );
                         });
                     }
                     _ => {
-                        ui.label(egui::RichText::new("Lossless bit-exact container remux active. 0.00% Zero-Loss.").size(11.0).color(palette.text_muted));
+                        ui.label(
+                            egui::RichText::new(
+                                "Lossless bit-exact container remux active. 0.00% Zero-Loss.",
+                            )
+                            .size(11.0)
+                            .color(palette.text_muted),
+                        );
                     }
                 }
 
@@ -537,29 +1176,55 @@ impl StudioView {
 
                 // Custom Conformer Parameters directly in Transcoder tab
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut settings.exam_mode_enabled, "🎯 Apply Custom Parameters (Dimensions, DPI & Size Limit)");
+                    ui.checkbox(
+                        &mut settings.exam_mode_enabled,
+                        "🎯 Apply Custom Parameters (Dimensions, DPI & Size Limit)",
+                    );
                 });
 
                 if settings.exam_mode_enabled {
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.label("Name:");
-                        ui.add(egui::TextEdit::singleline(&mut settings.exam_preset_name).desired_width(180.0));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut settings.exam_preset_name)
+                                .desired_width(180.0),
+                        );
                         ui.add_space(10.0);
                         ui.checkbox(&mut settings.exam_whiten, "Whiten Background");
                     });
                     ui.horizontal(|ui| {
                         ui.label("Dimensions:");
-                        ui.add(egui::DragValue::new(&mut settings.exam_width).speed(1).prefix("W: ").suffix("px"));
-                        ui.add(egui::DragValue::new(&mut settings.exam_height).speed(1).prefix("H: ").suffix("px"));
+                        ui.add(
+                            egui::DragValue::new(&mut settings.exam_width)
+                                .speed(1)
+                                .prefix("W: ")
+                                .suffix("px"),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut settings.exam_height)
+                                .speed(1)
+                                .prefix("H: ")
+                                .suffix("px"),
+                        );
                         ui.add_space(10.0);
                         ui.label("DPI:");
                         ui.add(egui::DragValue::new(&mut settings.exam_dpi).speed(1));
                     });
                     ui.horizontal(|ui| {
                         ui.label("Size Bounds:");
-                        ui.add(egui::DragValue::new(&mut settings.exam_min_kb).speed(1).prefix("Min: ").suffix("KB"));
-                        ui.add(egui::DragValue::new(&mut settings.exam_max_kb).speed(1).prefix("Max: ").suffix("KB"));
+                        ui.add(
+                            egui::DragValue::new(&mut settings.exam_min_kb)
+                                .speed(1)
+                                .prefix("Min: ")
+                                .suffix("KB"),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut settings.exam_max_kb)
+                                .speed(1)
+                                .prefix("Max: ")
+                                .suffix("KB"),
+                        );
                     });
                 }
             });
@@ -644,7 +1309,12 @@ impl StudioView {
             ui.add_space(18.0);
 
             // 2. Quick-Start Workflow Presets (2x2 Grid)
-            ui.label(egui::RichText::new("Quick-Start Conversion Workflows").size(14.0).strong().color(palette.text_primary));
+            ui.label(
+                egui::RichText::new("Quick-Start Conversion Workflows")
+                    .size(14.0)
+                    .strong()
+                    .color(palette.text_primary),
+            );
             ui.add_space(8.0);
 
             ui.columns(2, |cols| {
@@ -717,7 +1387,12 @@ impl StudioView {
 
             // 3. Interactive 200+ Format Catalogue Browser
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("📚 200+ Supported Formats Catalogue").size(14.0).strong().color(palette.text_primary));
+                ui.label(
+                    egui::RichText::new("📚 200+ Supported Formats Catalogue")
+                        .size(14.0)
+                        .strong()
+                        .color(palette.text_primary),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add(
                         egui::TextEdit::singleline(&mut self.catalogue_search)
@@ -730,37 +1405,108 @@ impl StudioView {
             ui.add_space(8.0);
 
             let all_samples = [
-                ("PNG", FileCategory::Image, "Portable Network Graphics • Lossless"),
-                ("JPG", FileCategory::Image, "Joint Photographic Experts Group"),
-                ("WEBP", FileCategory::Image, "Google Modern Web Image • 80% Reduction"),
-                ("AVIF", FileCategory::Image, "AV1 Image File Format • Next-Gen"),
-                ("HEIC", FileCategory::Image, "High Efficiency Image Container • Apple"),
-                ("TIFF", FileCategory::Image, "Tagged Image File Format • Archival"),
+                (
+                    "PNG",
+                    FileCategory::Image,
+                    "Portable Network Graphics • Lossless",
+                ),
+                (
+                    "JPG",
+                    FileCategory::Image,
+                    "Joint Photographic Experts Group",
+                ),
+                (
+                    "WEBP",
+                    FileCategory::Image,
+                    "Google Modern Web Image • 80% Reduction",
+                ),
+                (
+                    "AVIF",
+                    FileCategory::Image,
+                    "AV1 Image File Format • Next-Gen",
+                ),
+                (
+                    "HEIC",
+                    FileCategory::Image,
+                    "High Efficiency Image Container • Apple",
+                ),
+                (
+                    "TIFF",
+                    FileCategory::Image,
+                    "Tagged Image File Format • Archival",
+                ),
                 ("BMP", FileCategory::Image, "Windows Bitmap Graphics"),
                 ("SVG", FileCategory::Image, "Scalable Vector Graphics"),
-                ("PDF", FileCategory::Document, "Adobe Portable Document Format • Vector"),
-                ("DOCX", FileCategory::Document, "Microsoft Word OpenXML Document"),
-                ("XLSX", FileCategory::Document, "Microsoft Excel Spreadsheet"),
-                ("CSV", FileCategory::Document, "Comma-Separated Values Table"),
+                (
+                    "PDF",
+                    FileCategory::Document,
+                    "Adobe Portable Document Format • Vector",
+                ),
+                (
+                    "DOCX",
+                    FileCategory::Document,
+                    "Microsoft Word OpenXML Document",
+                ),
+                (
+                    "XLSX",
+                    FileCategory::Document,
+                    "Microsoft Excel Spreadsheet",
+                ),
+                (
+                    "CSV",
+                    FileCategory::Document,
+                    "Comma-Separated Values Table",
+                ),
                 ("TXT", FileCategory::Document, "Plain Text UTF-8"),
                 ("MD", FileCategory::Document, "Markdown Formatted Document"),
                 ("WAV", FileCategory::Audio, "Uncompressed PCM RIFF Wave"),
-                ("FLAC", FileCategory::Audio, "Free Lossless Audio Codec • Bit-Exact"),
-                ("MP3", FileCategory::Audio, "MPEG-1 Audio Layer III • 320 kbps"),
-                ("AAC", FileCategory::Audio, "Advanced Audio Coding • High-Fidelity"),
+                (
+                    "FLAC",
+                    FileCategory::Audio,
+                    "Free Lossless Audio Codec • Bit-Exact",
+                ),
+                (
+                    "MP3",
+                    FileCategory::Audio,
+                    "MPEG-1 Audio Layer III • 320 kbps",
+                ),
+                (
+                    "AAC",
+                    FileCategory::Audio,
+                    "Advanced Audio Coding • High-Fidelity",
+                ),
                 ("OGG", FileCategory::Audio, "Ogg Vorbis Audio Stream"),
-                ("MP4", FileCategory::Video, "MPEG-4 Part 14 Video • Fast Remux"),
+                (
+                    "MP4",
+                    FileCategory::Video,
+                    "MPEG-4 Part 14 Video • Fast Remux",
+                ),
                 ("MKV", FileCategory::Video, "Matroska Multimedia Container"),
                 ("WEBM", FileCategory::Video, "HTML5 Web Video • VP9/AV1"),
-                ("ZIP", FileCategory::Archive, "PKZip Deflate Level 9 • Safe Unpack"),
-                ("TAR.GZ", FileCategory::Archive, "Unix Tape Archive Gzip Compressed"),
-                ("TAR.ZST", FileCategory::Archive, "Zstandard Modern Ultra Compression"),
+                (
+                    "ZIP",
+                    FileCategory::Archive,
+                    "PKZip Deflate Level 9 • Safe Unpack",
+                ),
+                (
+                    "TAR.GZ",
+                    FileCategory::Archive,
+                    "Unix Tape Archive Gzip Compressed",
+                ),
+                (
+                    "TAR.ZST",
+                    FileCategory::Archive,
+                    "Zstandard Modern Ultra Compression",
+                ),
             ];
 
             let query = self.catalogue_search.to_uppercase();
             ui.horizontal_wrapped(|ui| {
                 for (fmt, _cat, desc) in all_samples {
-                    if !query.is_empty() && !fmt.contains(&query) && !desc.to_uppercase().contains(&query) {
+                    if !query.is_empty()
+                        && !fmt.contains(&query)
+                        && !desc.to_uppercase().contains(&query)
+                    {
                         continue;
                     }
                     let chip_frame = egui::Frame::none()
@@ -771,8 +1517,17 @@ impl StudioView {
 
                     chip_frame.show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(fmt).size(12.0).strong().color(PANTONE_FLAVEDO));
-                            ui.label(egui::RichText::new(desc).size(10.0).color(palette.text_muted));
+                            ui.label(
+                                egui::RichText::new(fmt)
+                                    .size(12.0)
+                                    .strong()
+                                    .color(PANTONE_FLAVEDO),
+                            );
+                            ui.label(
+                                egui::RichText::new(desc)
+                                    .size(10.0)
+                                    .color(palette.text_muted),
+                            );
                         });
                     });
                 }
@@ -790,7 +1545,12 @@ impl StudioView {
         mut on_pick_file: impl FnMut(),
         mut on_open_folder: impl FnMut(&Path),
     ) {
-        ui.label(egui::RichText::new("🎯 Custom Specification & Form Conformer").size(22.0).strong().color(palette.text_primary));
+        ui.label(
+            egui::RichText::new("🎯 Custom Specification & Form Conformer")
+                .size(22.0)
+                .strong()
+                .color(palette.text_primary),
+        );
         ui.label(
             egui::RichText::new("Conform any photo, signature, or document to your exact custom specifications with micro-converged binary search bounds. No unverified or outdated templates.")
                 .size(12.0)
@@ -950,8 +1710,19 @@ impl StudioView {
         mut on_pick_file: impl FnMut(),
         mut on_convert: impl FnMut(String),
     ) {
-        ui.label(egui::RichText::new("Archive Suite & Compression").size(22.0).strong().color(palette.text_primary));
-        ui.label(egui::RichText::new("Zip-Slip Traversal Protection • Multi-Threaded Deflate / Zstandard").size(12.0).color(palette.text_secondary));
+        ui.label(
+            egui::RichText::new("Archive Suite & Compression")
+                .size(22.0)
+                .strong()
+                .color(palette.text_primary),
+        );
+        ui.label(
+            egui::RichText::new(
+                "Zip-Slip Traversal Protection • Multi-Threaded Deflate / Zstandard",
+            )
+            .size(12.0)
+            .color(palette.text_secondary),
+        );
         ui.add_space(14.0);
 
         if let Some(ref path) = current_file {
@@ -959,21 +1730,40 @@ impl StudioView {
             ui.add_space(10.0);
 
             ui.horizontal(|ui| {
-                if ui.button(egui::RichText::new("📦 Pack to ZIP").size(12.0)).clicked() {
+                if ui
+                    .button(egui::RichText::new("📦 Pack to ZIP").size(12.0))
+                    .clicked()
+                {
                     on_convert("ZIP".to_string());
                 }
-                if ui.button(egui::RichText::new("📦 Pack to TAR.GZ").size(12.0)).clicked() {
+                if ui
+                    .button(egui::RichText::new("📦 Pack to TAR.GZ").size(12.0))
+                    .clicked()
+                {
                     on_convert("TAR.GZ".to_string());
                 }
-                if ui.button(egui::RichText::new("📦 Pack to 7Z").size(12.0)).clicked() {
+                if ui
+                    .button(egui::RichText::new("📦 Pack to 7Z").size(12.0))
+                    .clicked()
+                {
                     on_convert("7Z".to_string());
                 }
-                if ui.button(egui::RichText::new("📂 Safe Extract").size(12.0).color(PANTONE_FLAVEDO)).clicked() {
+                if ui
+                    .button(
+                        egui::RichText::new("📂 Safe Extract")
+                            .size(12.0)
+                            .color(PANTONE_FLAVEDO),
+                    )
+                    .clicked()
+                {
                     on_convert("EXTRACT".to_string());
                 }
             });
         } else {
-            ui.label(egui::RichText::new("Select a file or folder to compress or extract.").color(palette.text_muted));
+            ui.label(
+                egui::RichText::new("Select a file or folder to compress or extract.")
+                    .color(palette.text_muted),
+            );
             if ui.button("📁 Select Input").clicked() {
                 on_pick_file();
             }
@@ -983,8 +1773,19 @@ impl StudioView {
     /// Tab 4: Hardware & AI Telemetry
     fn render_telemetry_tab(&mut self, ui: &mut Ui, palette: &ThemePalette) {
         let hw = detect_hardware_capabilities();
-        ui.label(egui::RichText::new("Hardware Acceleration & Neural Telemetry").size(22.0).strong().color(palette.text_primary));
-        ui.label(egui::RichText::new("GPU Encoder Pipelines • Windows DirectML • Multi-Core Concurrency").size(12.0).color(palette.text_secondary));
+        ui.label(
+            egui::RichText::new("Hardware Acceleration & Neural Telemetry")
+                .size(22.0)
+                .strong()
+                .color(palette.text_primary),
+        );
+        ui.label(
+            egui::RichText::new(
+                "GPU Encoder Pipelines • Windows DirectML • Multi-Core Concurrency",
+            )
+            .size(12.0)
+            .color(palette.text_secondary),
+        );
         ui.add_space(14.0);
 
         let card_frame = egui::Frame::none()
@@ -995,23 +1796,61 @@ impl StudioView {
 
         card_frame.show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("GPU Transcoder:").size(13.0).strong().color(PANTONE_FLAVEDO));
-                ui.label(format!("{:?} (H.264: {} | HEVC: {})", hw.vendor, hw.h264_encoder, hw.hevc_encoder));
+                ui.label(
+                    egui::RichText::new("GPU Transcoder:")
+                        .size(13.0)
+                        .strong()
+                        .color(PANTONE_FLAVEDO),
+                );
+                ui.label(format!(
+                    "{:?} (H.264: {} | HEVC: {})",
+                    hw.vendor, hw.h264_encoder, hw.hevc_encoder
+                ));
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("NPU AI Accelerator:").size(13.0).strong().color(PANTONE_FLAVEDO));
+                ui.label(
+                    egui::RichText::new("NPU AI Accelerator:")
+                        .size(13.0)
+                        .strong()
+                        .color(PANTONE_FLAVEDO),
+                );
                 ui.label(format!("{} (Active)", hw.npu_name));
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("CPU Concurrency:").size(13.0).strong().color(PANTONE_FLAVEDO));
-                ui.label(format!("{} Concurrent Rayon Worker Threads", hw.optimal_thread_count));
+                ui.label(
+                    egui::RichText::new("CPU Concurrency:")
+                        .size(13.0)
+                        .strong()
+                        .color(PANTONE_FLAVEDO),
+                );
+                ui.label(format!(
+                    "{} Concurrent Rayon Worker Threads",
+                    hw.optimal_thread_count
+                ));
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("SIMD Vector Units:").size(13.0).strong().color(PANTONE_FLAVEDO));
-                ui.label(format!("AVX2: {} | NEON: {}", if hw.supports_avx2_simd { "Active" } else { "Off" }, if hw.supports_neon_simd { "Active" } else { "Off" }));
+                ui.label(
+                    egui::RichText::new("SIMD Vector Units:")
+                        .size(13.0)
+                        .strong()
+                        .color(PANTONE_FLAVEDO),
+                );
+                ui.label(format!(
+                    "AVX2: {} | NEON: {}",
+                    if hw.supports_avx2_simd {
+                        "Active"
+                    } else {
+                        "Off"
+                    },
+                    if hw.supports_neon_simd {
+                        "Active"
+                    } else {
+                        "Off"
+                    }
+                ));
             });
         });
     }
@@ -1024,8 +1863,17 @@ impl StudioView {
         current_theme: &mut ThemeStyle,
         _settings: &mut QuickSettingsState,
     ) {
-        ui.label(egui::RichText::new("Preferences & Appearance").size(22.0).strong().color(palette.text_primary));
-        ui.label(egui::RichText::new("Theme Selection, Gestures, and Certified Pantone Swatches").size(12.0).color(palette.text_secondary));
+        ui.label(
+            egui::RichText::new("Preferences & Appearance")
+                .size(22.0)
+                .strong()
+                .color(palette.text_primary),
+        );
+        ui.label(
+            egui::RichText::new("Theme Selection, Gestures, and Certified Pantone Swatches")
+                .size(12.0)
+                .color(palette.text_secondary),
+        );
         ui.add_space(14.0);
 
         // 1. Certified Pantone Theme Selector (10 Dark & 10 Light)
@@ -1451,7 +2299,11 @@ impl StudioView {
             .inner_margin(egui::Margin::same(16.0));
 
         pantone_frame.show(ui, |ui| {
-            ui.label(egui::RichText::new("Certified Pantone Citrus Palette").strong().color(palette.text_primary));
+            ui.label(
+                egui::RichText::new("Certified Pantone Citrus Palette")
+                    .strong()
+                    .color(palette.text_primary),
+            );
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("■").color(PANTONE_FLAVEDO).size(16.0));
                 ui.label("Pantone 376 C (#78BE20) - Raw Peel Green (Active Accents)");
@@ -1505,10 +2357,12 @@ impl StudioView {
                     ui.label(egui::RichText::new("🔬").size(22.0));
                     ui.vertical(|ui| {
                         ui.label(
-                            egui::RichText::new(path.file_name().unwrap_or_default().to_string_lossy())
-                                .size(13.0)
-                                .strong()
-                                .color(palette.text_primary),
+                            egui::RichText::new(
+                                path.file_name().unwrap_or_default().to_string_lossy(),
+                            )
+                            .size(13.0)
+                            .strong()
+                            .color(palette.text_primary),
                         );
                         ui.label(
                             egui::RichText::new(path.display().to_string())
@@ -1518,13 +2372,23 @@ impl StudioView {
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Benchmark Speed").size(11.5).strong().color(Color32::BLACK))
-                            .on_hover_text("Benchmark conversion speed against Online and CLI converters")
+                        if ui
+                            .button(
+                                egui::RichText::new("Benchmark Speed")
+                                    .size(11.5)
+                                    .strong()
+                                    .color(Color32::BLACK),
+                            )
+                            .on_hover_text(
+                                "Benchmark conversion speed against Online and CLI converters",
+                            )
                             .clicked()
                         {
                             match crate::codec::BenchmarkEngine::benchmark_file(path, None) {
                                 Ok(bench) => self.bench_report = Some(bench),
-                                Err(e) => self.inspection_status = format!("Benchmark failed: {}", e),
+                                Err(e) => {
+                                    self.inspection_status = format!("Benchmark failed: {}", e)
+                                }
                             }
                         }
 
@@ -1554,11 +2418,25 @@ impl StudioView {
                 } else {
                     ui.label(egui::RichText::new("📥").size(22.0));
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new("No File Selected").size(13.0).strong().color(palette.text_primary));
-                        ui.label(egui::RichText::new("Choose a file to inspect its container integrity and checksums.").size(10.5).color(palette.text_muted));
+                        ui.label(
+                            egui::RichText::new("No File Selected")
+                                .size(13.0)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
+                        ui.label(
+                            egui::RichText::new(
+                                "Choose a file to inspect its container integrity and checksums.",
+                            )
+                            .size(10.5)
+                            .color(palette.text_muted),
+                        );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("📁 Choose File").size(11.5)).clicked() {
+                        if ui
+                            .button(egui::RichText::new("📁 Choose File").size(11.5))
+                            .clicked()
+                        {
                             on_pick_file();
                         }
                     });
@@ -1572,12 +2450,23 @@ impl StudioView {
             card_frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let (badge_text, badge_color) = match rep.verdict {
-                        crate::codec::QualityVerdict::Pass => ("✓ PASS", Color32::from_rgb(39, 201, 63)),
-                        crate::codec::QualityVerdict::Warning => ("⚠️ WARN", Color32::from_rgb(255, 189, 46)),
-                        crate::codec::QualityVerdict::Fail => ("❌ FAIL", Color32::from_rgb(255, 95, 86)),
+                        crate::codec::QualityVerdict::Pass => {
+                            ("✓ PASS", Color32::from_rgb(39, 201, 63))
+                        }
+                        crate::codec::QualityVerdict::Warning => {
+                            ("⚠️ WARN", Color32::from_rgb(255, 189, 46))
+                        }
+                        crate::codec::QualityVerdict::Fail => {
+                            ("❌ FAIL", Color32::from_rgb(255, 95, 86))
+                        }
                     };
 
-                    ui.label(egui::RichText::new(badge_text).size(18.0).strong().color(badge_color));
+                    ui.label(
+                        egui::RichText::new(badge_text)
+                            .size(18.0)
+                            .strong()
+                            .color(badge_color),
+                    );
                     ui.separator();
                     ui.label(
                         egui::RichText::new(format!("Overall Score: {:.1}%", rep.overall_score))
@@ -1608,11 +2497,29 @@ impl StudioView {
 
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("SHA-256:").size(10.5).color(palette.text_muted));
-                    ui.label(egui::RichText::new(&rep.sha256).size(10.0).monospace().color(palette.text_secondary));
+                    ui.label(
+                        egui::RichText::new("SHA-256:")
+                            .size(10.5)
+                            .color(palette.text_muted),
+                    );
+                    ui.label(
+                        egui::RichText::new(&rep.sha256)
+                            .size(10.0)
+                            .monospace()
+                            .color(palette.text_secondary),
+                    );
                     ui.separator();
-                    ui.label(egui::RichText::new("CRC-32:").size(10.5).color(palette.text_muted));
-                    ui.label(egui::RichText::new(&rep.crc32).size(10.0).monospace().color(palette.text_secondary));
+                    ui.label(
+                        egui::RichText::new("CRC-32:")
+                            .size(10.5)
+                            .color(palette.text_muted),
+                    );
+                    ui.label(
+                        egui::RichText::new(&rep.crc32)
+                            .size(10.0)
+                            .monospace()
+                            .color(palette.text_secondary),
+                    );
                 });
             });
 
@@ -1622,41 +2529,120 @@ impl StudioView {
             ui.columns(2, |cols| {
                 card_frame.show(&mut cols[0], |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("🛡️ 1. Container Integrity").size(13.0).strong().color(palette.text_primary));
+                        ui.label(
+                            egui::RichText::new("🛡️ 1. Container Integrity")
+                                .size(13.0)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
-                                egui::RichText::new(format!("{:.1}%", rep.integrity.structural_integrity_score))
-                                    .size(12.0)
-                                    .strong()
-                                    .color(if rep.integrity.corruption_detected { Color32::RED } else { Color32::GREEN }),
+                                egui::RichText::new(format!(
+                                    "{:.1}%",
+                                    rep.integrity.structural_integrity_score
+                                ))
+                                .size(12.0)
+                                .strong()
+                                .color(
+                                    if rep.integrity.corruption_detected {
+                                        Color32::RED
+                                    } else {
+                                        Color32::GREEN
+                                    },
+                                ),
                             );
                         });
                     });
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(format!("Signature: {}", rep.integrity.magic_bytes_description)).size(11.0).color(palette.text_secondary));
-                    ui.label(egui::RichText::new(format!("EOF Check: {}", rep.integrity.eof_description)).size(11.0).color(palette.text_secondary));
-                    ui.label(egui::RichText::new(format!("Corruption Detected: {}", if rep.integrity.corruption_detected { "YES (Structure Damaged)" } else { "No (Bit-Exact Valid)" })).size(11.0).color(if rep.integrity.corruption_detected { Color32::RED } else { palette.text_muted }));
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Signature: {}",
+                            rep.integrity.magic_bytes_description
+                        ))
+                        .size(11.0)
+                        .color(palette.text_secondary),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "EOF Check: {}",
+                            rep.integrity.eof_description
+                        ))
+                        .size(11.0)
+                        .color(palette.text_secondary),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Corruption Detected: {}",
+                            if rep.integrity.corruption_detected {
+                                "YES (Structure Damaged)"
+                            } else {
+                                "No (Bit-Exact Valid)"
+                            }
+                        ))
+                        .size(11.0)
+                        .color(if rep.integrity.corruption_detected {
+                            Color32::RED
+                        } else {
+                            palette.text_muted
+                        }),
+                    );
                 });
 
                 card_frame.show(&mut cols[1], |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("⚙️ 2. Parser & Decoder").size(13.0).strong().color(palette.text_primary));
+                        ui.label(
+                            egui::RichText::new("⚙️ 2. Parser & Decoder")
+                                .size(13.0)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
-                                egui::RichText::new(format!("{:.1}%", rep.parseability.parseability_score))
-                                    .size(12.0)
-                                    .strong()
-                                    .color(if rep.parseability.can_parse { Color32::GREEN } else { Color32::RED }),
+                                egui::RichText::new(format!(
+                                    "{:.1}%",
+                                    rep.parseability.parseability_score
+                                ))
+                                .size(12.0)
+                                .strong()
+                                .color(
+                                    if rep.parseability.can_parse {
+                                        Color32::GREEN
+                                    } else {
+                                        Color32::RED
+                                    },
+                                ),
                             );
                         });
                     });
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(format!("Parser: {}", rep.parseability.parser_used)).size(11.0).color(palette.text_secondary));
-                    ui.label(egui::RichText::new(format!("Decoded: {}", rep.parseability.decoded_payload_summary)).size(11.0).color(palette.text_secondary));
+                    ui.label(
+                        egui::RichText::new(format!("Parser: {}", rep.parseability.parser_used))
+                            .size(11.0)
+                            .color(palette.text_secondary),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Decoded: {}",
+                            rep.parseability.decoded_payload_summary
+                        ))
+                        .size(11.0)
+                        .color(palette.text_secondary),
+                    );
                     if !rep.parseability.parse_warnings.is_empty() {
-                        ui.label(egui::RichText::new(format!("Warnings: {}", rep.parseability.parse_warnings.join(", "))).size(10.5).color(Color32::from_rgb(255, 189, 46)));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Warnings: {}",
+                                rep.parseability.parse_warnings.join(", ")
+                            ))
+                            .size(10.5)
+                            .color(Color32::from_rgb(255, 189, 46)),
+                        );
                     } else {
-                        ui.label(egui::RichText::new("Zero decode anomalies detected").size(10.5).color(palette.text_muted));
+                        ui.label(
+                            egui::RichText::new("Zero decode anomalies detected")
+                                .size(10.5)
+                                .color(palette.text_muted),
+                        );
                     }
                 });
             });
@@ -1666,24 +2652,53 @@ impl StudioView {
             ui.columns(2, |cols| {
                 card_frame.show(&mut cols[0], |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("🌐 3. Compatibility Matrix").size(13.0).strong().color(palette.text_primary));
+                        ui.label(
+                            egui::RichText::new("🌐 3. Compatibility Matrix")
+                                .size(13.0)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
-                                egui::RichText::new(format!("{:.1}%", rep.compatibility.compatibility_score))
-                                    .size(12.0)
-                                    .strong()
-                                    .color(Color32::GREEN),
+                                egui::RichText::new(format!(
+                                    "{:.1}%",
+                                    rep.compatibility.compatibility_score
+                                ))
+                                .size(12.0)
+                                .strong()
+                                .color(Color32::GREEN),
                             );
                         });
                     });
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(format!("Web Browsers: {:.0}% • Mobile HW: {:.0}% • Archival: {:.0}%", rep.compatibility.web_compatibility_score, rep.compatibility.mobile_compatibility_score, rep.compatibility.archival_compatibility_score)).size(11.0).color(palette.text_secondary));
-                    ui.label(egui::RichText::new(format!("Standards: {}", rep.compatibility.standards_compliance.join(" • "))).size(10.5).color(palette.text_muted));
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Web Browsers: {:.0}% • Mobile HW: {:.0}% • Archival: {:.0}%",
+                            rep.compatibility.web_compatibility_score,
+                            rep.compatibility.mobile_compatibility_score,
+                            rep.compatibility.archival_compatibility_score
+                        ))
+                        .size(11.0)
+                        .color(palette.text_secondary),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Standards: {}",
+                            rep.compatibility.standards_compliance.join(" • ")
+                        ))
+                        .size(10.5)
+                        .color(palette.text_muted),
+                    );
                 });
 
                 card_frame.show(&mut cols[1], |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("💎 4. Quality & Fidelity").size(13.0).strong().color(palette.text_primary));
+                        ui.label(
+                            egui::RichText::new("💎 4. Quality & Fidelity")
+                                .size(13.0)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
                                 egui::RichText::new(format!("{:.1}%", rep.quality.quality_score))
@@ -1694,9 +2709,27 @@ impl StudioView {
                         });
                     });
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(format!("Rating: {}", rep.quality.fidelity_rating)).size(11.0).color(palette.text_secondary));
-                    ui.label(egui::RichText::new(format!("Depth/Resolution: {}", rep.quality.color_or_sample_depth)).size(11.0).color(palette.text_secondary));
-                    ui.label(egui::RichText::new(format!("Clarity Heuristic: {:.1}%", rep.quality.edge_clarity_score)).size(10.5).color(palette.text_muted));
+                    ui.label(
+                        egui::RichText::new(format!("Rating: {}", rep.quality.fidelity_rating))
+                            .size(11.0)
+                            .color(palette.text_secondary),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Depth/Resolution: {}",
+                            rep.quality.color_or_sample_depth
+                        ))
+                        .size(11.0)
+                        .color(palette.text_secondary),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Clarity Heuristic: {:.1}%",
+                            rep.quality.edge_clarity_score
+                        ))
+                        .size(10.5)
+                        .color(palette.text_muted),
+                    );
                 });
             });
 
@@ -1705,30 +2738,96 @@ impl StudioView {
                 ui.add_space(8.0);
                 card_frame.show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("🏎️ Performance Benchmark Results").size(13.5).strong().color(palette.text_primary));
+                        ui.label(
+                            egui::RichText::new("🏎️ Performance Benchmark Results")
+                                .size(13.5)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
                         ui.separator();
-                        ui.label(egui::RichText::new(format!("Duration: {:.2} ms ({} µs)", bench.duration_ms, bench.duration_micros)).size(12.0).strong().color(PANTONE_FLAVEDO));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Duration: {:.2} ms ({} µs)",
+                                bench.duration_ms, bench.duration_micros
+                            ))
+                            .size(12.0)
+                            .strong()
+                            .color(PANTONE_FLAVEDO),
+                        );
                         ui.separator();
-                        ui.label(egui::RichText::new(format!("Throughput: {:.1} MB/s", bench.throughput_mb_per_sec)).size(12.0).strong().color(Color32::GREEN));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Throughput: {:.1} MB/s",
+                                bench.throughput_mb_per_sec
+                            ))
+                            .size(12.0)
+                            .strong()
+                            .color(Color32::GREEN),
+                        );
                         ui.separator();
-                        ui.label(egui::RichText::new(if bench.hardware_accelerated { "HW-ACCEL ACTIVE" } else { "CPU PIPELINE" }).size(11.0).color(PANTONE_GOLD));
+                        ui.label(
+                            egui::RichText::new(if bench.hardware_accelerated {
+                                "HW-ACCEL ACTIVE"
+                            } else {
+                                "CPU PIPELINE"
+                            })
+                            .size(11.0)
+                            .color(PANTONE_GOLD),
+                        );
                     });
 
                     ui.add_space(6.0);
-                    ui.label(egui::RichText::new("Comparison Against Industry Converters:").size(11.5).strong().color(palette.text_secondary));
+                    ui.label(
+                        egui::RichText::new("Comparison Against Industry Converters:")
+                            .size(11.5)
+                            .strong()
+                            .color(palette.text_secondary),
+                    );
 
                     for comp in &bench.comparisons {
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(format!("• {:<24}", comp.name)).size(11.0).strong().color(palette.text_primary));
-                            ui.label(egui::RichText::new(format!("({:<12})", comp.category)).size(10.5).color(palette.text_muted));
-                            ui.label(egui::RichText::new(format!("~{:.1} ms", comp.estimated_duration_ms)).size(11.0).color(palette.text_secondary));
-                            ui.label(egui::RichText::new(format!("➔ {:.1}x FASTER", comp.speedup_factor)).size(11.0).strong().color(Color32::GREEN));
-                            ui.label(egui::RichText::new(format!("— {}", comp.notes)).size(10.5).color(palette.text_muted));
+                            ui.label(
+                                egui::RichText::new(format!("• {:<24}", comp.name))
+                                    .size(11.0)
+                                    .strong()
+                                    .color(palette.text_primary),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!("({:<12})", comp.category))
+                                    .size(10.5)
+                                    .color(palette.text_muted),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "~{:.1} ms",
+                                    comp.estimated_duration_ms
+                                ))
+                                .size(11.0)
+                                .color(palette.text_secondary),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "➔ {:.1}x FASTER",
+                                    comp.speedup_factor
+                                ))
+                                .size(11.0)
+                                .strong()
+                                .color(Color32::GREEN),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!("— {}", comp.notes))
+                                    .size(10.5)
+                                    .color(palette.text_muted),
+                            );
                         });
                     }
 
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new(&bench.summary).size(11.0).color(PANTONE_FLAVEDO));
+                    ui.label(
+                        egui::RichText::new(&bench.summary)
+                            .size(11.0)
+                            .color(PANTONE_FLAVEDO),
+                    );
                 });
             }
         }

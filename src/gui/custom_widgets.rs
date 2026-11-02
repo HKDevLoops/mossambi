@@ -47,14 +47,20 @@ pub fn render_custom_progress_bar(
     }
 
     // 3. Centered Progress Text
-    let label = text.map(|s| s.to_string()).unwrap_or_else(|| format!("{:.0}%", clamped * 100.0));
+    let label = text
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("{:.0}%", clamped * 100.0));
     let font_size = (height * 0.68).clamp(8.5, 12.0);
     painter.text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         label,
         egui::FontId::proportional(font_size),
-        if clamped > 0.55 { Color32::WHITE } else { palette.text_primary },
+        if clamped > 0.55 {
+            Color32::WHITE
+        } else {
+            palette.text_primary
+        },
     );
 
     resp

@@ -5,8 +5,16 @@ use mossambi::core::ThemeMode;
 
 #[test]
 fn test_theme_counts() {
-    assert_eq!(DARK_THEMES.len(), 10, "Must have exactly 10 Certified Dark Pantone Themes");
-    assert_eq!(LIGHT_THEMES.len(), 10, "Must have exactly 10 Certified Light Pantone Themes");
+    assert_eq!(
+        DARK_THEMES.len(),
+        10,
+        "Must have exactly 10 Certified Dark Pantone Themes"
+    );
+    assert_eq!(
+        LIGHT_THEMES.len(),
+        10,
+        "Must have exactly 10 Certified Light Pantone Themes"
+    );
     let all = all_pantone_themes();
     assert_eq!(all.len(), 20, "Total certified Pantone themes must be 20");
 }
@@ -14,7 +22,11 @@ fn test_theme_counts() {
 #[test]
 fn test_dark_themes_integrity() {
     for theme in &DARK_THEMES {
-        assert!(theme.is_dark, "Theme {} must have is_dark = true", theme.name);
+        assert!(
+            theme.is_dark,
+            "Theme {} must have is_dark = true",
+            theme.name
+        );
         assert!(!theme.id.is_empty());
         assert!(!theme.name.is_empty());
 
@@ -28,11 +40,26 @@ fn test_dark_themes_integrity() {
             &theme.accent,
             &theme.highlight,
         ] {
-            assert!(color.code.starts_with("Pantone"), "Color {} code must be official Pantone: {}", color.name, color.code);
-            assert!(color.hex.starts_with('#') && color.hex.len() == 7, "Color {} hex must be 7 chars: {}", color.name, color.hex);
+            assert!(
+                color.code.starts_with("Pantone"),
+                "Color {} code must be official Pantone: {}",
+                color.name,
+                color.code
+            );
+            assert!(
+                color.hex.starts_with('#') && color.hex.len() == 7,
+                "Color {} hex must be 7 chars: {}",
+                color.name,
+                color.hex
+            );
             let (r, g, b) = color.to_rgb();
             let reconstructed = format!("#{:02X}{:02X}{:02X}", r, g, b);
-            assert_eq!(color.hex.to_uppercase(), reconstructed, "Color {} RGB must match hex", color.name);
+            assert_eq!(
+                color.hex.to_uppercase(),
+                reconstructed,
+                "Color {} RGB must match hex",
+                color.name
+            );
         }
     }
 }
@@ -40,7 +67,11 @@ fn test_dark_themes_integrity() {
 #[test]
 fn test_light_themes_integrity() {
     for theme in &LIGHT_THEMES {
-        assert!(!theme.is_dark, "Theme {} must have is_dark = false", theme.name);
+        assert!(
+            !theme.is_dark,
+            "Theme {} must have is_dark = false",
+            theme.name
+        );
         assert!(!theme.id.is_empty());
         assert!(!theme.name.is_empty());
 
@@ -54,11 +85,26 @@ fn test_light_themes_integrity() {
             &theme.accent,
             &theme.highlight,
         ] {
-            assert!(color.code.starts_with("Pantone"), "Color {} code must be official Pantone: {}", color.name, color.code);
-            assert!(color.hex.starts_with('#') && color.hex.len() == 7, "Color {} hex must be 7 chars: {}", color.name, color.hex);
+            assert!(
+                color.code.starts_with("Pantone"),
+                "Color {} code must be official Pantone: {}",
+                color.name,
+                color.code
+            );
+            assert!(
+                color.hex.starts_with('#') && color.hex.len() == 7,
+                "Color {} hex must be 7 chars: {}",
+                color.name,
+                color.hex
+            );
             let (r, g, b) = color.to_rgb();
             let reconstructed = format!("#{:02X}{:02X}{:02X}", r, g, b);
-            assert_eq!(color.hex.to_uppercase(), reconstructed, "Color {} RGB must match hex", color.name);
+            assert_eq!(
+                color.hex.to_uppercase(),
+                reconstructed,
+                "Color {} RGB must match hex",
+                color.name
+            );
         }
     }
 }
@@ -126,11 +172,20 @@ fn test_serde_theme_mode() {
 
     // Test legacy aliases resolve to the identical Pantone themes
     let legacy_dark: ThemeMode = serde_json::from_str("\"liquid_glass\"").unwrap();
-    assert_eq!(legacy_dark.to_pantone_theme(), ThemeMode::DarkAnthracite.to_pantone_theme());
+    assert_eq!(
+        legacy_dark.to_pantone_theme(),
+        ThemeMode::DarkAnthracite.to_pantone_theme()
+    );
 
     let legacy_frosted: ThemeMode = serde_json::from_str("\"frosted_glass\"").unwrap();
-    assert_eq!(legacy_frosted.to_pantone_theme(), ThemeMode::DarkPewter.to_pantone_theme());
+    assert_eq!(
+        legacy_frosted.to_pantone_theme(),
+        ThemeMode::DarkPewter.to_pantone_theme()
+    );
 
     let legacy_light: ThemeMode = serde_json::from_str("\"light_aqua\"").unwrap();
-    assert_eq!(legacy_light.to_pantone_theme(), ThemeMode::LightGlacier.to_pantone_theme());
+    assert_eq!(
+        legacy_light.to_pantone_theme(),
+        ThemeMode::LightGlacier.to_pantone_theme()
+    );
 }

@@ -48,8 +48,18 @@ fn test_exam_optimizer_binary_search_convergence() {
     assert!(optimized.exists());
 
     let final_bytes = fs::metadata(&optimized).unwrap().len();
-    assert!(final_bytes >= constraint.min_bytes, "Size {} must be >= min {}", final_bytes, constraint.min_bytes);
-    assert!(final_bytes <= constraint.max_bytes, "Size {} must be <= max {}", final_bytes, constraint.max_bytes);
+    assert!(
+        final_bytes >= constraint.min_bytes,
+        "Size {} must be >= min {}",
+        final_bytes,
+        constraint.min_bytes
+    );
+    assert!(
+        final_bytes <= constraint.max_bytes,
+        "Size {} must be <= max {}",
+        final_bytes,
+        constraint.max_bytes
+    );
 
     let final_img = image::open(&optimized).unwrap();
     assert_eq!(final_img.width(), constraint.width_px);
@@ -82,12 +92,24 @@ fn test_exam_constraint_conflict_detection() {
         background_color: [255, 255, 255],
     };
 
-    let report = mossambi::exam::ExamOptimizer::process_upload_ready(&input_path, &output_path, &impossible).unwrap();
-    assert!(!report.constraints_satisfied, "Conflicting constraints must not be marked satisfied");
-    assert!(report.conflict.is_some(), "Must identify constraint conflict");
+    let report =
+        mossambi::exam::ExamOptimizer::process_upload_ready(&input_path, &output_path, &impossible)
+            .unwrap();
+    assert!(
+        !report.constraints_satisfied,
+        "Conflicting constraints must not be marked satisfied"
+    );
+    assert!(
+        report.conflict.is_some(),
+        "Must identify constraint conflict"
+    );
     let conflict = report.conflict.unwrap();
-    assert!(conflict.conflicting_parameters.contains(&"min_bytes".to_string()));
-    assert!(conflict.conflicting_parameters.contains(&"max_bytes".to_string()));
+    assert!(conflict
+        .conflicting_parameters
+        .contains(&"min_bytes".to_string()));
+    assert!(conflict
+        .conflicting_parameters
+        .contains(&"max_bytes".to_string()));
     let _ = fs::remove_dir_all(&test_dir);
 }
 
@@ -119,7 +141,9 @@ fn test_scorecard_and_non_destructive_padding() {
         background_color: [255, 255, 255],
     };
 
-    let report = mossambi::exam::ExamOptimizer::process_upload_ready(&input_path, &output_path, &constraint).unwrap();
+    let report =
+        mossambi::exam::ExamOptimizer::process_upload_ready(&input_path, &output_path, &constraint)
+            .unwrap();
     assert!(report.constraints_satisfied);
     assert!(report.final_size_bytes >= constraint.min_bytes);
     assert!(report.final_size_bytes <= constraint.max_bytes);
@@ -144,4 +168,3 @@ fn test_profile_persistence() {
     assert!(upsc.is_some());
     assert_eq!(upsc.unwrap().width_px, 350);
 }
-

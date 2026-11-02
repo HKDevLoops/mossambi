@@ -74,7 +74,11 @@ fn test_cli_text_to_pdf_mv_grammar() {
     fs::create_dir_all(&test_dir).unwrap();
 
     let txt_file = test_dir.join("notes.txt");
-    fs::write(&txt_file, b"Header Line\n\nParagraph with publication typesetting.\n").unwrap();
+    fs::write(
+        &txt_file,
+        b"Header Line\n\nParagraph with publication typesetting.\n",
+    )
+    .unwrap();
 
     // Run: mossambi notes.txt pdf
     let conv_out = Command::new(&bin)
@@ -141,12 +145,19 @@ fn test_cli_verify_zero_loss() {
 
     // Verify mathematical quality
     let ver_out = Command::new(&bin)
-        .args(["verify", txt_file.to_str().unwrap(), pdf_file.to_str().unwrap()])
+        .args([
+            "verify",
+            txt_file.to_str().unwrap(),
+            pdf_file.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(ver_out.status.success());
     let stdout = String::from_utf8_lossy(&ver_out.stdout);
-    assert!(stdout.contains("VERIFIED 0.00% ZERO-LOSS") || stdout.contains("Vector Layout Preservation"));
+    assert!(
+        stdout.contains("VERIFIED 0.00% ZERO-LOSS")
+            || stdout.contains("Vector Layout Preservation")
+    );
 
     let _ = fs::remove_dir_all(&test_dir);
 }
@@ -167,7 +178,12 @@ fn test_cli_upload_ready() {
     img.save(&img_file).unwrap();
 
     let out = Command::new(&bin)
-        .args(["upload-ready", img_file.to_str().unwrap(), "--preset", "upsc-photo"])
+        .args([
+            "upload-ready",
+            img_file.to_str().unwrap(),
+            "--preset",
+            "upsc-photo",
+        ])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -185,7 +201,10 @@ fn test_cli_check_and_bench_commands() {
     }
 
     let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let sample_txt = workspace_root.join("test_vault").join("document").join("sample_notes.txt");
+    let sample_txt = workspace_root
+        .join("test_vault")
+        .join("document")
+        .join("sample_notes.txt");
 
     if sample_txt.exists() {
         // Run: mossambi check sample_notes.txt
@@ -246,10 +265,7 @@ fn test_cli_completions_and_carapace() {
     assert!(cara_str.contains("upload-ready"));
 
     // Help-manual Unicode table test
-    let help_out = Command::new(&bin)
-        .arg("help-manual")
-        .output()
-        .unwrap();
+    let help_out = Command::new(&bin).arg("help-manual").output().unwrap();
     assert!(help_out.status.success());
     let help_str = String::from_utf8_lossy(&help_out.stdout);
     assert!(help_str.contains("MOSSAMBI — ZERO-LOSS CONVERSION PLATFORM"));

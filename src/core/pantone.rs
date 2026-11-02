@@ -56,22 +56,36 @@ pub struct PantonePalette;
 
 impl PantonePalette {
     // Soothing Pantone Accent Colors (100% Eye-Safe, Non-Neon)
-    pub const RAW_PEEL_GREEN: PantoneColor = PantoneColor::new("Sage Meadow", "Pantone 16-5917 TPG", "#4A855A");
-    pub const SWEET_ZEST_LIME: PantoneColor = PantoneColor::new("Classic Blue", "Pantone 19-4052 TPG", "#007AFF");
-    pub const RIPE_PULP_YELLOW_GREEN: PantoneColor = PantoneColor::new("Soft Amber", "Pantone 14-1064 TPG", "#D97706");
-    pub const CITRUS_GOLD: PantoneColor = PantoneColor::new("Citrus Gold", "Pantone 1235 C", "#FFB81C");
-    pub const TANGERINE_SUN: PantoneColor = PantoneColor::new("Tangerine Sun", "Pantone 15-1247", "#F88F58");
-    pub const DEEP_FOREST_PEEL: PantoneColor = PantoneColor::new("Deep Forest Peel", "Pantone 371 C", "#2E4D1E");
+    pub const RAW_PEEL_GREEN: PantoneColor =
+        PantoneColor::new("Sage Meadow", "Pantone 16-5917 TPG", "#4A855A");
+    pub const SWEET_ZEST_LIME: PantoneColor =
+        PantoneColor::new("Classic Blue", "Pantone 19-4052 TPG", "#007AFF");
+    pub const RIPE_PULP_YELLOW_GREEN: PantoneColor =
+        PantoneColor::new("Soft Amber", "Pantone 14-1064 TPG", "#D97706");
+    pub const CITRUS_GOLD: PantoneColor =
+        PantoneColor::new("Citrus Gold", "Pantone 1235 C", "#FFB81C");
+    pub const TANGERINE_SUN: PantoneColor =
+        PantoneColor::new("Tangerine Sun", "Pantone 15-1247", "#F88F58");
+    pub const DEEP_FOREST_PEEL: PantoneColor =
+        PantoneColor::new("Deep Forest Peel", "Pantone 371 C", "#2E4D1E");
 
     // Apple-Style Certified Neutrals
-    pub const BRILLIANT_WHITE: PantoneColor = PantoneColor::new("Brilliant White", "Pantone 11-4001 TPG", "#F4F5F7");
-    pub const BLANC_DE_BLANC: PantoneColor = PantoneColor::new("Blanc de Blanc", "Pantone 11-4800 TPG", "#F1EFEA");
-    pub const GLACIER_GRAY: PantoneColor = PantoneColor::new("Glacier Gray", "Pantone 14-4102 TPG", "#C5C6C7");
-    pub const COOL_GRAY_6: PantoneColor = PantoneColor::new("Cool Gray 6", "Pantone Cool Gray 6 C", "#A1A1A6");
-    pub const PEWTER_SLATE: PantoneColor = PantoneColor::new("Pewter Slate", "Pantone 18-5203 TPG", "#2A2A2E");
-    pub const ANTHRACITE_DARK: PantoneColor = PantoneColor::new("Anthracite Dark", "Pantone 19-4007 TPG", "#18181A");
-    pub const DEEP_BLACK: PantoneColor = PantoneColor::new("Deep Black", "Pantone 19-3911 TPG", "#121214");
-    pub const CHARCOAL_TEXT: PantoneColor = PantoneColor::new("Charcoal Text", "Pantone 19-3901 TPG", "#1D1D1F");
+    pub const BRILLIANT_WHITE: PantoneColor =
+        PantoneColor::new("Brilliant White", "Pantone 11-4001 TPG", "#F4F5F7");
+    pub const BLANC_DE_BLANC: PantoneColor =
+        PantoneColor::new("Blanc de Blanc", "Pantone 11-4800 TPG", "#F1EFEA");
+    pub const GLACIER_GRAY: PantoneColor =
+        PantoneColor::new("Glacier Gray", "Pantone 14-4102 TPG", "#C5C6C7");
+    pub const COOL_GRAY_6: PantoneColor =
+        PantoneColor::new("Cool Gray 6", "Pantone Cool Gray 6 C", "#A1A1A6");
+    pub const PEWTER_SLATE: PantoneColor =
+        PantoneColor::new("Pewter Slate", "Pantone 18-5203 TPG", "#2A2A2E");
+    pub const ANTHRACITE_DARK: PantoneColor =
+        PantoneColor::new("Anthracite Dark", "Pantone 19-4007 TPG", "#18181A");
+    pub const DEEP_BLACK: PantoneColor =
+        PantoneColor::new("Deep Black", "Pantone 19-3911 TPG", "#121214");
+    pub const CHARCOAL_TEXT: PantoneColor =
+        PantoneColor::new("Charcoal Text", "Pantone 19-3901 TPG", "#1D1D1F");
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

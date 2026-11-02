@@ -62,7 +62,8 @@ pub fn get_system_drives() -> Vec<DriveInfo> {
                 let mut free_avail = 0u64;
                 let mut total = 0u64;
                 let mut total_free = 0u64;
-                let wide_root: Vec<u16> = root_str.encode_utf16().chain(std::iter::once(0)).collect();
+                let wide_root: Vec<u16> =
+                    root_str.encode_utf16().chain(std::iter::once(0)).collect();
                 unsafe {
                     GetDiskFreeSpaceExW(
                         wide_root.as_ptr(),
@@ -147,7 +148,10 @@ impl FileItem {
         #[cfg(target_os = "windows")]
         let is_hidden = name.starts_with('.') || {
             use std::os::windows::fs::MetadataExt;
-            metadata.as_ref().map(|m| m.file_attributes() & 0x2 != 0).unwrap_or(false)
+            metadata
+                .as_ref()
+                .map(|m| m.file_attributes() & 0x2 != 0)
+                .unwrap_or(false)
         };
         #[cfg(not(target_os = "windows"))]
         let is_hidden = name.starts_with('.');
@@ -155,13 +159,23 @@ impl FileItem {
         #[cfg(unix)]
         let permissions_mode = {
             use std::os::unix::fs::PermissionsExt;
-            metadata.as_ref().map(|m| m.permissions().mode()).unwrap_or(0o644)
+            metadata
+                .as_ref()
+                .map(|m| m.permissions().mode())
+                .unwrap_or(0o644)
         };
         #[cfg(not(unix))]
         let permissions_mode = {
-            let readonly = metadata.as_ref().map(|m| m.permissions().readonly()).unwrap_or(false);
+            let readonly = metadata
+                .as_ref()
+                .map(|m| m.permissions().readonly())
+                .unwrap_or(false);
             if is_dir {
-                if readonly { 0o555 } else { 0o755 }
+                if readonly {
+                    0o555
+                } else {
+                    0o755
+                }
             } else if readonly {
                 0o444
             } else {
@@ -200,9 +214,15 @@ impl FileItem {
         format!(
             "{}{}{}{}{}{}{}{}{}{}",
             file_type,
-            r(0o400), w(0o200), x(0o100),
-            r(0o040), w(0o020), x(0o010),
-            r(0o004), w(0o002), x(0o001),
+            r(0o400),
+            w(0o200),
+            x(0o100),
+            r(0o040),
+            w(0o020),
+            x(0o010),
+            r(0o004),
+            w(0o002),
+            x(0o001),
         )
     }
 
@@ -229,7 +249,14 @@ impl FileItem {
                 let day_of_year = days % 365;
                 let approx_month = (day_of_year / 30) + 1;
                 let approx_day = (day_of_year % 30) + 1;
-                return format!("{:04}-{:02}-{:02} {:02}:{:02}", approx_year, approx_month.min(12), approx_day.min(31), hours, minutes);
+                return format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}",
+                    approx_year,
+                    approx_month.min(12),
+                    approx_day.min(31),
+                    hours,
+                    minutes
+                );
             }
         }
         "—".to_string()

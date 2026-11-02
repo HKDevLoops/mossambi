@@ -90,7 +90,10 @@ impl AsyncWorkerPool {
                     cancel_watchdog.store(true, Ordering::SeqCst);
                     let _ = tx.send(TaskUpdate::Failed {
                         id: task_id,
-                        error: format!("Task '{}' timed out after 30 seconds (watchdog triggered).", name),
+                        error: format!(
+                            "Task '{}' timed out after 30 seconds (watchdog triggered).",
+                            name
+                        ),
                     });
                 }
             })

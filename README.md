@@ -1,4 +1,4 @@
-# 🍋 Mossambi — Universal File Conversion Platform
+# 🍋 Mossambi — Universal File Conversion Platform & Explorer
 
 [![CI](https://github.com/mossambi/mossambi/actions/workflows/ci.yml/badge.svg)](https://github.com/mossambi/mossambi/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
@@ -17,221 +17,178 @@
                      `.  `--'  .'
                        `'-..-'`
 
-   ╭╮╭╮╭╮ ╭───╮ ╭────╮ ╭────╮ ╭───╮ ╭╮╭╮╭╮ ╭────╮ ╭─╮
-   ││││││ │╭─╮│ │╭───╯ │╭───╯ │╭─╮│ ││││││ │╭─╮│ │ │
-   ││││││ ││ ││ ╰───╮  ╰───╮  ││ ││ ││││││ │╰─╯│ │ │
-   ││││││ │╰─╯│ ╭───╯  ╭───╯  │╰─╯│ ││││││ │╭─╮│ │ │
-   ╰╯╰╯╰╯ ╰───╯ ╰────╯ ╰────╯ ╰─╰─╯ ╰╯╰╯╰╯ ╰───╯ ╰─╯
-
-   Universal File Conversion Platform · Indian Exam Form Studio
-   One Rust Core · Four Native Interfaces: CLI, TUI, Desktop Studio GUI & Standalone Radial Widget
+   M O S S A M B I
+   Zero-Loss File Conversion Platform & Universal File Explorer
+   One Pure Rust Core · Three Modalities: Explorer App, Radial Widget, Interactive TUI
+   v2.1.0 | 0.00% Zero-Loss Standard | Windows Fluent & macOS Finder DNA
 ```
 
-**Mossambi** (Sweet Lime) is a high-performance native desktop file conversion suite and Indian competitive exam form optimizer written entirely in **100% pure Rust**. It combines **Apple macOS elegance** (liquid glass, specular highlights, authentic traffic lights) with **Linux power** (streaming chunk hashing, direct NVMe stream copy, and friction-free UNIX `mv`-style grammar).
+**Mossambi** (Sweet Lime) is a high-performance, single-executable file conversion platform and modern universal file explorer written in **100% pure Rust**. It merges **Windows 11 Fluent Design / macOS Finder aesthetics** (acrylic/mica translucency, multi-tab navigation, certified Pantone palettes) with **high-throughput Linux power** (streaming chunk hashing, direct NVMe stream copy, and friction-free UNIX `mv`-style grammar).
 
 ---
 
-## ⚡ Quick Install
+## ⚡ Unified Binary & 3 Modalities
 
-### 🪟 Windows Binary Installers
-- **Windows Installer (`.msi`)**: [`mossambi-2.1.0-x64.msi`](https://github.com/mossambi/mossambi/releases/download/v2.1.0/mossambi-2.1.0-x64.msi)
-  - Full WiX Toolset standard MSI with Start Menu shortcuts, Desktop icon, and `PATH` registration.
-- **Portable ZIP Bundle**: [`mossambi-v2.1.0-windows-x64.zip`](https://github.com/mossambi/mossambi/releases/download/v2.1.0/mossambi-v2.1.0-windows-x64.zip)
-  - Portable bundle with all 4 binaries, `setup.bat`, `install.ps1`, and icon assets.
-- **PowerShell One-Liner**:
-  ```powershell
-  irm https://raw.githubusercontent.com/mossambi/mossambi/main/install.ps1 | iex
-  ```
+Mossambi compiles to a **single unified binary**: `mossambi` (`mossambi.exe` on Windows). All tools, converters, and explorer views run from this single executable:
 
-### 🐧 Linux Binary Packages & One-Liner
-- **Debian / Ubuntu (`.deb`)**: [`mossambi_2.1.0_amd64.deb`](https://github.com/mossambi/mossambi/releases/download/v2.1.0/mossambi_2.1.0_amd64.deb)
-  ```bash
-  sudo apt install ./mossambi_2.1.0_amd64.deb
-  ```
-- **Fedora / RHEL / openSUSE (`.rpm`)**: [`mossambi-2.1.0-1.x86_64.rpm`](https://github.com/mossambi/mossambi/releases/download/v2.1.0/mossambi-2.1.0-1.x86_64.rpm)
-  ```bash
-  sudo dnf install ./mossambi-2.1.0-1.x86_64.rpm
-  ```
-- **Universal Linux & macOS Script**:
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/mossambi/mossambi/main/install.sh | bash
-  ```
-
----
-
-## 📦 Package Managers Supported
-
-| OS / Distro | Package Manager | Install Command | Manifest Location |
-|---|---|---|---|
-| **Windows** | `winget` | `winget install Mossambi.Mossambi` | [`packaging/winget/Mossambi.Mossambi.yaml`](packaging/winget/Mossambi.Mossambi.yaml) |
-| **Windows** | `scoop` | `scoop install mossambi` | [`packaging/scoop/mossambi.json`](packaging/scoop/mossambi.json) |
-| **Arch Linux** | `pacman` / `yay` | `yay -S mossambi-bin` | [`packaging/arch/PKGBUILD`](packaging/arch/PKGBUILD) |
-| **Ubuntu / Debian** | `apt` | `sudo apt install ./mossambi_2.1.0_amd64.deb` | [`packaging/debian/`](packaging/debian/) |
-| **Fedora / RHEL** | `dnf` / `rpm` | `sudo dnf install mossambi` | [`packaging/rpm/mossambi.spec`](packaging/rpm/mossambi.spec) |
-| **openSUSE** | `zypper` | `sudo zypper install mossambi` | [`packaging/zypper/mossambi-opensuse.spec`](packaging/zypper/mossambi-opensuse.spec) |
-| **Gentoo** | `emerge` | `emerge --ask app-misc/mossambi` | [`packaging/gentoo/mossambi-2.1.0.ebuild`](packaging/gentoo/mossambi-2.1.0.ebuild) |
-| **Nix / NixOS** | `nix` | `nix profile install github:mossambi/mossambi` | [`packaging/nix/flake.nix`](packaging/nix/flake.nix) |
-| **GNU Guix** | `guix` | `guix package -f packaging/guix/mossambi.scm` | [`packaging/guix/mossambi.scm`](packaging/guix/mossambi.scm) |
-| **Alpine Linux** | `apk` | `apk add mossambi` | [`packaging/alpine/APKBUILD`](packaging/alpine/APKBUILD) |
-| **macOS / Linux** | `brew` | `brew install packaging/homebrew/mossambi.rb` | [`packaging/homebrew/mossambi.rb`](packaging/homebrew/mossambi.rb) |
-
----
-
-## 🎨 Official Sweet Lime Brand Icons (`assets/icons/`)
-
-Mossambi includes custom-crafted, publication-grade Sweet Lime fruit icon artwork across all standard dimensions:
-
-| Format / Dimension | Path | Resolution | Usage |
-|---|---|---|---|
-| **Scalable Vector** | [`assets/icons/mossambi.svg`](assets/icons/mossambi.svg) | Vector | Scalable vector displays, web banners, Linux theme icons |
-| **Windows Multi-Res Icon** | [`assets/icons/mossambi.ico`](assets/icons/mossambi.ico) | 16–256 px | Windows Explorer, Taskbar, MSI Installer, Desktop Shortcut |
-| **Ultra-High Resolution** | [`assets/icons/mossambi-1024x1024.png`](assets/icons/mossambi-1024x1024.png) | 1024x1024 | App Store, Retina display splashes, marketing |
-| **Standard App Icon** | [`assets/icons/mossambi-512x512.png`](assets/icons/mossambi-512x512.png) | 512x512 | Linux `/usr/share/pixmaps/`, Flathub, Snap Store |
-| **Desktop Frame Icon** | [`assets/icons/mossambi-256x256.png`](assets/icons/mossambi-256x256.png) | 256x256 | Embedded in `mossambi-gui` and `mossambi-widget` windows |
-| **Large Shell Icon** | [`assets/icons/mossambi-128x128.png`](assets/icons/mossambi-128x128.png) | 128x128 | Application docks, modern desktop environments |
-| **Medium Shell Icon** | [`assets/icons/mossambi-64x64.png`](assets/icons/mossambi-64x64.png) | 64x64 | Linux hicolor standard |
-| **Small Shell Icon** | [`assets/icons/mossambi-48x48.png`](assets/icons/mossambi-48x48.png) | 48x48 | Windows Control Panel, file dialogs |
-| **Taskbar / Menu Icon** | [`assets/icons/mossambi-32x32.png`](assets/icons/mossambi-32x32.png) | 32x32 | Window titlebar and alt-tab switcher |
-| **System Tray Micro Icon** | [`assets/icons/mossambi-16x16.png`](assets/icons/mossambi-16x16.png) | 16x16 | Notification area, small list views |
-
----
-
-## 🏛️ Architecture: One Core, Four Interfaces
-
-```
-                    ┌────────────────────────────────────────────────────────┐
-                    │               MOSSAMBI SHARED CORE                     │
-                    │  200+ Format Registry · Mathematical Remux Engine      │
-                    │  Pantone Palette · Exam Constraint Solver · Checkers   │
-                    └────────────────────────────────────────────────────────┘
-                                   │            │             │
-                ┌──────────────────┘            │             └──────────────────┐
-                ▼                               ▼                                ▼
-       ┌─────────────────┐             ┌─────────────────┐             ┌─────────────────┐
-       │  mossambi (CLI) │             │  mossambi-tui   │             │   mossambi-gui  │
-       │  UNIX mv Syntax │             │ Ratatui Studio  │             │ Desktop Studio  │
-       │  Auto-Complete  │             │ Traffic Lights  │             │ Sidebar Layout  │
-       │  Carapace Spec  │             │ 6 macOS Worksp. │             │ Native Controls │
-       └─────────────────┘             └─────────────────┘             └─────────────────┘
-                                                                                 ▲
-                                                                                 │
-                                                                       ┌─────────────────┐
-                                                                       │ mossambi-widget │
-                                                                       │ Pure Fruit Ring │
-                                                                       │ 0 Topbars/Menus │
-                                                                       │ 32-bit Transpar.│
-                                                                       └─────────────────┘
+```text
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  Mossambi (MOSSAMBI — ZERO-LOSS CONVERSION PLATFORM & UNIVERSAL FILE EXPLORER v2.1.0)                            │
+│  One Pure Rust Core · Three Operating Modalities · Apple Elegance + Linux Power                                  │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  Usage: mossambi [FLAGS / OPTIONS] [INPUT] [TARGET_FORMAT]                                                       │
+│  UNIX 'mv' POSITIONAL GRAMMAR: mossambi <INPUT> [TARGET_FORMAT] [-a|--all] [-o <DIR>]                            │
+├──────────────────────────────────┬──────────────────────────────────────────────────────┬────────────────────────┤
+│  FLAG / OPTION                   │  DESCRIPTION & FUNCTION                              │  EXAMPLE USAGE         │
+├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+│  --app, --explorer, --gui [DIR]  │  Launch macOS-styled Universal File Explorer & Studio │  mossambi --app        │
+│  --widget [FILE]                 │  Launch Sweet Lime Resident Radial Widget (8 petals) │  mossambi --widget     │
+│  --tui [DIR]                     │  Launch Yazi-Grade Interactive Terminal File Explorer │  mossambi --tui        │
+├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+│  -a, --all                       │  Batch transcode to ALL valid formats in domain      │  mossambi file.wav -a  │
+│  -o, --output <DIR>              │  Custom destination directory for output files       │  mossambi file.png -o .│
+│  --strict                        │  Enforce strict 0.00% zero-loss mathematical standard│  mossambi in.wav flac  │
+│  --json                          │  Output structured machine-parseable JSON response   │  mossambi in.wav --json│
+├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+│  --exam <PRESET>                 │  Indian Exam Tuner (upsc-photo, ssc-photo, ibps-sign)│  mossambi in.jpg --exam│
+│  --width <PX> / --height <PX>    │  Exact target width and height in pixels             │  --width 350 --height  │
+│  --dpi <INT>                     │  Target resolution DPI (e.g. 200 or 300 DPI)         │  --dpi 300             │
+│  --min-kb <N> / --max-kb <N>     │  Target file byte envelope range (e.g. 20KB to 50KB) │  --min-kb 20 --max-kb50│
+│  --whiten                        │  Auto-whiten background of scanned signatures/photos │  --whiten              │
+├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+│  --archive <FILES...> -o <ZIP>   │  Pack files into ZIP, 7Z, TAR, GZ, BZ2, XZ, or ZST   │  --archive a b -o c.zip│
+│  --extract <ARCHIVE> [-o <DIR>]  │  Extract archive safely with Zip-Slip protection     │  --extract bundle.zip  │
+├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+│  --check <FILE>                  │  4-dimension Quality & Container Integrity Scorecard │  mossambi --check f.png│
+│  --bench <FILE> [TARGET]         │  Benchmark latency, throughput (MB/s) and speedup    │  mossambi --bench f.wav│
+│  --hw                            │  Display GPU/NPU hardware acceleration engines       │  mossambi --hw         │
+│  --verify <ORIG> <CONV>          │  Mathematical 0.00% zero-loss verification proof     │  --verify a.png b.png  │
+│  --catalogue [QUERY]             │  Search across 200+ format registry catalog          │  --catalogue lossless  │
+├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤
+│  --themes                        │  List all 20 certified eye-safe Pantone themes       │  mossambi --themes     │
+│  --config [get|set|list]         │  View or edit persistent preferences (~/.mossambi)   │  --config set theme ...│
+│  --daemon [start|stop|status]    │  Resident mouse gesture daemon (Win+Shift+C Hotkey) │  --daemon start        │
+│  --banner                        │  Display Sweet Lime ASCII fruit art and summary      │  mossambi --banner     │
+│  --manual                        │  Display Unicode box table manual                    │  mossambi --manual     │
+│  -h, --help                      │  Display this complete usage manual table            │  mossambi --help       │
+│  -V, --version                   │  Display version and system architecture info        │  mossambi --version    │
+└──────────────────────────────────┴──────────────────────────────────────────────────────┴────────────────────────┘
 ```
 
-1. **`mossambi` (CLI)**: Friction-free UNIX grammar modeled after `mv` (`mossambi input.wav flac`). Supports `--all` batch transcode, shell auto-completions (`bash`, `zsh`, `fish`, `powershell`, `elvish`), context-aware Carapace bridge, and Unicode table manuals.
-2. **`mossambi-tui` (TUI)**: Terminal user interface styled after macOS Sequoia, featuring authentic traffic lights, Pantone color themes, and 6 full workspaces (Transcoder & ALL, Indian Exam Studio, Archive Manager, Hardware Diagnostics, Settings & Themes, and Quality Inspector).
-3. **`mossambi-gui` (Desktop Studio GUI)**: Standard application-style workspace window with native titlebar, window decorations, sidebar navigation, drag-and-drop batch queue, format catalogue modal, and settings.
-4. **`mossambi-widget` (Standalone Radial Fruit Widget)**: 100% Topbarless, Menu-less, Ribbon-less, Frameless, 32-Bit Transparent Desktop Widget. Faithfully reproduces all 6 visual states from `Image reference.png`, summons directly under cursor, and converts dropped files beside their source.
+### 1. 🪟 Universal File Explorer & Studio GUI
+- Launch with `mossambi` or `mossambi --app [DIR]`.
+- **Windows 11 Fluent & macOS Tab Bar**: Multi-tab navigation with tab titles, tab icons, and close buttons.
+- **Home Dashboard**: Quick Access 9-card folder grid (Desktop, Downloads, Documents, Pictures, Music, Videos, between_pcs, wallpapers, Recycle Bin), Storage Space Meters for all system drives, and recent files list.
+- **Embedded Agave Nerd Font**: Crisp vector icons and typography for all files and folders.
+- **Zero Alternate Tint Bugs**: Eye-safe background with clean card surfaces, subtle hover elevation, and responsive flex wrapping.
+- **200+ Format Transcoder**: Built-in batch conversion studio, archive manager, quality inspector, and hardware telemetry.
+
+### 2. 🍋 Sweet Lime Resident Radial Widget
+- Summon with `mossambi --widget [FILE]` or **`Win + Shift + C`** global hotkey.
+- **Radial Petal Menu**: 8 contextual conversion sectors rendered around the cursor with real-time gesture tracking.
+- Converts files in place with 0.00% zero-loss quality.
+
+### 3. 🖥️ Yazi-Grade Interactive Terminal Explorer (TUI)
+- Launch with `mossambi --tui [DIR]`.
+- High-speed terminal file manager powered by Ratatui and Crossterm.
+- Multi-column tree navigation, instant file preview, and keyboard shortcuts.
 
 ---
 
-## 🚀 Whisper Flow Resident Background Service & Global Hotkeys
+## ⚡ Fast-Path UNIX `mv`-Style Conversion
 
-Mossambi operates silently in the background with **zero idle resource load** (~5-8 MB RAM, 0% CPU):
-- **`Win + Shift + C`**: Summons the Floating Radial Sweet Lime Wheel (`mossambi-widget`) directly under the user's cursor.
-- **`Win + Ctrl + C`**: Launches the Full Desktop Studio GUI (`mossambi-gui`).
-- **Whisper Flow Onboarding Prompt**: `install.ps1` and `install.sh` interactively ask whether you'd like Mossambi running quietly on startup.
-- **CLI Daemon Management**:
-  ```bash
-  mossambi daemon status          # Check resident status & autostart
-  mossambi daemon start | stop    # Spawn or gracefully terminate daemon
-  mossambi daemon gesture-on      # Enable file drag gesture activation
-  mossambi daemon gesture-off     # Disable gesture activation
-  mossambi daemon install         # Register OS startup entry
-  ```
-
----
-
-## 🖱️ Deep System-Level File Drag & Drop Gesture Engine
-
-A specialized system-level listener that monitors mouse motion **strictly when the user is actively dragging actual files or folders**:
-1. **Zero Idle Overhead (Deep Window Gate)**:
-   - On Windows: Uses a dedicated thread with a Win32 low-level mouse hook (`WH_MOUSE_LL`).
-   - On `WM_LBUTTONDOWN`, verifies if the cursor is pressing on File Explorer (`CabinetWClass`), Desktop (`Progman` / `WorkerW`), or File Dialogs (`#32770`).
-   - If user is clicking in Chrome, Discord, or Word, the hook passes through (`CallNextHookEx`) with **zero gesture calculations and zero CPU cycles**.
-2. **Kinematic Gesture Recognition**:
-   - **Shake**: Detects $\ge 3$ rapid horizontal direction reversals within $\le 450\text{ ms}$.
-   - **Circle**: Detects a swept circular arc $\ge 300^\circ$ within $\le 500\text{ ms}$.
-3. **Instant Radial Overlay**:
-   - The Sweet Lime radial wheel appears centered at `(cursor.x - 180, cursor.y - 180)` in **State 3 (Active Drag & Drop Petals)** tailored to the dragged file format.
-   - Releasing the mouse button over any petal converts the file and places the output directly beside the original file.
-
----
-
-## 💎 Mathematical Remuxing: 0.00% Zero-Loss Standard
-
-Mossambi guarantees the **0.00% Zero-Loss mathematical standard** across media transformations:
-- **Video Stream Copy Fast-Path (`-c copy`)**: Converts containers (MKV $\leftrightarrow$ MP4 $\leftrightarrow$ MOV $\leftrightarrow$ TS) at disk NVMe read/write speed (~1-2 GB/s) in **5 to 15 seconds** for a 2-hour movie, with **0 bytes of re-encoding loss**.
-- **Audio Linear PCM & Lossless Compression**: 24-bit / 48 kHz Linear PCM (`pcm_s24le`), FLAC Level 8, ALAC, and LAME 320 kbps V0 Extreme.
-- **Image Raster Precision**: 300 DPI metadata injection into JFIF (`APP0`) and PNG (`pHYs`), clean alpha canvas compositing (preventing pitch black transparency artifacts), and bit-exact pixel matrix comparison.
-- **Document Vector Preservation**: Text and markdown converted into vector PDF with native Type 1 PostScript font CMap embedding (zero bitmap rasterization loss).
-
----
-
-## 🇮🇳 Indian Competitive Exam & Form Studio (Upload Ready)
-
-Constraint-based document, photo, and signature optimizer designed for strict Indian portals (**UPSC, SSC, IBPS, GATE, RRB, CAT, JEE, NEET**):
-- **5-Iteration 100% Scorecard Loop**: Dimension scaling, contrast normalization, mobile scan whitening, and binary-search byte size convergence.
-- **Non-Destructive Metadata Padding**: Inserts compliant JPEG comment markers (`0xFF 0xFE`) to satisfy strict portal minimum size thresholds without pixel distortion.
-- **Built-in Presets**:
-  - `upsc-photo`: 350x450 px, 300 DPI, 20 KB – 300 KB
-  - `upsc-signature`: 350x150 px, 300 DPI, 20 KB – 300 KB
-  - `ssc-photo`: 100x120 px, 200 DPI, 20 KB – 50 KB
-  - `ssc-signature`: 140x60 px, 200 DPI, 10 KB – 20 KB
-  - `ibps-photo`: 200x230 px, 200 DPI, 20 KB – 50 KB
-  - `ibps-signature`: 140x60 px, 200 DPI, 10 KB – 20 KB
+Convert files instantly from your terminal without opening any GUI:
 
 ```bash
+# Instant format conversion
+mossambi photo.png jpg
+mossambi sound.wav flac
+mossambi doc.txt pdf
+
+# Transcode to ALL compatible formats in domain
+mossambi sample.wav -a
+
+# Indian Exam Form Tuning (UPSC, SSC, IBPS, GATE)
 mossambi candidate.png --exam upsc-photo
 mossambi signature.jpg --exam ibps-signature
+
+# Archive Packing & Extraction
+mossambi --archive doc1.pdf doc2.pdf -o bundle.zip
+mossambi --extract bundle.zip -o ./extracted
+
+# Mathematical Zero-Loss Verification Proof
+mossambi --verify original.png converted.png
 ```
 
 ---
 
-## 🔬 Universal Quality Inspector & Benchmark Engine
+## 🎨 20 Certified Eye-Safe Pantone Themes
 
-Exhaustively checks files across 4 distinct dimensions with **zero RAM spikes** on multi-gigabyte media:
-- **Streaming Hashes**: 1 MB chunk streaming for SHA-256 and CRC-32 (RAM clamped to ~1 MB on 50 GB movies).
-- **Instant Header/Trailer Sampling**: 64 KB header and trailer disk seek for instant container validation.
-- **Cross-Platform Compatibility**: Compliance scores for Web, Mobile, Archival, and Government portals.
-- **Performance Benchmark Matrix**: Measures latency and throughput, comparing speedups against Online APIs (CloudConvert, Zamzar) and Offline CLIs (ImageMagick, FFmpeg).
+Mossambi includes **20 certified Pantone themes** configured specifically to prevent eye fatigue. Neon greens have been replaced with Pantone certified hues:
 
+| Mode | Theme ID | Name | Accent Color | Surface |
+|---|---|---|---|---|
+| **Light** | `light_brilliant` | **Brilliant Lime** (Default Light) | `#0071E3` (Apple / Fluent Blue) | `#FFFFFF` |
+| **Light** | `light_glacier` | **Glacier Aqua** | `#0A8F82` (Turquoise Bay) | `#FFFFFF` |
+| **Light** | `light_zest` | **Sweet Zest Sunlight** | `#D97706` (Apple Amber) | `#FFFFFF` |
+| **Light** | `light_blanc` | **Blanc de Blanc** | `#C48300` (Citrus Gold) | `#FFFFFF` |
+| **Light** | `light_tangerine` | **Tangerine Sorbet** | `#D46124` (Tangerine Sun) | `#FFFFFF` |
+| **Light** | `light_albedo` | **Albedo Pure Ivory** | `#D97706` (Amber Harvest) | `#FFFFFF` |
+| **Light** | `light_quartz` | **Cool Quartz** | `#0077D4` (Quartz Blue) | `#FFFFFF` |
+| **Light** | `light_pistachio` | **Pistachio Cream** | `#16A34A` (Fresh Leaf) | `#FFFFFF` |
+| **Light** | `light_amber` | **Vanilla Amber** | `#B45309` (Amber Resin) | `#FFFFFF` |
+| **Light** | `light_silver` | **Silver Pearl** | `#0284C7` (Sky Blue) | `#FFFFFF` |
+| **Dark** | `dark_anthracite` | **Anthracite Obsidian** (Default Dark) | `#0071E3` (Apple Blue) | `#1A1D24` |
+| **Dark** | `dark_forest` | **Deep Forest Emerald** | `#10B981` (Emerald Accent) | `#1B2420` |
+| **Dark** | `dark_eclipse` | **Midnight Eclipse** | `#6366F1` (Indigo Neon) | `#1A1B29` |
+| **Dark** | `dark_pewter` | **Pewter Slate** | `#38BDF8` (Sky Highlight) | `#20252D` |
+| **Dark** | `dark_tangerine` | **Tangerine Nightfall** | `#F97316` (Citrus Glow) | `#281E19` |
+| **Dark** | `dark_caviar` | **Citrus Caviar** | `#EAB308` (Gold Core) | `#1F1E19` |
+| **Dark** | `dark_indigo` | **Abyssal Indigo** | `#818CF8` (Soft Violet) | `#1C1D2E` |
+| **Dark** | `dark_carbon` | **Carbon Noir** | `#94A3B8` (Steel Gray) | `#1D1E22` |
+| **Dark** | `dark_merlot` | **Vintage Merlot** | `#F43F5E` (Rose Blossom) | `#261B20` |
+| **Dark** | `dark_gunmetal` | **Gunmetal Steel** | `#06B6D4` (Cyan Glow) | `#1B2327` |
+
+---
+
+## 📦 Installation & Packaging
+
+### Windows
+```powershell
+# Run the automated installer
+irm https://raw.githubusercontent.com/mossambi/mossambi/main/install.ps1 | iex
+
+# Or install via package managers:
+winget install Mossambi.Mossambi
+scoop install mossambi
+```
+
+### Linux & macOS
 ```bash
-mossambi check test_vault/image/sample_photo.png
-mossambi bench test_vault/image/sample_photo.png webp
+# Universal Linux & macOS Script
+curl -fsSL https://raw.githubusercontent.com/mossambi/mossambi/main/install.sh | bash
+
+# Package Managers
+sudo apt install ./mossambi_2.1.0_amd64.deb    # Ubuntu / Debian
+sudo dnf install ./mossambi-2.1.0-1.x86_64.rpm# Fedora / RHEL
+yay -S mossambi-bin                          # Arch Linux
 ```
-
----
-
-## 🛡️ Security & Pessimistic Engineering Audit
-
-- **UTF-8 Character Boundary Slicing Safety**: Replaced raw byte slicing with character-aware iterators, eliminating panics on multi-byte international unicode characters or emojis.
-- **Win32 Hook RAII Guard (`HookGuard`)**: Guaranteed unhooking of `WH_MOUSE_LL` on thread exit or panic, eliminating desktop mouse lag.
-- **COM Initialization RAII Guard (`ComGuard` & `ComReleaseGuard`)**: Eliminates COM apartment leaks during active Explorer file detection.
-- **Zip-Slip & Tar-Slip Shield**: Rejects `ParentDir` (`..`), `RootDir`, and `Prefix` paths; prevents symlink and hardlink directory traversal.
-- **Decompression Bomb Ceilings**: 4 GB uncompressed byte ceiling, 20,000 archive entry cap, and 16,384 px / 512 MB image limit (`open_image_safe`).
-- **Memory Ceiling Caps**: 100 MB text ceiling, 50 MB subtitle read limit with cached `OnceLock<Regex>`, 50 MB DOCX XML bomb limit, 10,000 spreadsheet preview row cap, 100 MB JPEG padding cap.
-- **PDF Vector JPEG Magic Byte Verification**: Validates `[0xFF, 0xD8]` magic bytes before applying `DCTDecode`, falling back to `FlateDecode` to prevent corrupted PDF generation.
-- **Adaptive Repaint**: 16ms (60 FPS) when converting; 150-200ms when idle (slashes idle CPU churn by >90%).
 
 ---
 
 ## 🧪 Testing & Verification
 
-Run the full workspace test suite:
+Run the full integration test suite:
 ```bash
-cargo test --workspace
+cargo test
 ```
-Strict clippy zero-warning gate:
+
+Strict compiler and clippy gate (zero warnings enforced):
 ```bash
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --all-targets -- -D warnings
 ```
-Build release binaries:
+
+Build production release executable:
 ```bash
 cargo build --release
 ```

@@ -64,7 +64,10 @@ This guarantees 100% publication-grade clarity across all displays and 1200+ DPI
     }
 
     assert!(has_font, "PDF must contain embedded vector fonts");
-    assert!(!has_raster_image, "Text-to-PDF must be pure vector with ZERO rasterization");
+    assert!(
+        !has_raster_image,
+        "Text-to-PDF must be pure vector with ZERO rasterization"
+    );
 
     // Clean up
     let _ = fs::remove_file(txt_path);
@@ -78,8 +81,13 @@ fn test_transcode_file_text_to_pdf_pipeline() {
     let txt_path = temp_dir.join("input_document.txt");
     fs::write(&txt_path, "Hello from Mossambi Zero-Loss Engine!").unwrap();
 
-    let out_pdf = transcode_file(&txt_path, "PDF", LosslessMode::StrictBitExact, Some(&temp_dir))
-        .expect("Transcode text to PDF failed");
+    let out_pdf = transcode_file(
+        &txt_path,
+        "PDF",
+        LosslessMode::StrictBitExact,
+        Some(&temp_dir),
+    )
+    .expect("Transcode text to PDF failed");
 
     assert!(out_pdf.exists());
     assert_eq!(out_pdf.extension().and_then(|e| e.to_str()), Some("pdf"));

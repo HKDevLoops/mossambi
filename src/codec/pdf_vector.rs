@@ -63,7 +63,12 @@ fn calculate_text_width(text: &str, font_size: f32, font_family: &str) -> f32 {
 }
 
 /// Word-wraps a single paragraph into lines fitting within max_width.
-fn wrap_paragraph(paragraph: &str, max_width: f32, font_size: f32, font_family: &str) -> Vec<String> {
+fn wrap_paragraph(
+    paragraph: &str,
+    max_width: f32,
+    font_size: f32,
+    font_family: &str,
+) -> Vec<String> {
     if paragraph.is_empty() {
         return vec![String::new()];
     }
@@ -106,16 +111,14 @@ fn escape_pdf_string(s: &str) -> String {
             ')' => out.push_str(r"\)"),
             '\r' => {}
             // Normalize non-ASCII characters to closest ASCII equivalent or placeholder
-            c if c as u32 > 127 => {
-                match c {
-                    '“' | '”' => out.push('"'),
-                    '‘' | '’' => out.push('\''),
-                    '—' | '–' => out.push('-'),
-                    '•' => out.push('*'),
-                    '…' => out.push_str("..."),
-                    _ => out.push('?'),
-                }
-            }
+            c if c as u32 > 127 => match c {
+                '“' | '”' => out.push('"'),
+                '‘' | '’' => out.push('\''),
+                '—' | '–' => out.push('-'),
+                '•' => out.push('*'),
+                '…' => out.push_str("..."),
+                _ => out.push('?'),
+            },
             c => out.push(c),
         }
     }
@@ -140,7 +143,10 @@ pub fn convert_text_to_pdf_vector(
     let meta = fs::metadata(input_path)?;
     const MAX_TEXT_PDF_BYTES: u64 = 100 * 1024 * 1024; // 100 MB safety ceiling
     if meta.len() > MAX_TEXT_PDF_BYTES {
-        bail!("Input text file exceeds safe ceiling of 100 MB: {}", input_path.display());
+        bail!(
+            "Input text file exceeds safe ceiling of 100 MB: {}",
+            input_path.display()
+        );
     }
 
     let raw_text = fs::read_to_string(input_path)
@@ -239,7 +245,10 @@ pub fn render_text_to_pdf(text: &str, output_path: &Path, cfg: &TextPdfSettings)
             }
         } else {
             // Normal paragraph or bullet point
-            let content_text = if let Some(stripped) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+            let content_text = if let Some(stripped) = trimmed
+                .strip_prefix("- ")
+                .or_else(|| trimmed.strip_prefix("* "))
+            {
                 format!("   - {}", stripped)
             } else {
                 trimmed.to_string()
@@ -327,8 +336,14 @@ pub fn render_text_to_pdf(text: &str, output_path: &Path, cfg: &TextPdfSettings)
             if let Some(ref title) = cfg.title {
                 ops.push(Operation::new("BT", vec![]));
                 ops.push(Operation::new("Tf", vec!["F_REG".into(), 8.5.into()]));
-                ops.push(Operation::new("rg", vec![0.4.into(), 0.4.into(), 0.4.into()]));
-                ops.push(Operation::new("Td", vec![margin.into(), (page_h - margin + 8.0).into()]));
+                ops.push(Operation::new(
+                    "rg",
+                    vec![0.4.into(), 0.4.into(), 0.4.into()],
+                ));
+                ops.push(Operation::new(
+                    "Td",
+                    vec![margin.into(), (page_h - margin + 8.0).into()],
+                ));
                 ops.push(Operation::new(
                     "Tj",
                     vec![Object::string_literal(escape_pdf_string(title))],
@@ -339,8 +354,14 @@ pub fn render_text_to_pdf(text: &str, output_path: &Path, cfg: &TextPdfSettings)
             // Pantone 376 C Citrus Green divider line: #78BE20 -> (0.47, 0.75, 0.13)
             ops.push(Operation::new("q", vec![]));
             ops.push(Operation::new("w", vec![0.75.into()]));
-            ops.push(Operation::new("RG", vec![0.47.into(), 0.75.into(), 0.13.into()]));
-            ops.push(Operation::new("m", vec![margin.into(), (page_h - margin).into()]));
+            ops.push(Operation::new(
+                "RG",
+                vec![0.47.into(), 0.75.into(), 0.13.into()],
+            ));
+            ops.push(Operation::new(
+                "m",
+                vec![margin.into(), (page_h - margin).into()],
+            ));
             ops.push(Operation::new(
                 "l",
                 vec![(page_w - margin).into(), (page_h - margin).into()],
@@ -351,8 +372,14 @@ pub fn render_text_to_pdf(text: &str, output_path: &Path, cfg: &TextPdfSettings)
             // Footer divider line (light gray)
             ops.push(Operation::new("q", vec![]));
             ops.push(Operation::new("w", vec![0.5.into()]));
-            ops.push(Operation::new("RG", vec![0.8.into(), 0.8.into(), 0.8.into()]));
-            ops.push(Operation::new("m", vec![margin.into(), (margin - 8.0).into()]));
+            ops.push(Operation::new(
+                "RG",
+                vec![0.8.into(), 0.8.into(), 0.8.into()],
+            ));
+            ops.push(Operation::new(
+                "m",
+                vec![margin.into(), (margin - 8.0).into()],
+            ));
             ops.push(Operation::new(
                 "l",
                 vec![(page_w - margin).into(), (margin - 8.0).into()],
@@ -363,8 +390,14 @@ pub fn render_text_to_pdf(text: &str, output_path: &Path, cfg: &TextPdfSettings)
             // Footer text left: "Mossambi Publishing Engine"
             ops.push(Operation::new("BT", vec![]));
             ops.push(Operation::new("Tf", vec!["F_REG".into(), 8.0.into()]));
-            ops.push(Operation::new("rg", vec![0.5.into(), 0.5.into(), 0.5.into()]));
-            ops.push(Operation::new("Td", vec![margin.into(), (margin - 20.0).into()]));
+            ops.push(Operation::new(
+                "rg",
+                vec![0.5.into(), 0.5.into(), 0.5.into()],
+            ));
+            ops.push(Operation::new(
+                "Td",
+                vec![margin.into(), (margin - 20.0).into()],
+            ));
             ops.push(Operation::new(
                 "Tj",
                 vec![Object::string_literal("Generated by Mossambi Native Suite")],
@@ -376,10 +409,16 @@ pub fn render_text_to_pdf(text: &str, output_path: &Path, cfg: &TextPdfSettings)
             let page_str_w = calculate_text_width(&page_str, 8.0, base_font_name);
             ops.push(Operation::new("BT", vec![]));
             ops.push(Operation::new("Tf", vec!["F_REG".into(), 8.0.into()]));
-            ops.push(Operation::new("rg", vec![0.4.into(), 0.4.into(), 0.4.into()]));
+            ops.push(Operation::new(
+                "rg",
+                vec![0.4.into(), 0.4.into(), 0.4.into()],
+            ));
             ops.push(Operation::new(
                 "Td",
-                vec![(page_w - margin - page_str_w).into(), (margin - 20.0).into()],
+                vec![
+                    (page_w - margin - page_str_w).into(),
+                    (margin - 20.0).into(),
+                ],
             ));
             ops.push(Operation::new(
                 "Tj",
@@ -461,8 +500,12 @@ pub fn render_text_to_pdf(text: &str, output_path: &Path, cfg: &TextPdfSettings)
     doc.trailer.set("Root", catalog_id);
 
     // Save document to file
-    let mut file = fs::File::create(output_path)
-        .with_context(|| format!("Failed to create destination PDF: {}", output_path.display()))?;
+    let mut file = fs::File::create(output_path).with_context(|| {
+        format!(
+            "Failed to create destination PDF: {}",
+            output_path.display()
+        )
+    })?;
     doc.save_to(&mut file)
         .with_context(|| "Failed to write PDF binary stream")?;
 
@@ -475,8 +518,12 @@ pub fn convert_image_to_pdf_vector(
     output_path: &Path,
     target_dpi: Option<f32>,
 ) -> Result<()> {
-    let img = crate::codec::open_image_safe(input_path)
-        .with_context(|| format!("Failed to open image for PDF embedding: {}", input_path.display()))?;
+    let img = crate::codec::open_image_safe(input_path).with_context(|| {
+        format!(
+            "Failed to open image for PDF embedding: {}",
+            input_path.display()
+        )
+    })?;
     let (width, height) = (img.width(), img.height());
 
     let dpi = target_dpi.unwrap_or(150.0);
@@ -542,7 +589,10 @@ pub fn convert_image_to_pdf_vector(
             Operation::new("Q", vec![]),
         ],
     };
-    let content_id = doc.add_object(Stream::new(dictionary!(), content.encode().unwrap_or_default()));
+    let content_id = doc.add_object(Stream::new(
+        dictionary!(),
+        content.encode().unwrap_or_default(),
+    ));
 
     let page_id = doc.add_object(dictionary! {
         "Type" => "Page",

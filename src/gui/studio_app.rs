@@ -1,6 +1,5 @@
 //! Mossambi Universal Desktop File Conversion Studio Application
 
-use eframe::egui::{self, Color32, Rounding, Stroke, Vec2, ViewportBuilder, ViewportCommand};
 use crate::archive::{pack_archive, unpack_archive, ArchiveType};
 use crate::codec::{
     convert_text_to_pdf_vector, transcode_file, transcode_to_all_formats, LosslessMode,
@@ -12,6 +11,7 @@ use crate::gui::macos_theme::*;
 use crate::gui::quick_settings::QuickSettingsState;
 use crate::gui::studio_view::StudioView;
 use crate::gui::tray::{ActivationManager, AppControlEvent};
+use eframe::egui::{self, Vec2, ViewportBuilder, ViewportCommand};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
@@ -87,32 +87,10 @@ impl MossambiApp {
     }
 
     pub fn new_with_path(cc: &eframe::CreationContext<'_>, initial_path: Option<PathBuf>) -> Self {
-        let mut visuals = egui::Visuals::dark();
-        visuals.window_fill = Color32::from_rgb(15, 17, 23);
-        visuals.panel_fill = Color32::from_rgb(15, 17, 23);
-        visuals.faint_bg_color = Color32::from_rgb(22, 26, 36);
-        visuals.extreme_bg_color = Color32::from_rgb(11, 13, 18);
-
-        visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(22, 26, 36);
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(180, 186, 200));
-        visuals.widgets.noninteractive.rounding = Rounding::same(8.0);
-
-        visuals.widgets.inactive.bg_fill = Color32::from_rgb(26, 30, 42);
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(215, 220, 232));
-        visuals.widgets.inactive.rounding = Rounding::same(8.0);
-
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(38, 44, 60);
-        visuals.widgets.hovered.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
-        visuals.widgets.hovered.rounding = Rounding::same(8.0);
-
-        visuals.widgets.active.bg_fill = Color32::from_rgb(0, 122, 255); // Eye-safe Classic Blue / Apple System Blue
-        visuals.widgets.active.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
-        visuals.widgets.active.rounding = Rounding::same(8.0);
-
-        visuals.selection.bg_fill = Color32::from_rgba_premultiplied(0, 122, 255, 90);
-        visuals.selection.stroke = Stroke::new(1.0_f32, Color32::from_rgb(0, 122, 255));
-
-        cc.egui_ctx.set_visuals(visuals);
+        let cfg = crate::core::MossambiConfig::load();
+        let current_theme = ThemeStyle::from(cfg.theme_mode);
+        let palette = current_theme.colors();
+        crate::gui::macos_theme::apply_theme_visuals(&cc.egui_ctx, &palette);
 
         let mut style = (*cc.egui_ctx.style()).clone();
         style.spacing.item_spacing = Vec2::new(10.0, 8.0);
@@ -124,17 +102,23 @@ impl MossambiApp {
         let mut fonts = egui::FontDefinitions::default();
         fonts.font_data.insert(
             "AgaveNerdFont-Regular".to_owned(),
-            egui::FontData::from_static(include_bytes!("../../assets/fonts/AgaveNerdFont-Regular.ttf")),
+            egui::FontData::from_static(include_bytes!(
+                "../../assets/fonts/AgaveNerdFont-Regular.ttf"
+            )),
         );
         fonts.font_data.insert(
             "AgaveNerdFont-Bold".to_owned(),
-            egui::FontData::from_static(include_bytes!("../../assets/fonts/AgaveNerdFont-Bold.ttf")),
+            egui::FontData::from_static(include_bytes!(
+                "../../assets/fonts/AgaveNerdFont-Bold.ttf"
+            )),
         );
-        fonts.families
+        fonts
+            .families
             .entry(egui::FontFamily::Monospace)
             .or_default()
             .insert(0, "AgaveNerdFont-Regular".to_owned());
-        fonts.families
+        fonts
+            .families
             .entry(egui::FontFamily::Proportional)
             .or_default()
             .insert(1, "AgaveNerdFont-Regular".to_owned());
@@ -146,7 +130,9 @@ impl MossambiApp {
                 app.studio_view.explorer_view.navigate_to(path);
             } else if path.is_file() {
                 if let Some(parent) = path.parent() {
-                    app.studio_view.explorer_view.navigate_to(parent.to_path_buf());
+                    app.studio_view
+                        .explorer_view
+                        .navigate_to(parent.to_path_buf());
                 }
                 app.select_file(path);
             }
@@ -261,7 +247,9 @@ pub fn execute_conversion(
 
         match transcode_to_all_formats(input, mode, None) {
             Ok(outputs) => return ConversionResult::Success(outputs),
-            Err(e) => return ConversionResult::Failure(format!("Batch ALL transcode failed: {}", e)),
+            Err(e) => {
+                return ConversionResult::Failure(format!("Batch ALL transcode failed: {}", e))
+            }
         }
     }
 
@@ -269,8 +257,25 @@ pub fn execute_conversion(
     let (cat, in_ext) = UniversalRegistry::classify_file(input);
     let is_text = matches!(
         in_ext.as_str(),
-        "TXT" | "MD" | "RST" | "LOG" | "JSON" | "XML" | "YAML" | "YML" | "RS" | "PY" | "JS"
-            | "TS" | "C" | "CPP" | "H" | "HTML" | "HTM" | "ORG" | "TEX"
+        "TXT"
+            | "MD"
+            | "RST"
+            | "LOG"
+            | "JSON"
+            | "XML"
+            | "YAML"
+            | "YML"
+            | "RS"
+            | "PY"
+            | "JS"
+            | "TS"
+            | "C"
+            | "CPP"
+            | "H"
+            | "HTML"
+            | "HTM"
+            | "ORG"
+            | "TEX"
     );
 
     if target_upper == "PDF" && (cat == FileCategory::Document || is_text) {
@@ -282,28 +287,42 @@ pub fn execute_conversion(
             line_spacing: 1.35,
             margin_pt: settings.pdf_margin,
             show_header_footer: settings.pdf_header_footer,
-            title: Some(input.file_stem().and_then(|s| s.to_str()).unwrap_or("Document").to_string()),
+            title: Some(
+                input
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Document")
+                    .to_string(),
+            ),
         };
 
         match convert_text_to_pdf_vector(input, &out_path, Some(pdf_cfg)) {
             Ok(()) => return ConversionResult::Success(vec![out_path]),
-            Err(e) => return ConversionResult::Failure(format!("Vector PDF generation failed: {}", e)),
+            Err(e) => {
+                return ConversionResult::Failure(format!("Vector PDF generation failed: {}", e))
+            }
         }
     }
 
     // 4. Archive Extraction or Packing
     if target_upper == "EXTRACT" {
         let parent = input.parent().unwrap_or_else(|| Path::new("."));
-        let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("extracted");
+        let stem = input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("extracted");
         let dest = parent.join(stem);
         match unpack_archive(input, &dest) {
             Ok(()) => return ConversionResult::Success(vec![dest]),
-            Err(e) => return ConversionResult::Failure(format!("Archive extraction failed: {}", e)),
+            Err(e) => {
+                return ConversionResult::Failure(format!("Archive extraction failed: {}", e))
+            }
         }
     }
 
     if ["ZIP", "7Z", "TAR", "TAR.GZ", "TAR.XZ", "TAR.ZST"].contains(&target_upper.as_str()) {
-        let out_archive = crate::core::resolve_clean_sibling_output_path(input, &target_upper, None);
+        let out_archive =
+            crate::core::resolve_clean_sibling_output_path(input, &target_upper, None);
         let arch_type = ArchiveType::from_extension(&target_upper).unwrap_or(ArchiveType::Zip);
         match pack_archive(&[input.to_path_buf()], &out_archive, arch_type) {
             Ok(()) => return ConversionResult::Success(vec![out_archive]),
@@ -338,6 +357,8 @@ impl eframe::App for MossambiApp {
             || self.last_applied_theme != Some(self.theme)
             || self.last_applied_glass != Some(current_glass)
         {
+            let palette = self.theme.colors();
+            crate::gui::macos_theme::apply_theme_visuals(ctx, &palette);
             crate::gui::dwm_helper::apply_system_backdrop(self.theme.is_dark(), current_glass);
             self.last_applied_theme = Some(self.theme);
             self.last_applied_glass = Some(current_glass);
@@ -361,7 +382,8 @@ impl eframe::App for MossambiApp {
                     if let Some(path) = event.active_file {
                         self.select_file(path);
                     }
-                    self.status_message = format!("Summoned at ({:.0}, {:.0})", event.cursor_x, event.cursor_y);
+                    self.status_message =
+                        format!("Summoned at ({:.0}, {:.0})", event.cursor_x, event.cursor_y);
                 }
                 AppControlEvent::ChangeTheme(new_theme) => {
                     self.theme = new_theme;
@@ -383,7 +405,10 @@ impl eframe::App for MossambiApp {
                     cursor_y,
                     active_file,
                 } => {
-                    self.launch_radial_widget_at(Some((cursor_x, cursor_y)), active_file.as_deref());
+                    self.launch_radial_widget_at(
+                        Some((cursor_x, cursor_y)),
+                        active_file.as_deref(),
+                    );
                 }
                 AppControlEvent::ToggleAutostart(enabled) => {
                     let mut cfg = crate::core::MossambiConfig::load();
@@ -405,7 +430,8 @@ impl eframe::App for MossambiApp {
                     if let Some(first) = files.first() {
                         self.last_completed_output = Some(first.clone());
                     }
-                    self.status_message = format!("✨ Successfully converted {} file(s)!", files.len());
+                    self.status_message =
+                        format!("✨ Successfully converted {} file(s)!", files.len());
                 }
                 ConversionResult::Failure(err) => {
                     self.status_message = format!("❌ {}", err);
@@ -435,8 +461,8 @@ impl eframe::App for MossambiApp {
                     let dropped_path = drop.path.clone().or_else(|| {
                         #[cfg(target_os = "windows")]
                         {
-                            use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
                             use windows_sys::Win32::Foundation::POINT;
+                            use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
                             let mut pt = POINT { x: 0, y: 0 };
                             unsafe { GetCursorPos(&mut pt) };
                             crate::gui::active_file::get_active_file_under_cursor(pt.x, pt.y)

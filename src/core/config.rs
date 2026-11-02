@@ -163,8 +163,16 @@ impl ThemeMode {
             return Some(Self::LightBrilliant);
         }
         for mode in Self::all() {
-            let id = mode.to_pantone_theme().id.to_lowercase().replace([' ', '-', '_'], "");
-            let name = mode.to_pantone_theme().name.to_lowercase().replace([' ', '-', '_'], "");
+            let id = mode
+                .to_pantone_theme()
+                .id
+                .to_lowercase()
+                .replace([' ', '-', '_'], "");
+            let name = mode
+                .to_pantone_theme()
+                .name
+                .to_lowercase()
+                .replace([' ', '-', '_'], "");
             if id == q || name == q {
                 return Some(*mode);
             }
@@ -186,7 +194,11 @@ pub enum GlassEffect {
 
 impl GlassEffect {
     pub fn all() -> &'static [GlassEffect] {
-        &[GlassEffect::FrostedGlass, GlassEffect::LiquidGlass, GlassEffect::Opaque]
+        &[
+            GlassEffect::FrostedGlass,
+            GlassEffect::LiquidGlass,
+            GlassEffect::Opaque,
+        ]
     }
 
     pub fn name(&self) -> &'static str {
@@ -417,7 +429,10 @@ impl MossambiConfig {
     #[cfg(not(target_os = "windows"))]
     pub fn is_autostart_configured() -> bool {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let desktop_file = PathBuf::from(&home).join(".config").join("autostart").join("mossambi-daemon.desktop");
+        let desktop_file = PathBuf::from(&home)
+            .join(".config")
+            .join("autostart")
+            .join("mossambi-daemon.desktop");
         desktop_file.exists()
     }
 }

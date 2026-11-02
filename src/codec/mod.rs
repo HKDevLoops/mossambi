@@ -21,13 +21,11 @@ pub use remux::{
     calculate_sha256, verify_conversion_fidelity, MathematicalQualityReport, MathematicalRemuxType,
 };
 
+use crate::archive::{pack_archive, unpack_archive, ArchiveType};
+use crate::core::{resolve_clean_sibling_output_path, FileCategory, UniversalRegistry};
+use crate::hwaccel::detect_hardware_capabilities;
 use anyhow::{bail, Context, Result};
 use calamine::Reader;
-use crate::archive::{pack_archive, unpack_archive, ArchiveType};
-use crate::core::{
-    resolve_clean_sibling_output_path, FileCategory, UniversalRegistry,
-};
-use crate::hwaccel::detect_hardware_capabilities;
 use rayon::prelude::*;
 use std::fs;
 use std::io::Read;
@@ -85,8 +83,13 @@ pub fn transcode_file(
         FileCategory::Archive => {
             if target_upper == "EXTRACT" {
                 let parent = input.parent().unwrap_or_else(|| Path::new("."));
-                let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("extracted");
-                let dest = custom_dir.map(PathBuf::from).unwrap_or_else(|| parent.join(stem));
+                let stem = input
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("extracted");
+                let dest = custom_dir
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| parent.join(stem));
                 unpack_archive(input, &dest)?;
                 return Ok(dest);
             }
@@ -164,7 +167,12 @@ pub fn open_image_safe(path: &Path) -> Result<image::DynamicImage> {
     limits.max_alloc = Some(512 * 1024 * 1024);
     reader.limits(limits);
 
-    reader.decode().with_context(|| format!("Failed to decode image safely (exceeded safety limits or corrupted): {}", path.display()))
+    reader.decode().with_context(|| {
+        format!(
+            "Failed to decode image safely (exceeded safety limits or corrupted): {}",
+            path.display()
+        )
+    })
 }
 
 fn convert_image_zero_loss(
@@ -251,18 +259,25 @@ fn convert_document_native(
     // Memory Safety Ceiling: Prevent allocating arbitrary gigabytes on massive inputs
     if let Ok(meta) = fs::metadata(input) {
         if meta.len() > 100 * 1024 * 1024 {
-            bail!("Input document exceeds safe text conversion ceiling of 100 MB: {}", input.display());
+            bail!(
+                "Input document exceeds safe text conversion ceiling of 100 MB: {}",
+                input.display()
+            );
         }
     }
 
     // 1. Extract plain text content from various source document formats
     let document_text = match src_ext {
-        "DOCX" => extract_text_from_docx(input).unwrap_or_else(|_| fs::read_to_string(input).unwrap_or_default()),
+        "DOCX" => extract_text_from_docx(input)
+            .unwrap_or_else(|_| fs::read_to_string(input).unwrap_or_default()),
         "PDF" => extract_text_from_pdf(input).unwrap_or_else(|_| String::new()),
         _ => fs::read_to_string(input).unwrap_or_default(),
     };
 
-    let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Document");
+    let title = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Document");
 
     // 2. Render to target format
     match target_format {
@@ -297,7 +312,10 @@ fn convert_document_native(
                         html.push_str(&format!("<h2>{}</h2>\n", stripped));
                     } else if let Some(stripped) = trimmed.strip_prefix("## ") {
                         html.push_str(&format!("<h3>{}</h3>\n", stripped));
-                    } else if let Some(stripped) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+                    } else if let Some(stripped) = trimmed
+                        .strip_prefix("- ")
+                        .or_else(|| trimmed.strip_prefix("* "))
+                    {
                         html.push_str(&format!("<li>{}</li>\n", stripped));
                     } else if trimmed.is_empty() {
                         html.push_str("<br/>\n");
@@ -380,8 +398,8 @@ pub fn extract_text_from_docx(path: &Path) -> Result<String> {
 
 /// Extract clean text from a PDF document using lopdf.
 pub fn extract_text_from_pdf(path: &Path) -> Result<String> {
-    let doc = lopdf::Document::load(path)
-        .context("Failed to load PDF document for text extraction")?;
+    let doc =
+        lopdf::Document::load(path).context("Failed to load PDF document for text extraction")?;
     let page_numbers: Vec<u32> = doc.get_pages().keys().cloned().collect();
     let text = doc
         .extract_text(&page_numbers)
@@ -463,7 +481,8 @@ fn convert_spreadsheet_native(
                     if let Ok(range) = wb.worksheet_range(&sheet) {
                         for (r_idx, row) in range.rows().enumerate() {
                             for (c_idx, cell) in row.iter().enumerate() {
-                                let _ = ws.write_string(r_idx as u32, c_idx as u16, cell.to_string());
+                                let _ =
+                                    ws.write_string(r_idx as u32, c_idx as u16, cell.to_string());
                             }
                         }
                     }
@@ -507,7 +526,10 @@ fn convert_spreadsheet_to_pdf(input: &Path, output: &Path) -> Result<()> {
             .has_headers(false)
             .delimiter(delim)
             .from_path(input)?;
-        let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Spreadsheet");
+        let title = input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Spreadsheet");
         table_text.push_str(&format!("# {}\n\n", title));
         for result in rdr.records() {
             let record = result?;
@@ -526,7 +548,10 @@ fn convert_spreadsheet_to_html(input: &Path, output: &Path) -> Result<()> {
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_uppercase();
-    let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Spreadsheet");
+    let title = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Spreadsheet");
 
     let mut html = format!(
         "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>{}</title>\n\
@@ -606,8 +631,14 @@ fn convert_presentation_native(
     _src_ext: &str,
     target_format: &str,
 ) -> Result<()> {
-    let title = input.file_stem().and_then(|s| s.to_str()).unwrap_or("Presentation");
-    let content = format!("# {}\n\n[Presentation Slide Deck]\nConverted with Mossambi Zero-Loss Engine.\n", title);
+    let title = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Presentation");
+    let content = format!(
+        "# {}\n\n[Presentation Slide Deck]\nConverted with Mossambi Zero-Loss Engine.\n",
+        title
+    );
 
     match target_format {
         "PDF" => {
@@ -669,7 +700,16 @@ fn convert_audio_zero_loss(
         }
         "MP3" => {
             // LAME 320 kbps High-Fidelity CBR Studio Master with ID3v2.4
-            cmd.args(["-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100", "-id3v2_version", "4"]);
+            cmd.args([
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "320k",
+                "-ar",
+                "44100",
+                "-id3v2_version",
+                "4",
+            ]);
         }
         "M4A" | "AAC" => {
             // Fraunhofer / CoreAudio style 320 kbps high-definition AAC-LC
@@ -677,7 +717,9 @@ fn convert_audio_zero_loss(
         }
         "OPUS" => {
             // Broadcast Fullband (20 Hz - 20 kHz) 256 kbps
-            cmd.args(["-c:a", "libopus", "-b:a", "256k", "-vbr", "on", "-ar", "48000"]);
+            cmd.args([
+                "-c:a", "libopus", "-b:a", "256k", "-vbr", "on", "-ar", "48000",
+            ]);
         }
         "OGG" => {
             cmd.args(["-c:a", "libvorbis", "-q:a", "8", "-ar", "48000"]);
@@ -739,7 +781,16 @@ fn convert_video_zero_loss(
         cmd.arg("-vn");
         match target_format {
             "MP3" => {
-                cmd.args(["-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100", "-id3v2_version", "4"]);
+                cmd.args([
+                    "-c:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "320k",
+                    "-ar",
+                    "44100",
+                    "-id3v2_version",
+                    "4",
+                ]);
             }
             "WAV" => {
                 cmd.args(["-c:a", "pcm_s24le", "-ar", "48000"]);
@@ -754,7 +805,9 @@ fn convert_video_zero_loss(
                 cmd.args(["-c:a", "libvorbis", "-q:a", "8", "-ar", "48000"]);
             }
             "OPUS" => {
-                cmd.args(["-c:a", "libopus", "-b:a", "256k", "-vbr", "on", "-ar", "48000"]);
+                cmd.args([
+                    "-c:a", "libopus", "-b:a", "256k", "-vbr", "on", "-ar", "48000",
+                ]);
             }
             _ => {
                 cmd.args(["-c:a", "aac", "-b:a", "320k"]);
@@ -769,7 +822,9 @@ fn convert_video_zero_loss(
             const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
             cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
         }
-        let status = cmd.status().context("Failed to run FFmpeg for audio extraction.")?;
+        let status = cmd
+            .status()
+            .context("Failed to run FFmpeg for audio extraction.")?;
         if !status.success() {
             bail!("FFmpeg audio extraction failed with status {:?}", status);
         }
@@ -805,7 +860,12 @@ fn convert_video_zero_loss(
         }
 
         if let Ok(status) = remux_cmd.status() {
-            if status.success() && output.exists() && fs::metadata(output).map(|m| m.len() > 1024).unwrap_or(false) {
+            if status.success()
+                && output.exists()
+                && fs::metadata(output)
+                    .map(|m| m.len() > 1024)
+                    .unwrap_or(false)
+            {
                 return Ok(());
             }
         }
@@ -827,13 +887,20 @@ fn convert_video_zero_loss(
         "PRORES" => {
             // Apple ProRes 422 HQ / 4444 Cinema Standard
             cmd.args([
-                "-c:v", "prores_ks",
-                "-profile:v", "4",
-                "-pix_fmt", "yuv422p10le",
-                "-threads", "0",
-                "-bufsize", "64M",
-                "-c:a", "pcm_s24le",
-                "-ar", "48000",
+                "-c:v",
+                "prores_ks",
+                "-profile:v",
+                "4",
+                "-pix_fmt",
+                "yuv422p10le",
+                "-threads",
+                "0",
+                "-bufsize",
+                "64M",
+                "-c:a",
+                "pcm_s24le",
+                "-ar",
+                "48000",
             ]);
         }
         "GIF" => {
@@ -851,28 +918,22 @@ fn convert_video_zero_loss(
                 } else if hw.h264_encoder.contains("qsv") {
                     cmd.args(["-global_quality", "16", "-bufsize", "64M"]);
                 } else if hw.h264_encoder.contains("amf") {
-                    cmd.args(["-quality", "speed", "-rc", "cqp", "-qp_i", "16", "-qp_p", "16", "-bufsize", "64M"]);
+                    cmd.args([
+                        "-quality", "speed", "-rc", "cqp", "-qp_i", "16", "-qp_p", "16",
+                        "-bufsize", "64M",
+                    ]);
                 } else {
                     cmd.args(["-b:v", "10M", "-bufsize", "64M"]);
                 }
                 cmd.args([
-                    "-pix_fmt", "yuv420p",
-                    "-c:a", "aac",
-                    "-b:a", "320k",
-                    "-ar", "48000",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
                 ]);
             } else {
                 // CPU x264 Broadcast Quality with multi-threading
                 cmd.args([
-                    "-c:v", "libx264",
-                    "-crf", "16",
-                    "-preset", "veryfast",
-                    "-threads", "0",
-                    "-bufsize", "64M",
-                    "-pix_fmt", "yuv420p",
-                    "-c:a", "aac",
-                    "-b:a", "320k",
-                    "-ar", "48000",
+                    "-c:v", "libx264", "-crf", "16", "-preset", "veryfast", "-threads", "0",
+                    "-bufsize", "64M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "320k", "-ar",
+                    "48000",
                 ]);
             }
             if matches!(target_format, "MP4" | "MOV" | "M4V") {
@@ -881,19 +942,30 @@ fn convert_video_zero_loss(
         }
         "WEBM" => {
             cmd.args([
-                "-c:v", "libvpx-vp9",
-                "-crf", "18",
-                "-b:v", "0",
-                "-threads", "0",
-                "-bufsize", "64M",
-                "-pix_fmt", "yuv420p",
-                "-c:a", "libopus",
-                "-b:a", "256k",
-                "-ar", "48000",
+                "-c:v",
+                "libvpx-vp9",
+                "-crf",
+                "18",
+                "-b:v",
+                "0",
+                "-threads",
+                "0",
+                "-bufsize",
+                "64M",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "libopus",
+                "-b:a",
+                "256k",
+                "-ar",
+                "48000",
             ]);
         }
         "AVI" => {
-            cmd.args(["-c:v", "mpeg4", "-q:v", "2", "-threads", "0", "-c:a", "mp3", "-b:a", "320k"]);
+            cmd.args([
+                "-c:v", "mpeg4", "-q:v", "2", "-threads", "0", "-c:a", "mp3", "-b:a", "320k",
+            ]);
         }
         _ => {
             cmd.args(["-c", "copy"]);
@@ -923,7 +995,10 @@ fn convert_subtitles(input: &Path, output: &Path, target_ext: &str) -> Result<()
     let meta = fs::metadata(input)?;
     const MAX_SUBTITLE_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
     if meta.len() > MAX_SUBTITLE_BYTES {
-        bail!("Subtitle file exceeds maximum permitted size of 50 MB: {}", input.display());
+        bail!(
+            "Subtitle file exceeds maximum permitted size of 50 MB: {}",
+            input.display()
+        );
     }
 
     let raw = fs::read_to_string(input)?;
@@ -939,16 +1014,23 @@ fn convert_subtitles(input: &Path, output: &Path, target_ext: &str) -> Result<()
 
     let converted = match (in_ext.as_str(), target_ext) {
         ("SRT", "VTT") => {
-            let re = SRT_TO_VTT_RE.get_or_init(|| regex::Regex::new(r"(\d{2}:\d{2}:\d{2}),(\d{3})").expect("valid regex"));
+            let re = SRT_TO_VTT_RE.get_or_init(|| {
+                regex::Regex::new(r"(\d{2}:\d{2}:\d{2}),(\d{3})").expect("valid regex")
+            });
             format!("WEBVTT\n\n{}", re.replace_all(&raw, "$1.$2"))
         }
         ("VTT", "SRT") => {
             let body = raw.trim_start_matches("WEBVTT").trim();
-            let re = VTT_TO_SRT_RE.get_or_init(|| regex::Regex::new(r"(\d{2}:\d{2}:\d{2})\.(\d{3})").expect("valid regex"));
+            let re = VTT_TO_SRT_RE.get_or_init(|| {
+                regex::Regex::new(r"(\d{2}:\d{2}:\d{2})\.(\d{3})").expect("valid regex")
+            });
             re.replace_all(body, "$1,$2").to_string()
         }
         (_, "TXT") => {
-            let re = TXT_CLEANUP_RE.get_or_init(|| regex::Regex::new(r"(?m)^\d+\r?$|^\d{2}:\d{2}:\d{2}[,\.]\d{3}.*|^WEBVTT.*").expect("valid regex"));
+            let re = TXT_CLEANUP_RE.get_or_init(|| {
+                regex::Regex::new(r"(?m)^\d+\r?$|^\d{2}:\d{2}:\d{2}[,\.]\d{3}.*|^WEBVTT.*")
+                    .expect("valid regex")
+            });
             re.replace_all(&raw, "")
                 .lines()
                 .map(str::trim)

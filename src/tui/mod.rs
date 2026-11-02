@@ -14,15 +14,6 @@
 //!   archive packing run in background worker threads with generation counters and 30s watchdog timers.
 //!   Zero UI hitching, freezing, or lockups under rapid user tampering.
 
-use anyhow::Result;
-use crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind,
-        MouseButton, MouseEvent, MouseEventKind,
-    },
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
 use crate::archive::{pack_archive, ArchiveType};
 use crate::codec::{
     transcode_file, transcode_to_all_formats, BenchmarkEngine, BenchmarkReport, FileQualityChecker,
@@ -30,11 +21,19 @@ use crate::codec::{
 };
 use crate::core::{
     fuzzy_match, get_system_arch_info, get_system_drives, resolve_file_icon, spawn_async_dir_scan,
-    AsyncWorkerPool, DriveInfo, FileItem, MossambiConfig, ScanBatch,
-    TaskUpdate,
+    AsyncWorkerPool, DriveInfo, FileItem, MossambiConfig, ScanBatch, TaskUpdate,
 };
 use crate::exam::{optimize_exam_media, ExamConstraint};
 use crate::hwaccel::detect_hardware_capabilities;
+use anyhow::Result;
+use crossterm::{
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
+        MouseEvent, MouseEventKind,
+    },
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -53,12 +52,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // 100% Certified Pantone Palette Constants (Eye-Safe)
-pub const PANTONE_RAW_PEEL: Color = Color::Rgb(74, 133, 90);    // Pantone 16-5917 TPG Sage Meadow
-pub const PANTONE_SWEET_ZEST: Color = Color::Rgb(0, 122, 255);  // Pantone 19-4052 TPG Classic Blue
-pub const PANTONE_RIPE_PULP: Color = Color::Rgb(217, 119, 6);   // Pantone 14-1064 TPG Soft Amber
-pub const PANTONE_CITRUS_GOLD: Color = Color::Rgb(255, 184, 28);// Pantone 1235 C
-pub const PANTONE_TANGERINE: Color = Color::Rgb(248, 143, 88);  // Pantone 15-1247
-pub const PANTONE_DEEP_FOREST: Color = Color::Rgb(46, 77, 30);  // Pantone 371 C
+pub const PANTONE_RAW_PEEL: Color = Color::Rgb(74, 133, 90); // Pantone 16-5917 TPG Sage Meadow
+pub const PANTONE_SWEET_ZEST: Color = Color::Rgb(0, 122, 255); // Pantone 19-4052 TPG Classic Blue
+pub const PANTONE_RIPE_PULP: Color = Color::Rgb(217, 119, 6); // Pantone 14-1064 TPG Soft Amber
+pub const PANTONE_CITRUS_GOLD: Color = Color::Rgb(255, 184, 28); // Pantone 1235 C
+pub const PANTONE_TANGERINE: Color = Color::Rgb(248, 143, 88); // Pantone 15-1247
+pub const PANTONE_DEEP_FOREST: Color = Color::Rgb(46, 77, 30); // Pantone 371 C
 pub const PANTONE_WHITE: Color = Color::Rgb(244, 245, 247);
 
 // macOS Traffic Lights
@@ -323,7 +322,12 @@ impl AppState {
     pub fn trigger_async_scan(&mut self, dir: PathBuf) {
         self.current_dir = dir.clone();
         let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
-        spawn_async_dir_scan(dir.clone(), new_gen, Arc::clone(&self.scan_gen), self.scan_tx.clone());
+        spawn_async_dir_scan(
+            dir.clone(),
+            new_gen,
+            Arc::clone(&self.scan_gen),
+            self.scan_tx.clone(),
+        );
 
         // Also asynchronously scan parent directory for left Miller column
         if let Some(parent) = dir.parent() {
@@ -366,7 +370,8 @@ impl AppState {
                 })
                 .collect();
             scored.sort_by(|(a, score_a), (b, score_b)| {
-                score_b.cmp(score_a)
+                score_b
+                    .cmp(score_a)
                     .then_with(|| b.is_dir.cmp(&a.is_dir))
                     .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
             });
@@ -426,7 +431,11 @@ impl AppState {
     }
 
     pub fn toggle_select_all(&mut self) {
-        let all_paths: Vec<PathBuf> = self.filtered_entries().iter().map(|e| e.path.clone()).collect();
+        let all_paths: Vec<PathBuf> = self
+            .filtered_entries()
+            .iter()
+            .map(|e| e.path.clone())
+            .collect();
         if self.selected_paths.len() >= all_paths.len() && !all_paths.is_empty() {
             self.selected_paths.clear();
         } else {
@@ -449,27 +458,54 @@ impl AppState {
                 ));
             } else {
                 let ext = item.extension.to_lowercase();
-                if matches!(ext.as_str(), "txt" | "md" | "rs" | "toml" | "json" | "csv" | "yaml" | "py" | "c" | "cpp" | "h") {
+                if matches!(
+                    ext.as_str(),
+                    "txt"
+                        | "md"
+                        | "rs"
+                        | "toml"
+                        | "json"
+                        | "csv"
+                        | "yaml"
+                        | "py"
+                        | "c"
+                        | "cpp"
+                        | "h"
+                ) {
                     if let Ok(txt) = fs::read_to_string(&path) {
                         let lines: Vec<&str> = txt.lines().take(30).collect();
                         self.preview_content = Some(lines.join("\n"));
                     } else {
-                        self.preview_content = Some(format!("📄 Text File: {}\nSize: {}", item.name, item.formatted_size()));
+                        self.preview_content = Some(format!(
+                            "📄 Text File: {}\nSize: {}",
+                            item.name,
+                            item.formatted_size()
+                        ));
                     }
-                } else if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "tiff" | "avif" | "ico") {
+                } else if matches!(
+                    ext.as_str(),
+                    "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "tiff" | "avif" | "ico"
+                ) {
                     self.preview_content = Some(format!(
                         "🖼️ Image Media: {}\nSize: {}\nExtension: .{}\nFull Path: {}\n\nPress [c] to transcode\nPress [i] to inspect quality",
                         item.name, item.formatted_size(), ext, path.display()
                     ));
-                } else if matches!(ext.as_str(), "mp4" | "mkv" | "mov" | "avi" | "webm" | "mp3" | "wav" | "flac" | "aac") {
-                    self.preview_content = Some(format!(
+                } else if matches!(
+                    ext.as_str(),
+                    "mp4" | "mkv" | "mov" | "avi" | "webm" | "mp3" | "wav" | "flac" | "aac"
+                ) {
+                    self.preview_content =
+                        Some(format!(
                         "🎬 Audio/Video Media: {}\nSize: {}\nCodec: Stream Remuxable\nLocation: {}",
                         item.name, item.formatted_size(), path.display()
                     ));
                 } else {
                     self.preview_content = Some(format!(
                         "📦 File: {}\nSize: {}\nType: {}\nPath: {}",
-                        item.name, item.formatted_size(), ext, path.display()
+                        item.name,
+                        item.formatted_size(),
+                        ext,
+                        path.display()
                     ));
                 }
             }
@@ -495,46 +531,64 @@ impl AppState {
         };
 
         let target_ext = self.available_formats[self.selected_format_idx].to_lowercase();
-        self.active_task_name = Some(format!("Transcoding {} file(s) to {}", targets.len(), target_ext.to_uppercase()));
+        self.active_task_name = Some(format!(
+            "Transcoding {} file(s) to {}",
+            targets.len(),
+            target_ext.to_uppercase()
+        ));
         self.active_task_progress = 0.1;
-        self.status_message = format!("In Background: Transcoding to {}...", target_ext.to_uppercase());
+        self.status_message = format!(
+            "In Background: Transcoding to {}...",
+            target_ext.to_uppercase()
+        );
         self.status_is_error = false;
 
         let total = targets.len();
-        self.worker_pool.spawn_task("Transcode", move |_cancel, tx, task_id| {
-            for (idx, in_file) in targets.iter().enumerate() {
-                let stem = in_file.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
-                let out_file = in_file.parent().unwrap_or_else(|| Path::new(".")).join(format!("{}.{}", stem, target_ext));
+        self.worker_pool
+            .spawn_task("Transcode", move |_cancel, tx, task_id| {
+                for (idx, in_file) in targets.iter().enumerate() {
+                    let stem = in_file
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("output");
+                    let out_file = in_file
+                        .parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .join(format!("{}.{}", stem, target_ext));
 
-                let res = if target_ext == "all" {
-                    transcode_to_all_formats(in_file, LosslessMode::StrictBitExact, None)
-                        .map(|v| v.first().cloned().unwrap_or(out_file))
-                } else {
-                    transcode_file(in_file, &target_ext, LosslessMode::StrictBitExact, None)
-                };
+                    let res = if target_ext == "all" {
+                        transcode_to_all_formats(in_file, LosslessMode::StrictBitExact, None)
+                            .map(|v| v.first().cloned().unwrap_or(out_file))
+                    } else {
+                        transcode_file(in_file, &target_ext, LosslessMode::StrictBitExact, None)
+                    };
 
-                let frac = (idx + 1) as f32 / total as f32;
-                let _ = tx.send(TaskUpdate::Progress {
-                    id: task_id,
-                    fraction: frac,
-                    status: format!("Processed {}/{} files", idx + 1, total),
-                });
-
-                if let Err(e) = res {
-                    let _ = tx.send(TaskUpdate::Failed {
+                    let frac = (idx + 1) as f32 / total as f32;
+                    let _ = tx.send(TaskUpdate::Progress {
                         id: task_id,
-                        error: format!("Transcode error on {}: {}", in_file.display(), e),
+                        fraction: frac,
+                        status: format!("Processed {}/{} files", idx + 1, total),
                     });
-                    return;
-                }
-            }
 
-            let _ = tx.send(TaskUpdate::Completed {
-                id: task_id,
-                output: None,
-                message: format!("✓ Transcoded {} file(s) to {}", total, target_ext.to_uppercase()),
+                    if let Err(e) = res {
+                        let _ = tx.send(TaskUpdate::Failed {
+                            id: task_id,
+                            error: format!("Transcode error on {}: {}", in_file.display(), e),
+                        });
+                        return;
+                    }
+                }
+
+                let _ = tx.send(TaskUpdate::Completed {
+                    id: task_id,
+                    output: None,
+                    message: format!(
+                        "✓ Transcoded {} file(s) to {}",
+                        total,
+                        target_ext.to_uppercase()
+                    ),
+                });
             });
-        });
     }
 
     /// Triggers non-blocking background exam conformer via worker pool
@@ -547,31 +601,48 @@ impl AppState {
             }
 
             let (_, constraint) = self.exam_presets[self.selected_preset_idx].clone();
-            let stem = item.path.file_stem().and_then(|s| s.to_str()).unwrap_or("exam_output");
-            let out_file = item.path.parent().unwrap_or_else(|| Path::new(".")).join(format!("{}_conformed.jpg", stem));
+            let stem = item
+                .path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("exam_output");
+            let out_file = item
+                .path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(format!("{}_conformed.jpg", stem));
 
             self.active_task_name = Some("Conforming image to exam specifications".into());
             self.active_task_progress = 0.2;
             self.status_message = "🎯 Optimizing file to match exact pixel/byte envelope...".into();
 
-            self.worker_pool.spawn_task("ExamConformer", move |_cancel, tx, task_id| {
-                match optimize_exam_media(&item.path, &out_file, &constraint) {
-                    Ok(res) => {
-                        let len = fs::metadata(&res).map(|m| m.len()).unwrap_or(0);
-                        let _ = tx.send(TaskUpdate::Completed {
-                            id: task_id,
-                            output: Some(res),
-                            message: format!("✓ Exam Conformed: {:.1} KB within specifications!", len as f64 / 1024.0),
-                        });
-                    }
-                    Err(e) => {
-                        let _ = tx.send(TaskUpdate::Failed {
-                            id: task_id,
-                            error: format!("Exam conformer error: {}", e),
-                        });
-                    }
-                }
-            });
+            self.worker_pool
+                .spawn_task(
+                    "ExamConformer",
+                    move |_cancel, tx, task_id| match optimize_exam_media(
+                        &item.path,
+                        &out_file,
+                        &constraint,
+                    ) {
+                        Ok(res) => {
+                            let len = fs::metadata(&res).map(|m| m.len()).unwrap_or(0);
+                            let _ = tx.send(TaskUpdate::Completed {
+                                id: task_id,
+                                output: Some(res),
+                                message: format!(
+                                    "✓ Exam Conformed: {:.1} KB within specifications!",
+                                    len as f64 / 1024.0
+                                ),
+                            });
+                        }
+                        Err(e) => {
+                            let _ = tx.send(TaskUpdate::Failed {
+                                id: task_id,
+                                error: format!("Exam conformer error: {}", e),
+                            });
+                        }
+                    },
+                );
         }
     }
 
@@ -597,15 +668,22 @@ impl AppState {
         };
 
         let first = targets[0].clone();
-        let stem = first.file_stem().and_then(|s| s.to_str()).unwrap_or("bundle");
-        let out_file = first.parent().unwrap_or_else(|| Path::new(".")).join(format!("{}.{}", stem, ext));
+        let stem = first
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("bundle");
+        let out_file = first
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(format!("{}.{}", stem, ext));
 
         self.active_task_name = Some(format!("Packing {} item(s) into .{}", targets.len(), ext));
         self.active_task_progress = 0.2;
         self.status_message = format!("📦 Packing archive into .{}...", ext);
 
-        self.worker_pool.spawn_task("ArchivePack", move |_cancel, tx, task_id| {
-            match pack_archive(&targets, &out_file, atype) {
+        self.worker_pool.spawn_task(
+            "ArchivePack",
+            move |_cancel, tx, task_id| match pack_archive(&targets, &out_file, atype) {
                 Ok(_) => {
                     let _ = tx.send(TaskUpdate::Completed {
                         id: task_id,
@@ -619,8 +697,8 @@ impl AppState {
                         error: format!("Archive packing failed: {}", e),
                     });
                 }
-            }
-        });
+            },
+        );
     }
 
     pub fn inspect_selected_file(&mut self) {
@@ -628,7 +706,10 @@ impl AppState {
             if !item.is_dir {
                 match FileQualityChecker::inspect_file(&item.path) {
                     Ok(rep) => {
-                        self.inspection_status = format!("✓ Inspected {} (Score: {:.1}%, Format: {})", item.name, rep.overall_score, rep.format);
+                        self.inspection_status = format!(
+                            "✓ Inspected {} (Score: {:.1}%, Format: {})",
+                            item.name, rep.overall_score, rep.format
+                        );
                         self.quality_report = Some(rep);
                     }
                     Err(e) => {
@@ -644,7 +725,10 @@ impl AppState {
             if !item.is_dir {
                 match BenchmarkEngine::benchmark_file(&item.path, None) {
                     Ok(b) => {
-                        self.inspection_status = format!("✓ Benchmark: {:.2}ms (Throughput: {:.1} MB/s)", b.duration_ms, b.throughput_mb_per_sec);
+                        self.inspection_status = format!(
+                            "✓ Benchmark: {:.2}ms (Throughput: {:.1} MB/s)",
+                            b.duration_ms, b.throughput_mb_per_sec
+                        );
                         self.bench_report = Some(b);
                     }
                     Err(e) => {
@@ -716,7 +800,10 @@ pub fn run_with_path(initial_path: Option<PathBuf>) -> Result<()> {
     loop_res
 }
 
-fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: &mut AppState) -> Result<()> {
+fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    state: &mut AppState,
+) -> Result<()> {
     const SPINNER_CHARS: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
     while !state.should_quit {
@@ -738,7 +825,9 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: &mut Ap
                     state.active_task_name = Some(name);
                     state.active_task_progress = 0.05;
                 }
-                TaskUpdate::Progress { fraction, status, .. } => {
+                TaskUpdate::Progress {
+                    fraction, status, ..
+                } => {
                     state.active_task_progress = fraction;
                     state.status_message = status;
                 }
@@ -853,7 +942,9 @@ fn handle_key_event(state: &mut AppState, code: KeyCode) {
 
         // Tab Navigation
         KeyCode::Tab => {
-            if state.explorer_layout == ExplorerLayoutMode::DualPane && state.current_tab == AppTab::Convert {
+            if state.explorer_layout == ExplorerLayoutMode::DualPane
+                && state.current_tab == AppTab::Convert
+            {
                 state.active_pane = match state.active_pane {
                     ActivePane::Source => ActivePane::Target,
                     ActivePane::Target => ActivePane::Source,
@@ -905,7 +996,11 @@ fn handle_key_event(state: &mut AppState, code: KeyCode) {
             state.status_message = format!(
                 "🎨 Pantone: {} ({})",
                 state.config.theme_mode.name(),
-                if state.config.theme_mode.is_dark() { "Dark" } else { "Light" }
+                if state.config.theme_mode.is_dark() {
+                    "Dark"
+                } else {
+                    "Light"
+                }
             );
         }
 
@@ -916,7 +1011,11 @@ fn handle_key_event(state: &mut AppState, code: KeyCode) {
             state.status_message = format!(
                 "🎨 Toggled Set: {} ({})",
                 state.config.theme_mode.name(),
-                if state.config.theme_mode.is_dark() { "10 Dark Themes" } else { "10 Light Themes" }
+                if state.config.theme_mode.is_dark() {
+                    "10 Dark Themes"
+                } else {
+                    "10 Light Themes"
+                }
             );
         }
 
@@ -965,7 +1064,8 @@ fn handle_key_event(state: &mut AppState, code: KeyCode) {
             AppTab::Settings => {
                 state.config.enforce_zero_loss = !state.config.enforce_zero_loss;
                 let _ = state.config.save();
-                state.status_message = format!("Zero-loss enforcement: {}", state.config.enforce_zero_loss);
+                state.status_message =
+                    format!("Zero-loss enforcement: {}", state.config.enforce_zero_loss);
             }
             _ => {}
         },
@@ -1010,7 +1110,9 @@ fn handle_mouse_event(state: &mut AppState, mouse: MouseEvent) {
         MouseEventKind::Down(MouseButton::Left) => {
             // Check double-click on file item
             let now = Instant::now();
-            let is_double_click = if let (Some(t), Some(idx)) = (state.last_click_time, state.last_click_idx) {
+            let is_double_click = if let (Some(t), Some(idx)) =
+                (state.last_click_time, state.last_click_idx)
+            {
                 now.duration_since(t) < Duration::from_millis(400) && idx == state.selected_file_idx
             } else {
                 false
@@ -1074,7 +1176,13 @@ fn draw_ui(f: &mut Frame, state: &AppState, spinner: &str) {
     }
 }
 
-fn draw_header(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThemePalette, spinner: &str) {
+fn draw_header(
+    f: &mut Frame,
+    state: &AppState,
+    area: Rect,
+    palette: TuiThemePalette,
+    spinner: &str,
+) {
     let header_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -1103,7 +1211,9 @@ fn draw_header(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThemePal
         .iter()
         .map(|t| {
             let style = if *t == state.current_tab {
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(palette.text_muted)
             };
@@ -1120,18 +1230,31 @@ fn draw_header(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThemePal
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(palette.border)),
         )
-        .highlight_style(Style::default().fg(palette.accent).add_modifier(Modifier::BOLD));
+        .highlight_style(
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        );
     f.render_widget(tabs, header_chunks[1]);
 
     // Layout Indicator & Background Spinner
     let layout_text = if let Some(ref task) = state.active_task_name {
-        format!("{} {} ({:.0}%)", spinner, task, state.active_task_progress * 100.0)
+        format!(
+            "{} {} ({:.0}%)",
+            spinner,
+            task,
+            state.active_task_progress * 100.0
+        )
     } else {
         format!("[F6] {}", state.explorer_layout.badge())
     };
 
     let layout_badge = Paragraph::new(layout_text)
-        .style(Style::default().fg(palette.gold).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(palette.gold)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center)
         .block(
             Block::default()
@@ -1169,9 +1292,15 @@ fn draw_miller_view(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThe
         .map(|item| {
             let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
             let icon = icon_spec.glyph;
-            let is_curr = state.current_dir.file_name().map(|n| n == item.name.as_str()).unwrap_or(false);
+            let is_curr = state
+                .current_dir
+                .file_name()
+                .map(|n| n == item.name.as_str())
+                .unwrap_or(false);
             let style = if is_curr {
-                Style::default().fg(palette.accent).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(palette.text_muted)
             };
@@ -1208,9 +1337,14 @@ fn draw_miller_view(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThe
             let icon = icon_spec.glyph;
 
             let mut style = if is_sel {
-                Style::default().fg(Color::Black).bg(palette.accent).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
             } else if item.is_dir {
-                Style::default().fg(PANTONE_SWEET_ZEST).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(PANTONE_SWEET_ZEST)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(palette.text_primary)
             };
@@ -1219,16 +1353,31 @@ fn draw_miller_view(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThe
                 style = style.fg(palette.gold).add_modifier(Modifier::BOLD);
             }
 
-            let text = format!("{}{} {} ({})", check_mark, icon, item.name, item.formatted_size());
+            let text = format!(
+                "{}{} {} ({})",
+                check_mark,
+                icon,
+                item.name,
+                item.formatted_size()
+            );
             ListItem::new(text).style(style)
         })
         .collect();
 
     let count_str = format!("{} items", entries.len());
     let sel_count = state.selected_paths.len();
-    let sel_str = if sel_count > 0 { format!(" | {} selected", sel_count) } else { String::new() };
+    let sel_str = if sel_count > 0 {
+        format!(" | {} selected", sel_count)
+    } else {
+        String::new()
+    };
 
-    let cur_title = format!(" 📂 {} ({}{}) ", state.current_dir.display(), count_str, sel_str);
+    let cur_title = format!(
+        " 📂 {} ({}{}) ",
+        state.current_dir.display(),
+        count_str,
+        sel_str
+    );
     let active_list = List::new(current_items).block(
         Block::default()
             .title(cur_title)
@@ -1239,7 +1388,10 @@ fn draw_miller_view(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThe
     f.render_widget(active_list, cols[1]);
 
     // Right Column: Live Preview & Inspection
-    let preview_text = state.preview_content.as_deref().unwrap_or("No preview available.");
+    let preview_text = state
+        .preview_content
+        .as_deref()
+        .unwrap_or("No preview available.");
     let preview_p = Paragraph::new(preview_text)
         .style(Style::default().fg(palette.text_secondary))
         .block(
@@ -1267,7 +1419,10 @@ fn draw_fullscreen_view(f: &mut Frame, state: &AppState, area: Rect, palette: Tu
             let icon = icon_spec.glyph;
 
             let style = if is_sel {
-                Style::default().fg(Color::Black).bg(palette.accent).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
             } else if item.is_dir {
                 Style::default().fg(PANTONE_SWEET_ZEST)
             } else {
@@ -1302,8 +1457,11 @@ fn draw_fullscreen_view(f: &mut Frame, state: &AppState, area: Rect, palette: Tu
         ],
     )
     .header(
-        Row::new(vec!["Sel", "Filename", "Size", "Type", "Modified"])
-            .style(Style::default().fg(palette.gold).add_modifier(Modifier::BOLD)),
+        Row::new(vec!["Sel", "Filename", "Size", "Type", "Modified"]).style(
+            Style::default()
+                .fg(palette.gold)
+                .add_modifier(Modifier::BOLD),
+        ),
     )
     .block(
         Block::default()
@@ -1325,7 +1483,11 @@ fn draw_dual_pane_view(f: &mut Frame, state: &AppState, area: Rect, palette: Tui
 
     // Left Pane: Source
     let is_source_active = state.active_pane == ActivePane::Source;
-    let source_border = if is_source_active { palette.accent } else { palette.border };
+    let source_border = if is_source_active {
+        palette.accent
+    } else {
+        palette.border
+    };
     let entries = state.filtered_entries();
 
     let source_items: Vec<ListItem> = entries
@@ -1335,7 +1497,10 @@ fn draw_dual_pane_view(f: &mut Frame, state: &AppState, area: Rect, palette: Tui
             let is_sel = is_source_active && i == state.selected_file_idx;
             let icon = if item.is_dir { "📁 " } else { "📄 " };
             let style = if is_sel {
-                Style::default().fg(Color::Black).bg(palette.accent).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(palette.text_primary)
             };
@@ -1354,7 +1519,11 @@ fn draw_dual_pane_view(f: &mut Frame, state: &AppState, area: Rect, palette: Tui
 
     // Right Pane: Target / Staging
     let is_target_active = state.active_pane == ActivePane::Target;
-    let target_border = if is_target_active { palette.accent } else { palette.border };
+    let target_border = if is_target_active {
+        palette.accent
+    } else {
+        palette.border
+    };
 
     let target_items: Vec<ListItem> = state
         .selected_paths
@@ -1364,7 +1533,10 @@ fn draw_dual_pane_view(f: &mut Frame, state: &AppState, area: Rect, palette: Tui
             let is_sel = is_target_active && i == state.target_selected_idx;
             let name = p.file_name().unwrap_or_default().to_string_lossy();
             let style = if is_sel {
-                Style::default().fg(Color::Black).bg(palette.gold).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(palette.gold)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(palette.gold)
             };
@@ -1374,7 +1546,10 @@ fn draw_dual_pane_view(f: &mut Frame, state: &AppState, area: Rect, palette: Tui
 
     let target_list = List::new(target_items).block(
         Block::default()
-            .title(format!(" [Target Staging] {} files queued ", state.selected_paths.len()))
+            .title(format!(
+                " [Target Staging] {} files queued ",
+                state.selected_paths.len()
+            ))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(target_border)),
@@ -1382,17 +1557,33 @@ fn draw_dual_pane_view(f: &mut Frame, state: &AppState, area: Rect, palette: Tui
     f.render_widget(target_list, panes[1]);
 }
 
-fn draw_footer(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThemePalette, spinner: &str) {
+fn draw_footer(
+    f: &mut Frame,
+    state: &AppState,
+    area: Rect,
+    palette: TuiThemePalette,
+    spinner: &str,
+) {
     let status_text = if state.search_mode {
-        format!("🔍 Search Filter: {}_ (Press Enter or Esc to confirm)", state.search_query)
+        format!(
+            "🔍 Search Filter: {}_ (Press Enter or Esc to confirm)",
+            state.search_query
+        )
     } else if let Some(ref task) = state.active_task_name {
-        format!("{} Background Task Active: {} [{:.0}%]", spinner, task, state.active_task_progress * 100.0)
+        format!(
+            "{} Background Task Active: {} [{:.0}%]",
+            spinner,
+            task,
+            state.active_task_progress * 100.0
+        )
     } else {
         state.status_message.clone()
     };
 
     let style = if state.status_is_error {
-        Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::LightRed)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(palette.accent)
     };
@@ -1420,11 +1611,19 @@ fn draw_drive_modal(f: &mut Frame, state: &AppState, palette: TuiThemePalette) {
         .map(|(i, drive)| {
             let is_sel = i == state.selected_drive_idx;
             let style = if is_sel {
-                Style::default().fg(Color::Black).bg(palette.accent).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(palette.text_primary)
             };
-            ListItem::new(format!(" 💾 {} ({}) ", drive.display_name, drive.path.display())).style(style)
+            ListItem::new(format!(
+                " 💾 {} ({}) ",
+                drive.display_name,
+                drive.path.display()
+            ))
+            .style(style)
         })
         .collect();
 

@@ -11,8 +11,14 @@ fn test_citrus_geometry_hit_testing() {
 
     // 1. Hub center hit testing
     assert!(geom.hit_test_hub(center), "Center point must be in hub");
-    assert!(geom.hit_test_hub(Pos2::new(160.0, 180.0)), "Point at r=20 must be in hub");
-    assert!(!geom.hit_test_hub(Pos2::new(160.0, 240.0)), "Point at r=80 must not be in hub");
+    assert!(
+        geom.hit_test_hub(Pos2::new(160.0, 180.0)),
+        "Point at r=20 must be in hub"
+    );
+    assert!(
+        !geom.hit_test_hub(Pos2::new(160.0, 240.0)),
+        "Point at r=80 must not be in hub"
+    );
 
     // 2. Carpel hit testing across sectors (at radius r=90)
     let r = 90.0f32;
@@ -46,7 +52,10 @@ fn test_circle_gesture_detector() {
             triggered_linear = true;
         }
     }
-    assert!(!triggered_linear, "Linear mouse motion must not trigger circle gesture");
+    assert!(
+        !triggered_linear,
+        "Linear mouse motion must not trigger circle gesture"
+    );
 
     detector.reset();
 
@@ -60,12 +69,21 @@ fn test_circle_gesture_detector() {
         let y = cy + radius * theta.sin();
         if let Some((centroid_x, centroid_y)) = detector.update(x, y, true) {
             triggered_circle = true;
-            assert!((centroid_x - cx).abs() < 25.0, "Centroid X should match circle center");
-            assert!((centroid_y - cy).abs() < 25.0, "Centroid Y should match circle center");
+            assert!(
+                (centroid_x - cx).abs() < 25.0,
+                "Centroid X should match circle center"
+            );
+            assert!(
+                (centroid_y - cy).abs() < 25.0,
+                "Centroid Y should match circle center"
+            );
             break;
         }
     }
-    assert!(triggered_circle, "2-Time circular drag motion must trigger circle gesture with centroid");
+    assert!(
+        triggered_circle,
+        "2-Time circular drag motion must trigger circle gesture with centroid"
+    );
 }
 
 #[test]
@@ -89,8 +107,8 @@ fn test_quick_settings_defaults_and_presets() {
 
 #[test]
 fn test_citrus_varieties_and_pantone_palettes() {
-    use mossambi::gui::citrus_geometry::{CitrusColorPalette, CitrusVariety};
     use eframe::egui::Color32;
+    use mossambi::gui::citrus_geometry::{CitrusColorPalette, CitrusVariety};
 
     let varieties = CitrusVariety::all();
     assert_eq!(varieties.len(), 5);
@@ -98,22 +116,22 @@ fn test_citrus_varieties_and_pantone_palettes() {
     // 1. Sweet Lime (Pantone 376 C / 123 C)
     let lime_pal = CitrusVariety::SweetLime.colors(None);
     assert_eq!(lime_pal.flavedo_peel, Color32::from_rgb(120, 190, 32)); // Pantone 376 C
-    assert_eq!(lime_pal.carpel_pulp, Color32::from_rgb(255, 199, 44));  // Pantone 123 C
+    assert_eq!(lime_pal.carpel_pulp, Color32::from_rgb(255, 199, 44)); // Pantone 123 C
 
     // 2. Mandarin Tangerine (Pantone 15-1247)
     let tang_pal = CitrusVariety::MandarinTangerine.colors(None);
     assert_eq!(tang_pal.flavedo_peel, Color32::from_rgb(226, 109, 92)); // Pantone 15-1247
-    assert_eq!(tang_pal.carpel_pulp, Color32::from_rgb(243, 156, 18));  // Amber
+    assert_eq!(tang_pal.carpel_pulp, Color32::from_rgb(243, 156, 18)); // Amber
 
     // 3. Ruby Grapefruit (Pantone 18-1662)
     let ruby_pal = CitrusVariety::RubyGrapefruit.colors(None);
-    assert_eq!(ruby_pal.flavedo_peel, Color32::from_rgb(200, 16, 46));  // Pantone 18-1662
-    assert_eq!(ruby_pal.carpel_pulp, Color32::from_rgb(217, 56, 58));   // Crimson
+    assert_eq!(ruby_pal.flavedo_peel, Color32::from_rgb(200, 16, 46)); // Pantone 18-1662
+    assert_eq!(ruby_pal.carpel_pulp, Color32::from_rgb(217, 56, 58)); // Crimson
 
     // 4. Persian Lime (Pantone 371 C / 389 C)
     let persian_pal = CitrusVariety::PersianLime.colors(None);
     assert_eq!(persian_pal.flavedo_peel, Color32::from_rgb(92, 118, 51)); // Pantone 371 C
-    assert_eq!(persian_pal.carpel_pulp, Color32::from_rgb(208, 223, 0));  // Pantone 389 C
+    assert_eq!(persian_pal.carpel_pulp, Color32::from_rgb(208, 223, 0)); // Pantone 389 C
 
     // 5. Custom Hex Tuner
     let custom = CitrusColorPalette {
@@ -129,4 +147,3 @@ fn test_citrus_varieties_and_pantone_palettes() {
     assert_eq!(custom_pal.flavedo_peel, Color32::from_rgb(10, 20, 30));
     assert_eq!(custom_pal.carpel_pulp, Color32::from_rgb(70, 80, 90));
 }
-

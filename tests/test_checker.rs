@@ -76,17 +76,26 @@ fn test_vault_generation_and_inspection() {
     create_valid_wav(&audio_path);
     create_valid_png(&image_path, 400, 400);
     create_valid_png(&exam_photo_path, 500, 300);
-    fs::write(&doc_path, "Mossambi Universal File Explorer & Zero-Loss Conformer Notes").unwrap();
+    fs::write(
+        &doc_path,
+        "Mossambi Universal File Explorer & Zero-Loss Conformer Notes",
+    )
+    .unwrap();
 
     // Create zip archive
     let sample_content = b"Mossambi Pure Rust Zero-Loss Archive Suite";
     let temp_txt = vault_dir.join("archive").join("temp_item.txt");
     fs::write(&temp_txt, sample_content).unwrap();
-    let _ = mossambi::archive::pack_archive(std::slice::from_ref(&temp_txt), &archive_path, mossambi::archive::ArchiveType::Zip);
+    let _ = mossambi::archive::pack_archive(
+        std::slice::from_ref(&temp_txt),
+        &archive_path,
+        mossambi::archive::ArchiveType::Zip,
+    );
     let _ = fs::remove_file(&temp_txt);
 
     // 2. Test FileQualityChecker on Audio (WAV)
-    let audio_report = FileQualityChecker::inspect_file(&audio_path).expect("WAV inspection failed");
+    let audio_report =
+        FileQualityChecker::inspect_file(&audio_path).expect("WAV inspection failed");
     assert_eq!(audio_report.verdict, QualityVerdict::Pass);
     assert!(audio_report.overall_score >= 95.0);
     assert!(audio_report.integrity.magic_bytes_valid);
@@ -111,14 +120,16 @@ fn test_vault_generation_and_inspection() {
     println!("{}", doc_report.format_terminal());
 
     // 5. Test FileQualityChecker on Archive (ZIP)
-    let zip_report = FileQualityChecker::inspect_file(&archive_path).expect("ZIP inspection failed");
+    let zip_report =
+        FileQualityChecker::inspect_file(&archive_path).expect("ZIP inspection failed");
     assert_eq!(zip_report.verdict, QualityVerdict::Pass);
     assert!(zip_report.integrity.magic_bytes_valid);
     assert!(zip_report.integrity.eof_marker_valid);
     println!("{}", zip_report.format_terminal());
 
     // 6. Test BenchmarkEngine on WAV
-    let bench_audio = BenchmarkEngine::benchmark_file(&audio_path, Some("FLAC")).expect("Benchmark WAV failed");
+    let bench_audio =
+        BenchmarkEngine::benchmark_file(&audio_path, Some("FLAC")).expect("Benchmark WAV failed");
     assert!(bench_audio.duration_ms > 0.0);
     assert!(bench_audio.throughput_mb_per_sec > 0.0);
     assert_eq!(bench_audio.target_format, "FLAC");
@@ -126,7 +137,8 @@ fn test_vault_generation_and_inspection() {
     println!("{}", bench_audio.format_terminal());
 
     // 7. Test BenchmarkEngine on Image
-    let bench_img = BenchmarkEngine::benchmark_file(&image_path, Some("WEBP")).expect("Benchmark PNG failed");
+    let bench_img =
+        BenchmarkEngine::benchmark_file(&image_path, Some("WEBP")).expect("Benchmark PNG failed");
     assert!(bench_img.duration_ms > 0.0);
     assert_eq!(bench_img.target_format, "WEBP");
     println!("{}", bench_img.format_terminal());

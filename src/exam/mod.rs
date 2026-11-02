@@ -3,10 +3,10 @@
 //! iterative constraint convergence, 5-iteration 100% scorecard optimizer,
 //! non-destructive metadata padding, and persistent exam profiles.
 
+use crate::core::MossambiConfig;
 use anyhow::{bail, Context, Result};
 use image::imageops::FilterType;
 use image::{DynamicImage, Rgb, RgbImage};
-use crate::core::MossambiConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Cursor;
@@ -277,7 +277,12 @@ pub fn open_image_safe(path: &Path) -> Result<DynamicImage> {
     limits.max_alloc = Some(512 * 1024 * 1024);
     reader.limits(limits);
 
-    reader.decode().with_context(|| format!("Failed to decode image safely (exceeded safety limits or corrupted): {}", path.display()))
+    reader.decode().with_context(|| {
+        format!(
+            "Failed to decode image safely (exceeded safety limits or corrupted): {}",
+            path.display()
+        )
+    })
 }
 
 pub struct ExamOptimizer;
@@ -293,7 +298,8 @@ impl ExamOptimizer {
                     constraint.min_bytes / 1024,
                     constraint.max_bytes / 1024
                 ),
-                suggested_remedy: "Adjust the minimum size threshold to be lower than maximum size".into(),
+                suggested_remedy: "Adjust the minimum size threshold to be lower than maximum size"
+                    .into(),
             });
         }
 
@@ -309,7 +315,10 @@ impl ExamOptimizer {
         if constraint.max_bytes < 512 {
             return Err(ConstraintConflict {
                 conflicting_parameters: vec!["max_bytes".into()],
-                explanation: format!("Maximum size of {} bytes is too small for standard header metadata", constraint.max_bytes),
+                explanation: format!(
+                    "Maximum size of {} bytes is too small for standard header metadata",
+                    constraint.max_bytes
+                ),
                 suggested_remedy: "Raise max_bytes to at least 1 KB".into(),
             });
         }
@@ -345,7 +354,8 @@ impl ExamOptimizer {
             });
         }
 
-        let original_img = open_image_safe(input).context("Failed to open input file for exam optimization")?;
+        let original_img =
+            open_image_safe(input).context("Failed to open input file for exam optimization")?;
 
         let mut best_bytes: Vec<u8> = Vec::new();
         let mut best_scorecard = UploadReadyScorecard {
@@ -400,23 +410,36 @@ impl ExamOptimizer {
                     let bg_col = constraint.background_color;
 
                     let mut canvas = RgbImage::from_pixel(target_w, target_h, Rgb(bg_col));
-                    let scaled = processed_img.resize(target_w, target_h, FilterType::Lanczos3).to_rgb8();
+                    let scaled = processed_img
+                        .resize(target_w, target_h, FilterType::Lanczos3)
+                        .to_rgb8();
                     let (sw, sh) = scaled.dimensions();
 
                     let offset_x = (target_w.saturating_sub(sw)) / 2;
                     let offset_y = (target_h.saturating_sub(sh)) / 2;
 
-                    image::imageops::overlay(&mut canvas, &scaled, offset_x as i64, offset_y as i64);
+                    image::imageops::overlay(
+                        &mut canvas,
+                        &scaled,
+                        offset_x as i64,
+                        offset_y as i64,
+                    );
                     canvas
                 }
                 PositioningMode::CenterCrop => {
                     let target_w = constraint.width_px;
                     let target_h = constraint.height_px;
-                    processed_img.resize_to_fill(target_w, target_h, FilterType::Lanczos3).to_rgb8()
+                    processed_img
+                        .resize_to_fill(target_w, target_h, FilterType::Lanczos3)
+                        .to_rgb8()
                 }
-                PositioningMode::ExactStretch => {
-                    processed_img.resize_exact(constraint.width_px, constraint.height_px, FilterType::Lanczos3).to_rgb8()
-                }
+                PositioningMode::ExactStretch => processed_img
+                    .resize_exact(
+                        constraint.width_px,
+                        constraint.height_px,
+                        FilterType::Lanczos3,
+                    )
+                    .to_rgb8(),
             };
 
             // Binary search JPEG quality to strictly land in [min_bytes, max_bytes]
@@ -437,7 +460,9 @@ impl ExamOptimizer {
 
             let dpi_score = 100.0; // Encoded DPI calibrated to preset
 
-            let size_score = if candidate_size >= constraint.min_bytes && candidate_size <= constraint.max_bytes {
+            let size_score = if candidate_size >= constraint.min_bytes
+                && candidate_size <= constraint.max_bytes
+            {
                 100.0
             } else if candidate_size < constraint.min_bytes {
                 ((candidate_size as f64 / constraint.min_bytes as f64) * 100.0).clamp(50.0, 99.0)
@@ -446,8 +471,12 @@ impl ExamOptimizer {
             };
 
             let clarity_score = Self::compute_clarity_score(&processed_rgb);
-            let overall = (dim_score * 0.3) + (dpi_score * 0.2) + (size_score * 0.3) + (clarity_score * 0.2);
-            let is_perfect = dim_score >= 99.9 && dpi_score >= 99.9 && size_score >= 99.9 && clarity_score >= 98.0;
+            let overall =
+                (dim_score * 0.3) + (dpi_score * 0.2) + (size_score * 0.3) + (clarity_score * 0.2);
+            let is_perfect = dim_score >= 99.9
+                && dpi_score >= 99.9
+                && size_score >= 99.9
+                && clarity_score >= 98.0;
 
             let scorecard = UploadReadyScorecard {
                 dimension_score: dim_score,
@@ -577,7 +606,8 @@ impl ExamOptimizer {
         }
 
         let needed = target_bytes - jpeg.len();
-        let has_eoi = jpeg.len() >= 2 && jpeg[jpeg.len() - 2] == 0xFF && jpeg[jpeg.len() - 1] == 0xD9;
+        let has_eoi =
+            jpeg.len() >= 2 && jpeg[jpeg.len() - 2] == 0xFF && jpeg[jpeg.len() - 1] == 0xD9;
         if has_eoi {
             jpeg.truncate(jpeg.len() - 2);
         }
@@ -680,7 +710,11 @@ impl ExamOptimizer {
             .map(|p| 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32)
             .fold(0.0f32, f32::max);
 
-        let boost_factor = if max_corner_lum > 140.0 { 255.0 / max_corner_lum } else { 1.2 };
+        let boost_factor = if max_corner_lum > 140.0 {
+            255.0 / max_corner_lum
+        } else {
+            1.2
+        };
 
         for pixel in rgb.pixels_mut() {
             for c in 0..3 {
@@ -783,12 +817,18 @@ impl ExamProfileRegistry {
         self.get_all_presets().into_iter().find(|p| {
             let p_name = p.name.to_lowercase();
             // All tokens in query must appear as substring in preset name
-            tokens.iter().all(|&t| p_name.contains(t) || (t == "sig" && p_name.contains("signature")))
+            tokens
+                .iter()
+                .all(|&t| p_name.contains(t) || (t == "sig" && p_name.contains("signature")))
         })
     }
 
     pub fn add_or_update(&mut self, profile: ExamConstraint) -> Result<()> {
-        if let Some(idx) = self.custom_profiles.iter().position(|p| p.name.eq_ignore_ascii_case(&profile.name)) {
+        if let Some(idx) = self
+            .custom_profiles
+            .iter()
+            .position(|p| p.name.eq_ignore_ascii_case(&profile.name))
+        {
             self.custom_profiles[idx] = profile;
         } else {
             self.custom_profiles.push(profile);

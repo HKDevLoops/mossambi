@@ -2,10 +2,12 @@
 //! 100% Topbarless, Menu-less, Ribbon-less, Frameless, 32-Bit Transparent Desktop Widget
 //! Faithful reproduction of all 6 visual states from `Image reference.png`.
 
-use eframe::egui::{self, Color32, Key, Pos2, Rect, Stroke, Vec2, ViewportBuilder, ViewportCommand};
 use crate::codec::{transcode_file, LosslessMode};
 use crate::core::{FileCategory, UniversalRegistry};
 use crate::widget::{RadialWidgetGeometry, WidgetState, WidgetTheme};
+use eframe::egui::{
+    self, Color32, Key, Pos2, Rect, Stroke, Vec2, ViewportBuilder, ViewportCommand,
+};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
@@ -104,10 +106,10 @@ fn enforce_borderless_win32() {
     use std::ffi::c_void;
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetClassNameW, GetWindowLongPtrW, GetWindowThreadProcessId,
-        SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOMOVE,
-        SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
-        WS_EX_LAYERED, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+        EnumWindows, GetClassNameW, GetWindowLongPtrW, GetWindowThreadProcessId, SetWindowLongPtrW,
+        SetWindowPos, GWL_EXSTYLE, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE,
+        SWP_NOZORDER, SWP_SHOWWINDOW, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_LAYERED,
+        WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
     };
 
     extern "system" {
@@ -192,11 +194,7 @@ fn enforce_borderless_win32() {
                         0,
                         0,
                         0,
-                        SWP_FRAMECHANGED
-                            | SWP_NOMOVE
-                            | SWP_NOSIZE
-                            | SWP_NOZORDER
-                            | SWP_SHOWWINDOW,
+                        SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW,
                     );
                 }
             }
@@ -345,7 +343,8 @@ impl eframe::App for MossambiWidgetApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(Color32::TRANSPARENT))
             .show(ctx, |ui| {
-                let (rect, response) = ui.allocate_exact_size(Vec2::new(400.0, 400.0), egui::Sense::click_and_drag());
+                let (rect, response) =
+                    ui.allocate_exact_size(Vec2::new(400.0, 400.0), egui::Sense::click_and_drag());
                 let painter = ui.painter_at(rect);
                 self.geometry.center = rect.center();
 
@@ -400,10 +399,12 @@ impl eframe::App for MossambiWidgetApp {
                     WidgetState::Idle
                 };
 
-                self.geometry.render(&painter, &self.sectors, current_state, self.hovered_carpel);
+                self.geometry
+                    .render(&painter, &self.sectors, current_state, self.hovered_carpel);
 
                 if self.show_context_menu {
-                    let menu_rect = Rect::from_min_size(self.context_menu_pos, Vec2::new(175.0, 110.0));
+                    let menu_rect =
+                        Rect::from_min_size(self.context_menu_pos, Vec2::new(175.0, 110.0));
                     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(menu_rect), |ui| {
                         let fill_bg = if self.geometry.theme == WidgetTheme::Dark {
                             Color32::from_rgba_premultiplied(22, 26, 34, 245)
@@ -429,23 +430,26 @@ impl eframe::App for MossambiWidgetApp {
                                         "🌙 Dark Mode"
                                     };
                                     if ui.button(theme_text).clicked() {
-                                        self.geometry.theme = if self.geometry.theme == WidgetTheme::Dark {
-                                            WidgetTheme::Light
-                                        } else {
-                                            WidgetTheme::Dark
-                                        };
+                                        self.geometry.theme =
+                                            if self.geometry.theme == WidgetTheme::Dark {
+                                                WidgetTheme::Light
+                                            } else {
+                                                WidgetTheme::Dark
+                                            };
                                         let mut cfg = crate::core::MossambiConfig::load();
-                                        cfg.theme_mode = if self.geometry.theme == WidgetTheme::Dark {
+                                        cfg.theme_mode = if self.geometry.theme == WidgetTheme::Dark
+                                        {
                                             crate::core::ThemeMode::DarkAnthracite
                                         } else {
                                             crate::core::ThemeMode::LightBrilliant
                                         };
                                         let _ = cfg.save();
-                                        let mut visuals = if self.geometry.theme == WidgetTheme::Dark {
-                                            egui::Visuals::dark()
-                                        } else {
-                                            egui::Visuals::light()
-                                        };
+                                        let mut visuals =
+                                            if self.geometry.theme == WidgetTheme::Dark {
+                                                egui::Visuals::dark()
+                                            } else {
+                                                egui::Visuals::light()
+                                            };
                                         visuals.window_fill = Color32::TRANSPARENT;
                                         visuals.panel_fill = Color32::TRANSPARENT;
                                         visuals.extreme_bg_color = Color32::TRANSPARENT;
@@ -454,30 +458,39 @@ impl eframe::App for MossambiWidgetApp {
                                         self.show_context_menu = false;
                                     }
 
-                                    let is_autostart = crate::core::MossambiConfig::is_autostart_configured();
+                                    let is_autostart =
+                                        crate::core::MossambiConfig::is_autostart_configured();
                                     let autostart_label = if is_autostart {
                                         "✓ Run at Startup"
                                     } else {
                                         "🚀 Run at Startup"
                                     };
                                     if ui.button(autostart_label).clicked() {
-                                        let _ = crate::core::MossambiConfig::set_autostart(!is_autostart);
+                                        let _ = crate::core::MossambiConfig::set_autostart(
+                                            !is_autostart,
+                                        );
                                         self.show_context_menu = false;
                                     }
 
                                     if ui.button("🖥️ Open Studio").clicked() {
                                         self.show_context_menu = false;
                                         #[cfg(target_os = "windows")]
-                                        let _ = std::process::Command::new("mossambi.exe").arg("gui").spawn();
+                                        let _ = std::process::Command::new("mossambi.exe")
+                                            .arg("gui")
+                                            .spawn();
                                         #[cfg(not(target_os = "windows"))]
-                                        let _ = std::process::Command::new("mossambi").arg("gui").spawn();
+                                        let _ = std::process::Command::new("mossambi")
+                                            .arg("gui")
+                                            .spawn();
                                     }
 
                                     ui.separator();
                                     ui.label(
-                                        egui::RichText::new("Win+Shift+C: Wheel\nWin+Ctrl+C: Studio")
-                                            .size(9.5)
-                                            .color(Color32::from_rgb(130, 136, 148)),
+                                        egui::RichText::new(
+                                            "Win+Shift+C: Wheel\nWin+Ctrl+C: Studio",
+                                        )
+                                        .size(9.5)
+                                        .color(Color32::from_rgb(130, 136, 148)),
                                     );
 
                                     if ui.button("❌ Close Widget").clicked() {
@@ -526,7 +539,7 @@ pub fn run_widget_with_args(
         .with_max_inner_size([400.0, 400.0])
         .with_resizable(false)
         .with_decorations(false) // ZERO titlebar, ZERO system borders
-        .with_transparent(true)  // 100% borderless transparency
+        .with_transparent(true) // 100% borderless transparency
         .with_minimize_button(false)
         .with_maximize_button(false)
         .with_close_button(false)
@@ -552,17 +565,23 @@ pub fn run_widget_with_args(
             let mut fonts = egui::FontDefinitions::default();
             fonts.font_data.insert(
                 "AgaveNerdFont-Regular".to_owned(),
-                egui::FontData::from_static(include_bytes!("../../assets/fonts/AgaveNerdFont-Regular.ttf")),
+                egui::FontData::from_static(include_bytes!(
+                    "../../assets/fonts/AgaveNerdFont-Regular.ttf"
+                )),
             );
             fonts.font_data.insert(
                 "AgaveNerdFont-Bold".to_owned(),
-                egui::FontData::from_static(include_bytes!("../../assets/fonts/AgaveNerdFont-Bold.ttf")),
+                egui::FontData::from_static(include_bytes!(
+                    "../../assets/fonts/AgaveNerdFont-Bold.ttf"
+                )),
             );
-            fonts.families
+            fonts
+                .families
                 .entry(egui::FontFamily::Monospace)
                 .or_default()
                 .insert(0, "AgaveNerdFont-Regular".to_owned());
-            fonts.families
+            fonts
+                .families
                 .entry(egui::FontFamily::Proportional)
                 .or_default()
                 .insert(1, "AgaveNerdFont-Regular".to_owned());

@@ -51,7 +51,10 @@ Exec="{}" --inspect %f
 }
 
 /// Installs the native Linux XDG desktop entry and MIME associations into `~/.local/share/applications`
-pub fn install_linux_desktop_integration(exec_path: &Path, icon_path: Option<&Path>) -> Result<PathBuf> {
+pub fn install_linux_desktop_integration(
+    exec_path: &Path,
+    icon_path: Option<&Path>,
+) -> Result<PathBuf> {
     let home = std::env::var("HOME").context("HOME environment variable not set")?;
     let apps_dir = PathBuf::from(home).join(".local/share/applications");
     fs::create_dir_all(&apps_dir)?;
@@ -68,7 +71,10 @@ pub fn install_linux_desktop_integration(exec_path: &Path, icon_path: Option<&Pa
         .arg(&apps_dir)
         .status();
 
-    log::info!("Installed Linux XDG desktop entry at {}", desktop_file.display());
+    log::info!(
+        "Installed Linux XDG desktop entry at {}",
+        desktop_file.display()
+    );
     Ok(desktop_file)
 }
 

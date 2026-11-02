@@ -37,7 +37,13 @@ impl DragGestureListener {
         let worker = Builder::new()
             .name("mossambi-drag-listener".into())
             .spawn(move || {
-                run_listener_loop(shutdown_clone, tx, allow_shake, allow_circle, sensitivity_px);
+                run_listener_loop(
+                    shutdown_clone,
+                    tx,
+                    allow_shake,
+                    allow_circle,
+                    sensitivity_px,
+                );
             })
             .ok();
 
@@ -101,9 +107,9 @@ fn run_listener_loop(
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, DispatchMessageW, PeekMessageW, SetWindowsHookExW,
-        TranslateMessage, UnhookWindowsHookEx, HHOOK, MSG, MSLLHOOKSTRUCT,
-        PM_REMOVE, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_QUIT,
+        CallNextHookEx, DispatchMessageW, PeekMessageW, SetWindowsHookExW, TranslateMessage,
+        UnhookWindowsHookEx, HHOOK, MSG, MSLLHOOKSTRUCT, PM_REMOVE, WH_MOUSE_LL, WM_LBUTTONDOWN,
+        WM_LBUTTONUP, WM_MOUSEMOVE, WM_QUIT,
     };
 
     struct HookGuard(HHOOK);
@@ -213,12 +219,7 @@ fn run_listener_loop(
     }
 
     unsafe {
-        let hook: HHOOK = SetWindowsHookExW(
-            WH_MOUSE_LL,
-            Some(low_level_mouse_proc),
-            null_mut(),
-            0,
-        );
+        let hook: HHOOK = SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), null_mut(), 0);
 
         if hook.is_null() {
             log::warn!("Could not register WH_MOUSE_LL hook for drag gesture listener.");
@@ -242,10 +243,11 @@ fn run_listener_loop(
     }
 }
 
-
 #[cfg(target_os = "windows")]
 pub fn extract_clipboard_files() -> Vec<PathBuf> {
-    use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, OpenClipboard,
+    };
     use windows_sys::Win32::UI::Shell::DragQueryFileW;
 
     const CF_HDROP: u32 = 15;
@@ -306,9 +308,7 @@ mod shell_com {
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_LOCAL_SERVER,
         COINIT_APARTMENTTHREADED, DISPPARAMS,
     };
-    use windows_sys::Win32::System::Variant::{
-        VariantClear, VARIANT, VT_BSTR, VT_DISPATCH, VT_I4,
-    };
+    use windows_sys::Win32::System::Variant::{VariantClear, VARIANT, VT_BSTR, VT_DISPATCH, VT_I4};
 
     const DISPATCH_METHOD: u16 = 0x1;
     const DISPATCH_PROPERTYGET: u16 = 0x2;
@@ -430,7 +430,14 @@ mod shell_com {
                         if let Some(hwnd_id) = get_disp_id(win_disp, "HWND") {
                             let mut var_hwnd: VARIANT = std::mem::zeroed();
                             let mut p = std::mem::zeroed();
-                            if invoke(win_disp, hwnd_id, DISPATCH_PROPERTYGET, &mut p, &mut var_hwnd) >= 0 {
+                            if invoke(
+                                win_disp,
+                                hwnd_id,
+                                DISPATCH_PROPERTYGET,
+                                &mut p,
+                                &mut var_hwnd,
+                            ) >= 0
+                            {
                                 let w_hwnd = var_hwnd.Anonymous.Anonymous.Anonymous.lVal as isize;
                                 is_match = w_hwnd == target_hwnd;
                                 VariantClear(&mut var_hwnd);
@@ -451,10 +458,7 @@ mod shell_com {
         }
     }
 
-    unsafe fn extract_selected_from_window(
-        win_disp: IDispatchPtr,
-        results: &mut Vec<PathBuf>,
-    ) {
+    unsafe fn extract_selected_from_window(win_disp: IDispatchPtr, results: &mut Vec<PathBuf>) {
         let doc_id = match get_disp_id(win_disp, "Document") {
             Some(id) => id,
             None => return,
@@ -466,7 +470,9 @@ mod shell_com {
             return;
         }
 
-        if var_doc.Anonymous.Anonymous.vt != VT_DISPATCH || var_doc.Anonymous.Anonymous.Anonymous.pdispVal.is_null() {
+        if var_doc.Anonymous.Anonymous.vt != VT_DISPATCH
+            || var_doc.Anonymous.Anonymous.Anonymous.pdispVal.is_null()
+        {
             VariantClear(&mut var_doc);
             return;
         }
@@ -476,15 +482,31 @@ mod shell_com {
         if let Some(sel_id) = get_disp_id(doc_disp, "SelectedItems") {
             let mut var_sel: VARIANT = std::mem::zeroed();
             let mut p2: DISPPARAMS = std::mem::zeroed();
-            if invoke(doc_disp, sel_id, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &mut p2, &mut var_sel) >= 0 {
-                if var_sel.Anonymous.Anonymous.vt == VT_DISPATCH && !var_sel.Anonymous.Anonymous.Anonymous.pdispVal.is_null() {
+            if invoke(
+                doc_disp,
+                sel_id,
+                DISPATCH_METHOD | DISPATCH_PROPERTYGET,
+                &mut p2,
+                &mut var_sel,
+            ) >= 0
+            {
+                if var_sel.Anonymous.Anonymous.vt == VT_DISPATCH
+                    && !var_sel.Anonymous.Anonymous.Anonymous.pdispVal.is_null()
+                {
                     let sel_disp = var_sel.Anonymous.Anonymous.Anonymous.pdispVal as IDispatchPtr;
 
                     // SelectedItems.Count
                     if let Some(cnt_id) = get_disp_id(sel_disp, "Count") {
                         let mut var_cnt: VARIANT = std::mem::zeroed();
                         let mut p3: DISPPARAMS = std::mem::zeroed();
-                        if invoke(sel_disp, cnt_id, DISPATCH_PROPERTYGET, &mut p3, &mut var_cnt) >= 0 {
+                        if invoke(
+                            sel_disp,
+                            cnt_id,
+                            DISPATCH_PROPERTYGET,
+                            &mut p3,
+                            &mut var_cnt,
+                        ) >= 0
+                        {
                             let item_count = var_cnt.Anonymous.Anonymous.Anonymous.lVal;
                             VariantClear(&mut var_cnt);
 
@@ -502,17 +524,53 @@ mod shell_com {
                                     };
 
                                     let mut var_item: VARIANT = std::mem::zeroed();
-                                    if invoke(sel_disp, item_id, DISPATCH_METHOD, &mut p4, &mut var_item) >= 0 {
-                                        if var_item.Anonymous.Anonymous.vt == VT_DISPATCH && !var_item.Anonymous.Anonymous.Anonymous.pdispVal.is_null() {
-                                            let item_disp = var_item.Anonymous.Anonymous.Anonymous.pdispVal as IDispatchPtr;
+                                    if invoke(
+                                        sel_disp,
+                                        item_id,
+                                        DISPATCH_METHOD,
+                                        &mut p4,
+                                        &mut var_item,
+                                    ) >= 0
+                                    {
+                                        if var_item.Anonymous.Anonymous.vt == VT_DISPATCH
+                                            && !var_item
+                                                .Anonymous
+                                                .Anonymous
+                                                .Anonymous
+                                                .pdispVal
+                                                .is_null()
+                                        {
+                                            let item_disp =
+                                                var_item.Anonymous.Anonymous.Anonymous.pdispVal
+                                                    as IDispatchPtr;
 
                                             // Item.Path
                                             if let Some(path_id) = get_disp_id(item_disp, "Path") {
                                                 let mut var_path: VARIANT = std::mem::zeroed();
                                                 let mut p5: DISPPARAMS = std::mem::zeroed();
-                                                if invoke(item_disp, path_id, DISPATCH_PROPERTYGET, &mut p5, &mut var_path) >= 0 {
-                                                    if var_path.Anonymous.Anonymous.vt == VT_BSTR && !var_path.Anonymous.Anonymous.Anonymous.bstrVal.is_null() {
-                                                        let path_str = bstr_to_string(var_path.Anonymous.Anonymous.Anonymous.bstrVal);
+                                                if invoke(
+                                                    item_disp,
+                                                    path_id,
+                                                    DISPATCH_PROPERTYGET,
+                                                    &mut p5,
+                                                    &mut var_path,
+                                                ) >= 0
+                                                {
+                                                    if var_path.Anonymous.Anonymous.vt == VT_BSTR
+                                                        && !var_path
+                                                            .Anonymous
+                                                            .Anonymous
+                                                            .Anonymous
+                                                            .bstrVal
+                                                            .is_null()
+                                                    {
+                                                        let path_str = bstr_to_string(
+                                                            var_path
+                                                                .Anonymous
+                                                                .Anonymous
+                                                                .Anonymous
+                                                                .bstrVal,
+                                                        );
                                                         let pb = PathBuf::from(&path_str);
                                                         if pb.exists() {
                                                             results.push(pb);
@@ -555,7 +613,12 @@ mod shell_com {
 
         let hr = get_ids_fn(
             disp,
-            &GUID { data1: 0, data2: 0, data3: 0, data4: [0; 8] },
+            &GUID {
+                data1: 0,
+                data2: 0,
+                data3: 0,
+                data4: [0; 8],
+            },
             names.as_mut_ptr(),
             1,
             0x0800,
@@ -591,7 +654,12 @@ mod shell_com {
         invoke_fn(
             disp,
             dispid,
-            &GUID { data1: 0, data2: 0, data3: 0, data4: [0; 8] },
+            &GUID {
+                data1: 0,
+                data2: 0,
+                data3: 0,
+                data4: [0; 8],
+            },
             0x0800,
             flags,
             params,
@@ -643,7 +711,10 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg_attr(target_os = "windows", ignore = "Global WH_MOUSE_LL hook requires dedicated single-thread execution")]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "Global WH_MOUSE_LL hook requires dedicated single-thread execution"
+    )]
     fn test_drag_listener_lifecycle() {
         let mut listener = DragGestureListener::start(true, true, 25.0);
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -652,12 +723,18 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(target_os = "windows", ignore = "Requires STA single-threaded apartment")]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "Requires STA single-threaded apartment"
+    )]
     fn test_query_active_explorer_files_safe() {
         #[cfg(target_os = "windows")]
         {
             use windows_sys::Win32::Foundation::POINT;
-            let pt = POINT { x: -10000, y: -10000 };
+            let pt = POINT {
+                x: -10000,
+                y: -10000,
+            };
             // Should safely return empty list or non-panicking results
             let files = query_active_explorer_files(pt);
             assert!(files.is_empty() || !files.is_empty());

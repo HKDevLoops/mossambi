@@ -132,8 +132,16 @@ impl RadialWidgetGeometry {
         } else {
             Color32::from_rgba_premultiplied(15, 25, 40, 18)
         };
-        painter.circle_filled(self.center + Vec2::new(0.0, 5.0), self.outer_radius + 4.0, shadow_col1);
-        painter.circle_filled(self.center + Vec2::new(0.0, 9.0), self.outer_radius + 8.0, shadow_col2);
+        painter.circle_filled(
+            self.center + Vec2::new(0.0, 5.0),
+            self.outer_radius + 4.0,
+            shadow_col1,
+        );
+        painter.circle_filled(
+            self.center + Vec2::new(0.0, 9.0),
+            self.outer_radius + 8.0,
+            shadow_col2,
+        );
 
         // 1. Render each of the 8 organic rounded capsule petals
         for i in 0..8 {
@@ -203,7 +211,10 @@ impl RadialWidgetGeometry {
             // State 1 idle petal: clean off-white / pearl frosted (#F8F9FA)
             (
                 Color32::from_rgba_premultiplied(248, 249, 250, 255),
-                Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(222, 226, 234, 220)),
+                Stroke::new(
+                    1.0_f32,
+                    Color32::from_rgba_premultiplied(222, 226, 234, 220),
+                ),
                 Color32::from_rgb(45, 52, 64),
                 Color32::from_rgb(75, 84, 100),
             )
@@ -228,7 +239,11 @@ impl RadialWidgetGeometry {
         } else {
             Color32::from_rgba_premultiplied(18, 25, 38, 30)
         };
-        painter.add(PathShape::convex_polygon(shadow_pts_deep, shadow_deep_col, Stroke::NONE));
+        painter.add(PathShape::convex_polygon(
+            shadow_pts_deep,
+            shadow_deep_col,
+            Stroke::NONE,
+        ));
 
         let shadow_pts_soft = offset_points(&petal_pts, Vec2::new(0.0, 1.5));
         let shadow_soft_col = if is_dark {
@@ -236,7 +251,11 @@ impl RadialWidgetGeometry {
         } else {
             Color32::from_rgba_premultiplied(18, 25, 38, 20)
         };
-        painter.add(PathShape::convex_polygon(shadow_pts_soft, shadow_soft_col, Stroke::NONE));
+        painter.add(PathShape::convex_polygon(
+            shadow_pts_soft,
+            shadow_soft_col,
+            Stroke::NONE,
+        ));
 
         // 2. Hovered Luminous Glow Halo
         if is_hovered {
@@ -254,7 +273,11 @@ impl RadialWidgetGeometry {
         }
 
         // 3. Draw Petal Body & Crisp Border
-        painter.add(PathShape::convex_polygon(petal_pts, fill_color, border_stroke));
+        painter.add(PathShape::convex_polygon(
+            petal_pts,
+            fill_color,
+            border_stroke,
+        ));
 
         // Compute petal content position (Icon in upper half, Label in lower half)
         let r_icon = self.inner_radius + (self.outer_radius - self.inner_radius) * 0.66;
@@ -323,14 +346,25 @@ impl RadialWidgetGeometry {
             self.center.x + outer_r * (start_angle + d_theta_outer).cos(),
             self.center.y + outer_r * (start_angle + d_theta_outer).sin(),
         );
-        pts.push(quadratic_bezier(rad_left_out, corner_ol_v, arc_ol_start, 0.45));
-        pts.push(quadratic_bezier(rad_left_out, corner_ol_v, arc_ol_start, 0.85));
+        pts.push(quadratic_bezier(
+            rad_left_out,
+            corner_ol_v,
+            arc_ol_start,
+            0.45,
+        ));
+        pts.push(quadratic_bezier(
+            rad_left_out,
+            corner_ol_v,
+            arc_ol_start,
+            0.85,
+        ));
 
         // 3. Outer Circular Arc
         let num_outer_arc = 6;
         for s in 0..=num_outer_arc {
             let t = s as f32 / num_outer_arc as f32;
-            let a = (start_angle + d_theta_outer) + t * (end_angle - d_theta_outer - (start_angle + d_theta_outer));
+            let a = (start_angle + d_theta_outer)
+                + t * (end_angle - d_theta_outer - (start_angle + d_theta_outer));
             pts.push(Pos2::new(
                 self.center.x + outer_r * a.cos(),
                 self.center.y + outer_r * a.sin(),
@@ -350,8 +384,18 @@ impl RadialWidgetGeometry {
             self.center.x + (outer_r - d_rad_outer) * end_angle.cos(),
             self.center.y + (outer_r - d_rad_outer) * end_angle.sin(),
         );
-        pts.push(quadratic_bezier(arc_or_end, corner_or_v, rad_right_out, 0.45));
-        pts.push(quadratic_bezier(arc_or_end, corner_or_v, rad_right_out, 0.85));
+        pts.push(quadratic_bezier(
+            arc_or_end,
+            corner_or_v,
+            rad_right_out,
+            0.45,
+        ));
+        pts.push(quadratic_bezier(
+            arc_or_end,
+            corner_or_v,
+            rad_right_out,
+            0.85,
+        ));
 
         // 5. Right Radial Edge (from outer to inner)
         let rad_right_in = Pos2::new(
@@ -370,14 +414,25 @@ impl RadialWidgetGeometry {
             self.center.x + inner_r * (end_angle - d_theta_inner).cos(),
             self.center.y + inner_r * (end_angle - d_theta_inner).sin(),
         );
-        pts.push(quadratic_bezier(rad_right_in, corner_ir_v, arc_ir_start, 0.45));
-        pts.push(quadratic_bezier(rad_right_in, corner_ir_v, arc_ir_start, 0.85));
+        pts.push(quadratic_bezier(
+            rad_right_in,
+            corner_ir_v,
+            arc_ir_start,
+            0.45,
+        ));
+        pts.push(quadratic_bezier(
+            rad_right_in,
+            corner_ir_v,
+            arc_ir_start,
+            0.85,
+        ));
 
         // 7. Inner Circular Arc
         let num_inner_arc = 4;
         for s in 0..=num_inner_arc {
             let t = s as f32 / num_inner_arc as f32;
-            let a = (end_angle - d_theta_inner) - t * ((end_angle - d_theta_inner) - (start_angle + d_theta_inner));
+            let a = (end_angle - d_theta_inner)
+                - t * ((end_angle - d_theta_inner) - (start_angle + d_theta_inner));
             pts.push(Pos2::new(
                 self.center.x + inner_r * a.cos(),
                 self.center.y + inner_r * a.sin(),
@@ -433,7 +488,8 @@ impl RadialWidgetGeometry {
                 // Camera aperture & body with top flash
                 let cam_w = 17.0;
                 let cam_h = 12.0;
-                let cam_rect = Rect::from_center_size(pos + Vec2::new(0.0, 1.0), Vec2::new(cam_w, cam_h));
+                let cam_rect =
+                    Rect::from_center_size(pos + Vec2::new(0.0, 1.0), Vec2::new(cam_w, cam_h));
                 painter.rect_stroke(cam_rect, 3.0, stroke);
                 // Center camera lens
                 painter.circle_stroke(pos + Vec2::new(0.0, 1.0), 3.4, stroke);
@@ -517,18 +573,34 @@ impl RadialWidgetGeometry {
                 // Audio waveform equalizer bars
                 let x = pos.x;
                 let y = pos.y;
-                painter.line_segment([Pos2::new(x - 6.0, y - 2.5), Pos2::new(x - 6.0, y + 2.5)], stroke);
-                painter.line_segment([Pos2::new(x - 3.0, y - 5.5), Pos2::new(x - 3.0, y + 5.5)], stroke);
+                painter.line_segment(
+                    [Pos2::new(x - 6.0, y - 2.5), Pos2::new(x - 6.0, y + 2.5)],
+                    stroke,
+                );
+                painter.line_segment(
+                    [Pos2::new(x - 3.0, y - 5.5), Pos2::new(x - 3.0, y + 5.5)],
+                    stroke,
+                );
                 painter.line_segment([Pos2::new(x, y - 7.5), Pos2::new(x, y + 7.5)], stroke);
-                painter.line_segment([Pos2::new(x + 3.0, y - 5.5), Pos2::new(x + 3.0, y + 5.5)], stroke);
-                painter.line_segment([Pos2::new(x + 6.0, y - 2.5), Pos2::new(x + 6.0, y + 2.5)], stroke);
+                painter.line_segment(
+                    [Pos2::new(x + 3.0, y - 5.5), Pos2::new(x + 3.0, y + 5.5)],
+                    stroke,
+                );
+                painter.line_segment(
+                    [Pos2::new(x + 6.0, y - 2.5), Pos2::new(x + 6.0, y + 2.5)],
+                    stroke,
+                );
             }
             "MP4" | "MKV" | "MOV" | "WEBM" => {
                 // Video film play triangle
                 let p1 = pos + Vec2::new(-4.5, -6.0);
                 let p2 = pos + Vec2::new(-4.5, 6.0);
                 let p3 = pos + Vec2::new(6.0, 0.0);
-                painter.add(PathShape::convex_polygon(vec![p1, p2, p3], color, Stroke::NONE));
+                painter.add(PathShape::convex_polygon(
+                    vec![p1, p2, p3],
+                    color,
+                    Stroke::NONE,
+                ));
             }
             _ => {
                 // Generic circular badge
@@ -671,7 +743,10 @@ impl RadialWidgetGeometry {
                 } else {
                     (
                         Color32::from_rgba_premultiplied(142, 149, 165, 230), // Translucent frosted slate
-                        Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(255, 255, 255, 140)),
+                        Stroke::new(
+                            1.0_f32,
+                            Color32::from_rgba_premultiplied(255, 255, 255, 140),
+                        ),
                         Color32::WHITE,
                         Color32::from_rgb(255, 255, 255),
                     )
@@ -693,8 +768,14 @@ impl RadialWidgetGeometry {
                 let arrow_stroke = Stroke::new(2.4_f32, arrow_color);
 
                 painter.line_segment([shaft_top, shaft_bottom], arrow_stroke);
-                painter.line_segment([shaft_top, arrow_center + Vec2::new(-5.0, -3.5)], arrow_stroke);
-                painter.line_segment([shaft_top, arrow_center + Vec2::new(5.0, -3.5)], arrow_stroke);
+                painter.line_segment(
+                    [shaft_top, arrow_center + Vec2::new(-5.0, -3.5)],
+                    arrow_stroke,
+                );
+                painter.line_segment(
+                    [shaft_top, arrow_center + Vec2::new(5.0, -3.5)],
+                    arrow_stroke,
+                );
 
                 // Subtext "Drop files \n here"
                 painter.text(

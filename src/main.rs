@@ -9,9 +9,7 @@ use mossambi::codec::{
     transcode_file, transcode_to_all_formats, verify_conversion_fidelity, BenchmarkEngine,
     FileQualityChecker, LosslessMode,
 };
-use mossambi::core::{
-    get_system_arch_info, MossambiConfig, ThemeMode, UniversalRegistry,
-};
+use mossambi::core::{get_system_arch_info, MossambiConfig, ThemeMode, UniversalRegistry};
 use mossambi::exam::{optimize_exam_media, ExamConstraint};
 use mossambi::hwaccel::detect_hardware_capabilities;
 use serde_json::json;
@@ -332,13 +330,19 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     // 1. Intercept help flags -> Print ONLY table structure as requested!
-    if args.iter().any(|a| a == "--help" || a == "-h" || a == "help" || a == "help-manual" || a == "--manual") {
+    if args
+        .iter()
+        .any(|a| a == "--help" || a == "-h" || a == "help" || a == "help-manual" || a == "--manual")
+    {
         print_table_help();
         return Ok(());
     }
 
     // 2. Intercept version flags
-    if args.iter().any(|a| a == "--version" || a == "-V" || a == "version") {
+    if args
+        .iter()
+        .any(|a| a == "--version" || a == "-V" || a == "version")
+    {
         println!("Mossambi v2.1.0 (Windows & Linux | x86_64 & ARM64 | 0.00% Zero-Loss Standard)");
         return Ok(());
     }
@@ -423,13 +427,24 @@ fn main() -> Result<()> {
         return match cmd {
             Commands::App { path } | Commands::Explorer { path } => handle_gui(path),
             Commands::Tui { path } => handle_tui(path),
-            Commands::Widget { pos, active_drag, file } => handle_widget(pos.as_deref(), active_drag, file),
+            Commands::Widget {
+                pos,
+                active_drag,
+                file,
+            } => handle_widget(pos.as_deref(), active_drag, file),
             Commands::Convert {
                 input,
                 target,
                 output,
                 all,
-            } => handle_convert(&input, Some(&target), all, output.as_deref(), cli.strict_lossless, cli.json),
+            } => handle_convert(
+                &input,
+                Some(&target),
+                all,
+                output.as_deref(),
+                cli.strict_lossless,
+                cli.json,
+            ),
             Commands::Archive {
                 inputs,
                 output,
@@ -468,8 +483,12 @@ fn main() -> Result<()> {
                 cli.json,
             ),
             Commands::Themes => handle_themes(cli.json),
-            Commands::Config { action, key, value } => handle_config(&action, key.as_deref(), value.as_deref(), cli.json),
-            Commands::Completions { shell, carapace } => handle_completions(shell.as_deref(), carapace),
+            Commands::Config { action, key, value } => {
+                handle_config(&action, key.as_deref(), value.as_deref(), cli.json)
+            }
+            Commands::Completions { shell, carapace } => {
+                handle_completions(shell.as_deref(), carapace)
+            }
             Commands::Carapace { shell, args } => handle_carapace(shell.as_deref(), &args),
             Commands::HelpManual => {
                 print_table_help();
@@ -527,7 +546,14 @@ fn main() -> Result<()> {
 
         // If target is omitted, check if --all flag is set
         if cli.all || cli.target.as_deref().map(|t| t.to_uppercase()) == Some("ALL".to_string()) {
-            return handle_convert(&input, Some("ALL"), true, cli.output_dir.as_deref(), cli.strict_lossless, cli.json);
+            return handle_convert(
+                &input,
+                Some("ALL"),
+                true,
+                cli.output_dir.as_deref(),
+                cli.strict_lossless,
+                cli.json,
+            );
         }
 
         // If target is specified, convert
@@ -608,8 +634,8 @@ fn handle_convert(
         );
     }
 
-    let output = transcode_file(input, target_str, mode, output_dir)
-        .context("Failed converting file")?;
+    let output =
+        transcode_file(input, target_str, mode, output_dir).context("Failed converting file")?;
 
     let out_size = std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
 
@@ -624,7 +650,11 @@ fn handle_convert(
         });
         println!("{}", serde_json::to_string_pretty(&res)?);
     } else {
-        println!("✨ Completed: {} ({:.1} KB)", output.display(), out_size as f64 / 1024.0);
+        println!(
+            "✨ Completed: {} ({:.1} KB)",
+            output.display(),
+            out_size as f64 / 1024.0
+        );
     }
 
     Ok(())
@@ -649,11 +679,15 @@ fn handle_exam(
 
     let mut constraint = match preset.unwrap_or("").to_lowercase().as_str() {
         "upsc-photo" | "upsc_photo" => ExamConstraint::preset_upsc_photo(),
-        "upsc-signature" | "upsc_signature" | "upsc-sign" => ExamConstraint::preset_upsc_signature(),
+        "upsc-signature" | "upsc_signature" | "upsc-sign" => {
+            ExamConstraint::preset_upsc_signature()
+        }
         "ssc-photo" | "ssc_photo" => ExamConstraint::preset_ssc_photo(),
         "ssc-signature" | "ssc_signature" | "ssc-sign" => ExamConstraint::preset_ssc_signature(),
         "ibps-photo" | "ibps_photo" => ExamConstraint::preset_ibps_photo(),
-        "ibps-signature" | "ibps_signature" | "ibps-sign" => ExamConstraint::preset_ibps_signature(),
+        "ibps-signature" | "ibps_signature" | "ibps-sign" => {
+            ExamConstraint::preset_ibps_signature()
+        }
         _ => ExamConstraint {
             name: "Custom Exam Specification".into(),
             target_format: "JPG".into(),
@@ -689,7 +723,10 @@ fn handle_exam(
     }
 
     let parent = output_dir.unwrap_or_else(|| input.parent().unwrap_or_else(|| Path::new(".")));
-    let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("exam_doc");
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("exam_doc");
     let ext_lower = constraint.target_format.to_lowercase();
     let mut out_candidate = parent.join(format!("{}_exam.{}", stem, ext_lower));
     let mut c = 1;
@@ -699,7 +736,10 @@ fn handle_exam(
     }
 
     if !as_json {
-        println!("🇮🇳 Indian Exam Form Tuner: Optimizing for '{}'...", constraint.name);
+        println!(
+            "🇮🇳 Indian Exam Form Tuner: Optimizing for '{}'...",
+            constraint.name
+        );
         println!(
             "   Target: {}x{} px @ {} DPI | Allowed Size: {:.1} KB - {:.1} KB",
             constraint.width_px,
@@ -728,7 +768,10 @@ fn handle_exam(
         println!("{}", serde_json::to_string_pretty(&res)?);
     } else {
         println!("✨ Form Ready Document Generated: {}", optimized.display());
-        println!("   Final File Size: {:.2} KB (Passed portal validation boundaries)", actual_size as f64 / 1024.0);
+        println!(
+            "   Final File Size: {:.2} KB (Passed portal validation boundaries)",
+            actual_size as f64 / 1024.0
+        );
     }
 
     Ok(())
@@ -750,12 +793,8 @@ fn handle_archive(
         ArchiveType::from_extension(type_str)
             .with_context(|| format!("Unknown archive type specified: {}", type_str))?
     } else {
-        let ext = output
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("zip");
-        ArchiveType::from_extension(ext)
-            .unwrap_or(ArchiveType::Zip)
+        let ext = output.extension().and_then(|e| e.to_str()).unwrap_or("zip");
+        ArchiveType::from_extension(ext).unwrap_or(ArchiveType::Zip)
     };
 
     if !as_json {
@@ -779,7 +818,11 @@ fn handle_archive(
         });
         println!("{}", serde_json::to_string_pretty(&res)?);
     } else {
-        println!("✨ Archive successfully created: {} ({:.1} KB)", output.display(), size as f64 / 1024.0);
+        println!(
+            "✨ Archive successfully created: {} ({:.1} KB)",
+            output.display(),
+            size as f64 / 1024.0
+        );
     }
 
     Ok(())
@@ -793,8 +836,14 @@ fn handle_extract(archive: &Path, output_dir: Option<&Path>, as_json: bool) -> R
     let dest = match output_dir {
         Some(d) => d.to_path_buf(),
         None => {
-            let stem = archive.file_stem().and_then(|s| s.to_str()).unwrap_or("extracted");
-            archive.parent().unwrap_or_else(|| Path::new(".")).join(stem)
+            let stem = archive
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("extracted");
+            archive
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(stem)
         }
     };
 
@@ -848,7 +897,10 @@ fn handle_info(file: &Path, as_json: bool) -> Result<()> {
         println!("🍋 Mossambi File Inspector");
         println!("--------------------------------------------------");
         println!("File:         {}", file.display());
-        println!("Extension:    {}", if ext.is_empty() { "(none)" } else { &ext });
+        println!(
+            "Extension:    {}",
+            if ext.is_empty() { "(none)" } else { &ext }
+        );
         println!("Category:     {:?}", category);
         println!("Size:         {:.2} KB ({} bytes)", size_kb, meta.len());
         println!("\nRadial Widget Sectors (8 Petals):");
@@ -930,11 +982,38 @@ fn handle_hw(as_json: bool) -> Result<()> {
         println!("H.264 Encoder:        {}", hw.h264_encoder);
         println!("HEVC Encoder:         {}", hw.hevc_encoder);
         println!("NPU AI Accelerator:   {}", hw.npu_name);
-        println!("NPU Status:           {}", if hw.supports_npu_ai { "Active (AI Scan & OCR Acceleration)" } else { "CPU Fallback" });
-        println!("AV1 Support:          {}", if hw.supports_av1_hw { "Yes" } else { "No" });
-        println!("ARM NEON SIMD:        {}", if hw.supports_neon_simd { "Enabled" } else { "Disabled" });
-        println!("x86_64 AVX2 SIMD:     {}", if hw.supports_avx2_simd { "Enabled" } else { "Disabled" });
-        println!("Multi-Core Threads:   {} concurrent worker threads", hw.optimal_thread_count);
+        println!(
+            "NPU Status:           {}",
+            if hw.supports_npu_ai {
+                "Active (AI Scan & OCR Acceleration)"
+            } else {
+                "CPU Fallback"
+            }
+        );
+        println!(
+            "AV1 Support:          {}",
+            if hw.supports_av1_hw { "Yes" } else { "No" }
+        );
+        println!(
+            "ARM NEON SIMD:        {}",
+            if hw.supports_neon_simd {
+                "Enabled"
+            } else {
+                "Disabled"
+            }
+        );
+        println!(
+            "x86_64 AVX2 SIMD:     {}",
+            if hw.supports_avx2_simd {
+                "Enabled"
+            } else {
+                "Disabled"
+            }
+        );
+        println!(
+            "Multi-Core Threads:   {} concurrent worker threads",
+            hw.optimal_thread_count
+        );
         println!("==========================================================");
     }
 
@@ -958,20 +1037,33 @@ fn handle_catalogue(query: &str, as_json: bool) -> Result<()> {
     } else {
         println!("🍋 Mossambi Universal Format Catalogue (200+ Formats)");
         println!("Query: '{}' ({} matching format(s))", query, results.len());
-        println!("--------------------------------------------------------------------------------");
-        println!("{:<8} | {:<12} | {:<14} | {:<10} | NAME", "EXT", "CATEGORY", "NATURE", "ZERO-LOSS");
-        println!("--------------------------------------------------------------------------------");
+        println!(
+            "--------------------------------------------------------------------------------"
+        );
+        println!(
+            "{:<8} | {:<12} | {:<14} | {:<10} | NAME",
+            "EXT", "CATEGORY", "NATURE", "ZERO-LOSS"
+        );
+        println!(
+            "--------------------------------------------------------------------------------"
+        );
         for spec in results {
             println!(
                 "{:<8} | {:<12} | {:<14} | {:<10} | {}",
                 spec.extension,
                 format!("{:?}", spec.category),
                 spec.nature.badge_label(),
-                if spec.supports_zero_loss { "✓ Guaranteed" } else { "⚠️ Lossy" },
+                if spec.supports_zero_loss {
+                    "✓ Guaranteed"
+                } else {
+                    "⚠️ Lossy"
+                },
                 spec.display_name
             );
         }
-        println!("--------------------------------------------------------------------------------");
+        println!(
+            "--------------------------------------------------------------------------------"
+        );
     }
     Ok(())
 }
@@ -986,7 +1078,9 @@ fn handle_widget(pos: Option<&str>, _active_drag: bool, file: Option<PathBuf>) -
             FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
         };
 
-        let mutex_name: Vec<u16> = "Local\\MossambiWidgetSingleInstance\0".encode_utf16().collect();
+        let mutex_name: Vec<u16> = "Local\\MossambiWidgetSingleInstance\0"
+            .encode_utf16()
+            .collect();
         unsafe {
             let handle = CreateMutexW(null_mut(), 1, mutex_name.as_ptr());
             const ERROR_ALREADY_EXISTS: u32 = 183;
@@ -1007,7 +1101,10 @@ fn handle_widget(pos: Option<&str>, _active_drag: bool, file: Option<PathBuf>) -
     if let Some(pos_str) = pos {
         let parts: Vec<&str> = pos_str.split(',').collect();
         if parts.len() == 2 {
-            if let (Ok(x), Ok(y)) = (parts[0].trim().parse::<f32>(), parts[1].trim().parse::<f32>()) {
+            if let (Ok(x), Ok(y)) = (
+                parts[0].trim().parse::<f32>(),
+                parts[1].trim().parse::<f32>(),
+            ) {
                 initial_pos = Some(eframe::egui::Pos2::new(x - 200.0, y - 200.0));
             }
         }
@@ -1041,12 +1138,7 @@ fn handle_themes(as_json: bool) -> Result<()> {
         println!("🌙 10 CERTIFIED DARK PANTONE THEMES:");
         println!("────────────────────────────────────────────────────────────────────────────────────────────────");
         for (idx, theme) in DARK_THEMES.iter().enumerate() {
-            println!(
-                "  {:2}. {:<24} [ID: {:<16}]",
-                idx + 1,
-                theme.name,
-                theme.id
-            );
+            println!("  {:2}. {:<24} [ID: {:<16}]", idx + 1, theme.name, theme.id);
             println!(
                 "      BG:      {:<18} ({:<20}) [{}]",
                 theme.bg.name, theme.bg.code, theme.bg.hex
@@ -1065,12 +1157,7 @@ fn handle_themes(as_json: bool) -> Result<()> {
         println!("☀️ 10 CERTIFIED LIGHT PANTONE THEMES:");
         println!("────────────────────────────────────────────────────────────────────────────────────────────────");
         for (idx, theme) in LIGHT_THEMES.iter().enumerate() {
-            println!(
-                "  {:2}. {:<24} [ID: {:<16}]",
-                idx + 1,
-                theme.name,
-                theme.id
-            );
+            println!("  {:2}. {:<24} [ID: {:<16}]", idx + 1, theme.name, theme.id);
             println!(
                 "      BG:      {:<18} ({:<20}) [{}]",
                 theme.bg.name, theme.bg.code, theme.bg.hex
@@ -1091,7 +1178,12 @@ fn handle_themes(as_json: bool) -> Result<()> {
     Ok(())
 }
 
-fn handle_config(action: &str, key: Option<&str>, value: Option<&str>, as_json: bool) -> Result<()> {
+fn handle_config(
+    action: &str,
+    key: Option<&str>,
+    value: Option<&str>,
+    as_json: bool,
+) -> Result<()> {
     let mut config = MossambiConfig::load();
 
     match action.to_lowercase().as_str() {
@@ -1133,9 +1225,15 @@ fn handle_config(action: &str, key: Option<&str>, value: Option<&str>, as_json: 
                     }
                     "always_on_top" => config.always_on_top = v.parse().unwrap_or(true),
                     "wheel_size" => config.wheel_size = v.parse().unwrap_or(440),
-                    "gesture" | "enable_gesture_wakeup" => config.enable_gesture_wakeup = v.parse().unwrap_or(true),
-                    "hotkey" | "enable_hotkey_wakeup" => config.enable_hotkey_wakeup = v.parse().unwrap_or(true),
-                    "zero_loss" | "enforce_zero_loss" => config.enforce_zero_loss = v.parse().unwrap_or(true),
+                    "gesture" | "enable_gesture_wakeup" => {
+                        config.enable_gesture_wakeup = v.parse().unwrap_or(true)
+                    }
+                    "hotkey" | "enable_hotkey_wakeup" => {
+                        config.enable_hotkey_wakeup = v.parse().unwrap_or(true)
+                    }
+                    "zero_loss" | "enforce_zero_loss" => {
+                        config.enforce_zero_loss = v.parse().unwrap_or(true)
+                    }
                     _ => bail!("Unknown setting key: {}", k),
                 }
                 config.save()?;
@@ -1162,7 +1260,10 @@ fn handle_config(action: &str, key: Option<&str>, value: Option<&str>, as_json: 
                 println!("Win+Ctrl Hotkey:       {}", config.enable_hotkey_wakeup);
                 println!("Circle Gesture Wakeup: {}", config.enable_gesture_wakeup);
                 println!("Zero-Loss Standard:    {}", config.enforce_zero_loss);
-                println!("Config Path:           {}", MossambiConfig::config_path().display());
+                println!(
+                    "Config Path:           {}",
+                    MossambiConfig::config_path().display()
+                );
                 println!("---------------------------------------------------------------");
                 println!("To modify: mossambi config set <key> <value>");
             }
@@ -1173,13 +1274,13 @@ fn handle_config(action: &str, key: Option<&str>, value: Option<&str>, as_json: 
 }
 
 fn print_welcome_banner() {
-    let sage  = "\x1b[38;2;74;133;90m";   // Pantone 16-5917 Sage Meadow
-    let blue  = "\x1b[38;2;0;122;255m";   // Pantone 19-4052 Classic Blue
-    let amber = "\x1b[38;2;217;119;6m";   // Pantone 14-1064 Soft Amber
-    let cyan  = "\x1b[38;2;60;200;230m";
+    let sage = "\x1b[38;2;74;133;90m"; // Pantone 16-5917 Sage Meadow
+    let blue = "\x1b[38;2;0;122;255m"; // Pantone 19-4052 Classic Blue
+    let amber = "\x1b[38;2;217;119;6m"; // Pantone 14-1064 Soft Amber
+    let cyan = "\x1b[38;2;60;200;230m";
     let white = "\x1b[38;2;244;245;247m";
     let muted = "\x1b[38;2;160;160;165m";
-    let bold  = "\x1b[1m";
+    let bold = "\x1b[1m";
     let reset = "\x1b[0m";
 
     println!(
@@ -1204,7 +1305,9 @@ fn print_welcome_banner() {
     println!("{bold}Access Modalities:{reset}");
     println!("  {cyan}mossambi{reset}                       # Launch full macOS-style File Explorer & Studio GUI");
     println!("  {cyan}mossambi app [DIR]{reset}             # Launch Explorer GUI opened at specified directory");
-    println!("  {cyan}mossambi explorer [DIR]{reset}        # Launch Explorer GUI (explicit alias)");
+    println!(
+        "  {cyan}mossambi explorer [DIR]{reset}        # Launch Explorer GUI (explicit alias)"
+    );
     println!("  {cyan}mossambi widget{reset}                # Summon Sweet Lime desktop floating radial widget");
     println!("  {cyan}mossambi tui [DIR]{reset}             # Launch Yazi-grade interactive Terminal File Explorer");
     println!();
@@ -1213,13 +1316,23 @@ fn print_welcome_banner() {
     println!("  {cyan}mossambi <file> --all{reset}          # Transcode to ALL domain formats in parallel");
     println!("  {cyan}mossambi <photo> --exam <p>{reset}    # Indian Exam Optimizer (upsc-photo, ssc-photo, etc.)");
     println!("  {cyan}mossambi archive <f...> -o a.zip{reset}# Exhaustive compression archive (ZIP, 7Z, TAR, ZST)");
-    println!("  {cyan}mossambi extract <archive>{reset}     # Safe extraction with Zip-Slip protection");
-    println!("  {cyan}mossambi check <file>{reset}          # Quality, integrity & decode scorecard");
+    println!(
+        "  {cyan}mossambi extract <archive>{reset}     # Safe extraction with Zip-Slip protection"
+    );
+    println!(
+        "  {cyan}mossambi check <file>{reset}          # Quality, integrity & decode scorecard"
+    );
     println!("  {cyan}mossambi bench <file> [tgt]{reset}    # Latency, throughput (MB/s) & speedup benchmark");
-    println!("  {cyan}mossambi hw{reset}                    # GPU/NPU & SIMD hardware acceleration info");
+    println!(
+        "  {cyan}mossambi hw{reset}                    # GPU/NPU & SIMD hardware acceleration info"
+    );
     println!("  {cyan}mossambi verify <src> <tgt>{reset}    # Mathematical 0.00% zero-loss verification proof");
-    println!("  {cyan}mossambi catalogue [query]{reset}     # Search 200+ format registry catalogue");
-    println!("  {cyan}mossambi themes{reset}                # List 20 certified eye-safe Pantone themes");
+    println!(
+        "  {cyan}mossambi catalogue [query]{reset}     # Search 200+ format registry catalogue"
+    );
+    println!(
+        "  {cyan}mossambi themes{reset}                # List 20 certified eye-safe Pantone themes"
+    );
     println!("  {cyan}mossambi daemon{reset}                # Resident mouse gesture service (Win+Shift+C / Win+Ctrl+C)");
     println!("  {cyan}mossambi help-manual{reset}           # Exhaustive table help and manual");
     println!("\nRun '{cyan}mossambi --help{reset}' for all command flags and options.\n");

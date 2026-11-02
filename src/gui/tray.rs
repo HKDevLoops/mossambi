@@ -96,17 +96,15 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
     use windows_sys::Win32::UI::Shell::{
-        Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
-        NOTIFYICONDATAW,
+        Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-        DestroyWindow, DispatchMessageW, GetCursorPos, LoadIconW, PeekMessageW,
-        RegisterClassExW, SetForegroundWindow, TrackPopupMenu, TranslateMessage,
-        UnregisterClassW, CS_HREDRAW, CS_VREDRAW, IDI_APPLICATION, MF_CHECKED,
-        MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, PM_REMOVE,
-        TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-        WM_HOTKEY, WM_USER, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+        AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
+        DispatchMessageW, GetCursorPos, LoadIconW, PeekMessageW, RegisterClassExW,
+        SetForegroundWindow, TrackPopupMenu, TranslateMessage, UnregisterClassW, CS_HREDRAW,
+        CS_VREDRAW, IDI_APPLICATION, MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED,
+        MSG, PM_REMOVE, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD,
+        TPM_RIGHTBUTTON, WM_HOTKEY, WM_USER, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
     };
 
     const MOD_CONTROL: u32 = 0x0002;
@@ -114,7 +112,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
     const MOD_WIN: u32 = 0x0008;
     const MOD_NOREPEAT: u32 = 0x4000;
     const HOTKEY_WIDGET_ID: i32 = 701; // Win + Shift + C
-    const HOTKEY_GUI_ID: i32 = 702;    // Win + Ctrl + C
+    const HOTKEY_GUI_ID: i32 = 702; // Win + Ctrl + C
     const VK_C: u32 = 0x43;
     const WM_TRAYICON: u32 = WM_USER + 101;
     const TRAY_UID: u32 = 1001;
@@ -187,14 +185,24 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
 
     // Register global Win + Shift + C (Radial Widget) & Win + Ctrl + C (Studio GUI)
     unsafe {
-        let reg_widget = RegisterHotKey(hwnd, HOTKEY_WIDGET_ID, MOD_WIN | MOD_SHIFT | MOD_NOREPEAT, VK_C);
+        let reg_widget = RegisterHotKey(
+            hwnd,
+            HOTKEY_WIDGET_ID,
+            MOD_WIN | MOD_SHIFT | MOD_NOREPEAT,
+            VK_C,
+        );
         if reg_widget != 0 {
             log::info!("Registered global Win+Shift+C hotkey (Radial Widget).");
         } else {
             log::warn!("Could not register global Win+Shift+C hotkey.");
         }
 
-        let reg_gui = RegisterHotKey(hwnd, HOTKEY_GUI_ID, MOD_WIN | MOD_CONTROL | MOD_NOREPEAT, VK_C);
+        let reg_gui = RegisterHotKey(
+            hwnd,
+            HOTKEY_GUI_ID,
+            MOD_WIN | MOD_CONTROL | MOD_NOREPEAT,
+            VK_C,
+        );
         if reg_gui != 0 {
             log::info!("Registered global Win+Ctrl+C hotkey (Studio GUI).");
         } else {
@@ -283,53 +291,102 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                         // Theme Submenu
                         AppendMenuW(
                             hmenu_themes,
-                            MF_STRING | if current_theme == ThemeStyle::LiquidGlass { MF_CHECKED } else { MF_UNCHECKED },
+                            MF_STRING
+                                | if current_theme == ThemeStyle::LiquidGlass {
+                                    MF_CHECKED
+                                } else {
+                                    MF_UNCHECKED
+                                },
                             CMD_THEME_LIQUID_GLASS as usize,
                             to_u16("Liquid Glass (macOS Sequoia Specular)").as_ptr(),
                         );
                         AppendMenuW(
                             hmenu_themes,
-                            MF_STRING | if current_theme == ThemeStyle::FrostedGlass { MF_CHECKED } else { MF_UNCHECKED },
+                            MF_STRING
+                                | if current_theme == ThemeStyle::FrostedGlass {
+                                    MF_CHECKED
+                                } else {
+                                    MF_UNCHECKED
+                                },
                             CMD_THEME_FROSTED_GLASS as usize,
                             to_u16("Frosted Glass (macOS Sonoma Acrylic)").as_ptr(),
                         );
                         AppendMenuW(
                             hmenu_themes,
-                            MF_STRING | if current_theme == ThemeStyle::DarkAnthracite { MF_CHECKED } else { MF_UNCHECKED },
+                            MF_STRING
+                                | if current_theme == ThemeStyle::DarkAnthracite {
+                                    MF_CHECKED
+                                } else {
+                                    MF_UNCHECKED
+                                },
                             CMD_THEME_DARK_ANTHRACITE as usize,
                             to_u16("Dark Anthracite (Pro #161618)").as_ptr(),
                         );
                         AppendMenuW(
                             hmenu_themes,
-                            MF_STRING | if current_theme == ThemeStyle::LightAqua { MF_CHECKED } else { MF_UNCHECKED },
+                            MF_STRING
+                                | if current_theme == ThemeStyle::LightAqua {
+                                    MF_CHECKED
+                                } else {
+                                    MF_UNCHECKED
+                                },
                             CMD_THEME_LIGHT_AQUA as usize,
                             to_u16("Light Aqua (Clean Light #F5F5F7)").as_ptr(),
                         );
 
                         // Root Menu
-                        AppendMenuW(hmenu, MF_STRING, CMD_OPEN_STUDIO as usize, to_u16("🖥️ Open Mossambi Studio").as_ptr());
+                        AppendMenuW(
+                            hmenu,
+                            MF_STRING,
+                            CMD_OPEN_STUDIO as usize,
+                            to_u16("🖥️ Open Mossambi Studio").as_ptr(),
+                        );
                         AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
                         let is_autostart = crate::core::MossambiConfig::is_autostart_configured();
                         AppendMenuW(
                             hmenu,
-                            MF_STRING | if is_autostart { MF_CHECKED } else { MF_UNCHECKED },
+                            MF_STRING
+                                | if is_autostart {
+                                    MF_CHECKED
+                                } else {
+                                    MF_UNCHECKED
+                                },
                             CMD_TOGGLE_AUTOSTART as usize,
                             to_u16("🚀 Run in Background at Startup").as_ptr(),
                         );
                         AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
-                        AppendMenuW(hmenu, MF_POPUP, hmenu_themes as usize, to_u16("🎨 Themes (Liquid & Frosted Glass)").as_ptr());
                         AppendMenuW(
                             hmenu,
-                            MF_STRING | if zero_loss_enabled { MF_CHECKED } else { MF_UNCHECKED },
+                            MF_POPUP,
+                            hmenu_themes as usize,
+                            to_u16("🎨 Themes (Liquid & Frosted Glass)").as_ptr(),
+                        );
+                        AppendMenuW(
+                            hmenu,
+                            MF_STRING
+                                | if zero_loss_enabled {
+                                    MF_CHECKED
+                                } else {
+                                    MF_UNCHECKED
+                                },
                             CMD_TOGGLE_ZERO_LOSS as usize,
                             to_u16("Enforce 0.00% Zero-Loss Mode").as_ptr(),
                         );
                         AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
-                        AppendMenuW(hmenu, MF_STRING, CMD_QUIT as usize, to_u16("❌ Quit Mossambi").as_ptr());
+                        AppendMenuW(
+                            hmenu,
+                            MF_STRING,
+                            CMD_QUIT as usize,
+                            to_u16("❌ Quit Mossambi").as_ptr(),
+                        );
 
                         let cmd = TrackPopupMenu(
                             hmenu,
-                            TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_BOTTOMALIGN,
+                            TPM_RETURNCMD
+                                | TPM_NONOTIFY
+                                | TPM_RIGHTBUTTON
+                                | TPM_LEFTALIGN
+                                | TPM_BOTTOMALIGN,
                             pt.x,
                             pt.y,
                             0,
@@ -353,29 +410,35 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                                 });
                             }
                             CMD_TOGGLE_AUTOSTART => {
-                                let new_setting = !crate::core::MossambiConfig::is_autostart_configured();
+                                let new_setting =
+                                    !crate::core::MossambiConfig::is_autostart_configured();
                                 let _ = crate::core::MossambiConfig::set_autostart(new_setting);
                                 let _ = sender.send(AppControlEvent::ToggleAutostart(new_setting));
                             }
                             CMD_THEME_LIQUID_GLASS => {
                                 current_theme = ThemeStyle::LiquidGlass;
-                                let _ = sender.send(AppControlEvent::ChangeTheme(ThemeStyle::LiquidGlass));
+                                let _ = sender
+                                    .send(AppControlEvent::ChangeTheme(ThemeStyle::LiquidGlass));
                             }
                             CMD_THEME_FROSTED_GLASS => {
                                 current_theme = ThemeStyle::FrostedGlass;
-                                let _ = sender.send(AppControlEvent::ChangeTheme(ThemeStyle::FrostedGlass));
+                                let _ = sender
+                                    .send(AppControlEvent::ChangeTheme(ThemeStyle::FrostedGlass));
                             }
                             CMD_THEME_DARK_ANTHRACITE => {
                                 current_theme = ThemeStyle::DarkAnthracite;
-                                let _ = sender.send(AppControlEvent::ChangeTheme(ThemeStyle::DarkAnthracite));
+                                let _ = sender
+                                    .send(AppControlEvent::ChangeTheme(ThemeStyle::DarkAnthracite));
                             }
                             CMD_THEME_LIGHT_AQUA => {
                                 current_theme = ThemeStyle::LightAqua;
-                                let _ = sender.send(AppControlEvent::ChangeTheme(ThemeStyle::LightAqua));
+                                let _ = sender
+                                    .send(AppControlEvent::ChangeTheme(ThemeStyle::LightAqua));
                             }
                             CMD_TOGGLE_ZERO_LOSS => {
                                 zero_loss_enabled = !zero_loss_enabled;
-                                let _ = sender.send(AppControlEvent::ToggleZeroLoss(zero_loss_enabled));
+                                let _ =
+                                    sender.send(AppControlEvent::ToggleZeroLoss(zero_loss_enabled));
                             }
                             CMD_QUIT => {
                                 if let Some(mut l) = drag_listener.take() {

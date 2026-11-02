@@ -14,18 +14,20 @@ pub mod registry;
 
 pub use async_worker::{AsyncWorkerPool, TaskUpdate};
 pub use config::{GlassEffect, MossambiConfig, OutputMode, ThemeMode};
-pub use drag_listener::{extract_clipboard_files, DragGestureEvent, DragGestureListener};
 #[cfg(target_os = "windows")]
 pub use drag_listener::query_active_explorer_files;
+pub use drag_listener::{extract_clipboard_files, DragGestureEvent, DragGestureListener};
 pub use file_icons::{resolve_file_icon, FileIconSpec};
 pub use fs_utils::{
-    copy_entry_recursive, format_file_size, get_system_drives, list_directory_sync, move_entry, parse_breadcrumbs,
-    remove_entry_recursive, resolve_unique_paste_path, spawn_async_dir_scan,
+    copy_entry_recursive, format_file_size, get_system_drives, list_directory_sync, move_entry,
+    parse_breadcrumbs, remove_entry_recursive, resolve_unique_paste_path, spawn_async_dir_scan,
     BreadcrumbSegment, DriveInfo, FileItem, ScanBatch,
 };
 pub use fuzzy::{fuzzy_match, sort_by_fuzzy_match};
 pub use gesture::{GestureKind, GesturePoint, KinematicGestureTracker};
-pub use linux_dna::{discover_linux_mounts, install_linux_desktop_integration, send_linux_notification};
+pub use linux_dna::{
+    discover_linux_mounts, install_linux_desktop_integration, send_linux_notification,
+};
 pub use pantone::{
     all_pantone_themes, get_pantone_theme, CitrusShade, PantoneColor, PantonePalette, PantoneTheme,
     DARK_THEMES, LIGHT_THEMES,

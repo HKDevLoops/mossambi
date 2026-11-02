@@ -74,7 +74,14 @@ pub fn print_daemon_status() {
     println!("┌────────────────────────────────────────────────────────┐");
     println!("│  MOSSAMBI BACKGROUND DAEMON STATUS                    │");
     println!("├────────────────────────────────────────────────────────┤");
-    println!("│  Autostart on Boot:  {}", if autostart { "ENABLED  [Active at login]" } else { "DISABLED" });
+    println!(
+        "│  Autostart on Boot:  {}",
+        if autostart {
+            "ENABLED  [Active at login]"
+        } else {
+            "DISABLED"
+        }
+    );
     println!("│  File Drag Gesture:  {}  │", gesture_status);
     println!("│  Global Hotkey 1:    Win + Shift + C  (Radial Wheel)   │");
     println!("│  Global Hotkey 2:    Win + Ctrl + C   (Studio GUI)     │");
@@ -154,7 +161,13 @@ pub fn stop_daemon() -> Result<()> {
     {
         // Gracefully kill daemon instances
         let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "mossambi.exe", "/FI", "WINDOWTITLE eq MossambiDaemon*"])
+            .args([
+                "/F",
+                "/IM",
+                "mossambi.exe",
+                "/FI",
+                "WINDOWTITLE eq MossambiDaemon*",
+            ])
             .output();
         println!("✓ Mossambi daemon stopped.");
     }
@@ -177,13 +190,12 @@ pub fn run_daemon_loop() -> Result<()> {
         Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-        DestroyWindow, DispatchMessageW, GetCursorPos, LoadIconW, PeekMessageW,
-        RegisterClassExW, SetForegroundWindow, TrackPopupMenu, TranslateMessage,
-        UnregisterClassW, CS_HREDRAW, CS_VREDRAW, IDI_APPLICATION, MF_CHECKED,
-        MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, PM_REMOVE, TPM_BOTTOMALIGN,
-        TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_HOTKEY,
-        WM_USER, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+        AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
+        DispatchMessageW, GetCursorPos, LoadIconW, PeekMessageW, RegisterClassExW,
+        SetForegroundWindow, TrackPopupMenu, TranslateMessage, UnregisterClassW, CS_HREDRAW,
+        CS_VREDRAW, IDI_APPLICATION, MF_CHECKED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG,
+        PM_REMOVE, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+        WM_HOTKEY, WM_USER, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
     };
 
     const MOD_CONTROL: u32 = 0x0002;
@@ -191,7 +203,7 @@ pub fn run_daemon_loop() -> Result<()> {
     const MOD_WIN: u32 = 0x0008;
     const MOD_NOREPEAT: u32 = 0x4000;
     const HOTKEY_WIDGET_ID: i32 = 701; // Win + Shift + C
-    const HOTKEY_GUI_ID: i32 = 702;    // Win + Ctrl + C
+    const HOTKEY_GUI_ID: i32 = 702; // Win + Ctrl + C
     const VK_C: u32 = 0x43;
     const WM_TRAYICON: u32 = WM_USER + 101;
     const TRAY_UID: u32 = 1001;
@@ -256,11 +268,21 @@ pub fn run_daemon_loop() -> Result<()> {
 
     // Register Win + Shift + C & Win + Ctrl + C
     unsafe {
-        let reg1 = RegisterHotKey(hwnd, HOTKEY_WIDGET_ID, MOD_WIN | MOD_SHIFT | MOD_NOREPEAT, VK_C);
+        let reg1 = RegisterHotKey(
+            hwnd,
+            HOTKEY_WIDGET_ID,
+            MOD_WIN | MOD_SHIFT | MOD_NOREPEAT,
+            VK_C,
+        );
         if reg1 != 0 {
             log::info!("Registered global Win+Shift+C hotkey (Radial Wheel).");
         }
-        let reg2 = RegisterHotKey(hwnd, HOTKEY_GUI_ID, MOD_WIN | MOD_CONTROL | MOD_NOREPEAT, VK_C);
+        let reg2 = RegisterHotKey(
+            hwnd,
+            HOTKEY_GUI_ID,
+            MOD_WIN | MOD_CONTROL | MOD_NOREPEAT,
+            VK_C,
+        );
         if reg2 != 0 {
             log::info!("Registered global Win+Ctrl+C hotkey (Studio GUI).");
         }
@@ -328,23 +350,47 @@ pub fn run_daemon_loop() -> Result<()> {
                         SetForegroundWindow(hwnd);
 
                         let hmenu = CreatePopupMenu();
-                        AppendMenuW(hmenu, MF_STRING, CMD_SUMMON_WIDGET as usize, to_u16("🍊 Summon Radial Wheel (Win+Shift+C)").as_ptr());
-                        AppendMenuW(hmenu, MF_STRING, CMD_OPEN_STUDIO as usize, to_u16("🖥️ Open Studio (Win+Ctrl+C)").as_ptr());
+                        AppendMenuW(
+                            hmenu,
+                            MF_STRING,
+                            CMD_SUMMON_WIDGET as usize,
+                            to_u16("🍊 Summon Radial Wheel (Win+Shift+C)").as_ptr(),
+                        );
+                        AppendMenuW(
+                            hmenu,
+                            MF_STRING,
+                            CMD_OPEN_STUDIO as usize,
+                            to_u16("🖥️ Open Studio (Win+Ctrl+C)").as_ptr(),
+                        );
                         AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
 
                         let is_autostart = crate::core::MossambiConfig::is_autostart_configured();
                         AppendMenuW(
                             hmenu,
-                            MF_STRING | if is_autostart { MF_CHECKED } else { MF_UNCHECKED },
+                            MF_STRING
+                                | if is_autostart {
+                                    MF_CHECKED
+                                } else {
+                                    MF_UNCHECKED
+                                },
                             CMD_TOGGLE_AUTOSTART as usize,
                             to_u16("🚀 Run in Background at Startup").as_ptr(),
                         );
                         AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
-                        AppendMenuW(hmenu, MF_STRING, CMD_QUIT as usize, to_u16("❌ Exit Background Daemon").as_ptr());
+                        AppendMenuW(
+                            hmenu,
+                            MF_STRING,
+                            CMD_QUIT as usize,
+                            to_u16("❌ Exit Background Daemon").as_ptr(),
+                        );
 
                         let cmd = TrackPopupMenu(
                             hmenu,
-                            TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_BOTTOMALIGN,
+                            TPM_RETURNCMD
+                                | TPM_NONOTIFY
+                                | TPM_RIGHTBUTTON
+                                | TPM_LEFTALIGN
+                                | TPM_BOTTOMALIGN,
                             pt.x,
                             pt.y,
                             0,
@@ -361,7 +407,8 @@ pub fn run_daemon_loop() -> Result<()> {
                                 spawn_gui_studio();
                             }
                             CMD_TOGGLE_AUTOSTART => {
-                                let new_setting = !crate::core::MossambiConfig::is_autostart_configured();
+                                let new_setting =
+                                    !crate::core::MossambiConfig::is_autostart_configured();
                                 let _ = crate::core::MossambiConfig::set_autostart(new_setting);
                             }
                             CMD_QUIT => {
@@ -387,7 +434,12 @@ pub fn run_daemon_loop() -> Result<()> {
         // Check for system-level mouse drag gestures while holding files
         if let Some(ref listener) = drag_listener {
             if let Some(evt) = listener.try_recv() {
-                spawn_widget_at_with_files(evt.cursor_pos.0 as i32, evt.cursor_pos.1 as i32, &evt.files, true);
+                spawn_widget_at_with_files(
+                    evt.cursor_pos.0 as i32,
+                    evt.cursor_pos.1 as i32,
+                    &evt.files,
+                    true,
+                );
             }
         }
 
@@ -415,7 +467,12 @@ pub fn run_daemon_loop() -> Result<()> {
     loop {
         if let Some(ref listener) = drag_listener {
             if let Some(evt) = listener.try_recv() {
-                spawn_widget_at_with_files(evt.cursor_pos.0 as i32, evt.cursor_pos.1 as i32, &evt.files, true);
+                spawn_widget_at_with_files(
+                    evt.cursor_pos.0 as i32,
+                    evt.cursor_pos.1 as i32,
+                    &evt.files,
+                    true,
+                );
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -441,7 +498,15 @@ fn spawn_widget_at_with_files(x: i32, y: i32, files: &[std::path::PathBuf], acti
             unsafe {
                 ShowWindow(hwnd, SW_RESTORE);
                 SetForegroundWindow(hwnd);
-                SetWindowPos(hwnd, null_mut(), x - 200, y - 200, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+                SetWindowPos(
+                    hwnd,
+                    null_mut(),
+                    x - 200,
+                    y - 200,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER,
+                );
             }
             return;
         }

@@ -8,9 +8,9 @@ use crate::core::GlassEffect;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackdropKind {
     None = 1,
-    Mica = 2,        // DWMSBT_MAINWINDOW (Windows 11)
-    Acrylic = 3,     // DWMSBT_TRANSIENTWINDOW (Acrylic blur behind)
-    TabbedMica = 4,  // DWMSBT_TABBEDWINDOW (Mica Alt)
+    Mica = 2,       // DWMSBT_MAINWINDOW (Windows 11)
+    Acrylic = 3,    // DWMSBT_TRANSIENTWINDOW (Acrylic blur behind)
+    TabbedMica = 4, // DWMSBT_TABBEDWINDOW (Mica Alt)
 }
 
 impl From<GlassEffect> for BackdropKind {
@@ -76,7 +76,10 @@ mod win32_dwm {
             let class_str = String::from_utf16_lossy(&class_name[..len as usize]);
 
             // Matches eframe / winit window class
-            if class_str == "Window Class" || class_str.contains("winit") || class_str.contains("egui") {
+            if class_str == "Window Class"
+                || class_str.contains("winit")
+                || class_str.contains("egui")
+            {
                 let dark_mode = (lparam & 0x100) != 0;
                 let backdrop_val = (lparam & 0xFF) as i32;
 
