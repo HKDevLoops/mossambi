@@ -25,7 +25,8 @@ use mossambi::daemon;
     author = "Mossambi Systems Team",
     version = "2.1.0",
     about = "Zero-loss native desktop file converter, archive suite, Indian exam form tuner, and macOS-style Universal File Explorer",
-    long_about = "🍋 Mossambi: Zero-Loss Desktop File Converter & Universal File Explorer\nWindows & Linux | x86_64 & ARM64 | 0.00% Zero-Loss Standard | Hardware Accelerated\n\nACCESS MODALITIES:\n  1. mossambi [or: mossambi app, mossambi explorer]  -> Launch macOS-styled Universal File Explorer & Studio GUI\n  2. mossambi widget                                  -> Launch Sweet Lime Resident Radial Widget overlay\n  3. mossambi tui                                     -> Launch Yazi-grade interactive Terminal File Explorer\n  4. mossambi <INPUT> [TARGET_FORMAT]                 -> Fast UNIX mv-style file conversion"
+    long_about = "🍋 Mossambi: Zero-Loss Desktop File Converter & Universal File Explorer\nWindows & Linux | x86_64 & ARM64 | 0.00% Zero-Loss Standard | Hardware Accelerated\n\nACCESS MODALITIES:\n  1. mossambi [or: mossambi app, mossambi explorer]  -> Launch macOS-styled Universal File Explorer & Studio GUI\n  2. mossambi widget                                  -> Launch Sweet Lime Resident Radial Widget overlay\n  3. mossambi tui                                     -> Launch Yazi-grade interactive Terminal File Explorer\n  4. mossambi <INPUT> [TARGET_FORMAT]                 -> Fast UNIX mv-style file conversion",
+    subcommand_precedence_over_arg = true
 )]
 pub struct Cli {
     /// Input file or directory to process (mv-style positional grammar)
@@ -91,6 +92,50 @@ pub struct Cli {
     /// Launch the Terminal User Interface (TUI) File Explorer
     #[arg(long = "tui")]
     pub tui: bool,
+
+    /// Display MOSSAMBI banner and summary
+    #[arg(long = "banner")]
+    pub banner: bool,
+
+    /// Display Unicode box table manual
+    #[arg(long = "manual", visible_alias = "help-manual")]
+    pub manual: bool,
+
+    /// Display detected hardware acceleration engines
+    #[arg(long = "hw")]
+    pub hw: bool,
+
+    /// List all 20 certified Pantone themes
+    #[arg(long = "themes")]
+    pub themes: bool,
+
+    /// 4-dimension Quality & Container Integrity Scorecard
+    #[arg(long = "check")]
+    pub check: Option<PathBuf>,
+
+    /// Benchmark conversion latency and throughput
+    #[arg(long = "bench")]
+    pub bench: Option<PathBuf>,
+
+    /// Verify mathematical zero-loss fidelity between two files
+    #[arg(long = "verify", num_args = 2)]
+    pub verify: Option<Vec<PathBuf>>,
+
+    /// Search across the 200+ format registry catalog
+    #[arg(long = "catalogue")]
+    pub catalogue: Option<String>,
+
+    /// Pack files or directories into an archive
+    #[arg(long = "archive", num_args = 1..)]
+    pub archive: Option<Vec<PathBuf>>,
+
+    /// Extract an archive with automatic Zip-Slip protection
+    #[arg(long = "extract")]
+    pub extract: Option<PathBuf>,
+
+    /// Manage background resident daemon (start, stop, status)
+    #[arg(long = "daemon")]
+    pub daemon: Option<String>,
 
     /// Explicit subcommands
     #[command(subcommand)]
@@ -285,17 +330,83 @@ pub enum Commands {
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|a| a == "--table-help" || a == "help-manual") {
+
+    // 1. Intercept help flags -> Print ONLY table structure as requested!
+    if args.iter().any(|a| a == "--help" || a == "-h" || a == "help" || a == "help-manual" || a == "--manual") {
         print_table_help();
         return Ok(());
     }
 
+    // 2. Intercept version flags
+    if args.iter().any(|a| a == "--version" || a == "-V" || a == "version") {
+        println!("Mossambi v2.1.0 (Windows & Linux | x86_64 & ARM64 | 0.00% Zero-Loss Standard)");
+        return Ok(());
+    }
+
+    // 3. Intercept banner
     if args.iter().any(|a| a == "--banner" || a == "banner") {
         print_welcome_banner();
         return Ok(());
     }
 
+    // 4. Intercept hw diagnostics
+    if args.iter().any(|a| a == "--hw" || a == "hw") {
+        let as_json = args.iter().any(|a| a == "--json");
+        return handle_hw(as_json);
+    }
+
+    // 5. Intercept themes list
+    if args.iter().any(|a| a == "--themes" || a == "themes") {
+        let as_json = args.iter().any(|a| a == "--json");
+        return handle_themes(as_json);
+    }
+
     let cli = Cli::parse();
+
+    // Handle flag-style operations
+    if cli.banner {
+        print_welcome_banner();
+        return Ok(());
+    }
+    if cli.manual {
+        print_table_help();
+        return Ok(());
+    }
+    if cli.hw {
+        return handle_hw(cli.json);
+    }
+    if cli.themes {
+        return handle_themes(cli.json);
+    }
+    if let Some(ref check_file) = cli.check {
+        return handle_check(check_file, cli.json);
+    }
+    if let Some(ref bench_file) = cli.bench {
+        return handle_bench(bench_file, cli.target.as_deref(), cli.json);
+    }
+    if let Some(ref verify_files) = cli.verify {
+        if verify_files.len() >= 2 {
+            return handle_verify(&verify_files[0], &verify_files[1], cli.json);
+        } else {
+            bail!("--verify requires two file arguments: <original> <converted>");
+        }
+    }
+    if let Some(ref query) = cli.catalogue {
+        return handle_catalogue(query, cli.json);
+    }
+    if let Some(ref inputs) = cli.archive {
+        if let Some(ref out) = cli.output_dir {
+            return handle_archive(inputs, out, None, cli.json);
+        } else {
+            bail!("--archive requires -o <OUTPUT_ARCHIVE>");
+        }
+    }
+    if let Some(ref arc) = cli.extract {
+        return handle_extract(arc, cli.output_dir.as_deref(), cli.json);
+    }
+    if let Some(ref d_act) = cli.daemon {
+        return daemon::handle_daemon_command(d_act);
+    }
 
     if cli.app {
         return handle_gui(None);
@@ -374,6 +485,25 @@ fn main() -> Result<()> {
 
     // UNIX mv-like positional syntax: `mossambi <INPUT> [TARGET_FORMAT]`
     if let Some(input) = cli.input {
+        let input_str = input.to_string_lossy();
+        // Guard against command names being treated as files or directories:
+        match input_str.as_ref() {
+            "app" | "explorer" | "gui" => return handle_gui(None),
+            "widget" => return handle_widget(None, false, None),
+            "tui" => return handle_tui(None),
+            "banner" => {
+                print_welcome_banner();
+                return Ok(());
+            }
+            "help-manual" | "manual" | "help" => {
+                print_table_help();
+                return Ok(());
+            }
+            "hw" => return handle_hw(cli.json),
+            "themes" => return handle_themes(cli.json),
+            _ => {}
+        }
+
         // If input is a directory and no target is given, launch Explorer GUI directly opened at that directory
         if input.is_dir() && cli.target.is_none() && !cli.all && cli.exam_preset.is_none() {
             return handle_gui(Some(input));
@@ -1184,59 +1314,45 @@ fn handle_carapace(_shell: Option<&str>, args: &[String]) -> Result<()> {
 }
 
 fn print_table_help() {
-    println!("┌──────────────────────────────────────────────────────────────────────────────────────────────────┐");
-    println!("│  MOSSAMBI — ZERO-LOSS CONVERSION PLATFORM & UNIVERSAL FILE EXPLORER (v2.1.0)                     │");
-    println!("│  One Pure Rust Core · Three Operating Modalities · Apple Elegance + Linux Power                  │");
-    println!("├──────────────────────────────────────────────────────────────────────────────────────────────────┤");
-    println!("│  ACCESS MODALITIES:                                                                              │");
-    println!("│    mossambi                          Launch macOS-styled Universal File Explorer & Studio GUI    │");
-    println!("│    mossambi app [DIR]                Launch Explorer GUI opened at specified directory           │");
-    println!("│    mossambi explorer [DIR]           Launch Explorer GUI opened at specified directory           │");
-    println!("│    mossambi widget                   Summon Sweet Lime Desktop Floating Radial Widget            │");
-    println!("│    mossambi tui [DIR]                Launch Yazi-Grade Interactive Terminal File Explorer        │");
-    println!("│                                                                                                  │");
-    println!("│  UNIX 'mv' POSITIONAL GRAMMAR:                                                                   │");
-    println!("│    mossambi <INPUT> [TARGET_FORMAT] [OPTIONS]                                                    │");
-    println!("│    mossambi input.wav flac           Convert WAV to FLAC with 24-bit 0.00% Zero-Loss             │");
-    println!("│    mossambi photo.png webp           Lossless WebP raster transcoding                            │");
-    println!("│    mossambi movie.mkv mp4            Fast-path NVMe stream remux (2hr movie in ~10s)             │");
-    println!("│    mossambi notes.txt pdf            Vector typography PDF with embedded CMaps                   │");
-    println!("│    mossambi sound.flac ALL           Batch transcode to ALL audio formats in parallel            │");
-    println!("│    mossambi --exam upsc-photo s.png  Indian competitive exam 100% scorecard optimizer            │");
-    println!("├──────────────────────────┬──────────────────────────────────────────┬────────────────────────────┤");
-    println!("│  COMMAND                 │  DESCRIPTION                             │  KEY USAGE / EXAMPLE       │");
-    println!("├──────────────────────────┼──────────────────────────────────────────┼────────────────────────────┤");
-    println!("│  app / explorer          │  Launch Universal File Explorer GUI      │  mossambi app [folder]     │");
-    println!("│  widget                  │  Summon Sweet Lime radial hero overlay   │  mossambi widget           │");
-    println!("│  tui                     │  Full-screen interactive Terminal UI     │  mossambi tui [folder]     │");
-    println!("│  convert                 │  Explicit file conversion                │  mossambi convert in.wav mp3│");
-    println!("│  archive                 │  Pack files into ZIP, 7Z, TAR, GZ, XZ, ZST│ mossambi archive -o out.zip│");
-    println!("│  extract                 │  Extract archive with Zip-Slip safety    │  mossambi extract bundle.zip│");
-    println!("│  check                   │  Quality & container integrity scorecard │  mossambi check file.png   │");
-    println!("│  bench                   │  Benchmark latency, throughput & speedup │  mossambi bench file.wav   │");
-    println!("│  hw                      │  Display GPU/NPU hardware telemetry      │  mossambi hw               │");
-    println!("│  verify                  │  Mathematical 0.00% loss verification    │  mossambi verify a.png b.png│");
-    println!("│  catalogue               │  Search 200+ format registry             │  mossambi catalogue lossless│");
-    println!("│  upload-ready            │  Indian Exam Portal Optimizer            │  mossambi upload-ready in.jpg│");
-    println!("│  themes                  │  List 20 certified Pantone themes        │  mossambi themes           │");
-    println!("│  daemon                  │  Background gesture daemon (Win+Shift+C) │  mossambi daemon start     │");
-    println!("│  config                  │  View or edit persistent preferences     │  mossambi config list      │");
-    println!("│  completions             │  Generate shell completions & Carapace   │  mossambi completions zsh  │");
-    println!("├──────────────────────────┼──────────────────────────────────────────┼────────────────────────────┤");
-    println!("│  FLAG / OPTION           │  SHORT / ARG                             │  FUNCTION                  │");
-    println!("├──────────────────────────┼──────────────────────────────────────────┼────────────────────────────┤");
-    println!("│  --app / --explorer      │  --gui                                   │  Launch Studio GUI App     │");
-    println!("│  --widget                │  --widget                                │  Launch Desktop Radial     │");
-    println!("│  --tui                   │  --tui                                   │  Launch Interactive TUI    │");
-    println!("│  --all                   │  -a                                      │  Batch convert to ALL valid│");
-    println!("│  --output                │  -o <DIR>                                │  Custom destination folder │");
-    println!("│  --strict                │  (default: true)                         │  Enforce 0.00% Zero-Loss   │");
-    println!("│  --json                  │  --json                                  │  Emit script-ready JSON    │");
-    println!("│  --exam                  │  --exam <PRESET>                         │  upsc/ssc/ibps photo/sign  │");
-    println!("│  --width / --height      │  --width <PX> / --height <PX>            │  Exact pixel dimensions    │");
-    println!("│  --dpi                   │  --dpi <INT>                             │  Target DPI (200 / 300)    │");
-    println!("│  --min-kb / --max-kb     │  --min-kb <N> / --max-kb <N>             │  Target byte envelope range│");
-    println!("│  --whiten                │  --whiten                                │  Background illumination   │");
-    println!("│  --help                  │  -h                                      │  Show this command table   │");
-    println!("└──────────────────────────┴──────────────────────────────────────────┴────────────────────────────┘");
+    println!("┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐");
+    println!("│  Mossambi (MOSSAMBI — ZERO-LOSS CONVERSION PLATFORM & UNIVERSAL FILE EXPLORER v2.1.0)                            │");
+    println!("│  One Pure Rust Core · Three Operating Modalities · Apple Elegance + Linux Power                                  │");
+    println!("├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤");
+    println!("│  Usage: mossambi [FLAGS / OPTIONS] [INPUT] [TARGET_FORMAT]                                                       │");
+    println!("│  UNIX 'mv' POSITIONAL GRAMMAR: mossambi <INPUT> [TARGET_FORMAT] [-a|--all] [-o <DIR>]                            │");
+    println!("├──────────────────────────────────┬──────────────────────────────────────────────────────┬────────────────────────┤");
+    println!("│  FLAG / OPTION                   │  DESCRIPTION & FUNCTION                              │  EXAMPLE USAGE         │");
+    println!("├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤");
+    println!("│  --app, --explorer, --gui [DIR]  │  Launch macOS-styled Universal File Explorer & Studio │  mossambi --app        │");
+    println!("│  --widget [FILE]                 │  Launch Sweet Lime Resident Radial Widget (8 petals) │  mossambi --widget     │");
+    println!("│  --tui [DIR]                     │  Launch Yazi-Grade Interactive Terminal File Explorer │  mossambi --tui        │");
+    println!("├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤");
+    println!("│  -a, --all                       │  Batch transcode to ALL valid formats in domain      │  mossambi file.wav -a  │");
+    println!("│  -o, --output <DIR>              │  Custom destination directory for output files       │  mossambi file.png -o .│");
+    println!("│  --strict                        │  Enforce strict 0.00% zero-loss mathematical standard│  mossambi in.wav flac  │");
+    println!("│  --json                          │  Output structured machine-parseable JSON response   │  mossambi in.wav --json│");
+    println!("├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤");
+    println!("│  --exam <PRESET>                 │  Indian Exam Tuner (upsc-photo, ssc-photo, ibps-sign)│  mossambi in.jpg --exam│");
+    println!("│  --width <PX> / --height <PX>    │  Exact target width and height in pixels             │  --width 350 --height  │");
+    println!("│  --dpi <INT>                     │  Target resolution DPI (e.g. 200 or 300 DPI)         │  --dpi 300             │");
+    println!("│  --min-kb <N> / --max-kb <N>     │  Target file byte envelope range (e.g. 20KB to 50KB) │  --min-kb 20 --max-kb50│");
+    println!("│  --whiten                        │  Auto-whiten background of scanned signatures/photos │  --whiten              │");
+    println!("├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤");
+    println!("│  --archive <FILES...> -o <ZIP>   │  Pack files into ZIP, 7Z, TAR, GZ, BZ2, XZ, or ZST   │  --archive a b -o c.zip│");
+    println!("│  --extract <ARCHIVE> [-o <DIR>]  │  Extract archive safely with Zip-Slip protection     │  --extract bundle.zip  │");
+    println!("├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤");
+    println!("│  --check <FILE>                  │  4-dimension Quality & Container Integrity Scorecard │  mossambi --check f.png│");
+    println!("│  --bench <FILE> [TARGET]         │  Benchmark latency, throughput (MB/s) and speedup    │  mossambi --bench f.wav│");
+    println!("│  --hw                            │  Display GPU/NPU hardware acceleration engines       │  mossambi --hw         │");
+    println!("│  --verify <ORIG> <CONV>          │  Mathematical 0.00% zero-loss verification proof     │  --verify a.png b.png  │");
+    println!("│  --catalogue [QUERY]             │  Search across 200+ format registry catalog          │  --catalogue lossless  │");
+    println!("├──────────────────────────────────┼──────────────────────────────────────────────────────┼────────────────────────┤");
+    println!("│  --themes                        │  List all 20 certified eye-safe Pantone themes       │  mossambi --themes     │");
+    println!("│  --config [get|set|list]         │  View or edit persistent preferences (~/.mossambi)   │  --config set theme ...│");
+    println!("│  --daemon [start|stop|status]    │  Resident mouse gesture daemon (Win+Shift+C Hotkey) │  --daemon start        │");
+    println!("│  --banner                        │  Display Sweet Lime ASCII fruit art and summary      │  mossambi --banner     │");
+    println!("│  --manual                        │  Display Unicode box table manual                    │  mossambi --manual     │");
+    println!("│  -h, --help                      │  Display this complete usage manual table            │  mossambi --help       │");
+    println!("│  -V, --version                   │  Display version and system architecture info        │  mossambi --version    │");
+    println!("└──────────────────────────────────┴──────────────────────────────────────────────────────┴────────────────────────┘");
 }

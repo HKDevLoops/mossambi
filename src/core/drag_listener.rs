@@ -652,6 +652,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(target_os = "windows", ignore = "Requires STA single-threaded apartment")]
     fn test_query_active_explorer_files_safe() {
         #[cfg(target_os = "windows")]
         {
