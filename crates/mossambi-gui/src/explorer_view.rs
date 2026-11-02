@@ -413,6 +413,63 @@ impl ExplorerView {
             if (i.modifiers.ctrl || i.modifiers.command) && i.modifiers.shift && i.key_pressed(egui::Key::N) {
                 self.show_new_folder_dialog = true;
             }
+            if i.key_pressed(egui::Key::F2) {
+                if let Some(first_sel) = self.selected_paths.iter().next() {
+                    if let Some(name) = first_sel.file_name() {
+                        self.renaming_path = Some((first_sel.clone(), name.to_string_lossy().to_string()));
+                    }
+                }
+            }
+            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::L) {
+                self.path_edit_buffer = self.current_dir.to_string_lossy().to_string();
+                self.is_editing_path = true;
+            }
+            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::C) {
+                self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+                self.clipboard_is_cut = false;
+            }
+            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::X) {
+                self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+                self.clipboard_is_cut = true;
+            }
+            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::V) {
+                let mut pasted = false;
+                for src in &self.clipboard_paths {
+                    if let Some(file_name) = src.file_name() {
+                        let dest = self.current_dir.join(file_name);
+                        if self.clipboard_is_cut {
+                            let _ = std::fs::rename(src, &dest);
+                        } else if src.is_dir() {
+                            let _ = std::fs::create_dir_all(&dest);
+                        } else {
+                            let _ = std::fs::copy(src, &dest);
+                        }
+                        pasted = true;
+                    }
+                }
+                if self.clipboard_is_cut {
+                    self.clipboard_paths.clear();
+                    self.clipboard_is_cut = false;
+                }
+                if pasted {
+                    self.navigate_to(self.current_dir.clone());
+                }
+            }
+            if i.key_pressed(egui::Key::Delete) {
+                let mut deleted = false;
+                for path in &self.selected_paths {
+                    if path.is_dir() {
+                        let _ = std::fs::remove_dir_all(path);
+                    } else {
+                        let _ = std::fs::remove_file(path);
+                    }
+                    deleted = true;
+                }
+                if deleted {
+                    self.selected_paths.clear();
+                    self.navigate_to(self.current_dir.clone());
+                }
+            }
         });
 
         // 3. New Folder Modal Dialog
@@ -465,7 +522,60 @@ impl ExplorerView {
             }
         }
 
-        // 4. Explorer Layout: Left Sub-Sidebar (Drives & Bookmarks) + Right Main Explorer Body
+        // 4. Rename Item Modal Dialog
+        if let Some((old_path, mut new_name)) = self.renaming_path.clone() {
+            let mut close_dialog = false;
+            let mut do_rename = false;
+
+            egui::Window::new("✏ Rename Item")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .frame(
+                    egui::Frame::window(&ui.ctx().style())
+                        .fill(palette.card_bg)
+                        .stroke(Stroke::new(1.0_f32, palette.border))
+                        .rounding(Rounding::same(10.0))
+                        .inner_margin(egui::Margin::same(16.0)),
+                )
+                .show(ui.ctx(), |ui| {
+                    ui.label(egui::RichText::new("Enter new name:").color(palette.text_primary));
+                    ui.add_space(6.0);
+                    let resp = ui.text_edit_singleline(&mut new_name);
+                    resp.request_focus();
+                    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        do_rename = true;
+                    }
+
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(egui::RichText::new("Rename").strong().color(Color32::WHITE)).clicked() {
+                            do_rename = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close_dialog = true;
+                        }
+                    });
+                });
+
+            if do_rename {
+                let trimmed = new_name.trim();
+                if !trimmed.is_empty() {
+                    if let Some(parent) = old_path.parent() {
+                        let new_path = parent.join(trimmed);
+                        let _ = std::fs::rename(&old_path, &new_path);
+                        self.navigate_to(self.current_dir.clone());
+                    }
+                }
+                self.renaming_path = None;
+            } else if close_dialog {
+                self.renaming_path = None;
+            } else {
+                self.renaming_path = Some((old_path, new_name));
+            }
+        }
+
+        // 5. Explorer Layout: Left Sub-Sidebar (Drives & Bookmarks) + Right Main Explorer Body
         ui.horizontal(|ui| {
             // Left Sub-Sidebar (185px fixed width)
             let sidebar_frame = egui::Frame::none()
@@ -1131,6 +1241,33 @@ impl ExplorerView {
                         }
 
                         menu_ui.separator();
+                        if menu_ui.button("✏ Rename (F2)").clicked() {
+                            if let Some(name) = path_clone.file_name() {
+                                self.renaming_path = Some((path_clone.clone(), name.to_string_lossy().to_string()));
+                            }
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("📄 Copy (Ctrl+C)").clicked() {
+                            self.clipboard_paths = vec![path_clone.clone()];
+                            self.clipboard_is_cut = false;
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("✂ Cut (Ctrl+X)").clicked() {
+                            self.clipboard_paths = vec![path_clone.clone()];
+                            self.clipboard_is_cut = true;
+                            menu_ui.close_menu();
+                        }
+                        if menu_ui.button("🗑 Delete (Del)").clicked() {
+                            if path_clone.is_dir() {
+                                let _ = std::fs::remove_dir_all(&path_clone);
+                            } else {
+                                let _ = std::fs::remove_file(&path_clone);
+                            }
+                            self.selected_paths.remove(&path_clone);
+                            self.navigate_to(self.current_dir.clone());
+                            menu_ui.close_menu();
+                        }
+                        menu_ui.separator();
                         if menu_ui.button("📋 Copy Full Path").clicked() {
                             ui.output_mut(|o| o.copied_text = path_clone.to_string_lossy().to_string());
                             menu_ui.close_menu();
@@ -1177,6 +1314,29 @@ impl ExplorerView {
             }
             if menu_ui.button("✕ Clear Selection").clicked() {
                 self.selected_paths.clear();
+                menu_ui.close_menu();
+            }
+            menu_ui.separator();
+            let has_clip = !self.clipboard_paths.is_empty();
+            let paste_btn = egui::Button::new("📋 Paste (Ctrl+V)");
+            if menu_ui.add_enabled(has_clip, paste_btn).clicked() {
+                for src in &self.clipboard_paths {
+                    if let Some(file_name) = src.file_name() {
+                        let dest = self.current_dir.join(file_name);
+                        if self.clipboard_is_cut {
+                            let _ = std::fs::rename(src, &dest);
+                        } else if src.is_dir() {
+                            let _ = std::fs::create_dir_all(&dest);
+                        } else {
+                            let _ = std::fs::copy(src, &dest);
+                        }
+                    }
+                }
+                if self.clipboard_is_cut {
+                    self.clipboard_paths.clear();
+                    self.clipboard_is_cut = false;
+                }
+                self.navigate_to(self.current_dir.clone());
                 menu_ui.close_menu();
             }
             menu_ui.separator();
