@@ -127,7 +127,7 @@ impl AppTab {
 
     pub fn title(&self) -> &'static str {
         match self {
-            AppTab::Convert => " ⚡ File Explorer & Transcoder ",
+            AppTab::Convert => " 📁 File Explorer & Transcoder ",
             AppTab::ExamStudio => " 🎯 Custom Form Conformer ",
             AppTab::Archive => " 📦 Archive Manager ",
             AppTab::Hardware => " 🏎️ Hardware & AI ",
@@ -485,7 +485,7 @@ impl AppState {
         let target_ext = self.available_formats[self.selected_format_idx].to_lowercase();
         self.active_task_name = Some(format!("Transcoding {} file(s) to {}", targets.len(), target_ext.to_uppercase()));
         self.active_task_progress = 0.1;
-        self.status_message = format!("⚡ In Background: Transcoding to {}...", target_ext.to_uppercase());
+        self.status_message = format!("In Background: Transcoding to {}...", target_ext.to_uppercase());
         self.status_is_error = false;
 
         let total = targets.len();
@@ -1228,7 +1228,7 @@ fn draw_miller_view(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThe
         .style(Style::default().fg(palette.text_secondary))
         .block(
             Block::default()
-                .title(" 👁️ Live Preview & Metadata ")
+                .title(" Live Preview & Metadata ")
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(palette.border)),

@@ -322,7 +322,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                             hmenu,
                             MF_STRING | if zero_loss_enabled { MF_CHECKED } else { MF_UNCHECKED },
                             CMD_TOGGLE_ZERO_LOSS as usize,
-                            to_u16("⚡ Enforce 0.00% Zero-Loss Mode").as_ptr(),
+                            to_u16("Enforce 0.00% Zero-Loss Mode").as_ptr(),
                         );
                         AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
                         AppendMenuW(hmenu, MF_STRING, CMD_QUIT as usize, to_u16("❌ Quit Mossambi").as_ptr());

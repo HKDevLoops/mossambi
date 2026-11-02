@@ -204,7 +204,7 @@ impl StudioView {
                         }
                         ui.add_space(1.0);
 
-                        if render_sidebar_item(ui, &palette, "Transcoder", "⚡", self.current_tab == StudioTab::Transcoder) {
+                        if render_sidebar_item(ui, &palette, "Transcoder", "🔄", self.current_tab == StudioTab::Transcoder) {
                             self.current_tab = StudioTab::Transcoder;
                         }
                         ui.add_space(1.0);
@@ -376,7 +376,7 @@ impl StudioView {
                 ui.label(egui::RichText::new("0.00% Zero-Loss Standard • 200+ Formats • Multi-Threaded Rayon Concurrency").size(12.0).color(palette.text_secondary));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new("⚡ 16 Threads Ready").size(11.0).color(PANTONE_FLAVEDO));
+                ui.label(egui::RichText::new("16 Threads Ready").size(11.0).color(PANTONE_FLAVEDO));
             });
         });
 
@@ -485,7 +485,7 @@ impl StudioView {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let convert_btn = ui.add(
                             egui::Button::new(
-                                egui::RichText::new(format!("⚡ Convert to {} ➔", settings.active_format))
+                                egui::RichText::new(format!("Convert to {} ➔", settings.active_format))
                                     .size(13.0)
                                     .strong()
                                     .color(Color32::WHITE),
@@ -644,7 +644,7 @@ impl StudioView {
             ui.add_space(18.0);
 
             // 2. Quick-Start Workflow Presets (2x2 Grid)
-            ui.label(egui::RichText::new("⚡ Quick-Start Conversion Workflows").size(14.0).strong().color(palette.text_primary));
+            ui.label(egui::RichText::new("Quick-Start Conversion Workflows").size(14.0).strong().color(palette.text_primary));
             ui.add_space(8.0);
 
             ui.columns(2, |cols| {
@@ -1390,7 +1390,7 @@ impl StudioView {
             ui.add_space(8.0);
 
             let mut hidden = cfg.show_hidden_files;
-            if ui.checkbox(&mut hidden, "👁️ Show Hidden & System Dotfiles (e.g. .git, .env, hidden folders)").changed() {
+            if ui.checkbox(&mut hidden, "Show Hidden & System Dotfiles (e.g. .git, .env, hidden folders)").changed() {
                 cfg.show_hidden_files = hidden;
                 let _ = cfg.save();
             }
@@ -1518,7 +1518,7 @@ impl StudioView {
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("⚡ Benchmark Speed").size(11.5).strong().color(Color32::BLACK))
+                        if ui.button(egui::RichText::new("Benchmark Speed").size(11.5).strong().color(Color32::BLACK))
                             .on_hover_text("Benchmark conversion speed against Online and CLI converters")
                             .clicked()
                         {

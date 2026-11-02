@@ -986,23 +986,11 @@ impl ExplorerView {
             self.show_new_folder_dialog = true;
         }
 
-        // Quick Look Button
-        if ui.button("👁").on_hover_text("Quick Look (Space)").clicked() {
-            let entries = self.filtered_and_sorted_entries();
-            if let Some(item) = entries.get(self.focused_row) {
-                self.peek_item = Some((*item).clone());
-            } else if let Some(p) = self.selected_paths.iter().next() {
-                if let Some(item) = self.entries.iter().find(|e| &e.path == p) {
-                    self.peek_item = Some(item.clone());
-                }
-            }
-        }
-
         // Toggle Hidden Dotfiles Button
         let dot_bg = if self.show_hidden_files { palette.accent } else { palette.card_bg };
         let dot_fg = if self.show_hidden_files { Color32::WHITE } else { palette.text_secondary };
         let dot_btn = egui::Button::new(
-            egui::RichText::new("👁 .dotfiles")
+            egui::RichText::new(".dotfiles")
                 .size(11.0)
                 .color(dot_fg)
         )
@@ -1545,7 +1533,7 @@ impl ExplorerView {
                             }
                         }
 
-                        if menu_ui.button("👁 Quick Look (Space)").clicked() {
+                        if menu_ui.button("Quick Look (Space)").clicked() {
                             peek_to_open = Some(item_clone.clone());
                             menu_ui.close_menu();
                         }
@@ -1558,24 +1546,24 @@ impl ExplorerView {
                                 menu_ui.close_menu();
                             }
                         } else {
-                            menu_ui.menu_button("⚡ Transcode With", |sub_ui| {
-                                if sub_ui.button("⚡ Transcode to JPG").clicked() {
+                            menu_ui.menu_button("Transcode With", |sub_ui| {
+                                if sub_ui.button("Transcode to JPG").clicked() {
                                     on_transcode_target(path_clone.clone(), "JPG".into());
                                     sub_ui.close_menu();
                                 }
-                                if sub_ui.button("⚡ Transcode to PNG").clicked() {
+                                if sub_ui.button("Transcode to PNG").clicked() {
                                     on_transcode_target(path_clone.clone(), "PNG".into());
                                     sub_ui.close_menu();
                                 }
-                                if sub_ui.button("⚡ Transcode to WEBP").clicked() {
+                                if sub_ui.button("Transcode to WEBP").clicked() {
                                     on_transcode_target(path_clone.clone(), "WEBP".into());
                                     sub_ui.close_menu();
                                 }
-                                if sub_ui.button("⚡ Transcode to PDF").clicked() {
+                                if sub_ui.button("Transcode to PDF").clicked() {
                                     on_transcode_target(path_clone.clone(), "PDF".into());
                                     sub_ui.close_menu();
                                 }
-                                if sub_ui.button("⚡ Transcode to MP3").clicked() {
+                                if sub_ui.button("Transcode to MP3").clicked() {
                                     on_transcode_target(path_clone.clone(), "MP3".into());
                                     sub_ui.close_menu();
                                 }
@@ -1868,7 +1856,7 @@ impl ExplorerView {
                             }
                         }
 
-                        if menu_ui.button("👁 Quick Look (Space)").clicked() {
+                        if menu_ui.button("Quick Look (Space)").clicked() {
                             peek_to_open = Some(item_clone.clone());
                             menu_ui.close_menu();
                         }
@@ -1881,24 +1869,24 @@ impl ExplorerView {
                                 menu_ui.close_menu();
                             }
                         } else {
-                            menu_ui.menu_button("⚡ Transcode With", |sub_ui| {
-                                if sub_ui.button("⚡ Transcode to JPG").clicked() {
+                            menu_ui.menu_button("Transcode With", |sub_ui| {
+                                if sub_ui.button("Transcode to JPG").clicked() {
                                     on_transcode_target(path_clone.clone(), "JPG".into());
                                     sub_ui.close_menu();
                                 }
-                                if sub_ui.button("⚡ Transcode to PNG").clicked() {
+                                if sub_ui.button("Transcode to PNG").clicked() {
                                     on_transcode_target(path_clone.clone(), "PNG".into());
                                     sub_ui.close_menu();
                                 }
-                                if sub_ui.button("⚡ Transcode to WEBP").clicked() {
+                                if sub_ui.button("Transcode to WEBP").clicked() {
                                     on_transcode_target(path_clone.clone(), "WEBP".into());
                                     sub_ui.close_menu();
                                 }
-                                if sub_ui.button("⚡ Transcode to PDF").clicked() {
+                                if sub_ui.button("Transcode to PDF").clicked() {
                                     on_transcode_target(path_clone.clone(), "PDF".into());
                                     sub_ui.close_menu();
                                 }
-                                if sub_ui.button("⚡ Transcode to MP3").clicked() {
+                                if sub_ui.button("Transcode to MP3").clicked() {
                                     on_transcode_target(path_clone.clone(), "MP3".into());
                                     sub_ui.close_menu();
                                 }
@@ -2269,11 +2257,11 @@ impl ExplorerView {
 
                                         // Quick Action Buttons
                                         ui.vertical_centered_justified(|ui| {
-                                            if ui.button(egui::RichText::new("👁 Quick Look (Space)").strong()).clicked() {
+                                            if ui.button(egui::RichText::new("Quick Look (Space)").strong()).clicked() {
                                                 peek_to_open = Some(item_clone.clone());
                                             }
                                             if !item_clone.is_dir {
-                                                if ui.button("⚡ Transcode / Convert").clicked() {
+                                                if ui.button("Transcode / Convert").clicked() {
                                                     on_transcode_target(item_clone.path.clone(), "ALL".into());
                                                 }
                                             } else if ui.button("📦 Pack into ZIP Archive").clicked() {
@@ -2364,7 +2352,7 @@ impl ExplorerView {
                             }
 
                             if self.show_hidden_files {
-                                ui.label(egui::RichText::new("👁 Dotfiles visible").size(10.0).color(palette.accent));
+                                ui.label(egui::RichText::new("Dotfiles visible").size(10.0).color(palette.accent));
                                 ui.label(egui::RichText::new("•").size(10.5).color(palette.text_muted));
                             }
 
@@ -2398,7 +2386,7 @@ impl ExplorerView {
         let mut pack_to_open = false;
         let mut inspect_to_open = false;
 
-        let window_title = format!("👁 Quick Look — {}", item.name);
+        let window_title = format!("Quick Look — {}", item.name);
 
         egui::Window::new(window_title)
             .collapsible(false)
@@ -2515,16 +2503,16 @@ impl ExplorerView {
                 // 3. Action Toolbar at bottom of Quick Look
                 ui.horizontal_wrapped(|ui| {
                     if !item.is_dir {
-                        if ui.button("⚡ Transcode JPG").clicked() {
+                        if ui.button("Transcode JPG").clicked() {
                             transcode_to = Some("JPG".into());
                         }
-                        if ui.button("⚡ Transcode PNG").clicked() {
+                        if ui.button("Transcode PNG").clicked() {
                             transcode_to = Some("PNG".into());
                         }
-                        if ui.button("⚡ Transcode WEBP").clicked() {
+                        if ui.button("Transcode WEBP").clicked() {
                             transcode_to = Some("WEBP".into());
                         }
-                        if ui.button("⚡ Transcode PDF").clicked() {
+                        if ui.button("Transcode PDF").clicked() {
                             transcode_to = Some("PDF".into());
                         }
                         if ui.button("🎯 Exam Conform").clicked() {
@@ -2661,7 +2649,7 @@ impl ExplorerView {
                         reveal_path = item.path.parent().map(|p| p.to_path_buf());
                     }
 
-                    if !item.is_dir && ui.button("👁 Quick Look").clicked() {
+                    if !item.is_dir && ui.button("Quick Look").clicked() {
                         peek_item = Some(item.clone());
                     }
 

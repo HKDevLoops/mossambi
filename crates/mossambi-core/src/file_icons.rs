@@ -522,7 +522,7 @@ pub fn resolve_file_icon(name: &str, extension: &str, is_dir: bool) -> FileIconS
 
         // --- Executables & Binaries ---
         "EXE" | "MSI" | "APP" | "DEB" | "RPM" | "BIN" => FileIconSpec {
-            glyph: "⚡",
+            glyph: "▶",
             color_rgb: [120, 190, 32],
             category: "Executable",
             is_image: false,

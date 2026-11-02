@@ -395,7 +395,7 @@ impl CitrusGeometry {
                 painter.text(
                     Pos2::new(c.x, c.y + 2.0),
                     eframe::egui::Align2::CENTER_CENTER,
-                    "⚡",
+                    "▶",
                     FontId::proportional(18.0),
                     pal.text_dark,
                 );
