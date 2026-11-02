@@ -12,4 +12,4 @@ pub mod studio_view;
 pub mod tray;
 
 pub use custom_widgets::render_custom_progress_bar;
-pub use studio_app::{run_studio, MossambiApp};
+pub use studio_app::{run_studio, run_studio_with_path, MossambiApp};

@@ -24,8 +24,8 @@ use mossambi::daemon;
     name = "mossambi",
     author = "Mossambi Systems Team",
     version = "2.1.0",
-    about = "Zero-loss native desktop file converter, archive suite, and Indian exam form tuner",
-    long_about = "Mossambi: Native high-performance file conversion modeled after `mv`.\nWindows & Linux | x86_64 & ARM64 | 0.00% Loss Standard | Hardware Accelerated"
+    about = "Zero-loss native desktop file converter, archive suite, Indian exam form tuner, and macOS-style Universal File Explorer",
+    long_about = "🍋 Mossambi: Zero-Loss Desktop File Converter & Universal File Explorer\nWindows & Linux | x86_64 & ARM64 | 0.00% Zero-Loss Standard | Hardware Accelerated\n\nACCESS MODALITIES:\n  1. mossambi [or: mossambi app, mossambi explorer]  -> Launch macOS-styled Universal File Explorer & Studio GUI\n  2. mossambi widget                                  -> Launch Sweet Lime Resident Radial Widget overlay\n  3. mossambi tui                                     -> Launch Yazi-grade interactive Terminal File Explorer\n  4. mossambi <INPUT> [TARGET_FORMAT]                 -> Fast UNIX mv-style file conversion"
 )]
 pub struct Cli {
     /// Input file or directory to process (mv-style positional grammar)
@@ -81,20 +81,58 @@ pub struct Cli {
     pub json: bool,
 
     /// Launch the full Universal File Explorer & Conversion Studio GUI
-    #[arg(long = "gui")]
-    pub gui: bool,
+    #[arg(long = "app", visible_alias = "gui", visible_alias = "explorer")]
+    pub app: bool,
 
     /// Launch the Sweet Lime Desktop Radial Widget
     #[arg(long = "widget")]
     pub widget: bool,
+
+    /// Launch the Terminal User Interface (TUI) File Explorer
+    #[arg(long = "tui")]
+    pub tui: bool,
 
     /// Explicit subcommands
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, PartialEq)]
 pub enum Commands {
+    /// Launch the Universal File Explorer & Conversion Studio GUI (Default App)
+    #[command(visible_alias = "gui")]
+    App {
+        /// Optional directory or file to open in the Explorer
+        path: Option<PathBuf>,
+    },
+
+    /// Launch the Universal File Explorer & Conversion Studio GUI
+    Explorer {
+        /// Optional directory or file to open in the Explorer
+        path: Option<PathBuf>,
+    },
+
+    /// Launch the Terminal User Interface (TUI) File Explorer
+    Tui {
+        /// Optional directory to open in the TUI
+        path: Option<PathBuf>,
+    },
+
+    /// Launch or summon the Sweet Lime Resident Radial Widget overlay
+    Widget {
+        /// Optional X,Y spawn coordinates (e.g. 500,400)
+        #[arg(long = "pos")]
+        pos: Option<String>,
+
+        /// Flag indicating widget was awakened by active mouse drag
+        #[arg(long = "active-drag")]
+        active_drag: bool,
+
+        /// Initial file to load into the widget
+        #[arg(value_name = "FILE")]
+        file: Option<PathBuf>,
+    },
+
     /// Convert an input file to target format (explicit syntax)
     Convert {
         /// Source file path
@@ -195,24 +233,6 @@ pub enum Commands {
         output_dir: Option<PathBuf>,
     },
 
-    /// Launch or summon the Sweet Lime Resident Radial Widget overlay
-    Widget {
-        /// Optional X,Y spawn coordinates (e.g. 500,400)
-        #[arg(long = "pos")]
-        pos: Option<String>,
-
-        /// Flag indicating widget was awakened by active mouse drag
-        #[arg(long = "active-drag")]
-        active_drag: bool,
-
-        /// Initial file to load into the widget
-        #[arg(value_name = "FILE")]
-        file: Option<PathBuf>,
-    },
-
-    /// Launch or summon the Desktop Radial Widget and macOS-Styled GUI
-    Gui,
-
     /// List all 20 certified Pantone themes (10 Dark & 10 Light) with official Pantone codes and hex
     Themes,
 
@@ -277,16 +297,22 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    if cli.gui {
-        return handle_gui();
+    if cli.app {
+        return handle_gui(None);
     }
     if cli.widget {
         return handle_widget(None, false, None);
+    }
+    if cli.tui {
+        return handle_tui(None);
     }
 
     // Check if an explicit subcommand was requested
     if let Some(cmd) = cli.command {
         return match cmd {
+            Commands::App { path } | Commands::Explorer { path } => handle_gui(path),
+            Commands::Tui { path } => handle_tui(path),
+            Commands::Widget { pos, active_drag, file } => handle_widget(pos.as_deref(), active_drag, file),
             Commands::Convert {
                 input,
                 target,
@@ -306,8 +332,6 @@ fn main() -> Result<()> {
             Commands::Check { file } => handle_check(&file, cli.json),
             Commands::Bench { file, target } => handle_bench(&file, target.as_deref(), cli.json),
             Commands::Hw => handle_hw(cli.json),
-            Commands::Gui => handle_gui(),
-            Commands::Widget { pos, active_drag, file } => handle_widget(pos.as_deref(), active_drag, file),
             Commands::Verify { source, target } => handle_verify(&source, &target, cli.json),
             Commands::Catalogue { query } => handle_catalogue(&query, cli.json),
             Commands::UploadReady {
@@ -350,6 +374,11 @@ fn main() -> Result<()> {
 
     // UNIX mv-like positional syntax: `mossambi <INPUT> [TARGET_FORMAT]`
     if let Some(input) = cli.input {
+        // If input is a directory and no target is given, launch Explorer GUI directly opened at that directory
+        if input.is_dir() && cli.target.is_none() && !cli.all && cli.exam_preset.is_none() {
+            return handle_gui(Some(input));
+        }
+
         // Check if Exam Mode was requested
         if cli.exam_preset.is_some() || cli.exam_width.is_some() || cli.exam_min_kb.is_some() {
             return handle_exam(
@@ -388,7 +417,7 @@ fn main() -> Result<()> {
     }
 
     // Double-clicked or launched without console arguments: launch full Studio GUI directly
-    handle_gui()
+    handle_gui(None)
 }
 
 fn handle_convert(
@@ -857,9 +886,14 @@ fn handle_widget(pos: Option<&str>, _active_drag: bool, file: Option<PathBuf>) -
         .map_err(|e| anyhow::anyhow!("Radial Widget error: {}", e))
 }
 
-fn handle_gui() -> Result<()> {
-    mossambi::gui::run_studio()
+fn handle_gui(initial_path: Option<PathBuf>) -> Result<()> {
+    mossambi::gui::run_studio_with_path(initial_path)
         .map_err(|e| anyhow::anyhow!("Studio GUI error: {}", e))
+}
+
+fn handle_tui(initial_path: Option<PathBuf>) -> Result<()> {
+    mossambi::tui::run_with_path(initial_path)
+        .map_err(|e| anyhow::anyhow!("TUI execution error: {}", e))
 }
 
 fn handle_themes(as_json: bool) -> Result<()> {
@@ -1009,17 +1043,17 @@ fn handle_config(action: &str, key: Option<&str>, value: Option<&str>, as_json: 
 }
 
 fn print_welcome_banner() {
-    let green = "\x1b[38;2;120;190;32m";  // Pantone 376 C
-    let zest  = "\x1b[38;2;228;240;36m";  // Pantone 388 C
-    let gold  = "\x1b[38;2;255;184;28m";  // Pantone 1235 C
+    let sage  = "\x1b[38;2;74;133;90m";   // Pantone 16-5917 Sage Meadow
+    let blue  = "\x1b[38;2;0;122;255m";   // Pantone 19-4052 Classic Blue
+    let amber = "\x1b[38;2;217;119;6m";   // Pantone 14-1064 Soft Amber
     let cyan  = "\x1b[38;2;60;200;230m";
-    let white = "\x1b[38;2;245;245;247m";
+    let white = "\x1b[38;2;244;245;247m";
     let muted = "\x1b[38;2;160;160;165m";
     let bold  = "\x1b[1m";
     let reset = "\x1b[0m";
 
     println!(
-        r#"{green}
+        r#"{sage}
                        .-''''-.     _/\_
                      .'  ____  `.  (____)
                     /  .' || `.  \   ||
@@ -1030,34 +1064,35 @@ fn print_welcome_banner() {
                      `.  `--'  .'
                        `'-..-'`{reset}
 
-{zest}   ╭╮╭╮╭╮ ╭───╮ ╭────╮ ╭────╮ ╭───╮ ╭╮╭╮╭╮ ╭────╮ ╭─╮
-   ││││││ │╭─╮│ │╭───╯ │╭───╯ │╭─╮│ ││││││ │╭─╮│ │ │
-   ││││││ ││ ││ ╰───╮  ╰───╮  ││ ││ ││││││ │╰─╯│ │ │
-   ││││││ │╰─╯│ ╭───╯  ╭───╯  │╰─╯│ ││││││ │╭─╮│ │ │
-   ╰╯╰╯╰╯ ╰───╯ ╰────╯ ╰────╯ ╰─╰─╯ ╰╯╰╯╰╯ ╰───╯ ╰─╯{reset}
-
-{gold}   Universal File Conversion Platform · Indian Exam Form Studio{reset}
-{muted}   One Rust Core · Three Interfaces: CLI, TUI, and Floating Radial Widget{reset}
-   {white}v2.1.0 | 0.00% Zero-Loss Standard | Hardware Accelerated{reset}
+{blue}   M O S S A M B I{reset}
+{amber}   Zero-Loss File Conversion Platform & Universal File Explorer{reset}
+{muted}   One Pure Rust Core · Three Modalities: Explorer App, Radial Widget, Interactive TUI{reset}
+   {white}v2.1.0 | 0.00% Zero-Loss Standard | Windows Fluent & macOS Finder DNA{reset}
 "#
     );
 
-    println!("{bold}Usage (UNIX mv-style):{reset}");
-    println!("  {cyan}mossambi <file> [format]{reset}            # Convert file (e.g. mossambi song.flac mp3)");
-    println!("  {cyan}mossambi <file> --all{reset}               # Batch transcode to ALL domain formats");
-    println!("  {cyan}mossambi <photo> --exam upsc-photo{reset}  # Indian Exam Optimizer (UPSC/SSC/IBPS)");
-    println!("  {cyan}mossambi archive <files...> -o out.7z{reset}  # Pack exhaustive compression archive");
-    println!("  {cyan}mossambi extract <archive>{reset}          # Unpack archive safely with Zip-Slip protection");
-    println!("  {cyan}mossambi info <file>{reset}                # Inspect format, sectors & catalog");
-    println!("  {cyan}mossambi check <file>{reset}               # Universal Quality, Integrity & Compatibility Inspector");
-    println!("  {cyan}mossambi bench <file> [tgt]{reset}         # Benchmark speed & compare vs Online/CLI tools");
-    println!("  {cyan}mossambi tui{reset}                        # Launch Ratatui terminal interface");
-    println!("  {cyan}mossambi gui{reset}                        # Launch radial widget & Mac-styled GUI");
-    println!("  {cyan}mossambi hw{reset}                         # Check GPU & SIMD hardware engines");
-    println!("  {cyan}mossambi config{reset}                     # View or edit system settings");
-    println!("  {cyan}mossambi help-manual{reset}                # Display full Unicode box table manual");
-    println!("  {cyan}mossambi banner{reset}                     # Print Sweet Lime fruit ASCII art & banner");
-    println!("\nRun '{cyan}mossambi --help{reset}' or '{cyan}mossambi help-manual{reset}' for exhaustive options.\n");
+    println!("{bold}Access Modalities:{reset}");
+    println!("  {cyan}mossambi{reset}                       # Launch full macOS-style File Explorer & Studio GUI");
+    println!("  {cyan}mossambi app [DIR]{reset}             # Launch Explorer GUI opened at specified directory");
+    println!("  {cyan}mossambi explorer [DIR]{reset}        # Launch Explorer GUI (explicit alias)");
+    println!("  {cyan}mossambi widget{reset}                # Summon Sweet Lime desktop floating radial widget");
+    println!("  {cyan}mossambi tui [DIR]{reset}             # Launch Yazi-grade interactive Terminal File Explorer");
+    println!();
+    println!("{bold}CLI Fast-Path Conversion:{reset}");
+    println!("  {cyan}mossambi <file> [format]{reset}       # Instant conversion (e.g. mossambi sound.wav flac)");
+    println!("  {cyan}mossambi <file> --all{reset}          # Transcode to ALL domain formats in parallel");
+    println!("  {cyan}mossambi <photo> --exam <p>{reset}    # Indian Exam Optimizer (upsc-photo, ssc-photo, etc.)");
+    println!("  {cyan}mossambi archive <f...> -o a.zip{reset}# Exhaustive compression archive (ZIP, 7Z, TAR, ZST)");
+    println!("  {cyan}mossambi extract <archive>{reset}     # Safe extraction with Zip-Slip protection");
+    println!("  {cyan}mossambi check <file>{reset}          # Quality, integrity & decode scorecard");
+    println!("  {cyan}mossambi bench <file> [tgt]{reset}    # Latency, throughput (MB/s) & speedup benchmark");
+    println!("  {cyan}mossambi hw{reset}                    # GPU/NPU & SIMD hardware acceleration info");
+    println!("  {cyan}mossambi verify <src> <tgt>{reset}    # Mathematical 0.00% zero-loss verification proof");
+    println!("  {cyan}mossambi catalogue [query]{reset}     # Search 200+ format registry catalogue");
+    println!("  {cyan}mossambi themes{reset}                # List 20 certified eye-safe Pantone themes");
+    println!("  {cyan}mossambi daemon{reset}                # Resident mouse gesture service (Win+Shift+C / Win+Ctrl+C)");
+    println!("  {cyan}mossambi help-manual{reset}           # Exhaustive table help and manual");
+    println!("\nRun '{cyan}mossambi --help{reset}' for all command flags and options.\n");
 }
 
 fn handle_completions(shell_str: Option<&str>, carapace: bool) -> Result<()> {
@@ -1150,43 +1185,49 @@ fn handle_carapace(_shell: Option<&str>, args: &[String]) -> Result<()> {
 
 fn print_table_help() {
     println!("┌──────────────────────────────────────────────────────────────────────────────────────────────────┐");
-    println!("│  MOSSAMBI — ZERO-LOSS CONVERSION PLATFORM & DESKTOP SUITE (v2.1.0)                               │");
+    println!("│  MOSSAMBI — ZERO-LOSS CONVERSION PLATFORM & UNIVERSAL FILE EXPLORER (v2.1.0)                     │");
     println!("│  One Pure Rust Core · Three Operating Modalities · Apple Elegance + Linux Power                  │");
     println!("├──────────────────────────────────────────────────────────────────────────────────────────────────┤");
+    println!("│  ACCESS MODALITIES:                                                                              │");
+    println!("│    mossambi                          Launch macOS-styled Universal File Explorer & Studio GUI    │");
+    println!("│    mossambi app [DIR]                Launch Explorer GUI opened at specified directory           │");
+    println!("│    mossambi explorer [DIR]           Launch Explorer GUI opened at specified directory           │");
+    println!("│    mossambi widget                   Summon Sweet Lime Desktop Floating Radial Widget            │");
+    println!("│    mossambi tui [DIR]                Launch Yazi-Grade Interactive Terminal File Explorer        │");
+    println!("│                                                                                                  │");
     println!("│  UNIX 'mv' POSITIONAL GRAMMAR:                                                                   │");
     println!("│    mossambi <INPUT> [TARGET_FORMAT] [OPTIONS]                                                    │");
-    println!("│                                                                                                  │");
-    println!("│  EXAMPLES:                                                                                       │");
-    println!("│    mossambi input.wav flac                      Convert WAV to FLAC with 24-bit 0.00% Zero-Loss │");
-    println!("│    mossambi photo.png webp                      Lossless WebP raster transcoding                 │");
-    println!("│    mossambi movie.mkv mp4                       Fast-path NVMe stream remux (2hr movie in ~10s)  │");
-    println!("│    mossambi notes.txt pdf                       Vector typography PDF with embedded CMaps        │");
-    println!("│    mossambi sound.flac ALL                      Batch transcode to ALL audio formats in parallel │");
-    println!("│    mossambi check test_vault/image/photo.png    4-dimension Quality & Integrity Scorecard        │");
-    println!("│    mossambi bench test_vault/audio/sound.wav    Throughput (MB/s) & Speedup vs Online/CLI tools  │");
-    println!("│    mossambi --exam upsc-photo sign.png          Indian competitive exam 100% scorecard optimizer │");
+    println!("│    mossambi input.wav flac           Convert WAV to FLAC with 24-bit 0.00% Zero-Loss             │");
+    println!("│    mossambi photo.png webp           Lossless WebP raster transcoding                            │");
+    println!("│    mossambi movie.mkv mp4            Fast-path NVMe stream remux (2hr movie in ~10s)             │");
+    println!("│    mossambi notes.txt pdf            Vector typography PDF with embedded CMaps                   │");
+    println!("│    mossambi sound.flac ALL           Batch transcode to ALL audio formats in parallel            │");
+    println!("│    mossambi --exam upsc-photo s.png  Indian competitive exam 100% scorecard optimizer            │");
     println!("├──────────────────────────┬──────────────────────────────────────────┬────────────────────────────┤");
     println!("│  COMMAND                 │  DESCRIPTION                             │  KEY USAGE / EXAMPLE       │");
     println!("├──────────────────────────┼──────────────────────────────────────────┼────────────────────────────┤");
+    println!("│  app / explorer          │  Launch Universal File Explorer GUI      │  mossambi app [folder]     │");
+    println!("│  widget                  │  Summon Sweet Lime radial hero overlay   │  mossambi widget           │");
+    println!("│  tui                     │  Full-screen interactive Terminal UI     │  mossambi tui [folder]     │");
     println!("│  convert                 │  Explicit file conversion                │  mossambi convert in.wav mp3│");
-    println!("│  check                   │  Quality & container integrity scorecard │  mossambi check file.png   │");
-    println!("│  bench                   │  Benchmark latency, throughput & speedup │  mossambi bench file.wav   │");
     println!("│  archive                 │  Pack files into ZIP, 7Z, TAR, GZ, XZ, ZST│ mossambi archive -o out.zip│");
     println!("│  extract                 │  Extract archive with Zip-Slip safety    │  mossambi extract bundle.zip│");
-    println!("│  upload-ready            │  Indian Exam Portal Optimizer            │  mossambi upload-ready in.jpg│");
+    println!("│  check                   │  Quality & container integrity scorecard │  mossambi check file.png   │");
+    println!("│  bench                   │  Benchmark latency, throughput & speedup │  mossambi bench file.wav   │");
+    println!("│  hw                      │  Display GPU/NPU hardware telemetry      │  mossambi hw               │");
     println!("│  verify                  │  Mathematical 0.00% loss verification    │  mossambi verify a.png b.png│");
     println!("│  catalogue               │  Search 200+ format registry             │  mossambi catalogue lossless│");
-    println!("│  hw                      │  Display GPU/NPU hardware telemetry      │  mossambi hw               │");
-    println!("│  tui                     │  Full-screen Apple-styled interactive TUI│  mossambi tui              │");
-    println!("│  gui                     │  Launch macOS-styled studio workspace    │  mossambi gui              │");
-    println!("│  widget                  │  Summon Sweet Lime radial hero overlay   │  mossambi widget           │");
-    println!("│  daemon                  │  Background service (Whisper Flow style) │  mossambi daemon           │");
-    println!("│                          │  Hotkeys: Win+Shift+C / Win+Ctrl+C       │  mossambi daemon install   │");
+    println!("│  upload-ready            │  Indian Exam Portal Optimizer            │  mossambi upload-ready in.jpg│");
+    println!("│  themes                  │  List 20 certified Pantone themes        │  mossambi themes           │");
+    println!("│  daemon                  │  Background gesture daemon (Win+Shift+C) │  mossambi daemon start     │");
     println!("│  config                  │  View or edit persistent preferences     │  mossambi config list      │");
     println!("│  completions             │  Generate shell completions & Carapace   │  mossambi completions zsh  │");
     println!("├──────────────────────────┼──────────────────────────────────────────┼────────────────────────────┤");
     println!("│  FLAG / OPTION           │  SHORT / ARG                             │  FUNCTION                  │");
     println!("├──────────────────────────┼──────────────────────────────────────────┼────────────────────────────┤");
+    println!("│  --app / --explorer      │  --gui                                   │  Launch Studio GUI App     │");
+    println!("│  --widget                │  --widget                                │  Launch Desktop Radial     │");
+    println!("│  --tui                   │  --tui                                   │  Launch Interactive TUI    │");
     println!("│  --all                   │  -a                                      │  Batch convert to ALL valid│");
     println!("│  --output                │  -o <DIR>                                │  Custom destination folder │");
     println!("│  --strict                │  (default: true)                         │  Enforce 0.00% Zero-Loss   │");

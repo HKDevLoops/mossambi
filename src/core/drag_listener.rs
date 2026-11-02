@@ -643,6 +643,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(target_os = "windows", ignore = "Global WH_MOUSE_LL hook requires dedicated single-thread execution")]
     fn test_drag_listener_lifecycle() {
         let mut listener = DragGestureListener::start(true, true, 25.0);
         std::thread::sleep(std::time::Duration::from_millis(50));

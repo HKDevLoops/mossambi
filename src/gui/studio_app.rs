@@ -83,6 +83,10 @@ impl Default for MossambiApp {
 
 impl MossambiApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        Self::new_with_path(cc, None)
+    }
+
+    pub fn new_with_path(cc: &eframe::CreationContext<'_>, initial_path: Option<PathBuf>) -> Self {
         let mut visuals = egui::Visuals::dark();
         visuals.window_fill = Color32::from_rgb(15, 17, 23);
         visuals.panel_fill = Color32::from_rgb(15, 17, 23);
@@ -101,12 +105,12 @@ impl MossambiApp {
         visuals.widgets.hovered.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
         visuals.widgets.hovered.rounding = Rounding::same(8.0);
 
-        visuals.widgets.active.bg_fill = Color32::from_rgb(120, 190, 32); // Pantone 376 C
+        visuals.widgets.active.bg_fill = Color32::from_rgb(0, 122, 255); // Eye-safe Classic Blue / Apple System Blue
         visuals.widgets.active.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
         visuals.widgets.active.rounding = Rounding::same(8.0);
 
-        visuals.selection.bg_fill = Color32::from_rgba_premultiplied(120, 190, 32, 100);
-        visuals.selection.stroke = Stroke::new(1.0_f32, Color32::from_rgb(120, 190, 32));
+        visuals.selection.bg_fill = Color32::from_rgba_premultiplied(0, 122, 255, 90);
+        visuals.selection.stroke = Stroke::new(1.0_f32, Color32::from_rgb(0, 122, 255));
 
         cc.egui_ctx.set_visuals(visuals);
 
@@ -136,7 +140,18 @@ impl MossambiApp {
             .insert(1, "AgaveNerdFont-Regular".to_owned());
         cc.egui_ctx.set_fonts(fonts);
 
-        Self::default()
+        let mut app = Self::default();
+        if let Some(path) = initial_path {
+            if path.is_dir() {
+                app.studio_view.explorer_view.navigate_to(path);
+            } else if path.is_file() {
+                if let Some(parent) = path.parent() {
+                    app.studio_view.explorer_view.navigate_to(parent.to_path_buf());
+                }
+                app.select_file(path);
+            }
+        }
+        app
     }
 
     pub fn select_file(&mut self, path: PathBuf) {
@@ -509,7 +524,12 @@ pub fn load_app_icon() -> Option<egui::IconData> {
 
 /// Runs the complete native macOS-Styled Mossambi Studio GUI Application
 pub fn run_studio() -> Result<(), eframe::Error> {
-    env_logger::init();
+    run_studio_with_path(None)
+}
+
+/// Runs the complete native macOS-Styled Mossambi Studio GUI Application with an initial path
+pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe::Error> {
+    let _ = env_logger::try_init();
 
     let mut builder = ViewportBuilder::default()
         .with_title("Mossambi — Universal File Conversion Studio")
@@ -531,6 +551,6 @@ pub fn run_studio() -> Result<(), eframe::Error> {
     eframe::run_native(
         "Mossambi — Universal File Conversion Studio",
         options,
-        Box::new(|cc| Ok(Box::new(MossambiApp::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(MossambiApp::new_with_path(cc, initial_path)))),
     )
 }
