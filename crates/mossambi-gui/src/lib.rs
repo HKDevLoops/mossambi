@@ -1,5 +1,6 @@
 pub mod active_file;
 pub mod citrus_geometry;
+pub mod dwm_helper;
 pub mod explorer_view;
 pub mod gesture;
 pub mod macos_theme;

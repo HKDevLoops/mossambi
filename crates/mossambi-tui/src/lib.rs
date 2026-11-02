@@ -644,8 +644,14 @@ impl AppState {
         let (acc_r, acc_g, acc_b) = pt.accent.to_rgb();
         let (hi_r, hi_g, hi_b) = pt.highlight.to_rgb();
 
+        let bg_color = if self.config.tui_transparent_bg {
+            Color::Reset
+        } else {
+            Color::Rgb(bg_r, bg_g, bg_b)
+        };
+
         TuiThemePalette {
-            bg: Color::Rgb(bg_r, bg_g, bg_b),
+            bg: bg_color,
             surface: Color::Rgb(surf_r, surf_g, surf_b),
             border: Color::Rgb(bord_r, bord_g, bord_b),
             text_primary: Color::Rgb(tp_r, tp_g, tp_b),
@@ -888,6 +894,17 @@ fn handle_key_event(state: &mut AppState, code: KeyCode) {
             );
         }
 
+        // Glass / Transparent Terminal Background Toggle [g]
+        KeyCode::Char('g') => {
+            state.config.tui_transparent_bg = !state.config.tui_transparent_bg;
+            let _ = state.config.save();
+            state.status_message = if state.config.tui_transparent_bg {
+                "✨ TUI Glass: Terminal Transparency & Compositor Blur Enabled".to_string()
+            } else {
+                "⬛ TUI Opaque: Solid Pantone Background Enabled".to_string()
+            };
+        }
+
         // Arrow & Vim Navigation
         KeyCode::Up | KeyCode::Char('k') => {
             let count = state.filtered_entries().len();
@@ -946,7 +963,7 @@ fn handle_key_event(state: &mut AppState, code: KeyCode) {
                 state.benchmark_selected_file();
             }
         }
-        KeyCode::Home | KeyCode::Char('g') => {
+        KeyCode::Home => {
             state.selected_file_idx = 0;
             state.update_preview();
         }
@@ -1355,7 +1372,7 @@ fn draw_footer(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThemePal
         .style(style)
         .block(
             Block::default()
-                .title(" [Enter] Open | [Backspace] Up | [d] Drives | [F6] Layout | [Space] Select | [c] Convert | [/] Search ")
+                .title(" [Enter] Open | [Backspace] Up | [d] Drives | [F6] Layout | [t/T] Theme | [g] Glass | [Space] Select | [c] Convert ")
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(palette.border)),
@@ -1464,13 +1481,14 @@ fn draw_hardware_tab(f: &mut Frame, area: Rect, palette: TuiThemePalette) {
 fn draw_settings_tab(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThemePalette) {
     let pt = state.config.theme_mode.to_pantone_theme();
     let p = Paragraph::new(format!(
-        "⚙️ Appearance & Persistent Settings\n\n🎨 Active Pantone Theme: {} ({})\n   • Background: {} ({}, {})\n   • Surface:    {} ({}, {})\n   • Accent:     {} ({}, {})\n   • Highlight:  {} ({}, {})\n\n💡 Theme Hotkeys:\n   • [t] Cycle sequentially across all 20 certified Pantone themes\n   • [T] Switch between 10 Dark Themes and 10 Light Themes\n\nCitrus Shade: {}\nZero-Loss Enforcement: {}\nGesture Wakeup: {}\n\nPress [Enter] to toggle zero-loss.",
+        "⚙️ Appearance & Persistent Settings\n\n🎨 Active Pantone Theme: {} ({})\n   • Background: {} ({}, {})\n   • Surface:    {} ({}, {})\n   • Accent:     {} ({}, {})\n   • Highlight:  {} ({}, {})\n\n💡 Hotkeys:\n   • [t] Cycle sequentially across all 20 certified Pantone themes\n   • [T] Switch between 10 Dark Themes and 10 Light Themes\n   • [g] Toggle Terminal Glass / Transparency (Current: {})\n\nCitrus Shade: {}\nZero-Loss Enforcement: {}\nGesture Wakeup: {}\n\nPress [Enter] to toggle zero-loss.",
         pt.name,
         if pt.is_dark { "Certified Dark Theme" } else { "Certified Light Theme" },
         pt.bg.name, pt.bg.code, pt.bg.hex,
         pt.surface.name, pt.surface.code, pt.surface.hex,
         pt.accent.name, pt.accent.code, pt.accent.hex,
         pt.highlight.name, pt.highlight.code, pt.highlight.hex,
+        if state.config.tui_transparent_bg { "Transparent Blur" } else { "Solid Canvas" },
         state.config.citrus_shade,
         state.config.enforce_zero_loss,
         state.config.enable_gesture_wakeup

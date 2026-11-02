@@ -87,12 +87,22 @@ impl StudioView {
             .show(ctx, |ui| {
                 // Top Traffic Lights (Red = Close, Yellow = Min, Green = Maximize Toggle)
                 let is_max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-                render_traffic_lights(
-                    ui,
-                    || ctx.send_viewport_cmd(ViewportCommand::Close),
-                    || ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
-                    || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
-                );
+                ui.horizontal(|ui| {
+                    render_traffic_lights(
+                        ui,
+                        || ctx.send_viewport_cmd(ViewportCommand::Close),
+                        || ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
+                        || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
+                    );
+                    let side_drag_rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), 16.0));
+                    let side_drag_resp = ui.allocate_rect(side_drag_rect, Sense::click_and_drag());
+                    if side_drag_resp.drag_started() {
+                        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                    }
+                    if side_drag_resp.double_clicked() {
+                        ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max));
+                    }
+                });
 
                 ui.add_space(16.0);
 
@@ -143,12 +153,12 @@ impl StudioView {
                 }
                 ui.add_space(2.0);
 
-                if render_sidebar_item(ui, &palette, "Hardware & AI", "🏎️", self.current_tab == StudioTab::HardwareTelemetry) {
+                if render_sidebar_item(ui, &palette, "Hardware & AI", "💻", self.current_tab == StudioTab::HardwareTelemetry) {
                     self.current_tab = StudioTab::HardwareTelemetry;
                 }
                 ui.add_space(2.0);
 
-                if render_sidebar_item(ui, &palette, "Preferences", "⚙️", self.current_tab == StudioTab::Preferences) {
+                if render_sidebar_item(ui, &palette, "Preferences", "⚙", self.current_tab == StudioTab::Preferences) {
                     self.current_tab = StudioTab::Preferences;
                 }
 
@@ -173,72 +183,87 @@ impl StudioView {
         egui::CentralPanel::default()
             .frame(central_frame)
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        match self.current_tab {
-                            StudioTab::FileExplorer => {
-                                let mut staged: Option<PathBuf> = None;
-                                let mut transcode_req: Option<(PathBuf, String)> = None;
-                                let mut exam_req: Option<PathBuf> = None;
-                                let mut pack_req: Option<Vec<PathBuf>> = None;
-                                let mut inspect_req: Option<PathBuf> = None;
+                // Top Draggable Window Header Region
+                let is_max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                let drag_rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), 16.0));
+                let drag_resp = ui.allocate_rect(drag_rect, Sense::click_and_drag());
+                if drag_resp.drag_started() {
+                    ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                }
+                if drag_resp.double_clicked() {
+                    ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max));
+                }
 
-                                self.explorer_view.render(
-                                    ui,
-                                    |p| staged = Some(p),
-                                    |p, t| transcode_req = Some((p, t)),
-                                    |p| exam_req = Some(p),
-                                    |list| pack_req = Some(list),
-                                    |p| inspect_req = Some(p),
-                                );
+                match self.current_tab {
+                    StudioTab::FileExplorer => {
+                        let mut staged: Option<PathBuf> = None;
+                        let mut transcode_req: Option<(PathBuf, String)> = None;
+                        let mut exam_req: Option<PathBuf> = None;
+                        let mut pack_req: Option<Vec<PathBuf>> = None;
+                        let mut inspect_req: Option<PathBuf> = None;
 
-                                if let Some(p) = staged {
-                                    on_stage_file(p);
-                                }
-                                if let Some((p, t)) = transcode_req {
-                                    on_stage_file(p);
-                                    on_convert(t);
-                                }
-                                if let Some(p) = exam_req {
-                                    on_stage_file(p);
-                                    self.current_tab = StudioTab::ExamStudio;
-                                    quick_settings.exam_mode_enabled = true;
-                                }
-                                if let Some(list) = pack_req {
-                                    if let Some(first) = list.first() {
-                                        on_stage_file(first.clone());
-                                    }
-                                    self.current_tab = StudioTab::ArchiveSuite;
-                                }
-                                if let Some(p) = inspect_req {
-                                    on_stage_file(p.clone());
-                                    self.current_tab = StudioTab::QualityInspector;
-                                    if let Ok(rep) = mossambi_codec::FileQualityChecker::inspect_file(&p) {
-                                        self.quality_report = Some(rep);
-                                    }
-                                }
+                        self.explorer_view.render(
+                            ui,
+                            &palette,
+                            |p| staged = Some(p),
+                            |p, t| transcode_req = Some((p, t)),
+                            |p| exam_req = Some(p),
+                            |list| pack_req = Some(list),
+                            |p| inspect_req = Some(p),
+                        );
+
+                        if let Some(p) = staged {
+                            on_stage_file(p);
+                        }
+                        if let Some((p, t)) = transcode_req {
+                            on_stage_file(p);
+                            on_convert(t);
+                        }
+                        if let Some(p) = exam_req {
+                            on_stage_file(p);
+                            self.current_tab = StudioTab::ExamStudio;
+                            quick_settings.exam_mode_enabled = true;
+                        }
+                        if let Some(list) = pack_req {
+                            if let Some(first) = list.first() {
+                                on_stage_file(first.clone());
                             }
-                            StudioTab::Transcoder => {
-                                self.render_transcoder_tab(ui, &palette, current_file, quick_settings, &mut on_pick_file, &mut on_convert);
-                            }
-                            StudioTab::ExamStudio => {
-                                self.render_exam_studio_tab(ui, &palette, current_file, quick_settings, &mut on_pick_file, on_open_folder);
-                            }
-                            StudioTab::QualityInspector => {
-                                self.render_quality_inspector_tab(ui, &palette, current_file, &mut on_pick_file);
-                            }
-                            StudioTab::ArchiveSuite => {
-                                self.render_archive_tab(ui, &palette, current_file, quick_settings, &mut on_pick_file, on_convert);
-                            }
-                            StudioTab::HardwareTelemetry => {
-                                self.render_telemetry_tab(ui, &palette);
-                            }
-                            StudioTab::Preferences => {
-                                self.render_preferences_tab(ui, &palette, current_theme, quick_settings);
+                            self.current_tab = StudioTab::ArchiveSuite;
+                        }
+                        if let Some(p) = inspect_req {
+                            on_stage_file(p.clone());
+                            self.current_tab = StudioTab::QualityInspector;
+                            if let Ok(rep) = mossambi_codec::FileQualityChecker::inspect_file(&p) {
+                                self.quality_report = Some(rep);
                             }
                         }
-                    });
+                    }
+                    other => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| match other {
+                                StudioTab::FileExplorer => unreachable!(),
+                                StudioTab::Transcoder => {
+                                    self.render_transcoder_tab(ui, &palette, current_file, quick_settings, &mut on_pick_file, &mut on_convert);
+                                }
+                                StudioTab::ExamStudio => {
+                                    self.render_exam_studio_tab(ui, &palette, current_file, quick_settings, &mut on_pick_file, on_open_folder);
+                                }
+                                StudioTab::QualityInspector => {
+                                    self.render_quality_inspector_tab(ui, &palette, current_file, &mut on_pick_file);
+                                }
+                                StudioTab::ArchiveSuite => {
+                                    self.render_archive_tab(ui, &palette, current_file, quick_settings, &mut on_pick_file, on_convert);
+                                }
+                                StudioTab::HardwareTelemetry => {
+                                    self.render_telemetry_tab(ui, &palette);
+                                }
+                                StudioTab::Preferences => {
+                                    self.render_preferences_tab(ui, &palette, current_theme, quick_settings);
+                                }
+                            });
+                    }
+                }
             });
     }
 

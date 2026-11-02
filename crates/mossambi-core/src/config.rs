@@ -238,6 +238,12 @@ pub struct MossambiConfig {
     pub default_explorer_layout: u8, // 0 = Miller 3-Column, 1 = Full-Screen, 2 = Dual-Pane
     #[serde(default = "default_calculate_checksums")]
     pub calculate_checksums: bool,
+    #[serde(default = "default_tui_transparent")]
+    pub tui_transparent_bg: bool,
+}
+
+fn default_tui_transparent() -> bool {
+    true
 }
 
 fn default_show_hidden() -> bool {
@@ -296,6 +302,7 @@ impl Default for MossambiConfig {
             show_hidden_files: false,
             default_explorer_layout: 0,
             calculate_checksums: true,
+            tui_transparent_bg: true,
         }
     }
 }

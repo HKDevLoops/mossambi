@@ -84,6 +84,8 @@ pub fn discover_linux_mounts() -> Vec<DriveInfo> {
         display_name: "Root Filesystem (/)".into(),
         is_system: true,
         drive_type: "ext4/btrfs/xfs".into(),
+        total_bytes: 0,
+        free_bytes: 0,
     });
 
     // 2. User Home Directory
@@ -96,6 +98,8 @@ pub fn discover_linux_mounts() -> Vec<DriveInfo> {
                 display_name: "Home Directory (~/)".into(),
                 is_system: false,
                 drive_type: "User Home".into(),
+                total_bytes: 0,
+                free_bytes: 0,
             });
         }
     }
@@ -128,6 +132,8 @@ pub fn discover_linux_mounts() -> Vec<DriveInfo> {
                         display_name: format!("{} ({})", label, fstype),
                         is_system: false,
                         drive_type: fstype.to_string(),
+                        total_bytes: 0,
+                        free_bytes: 0,
                     });
                 }
             }
@@ -145,6 +151,8 @@ pub fn discover_linux_mounts() -> Vec<DriveInfo> {
                     display_name: format!("Mount Point ({})", loc),
                     is_system: false,
                     drive_type: "Mount".into(),
+                    total_bytes: 0,
+                    free_bytes: 0,
                 });
             }
         }

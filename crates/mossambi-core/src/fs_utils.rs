@@ -17,13 +17,35 @@ pub struct DriveInfo {
     pub display_name: String,
     pub is_system: bool,
     pub drive_type: String,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+}
+
+impl DriveInfo {
+    pub fn formatted_space(&self) -> String {
+        if self.total_bytes == 0 {
+            return String::new();
+        }
+        let free_gb = self.free_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+        let total_gb = self.total_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+        format!("{:.0} GB free of {:.0} GB", free_gb, total_gb)
+    }
+
+    pub fn usage_ratio(&self) -> f32 {
+        if self.total_bytes == 0 {
+            0.0
+        } else {
+            let used = self.total_bytes.saturating_sub(self.free_bytes);
+            (used as f64 / self.total_bytes as f64) as f32
+        }
+    }
 }
 
 /// Enumerates all active system drives (Windows) or root / mount points (Linux/macOS)
 pub fn get_system_drives() -> Vec<DriveInfo> {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
+        use windows_sys::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetLogicalDrives};
         let mut drives = Vec::new();
         let mask = unsafe { GetLogicalDrives() };
         for i in 0..26 {
@@ -36,12 +58,28 @@ pub fn get_system_drives() -> Vec<DriveInfo> {
                 } else {
                     "Local Volume"
                 };
+
+                let mut free_avail = 0u64;
+                let mut total = 0u64;
+                let mut total_free = 0u64;
+                let wide_root: Vec<u16> = root_str.encode_utf16().chain(std::iter::once(0)).collect();
+                unsafe {
+                    GetDiskFreeSpaceExW(
+                        wide_root.as_ptr(),
+                        &mut free_avail,
+                        &mut total,
+                        &mut total_free,
+                    );
+                }
+
                 drives.push(DriveInfo {
                     letter,
                     path: PathBuf::from(&root_str),
                     display_name: format!("{} ({}:)", drive_type, letter),
                     is_system,
                     drive_type: drive_type.to_string(),
+                    total_bytes: total,
+                    free_bytes: free_avail,
                 });
             }
         }
@@ -52,6 +90,8 @@ pub fn get_system_drives() -> Vec<DriveInfo> {
                 display_name: "Local Disk (C:)".into(),
                 is_system: true,
                 drive_type: "Fixed".into(),
+                total_bytes: 0,
+                free_bytes: 0,
             });
         }
         drives
@@ -116,6 +156,24 @@ impl FileItem {
         } else {
             format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
         }
+    }
+
+    pub fn formatted_date(&self) -> String {
+        if let Some(time) = self.modified {
+            if let Ok(duration) = time.duration_since(SystemTime::UNIX_EPOCH) {
+                let secs = duration.as_secs();
+                let days = secs / 86400;
+                let day_secs = secs % 86400;
+                let hours = day_secs / 3600;
+                let minutes = (day_secs % 3600) / 60;
+                let approx_year = 1970 + days / 365;
+                let day_of_year = days % 365;
+                let approx_month = (day_of_year / 30) + 1;
+                let approx_day = (day_of_year % 30) + 1;
+                return format!("{:04}-{:02}-{:02} {:02}:{:02}", approx_year, approx_month.min(12), approx_day.min(31), hours, minutes);
+            }
+        }
+        "—".to_string()
     }
 }
 

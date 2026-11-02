@@ -48,6 +48,11 @@ pub struct MossambiApp {
     // Background worker channels
     result_receiver: Receiver<ConversionResult>,
     result_sender: Sender<ConversionResult>,
+
+    // Windows DWM & Backdrop Sync
+    frame_count: u64,
+    last_applied_theme: Option<ThemeStyle>,
+    last_applied_glass: Option<mossambi_core::GlassEffect>,
 }
 
 impl Default for MossambiApp {
@@ -75,6 +80,10 @@ impl Default for MossambiApp {
 
             result_receiver: rx,
             result_sender: tx,
+
+            frame_count: 0,
+            last_applied_theme: None,
+            last_applied_glass: None,
         }
     }
 }
@@ -295,6 +304,19 @@ impl eframe::App for MossambiApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Synchronize Windows DWM Backdrop (Acrylic / Mica) with active theme & glass effect
+        self.frame_count = self.frame_count.saturating_add(1);
+        let cfg = mossambi_core::MossambiConfig::load();
+        let current_glass = cfg.glass_effect;
+        if self.frame_count <= 10
+            || self.last_applied_theme != Some(self.theme)
+            || self.last_applied_glass != Some(current_glass)
+        {
+            mossambi_gui::dwm_helper::apply_system_backdrop(self.theme.is_dark(), current_glass);
+            self.last_applied_theme = Some(self.theme);
+            self.last_applied_glass = Some(current_glass);
+        }
+
         let is_animating = self.is_converting || self.completion_time.is_some();
         let repaint_interval = if is_animating {
             Duration::from_millis(16)
@@ -481,7 +503,7 @@ fn main() -> Result<(), eframe::Error> {
         .with_title("Mossambi — Universal File Conversion Studio")
         .with_inner_size([1120.0, 720.0])
         .with_min_inner_size([920.0, 580.0])
-        .with_decorations(true) // Full Desktop Studio Window
+        .with_decorations(false) // Undecorated: eliminate duplicate OS titlebar!
         .with_transparent(true)
         .with_resizable(true);
 
