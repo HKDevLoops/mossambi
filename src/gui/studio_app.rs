@@ -186,20 +186,9 @@ impl MossambiApp {
     }
 
     pub fn launch_radial_widget_at(&self, pos: Option<(f32, f32)>, file: Option<&Path>) {
-        #[cfg(target_os = "windows")]
-        let bin = "mossambi-widget.exe";
-        #[cfg(not(target_os = "windows"))]
-        let bin = "mossambi-widget";
-
-        let mut cmd = std::process::Command::new(bin);
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(parent) = exe.parent() {
-                let sibling = parent.join(bin);
-                if sibling.exists() {
-                    cmd = std::process::Command::new(sibling);
-                }
-            }
-        }
+        let exe = std::env::current_exe().ok();
+        let mut cmd = std::process::Command::new(exe.as_deref().unwrap_or_else(|| std::path::Path::new("mossambi.exe")));
+        cmd.arg("widget");
 
         if let Some((x, y)) = pos {
             cmd.arg("--pos").arg(format!("{:.0},{:.0}", x, y));

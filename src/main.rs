@@ -1074,9 +1074,7 @@ fn handle_widget(pos: Option<&str>, _active_drag: bool, file: Option<PathBuf>) -
         use std::ptr::null_mut;
         use windows_sys::Win32::Foundation::GetLastError;
         use windows_sys::Win32::System::Threading::CreateMutexW;
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
-        };
+        use windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW;
 
         let mutex_name: Vec<u16> = "Local\\MossambiWidgetSingleInstance\0"
             .encode_utf16()
@@ -1085,14 +1083,18 @@ fn handle_widget(pos: Option<&str>, _active_drag: bool, file: Option<PathBuf>) -
             let handle = CreateMutexW(null_mut(), 1, mutex_name.as_ptr());
             const ERROR_ALREADY_EXISTS: u32 = 183;
             if !handle.is_null() && GetLastError() == ERROR_ALREADY_EXISTS {
-                // Widget is already running! Bring existing window to foreground and exit.
+                // Close existing widget first, then continue to launch a fresh one
                 let title: Vec<u16> = "Mossambi Radial Widget\0".encode_utf16().collect();
                 let hwnd = FindWindowW(null_mut(), title.as_ptr());
                 if !hwnd.is_null() {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::{
+                        PostMessageW, ShowWindow, SW_RESTORE,
+                    };
+                    const WM_CLOSE: u32 = 0x0010;
                     ShowWindow(hwnd, SW_RESTORE);
-                    SetForegroundWindow(hwnd);
+                    let _ = PostMessageW(hwnd, WM_CLOSE, 0, 0);
                 }
-                return Ok(());
+                // Fall through: launch a fresh instance at the pointer
             }
         }
     }

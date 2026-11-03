@@ -1766,7 +1766,7 @@ impl ExplorerView {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(12.0, 12.0);
 
-                    for (label, glyph, rgb, path) in &pinned_folders {
+                    for (label, _glyph, rgb, path) in &pinned_folders {
                         let display_label = truncate_end(label, 14);
                         let card_size = Vec2::new(104.0, 78.0);
                         let (rect, resp) = ui.allocate_exact_size(card_size, egui::Sense::click());
@@ -1786,25 +1786,25 @@ impl ExplorerView {
                         ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
                         ui.painter().rect_stroke(rect, Rounding::same(8.0), border_stroke);
 
-                        // 3D-styled Squircle Badge in center top
-                        let badge_center = Pos2::new(rect.center().x, rect.top() + 28.0);
-                        let badge_rect = Rect::from_center_size(badge_center, Vec2::splat(32.0));
-                        ui.painter().rect_filled(
-                            badge_rect,
-                            Rounding::same(8.0),
-                            Color32::from_rgba_premultiplied(rgb[0], rgb[1], rgb[2], 30),
-                        );
-                        ui.painter().rect_stroke(
-                            badge_rect,
-                            Rounding::same(8.0),
-                            Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(rgb[0], rgb[1], rgb[2], 80)),
-                        );
-                        ui.painter().text(
-                            badge_center,
-                            egui::Align2::CENTER_CENTER,
-                            *glyph,
-                            egui::FontId::proportional(16.0),
-                            Color32::from_rgb(rgb[0], rgb[1], rgb[2]),
+                        // Large squircle-less pack icon (crisp, antialiased)
+                        let icon_key = match label.as_str() {
+                            "Desktop" => crate::core::icon_packs::IconGlyph::FolderDesktop,
+                            "Downloads" => crate::core::icon_packs::IconGlyph::FolderDownloads,
+                            "Documents" => crate::core::icon_packs::IconGlyph::FolderDocuments,
+                            "Pictures" => crate::core::icon_packs::IconGlyph::FolderPictures,
+                            "Music" => crate::core::icon_packs::IconGlyph::FolderMusic,
+                            "Videos" => crate::core::icon_packs::IconGlyph::FolderVideos,
+                            "Recycle Bin" => crate::core::icon_packs::IconGlyph::RecycleBin,
+                            _ => crate::core::icon_packs::IconGlyph::Folder,
+                        };
+                        let badge_center = Pos2::new(rect.center().x, rect.top() + 40.0);
+                        let big_rect = Rect::from_center_size(badge_center, Vec2::splat(42.0));
+                        crate::core::icon_packs::paint_icon(
+                            ui,
+                            self.icon_pack,
+                            icon_key,
+                            big_rect,
+                            [rgb[0], rgb[1], rgb[2]],
                         );
 
                         // Label below badge
@@ -1864,35 +1864,16 @@ impl ExplorerView {
                         ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
                         ui.painter().rect_stroke(rect, Rounding::same(8.0), border_stroke);
 
-                        // Left: 3D Drive / Windows Icon Badge
+                        // Left: Vector drive icon
                         let badge_center = Pos2::new(rect.left() + 26.0, rect.center().y);
-                        let icon_glyph = if drive.is_system {
-                            "🪟"
-                        } else if drive.drive_type.to_lowercase().contains("cd") || drive.drive_type.to_lowercase().contains("dvd") {
-                            "💿"
+                        let d_glyph = if drive.is_system {
+                            crate::core::icon_packs::IconGlyph::DriveSystem
                         } else {
-                            "💾"
+                            crate::core::icon_packs::IconGlyph::Drive
                         };
-                        let drive_rgb = if drive.is_system { [0, 122, 255] } else { [100, 116, 139] };
-
-                        let badge_rect = Rect::from_center_size(badge_center, Vec2::splat(32.0));
-                        ui.painter().rect_filled(
-                            badge_rect,
-                            Rounding::same(6.0),
-                            Color32::from_rgba_premultiplied(drive_rgb[0], drive_rgb[1], drive_rgb[2], 25),
-                        );
-                        ui.painter().rect_stroke(
-                            badge_rect,
-                            Rounding::same(6.0),
-                            Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(drive_rgb[0], drive_rgb[1], drive_rgb[2], 70)),
-                        );
-                        ui.painter().text(
-                            badge_center,
-                            egui::Align2::CENTER_CENTER,
-                            icon_glyph,
-                            egui::FontId::proportional(15.0),
-                            Color32::from_rgb(drive_rgb[0], drive_rgb[1], drive_rgb[2]),
-                        );
+                        let big_rect = Rect::from_center_size(badge_center, Vec2::splat(30.0));
+                        let d_rgb: [u8; 3] = if drive.is_system { [0, 122, 255] } else { [100, 116, 139] };
+                        crate::core::icon_packs::paint_icon(ui, self.icon_pack, d_glyph, big_rect, d_rgb);
 
                         // Right: Title, Progress Bar, and Space details
                         let text_left = rect.left() + 52.0;
@@ -2006,16 +1987,22 @@ impl ExplorerView {
                         }
 
                         let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
-                        let icon_tint = Color32::from_rgb(icon_spec.color_rgb[0], icon_spec.color_rgb[1], icon_spec.color_rgb[2]);
-
-                        // Icon badge
-                        ui.painter().text(
-                            Pos2::new(row_rect.left() + 10.0, row_rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            icon_spec.glyph,
-                            egui::FontId::proportional(13.0),
-                            icon_tint,
+                        let (glyph_ast, accent_rgb) = crate::core::icon_packs::IconGlyph::resolve(
+                            &item.name,
+                            &item.extension,
+                            item.is_dir,
+                            icon_spec.is_image,
+                            icon_spec.is_media,
+                            icon_spec.is_archive,
+                            icon_spec.is_document,
+                            icon_spec.is_code,
+                            icon_spec.color_rgb,
                         );
+                        let icon_rect = egui::Rect::from_center_size(
+                            Pos2::new(row_rect.left() + 14.0, row_rect.center().y),
+                            Vec2::splat(18.0),
+                        );
+                        crate::core::icon_packs::paint_icon(ui, self.icon_pack, glyph_ast, icon_rect, accent_rgb);
 
                         // File name
                         ui.painter().text(
@@ -3004,15 +2991,18 @@ impl ExplorerView {
                                 ui.add_space(6.0);
                                 for c in children.iter() {
                                     let spec = resolve_file_icon(&c.name, &c.extension, c.is_dir);
+                                    let (cglyph, caccent) = crate::core::icon_packs::IconGlyph::resolve(
+                                        &c.name, &c.extension, c.is_dir,
+                                        spec.is_image, spec.is_media, spec.is_archive,
+                                        spec.is_document, spec.is_code, spec.color_rgb,
+                                    );
                                     ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new(spec.glyph)
-                                                .size(11.0)
-                                                .color(Color32::from_rgb(
-                                                    spec.color_rgb[0],
-                                                    spec.color_rgb[1],
-                                                    spec.color_rgb[2],
-                                                )),
+                                        let (crect, _) = ui.allocate_exact_size(
+                                            Vec2::splat(15.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        crate::core::icon_packs::paint_icon(
+                                            ui, self.icon_pack, cglyph, crect, caccent,
                                         );
                                         ui.label(
                                             egui::RichText::new(truncate_end(&c.name, 30))
@@ -3041,14 +3031,17 @@ impl ExplorerView {
                                 let spec =
                                     resolve_file_icon(&item.name, &item.extension, item.is_dir);
                                 ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(spec.glyph)
-                                            .size(26.0)
-                                            .color(Color32::from_rgb(
-                                                spec.color_rgb[0],
-                                                spec.color_rgb[1],
-                                                spec.color_rgb[2],
-                                            )),
+                                    let (mrect, _) = ui.allocate_exact_size(
+                                        Vec2::splat(40.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    let (mglyph, maccent) = crate::core::icon_packs::IconGlyph::resolve(
+                                        &item.name, &item.extension, item.is_dir,
+                                        spec.is_image, spec.is_media, spec.is_archive,
+                                        spec.is_document, spec.is_code, spec.color_rgb,
+                                    );
+                                    crate::core::icon_packs::paint_icon(
+                                        ui, self.icon_pack, mglyph, mrect, maccent,
                                     );
                                     ui.vertical(|ui| {
                                         ui.label(
@@ -3186,7 +3179,6 @@ impl ExplorerView {
         let tile_h = icon_sz * 1.15;
         let tile_size = Vec2::new(tile_w, tile_h);
 
-        let icon_font_sz = (icon_sz * 0.32).clamp(20.0, 52.0);
         let name_font_sz = (icon_sz * 0.115).clamp(10.0, 13.0);
         let size_font_sz = (icon_sz * 0.095).clamp(8.5, 11.0);
 
@@ -3273,12 +3265,6 @@ impl ExplorerView {
                     for item in &entries {
                         let is_checked = self.selected_paths.contains(&item.path);
                         let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
-                        let icon = icon_spec.glyph;
-                        let icon_color = Color32::from_rgb(
-                            icon_spec.color_rgb[0],
-                            icon_spec.color_rgb[1],
-                            icon_spec.color_rgb[2],
-                        );
 
                         let (rect, resp) = ui.allocate_exact_size(tile_size, egui::Sense::click());
                         let bg = if resp.hovered() {
@@ -3313,18 +3299,10 @@ impl ExplorerView {
                             ),
                         );
 
-                        // Center 3D-styled Material/Apple badge icon and file name
+                        // Center vector icon & file name (Apple/Finder proportions)
                         let center = rect.center();
-                        let icon_y_offset = tile_h * 0.16;
+                        let icon_y_offset = tile_h * 0.14;
                         let badge_center = center - Vec2::new(0.0, icon_y_offset);
-                        let badge_sz = (icon_font_sz * 1.3).clamp(24.0, 64.0);
-                        let badge_rect =
-                            Rect::from_center_size(badge_center, Vec2::splat(badge_sz));
-                        let icon_tint = if item.is_dir {
-                            Color32::from_rgb(79, 168, 255)
-                        } else {
-                            icon_color
-                        };
 
                         // Image files: real thumbnail preview (lazily decoded, cached)
                         let thumb = if !item.is_dir && is_image_extension(&item.extension) {
@@ -3335,9 +3313,7 @@ impl ExplorerView {
 
                         if let Some(tex) = &thumb {
                             // Cover-crop the thumbnail into the badge region
-                            let img_sz = (badge_sz * 1.75)
-                                .min(tile_h * 0.60)
-                                .min(tile_w - 14.0);
+                            let img_sz = (tile_h * 0.58).min(tile_w - 12.0);
                             let img_rect =
                                 Rect::from_center_size(badge_center, Vec2::splat(img_sz));
                             let tex_wh = tex.size_vec2();
@@ -3359,38 +3335,15 @@ impl ExplorerView {
                             );
                             ui.painter_at(img_rect).image(tex.id(), img_rect, uv, Color32::WHITE);
                         } else {
-                            // Subtle 3D squircle background badge with depth
-                            ui.painter().rect_filled(
-                                badge_rect,
-                                Rounding::same(8.0),
-                                Color32::from_rgba_premultiplied(
-                                    icon_tint.r(),
-                                    icon_tint.g(),
-                                    icon_tint.b(),
-                                    26,
-                                ),
+                            // Large embedded vector icon (pack-agnostic, antialiased)
+                            let (glyph, accent) = crate::core::icon_packs::IconGlyph::resolve(
+                                &item.name, &item.extension, item.is_dir,
+                                icon_spec.is_image, icon_spec.is_media, icon_spec.is_archive,
+                                icon_spec.is_document, icon_spec.is_code, icon_spec.color_rgb,
                             );
-                            ui.painter().rect_stroke(
-                                badge_rect,
-                                Rounding::same(8.0),
-                                Stroke::new(
-                                    1.0_f32,
-                                    Color32::from_rgba_premultiplied(
-                                        icon_tint.r(),
-                                        icon_tint.g(),
-                                        icon_tint.b(),
-                                        65,
-                                    ),
-                                ),
-                            );
-
-                            ui.painter().text(
-                                badge_center,
-                                egui::Align2::CENTER_CENTER,
-                                icon,
-                                egui::FontId::proportional(icon_font_sz),
-                                icon_tint,
-                            );
+                            let icon_block = (tile_w * 0.52).min(tile_h * 0.56);
+                            let irect = Rect::from_center_size(badge_center, Vec2::splat(icon_block));
+                            crate::core::icon_packs::paint_icon(ui, self.icon_pack, glyph, irect, accent);
                         }
 
                         let max_chars = ((tile_w / 8.0) as usize).clamp(8, 22);
@@ -3673,41 +3626,83 @@ impl ExplorerView {
 
                                         let symlink_suffix =
                                             if item.is_symlink { " ↗" } else { "" };
-                                        let text_label = if item.is_dir {
-                                            format!(
-                                                "{} {}{}  ›",
-                                                icon_spec.glyph, item.name, symlink_suffix
-                                            )
+                                        let display_name = truncate_middle(
+                                            &format!("{}{}", item.name, symlink_suffix),
+                                            (col1_w / 7.0) as usize,
+                                        );
+                                        let name_text = if item.is_dir {
+                                            format!("{}  ›", display_name)
                                         } else {
-                                            format!(
-                                                "{} {}{}",
-                                                icon_spec.glyph, item.name, symlink_suffix
-                                            )
+                                            display_name
                                         };
 
-                                        let mut rt = egui::RichText::new(text_label)
-                                            .size(11.5)
-                                            .color(if is_selected {
-                                                palette.accent
-                                            } else {
-                                                palette.text_primary
-                                            });
-                                        if item.is_dir {
-                                            rt = rt.strong();
+                                        let (row_rect, resp) = ui.allocate_exact_size(
+                                            Vec2::new(col1_w - 8.0, 24.0),
+                                            egui::Sense::click(),
+                                        );
+                                        // Row band: hover/selected
+                                        if is_selected {
+                                            ui.painter().rect_filled(
+                                                row_rect,
+                                                Rounding::same(5.0),
+                                                Color32::from_rgba_premultiplied(
+                                                    palette.accent.r(),
+                                                    palette.accent.g(),
+                                                    palette.accent.b(),
+                                                    38,
+                                                ),
+                                            );
+                                        } else if resp.hovered() {
+                                            ui.painter().rect_filled(
+                                                row_rect,
+                                                Rounding::same(5.0),
+                                                Color32::from_rgba_premultiplied(
+                                                    palette.accent.r(),
+                                                    palette.accent.g(),
+                                                    palette.accent.b(),
+                                                    18,
+                                                ),
+                                            );
                                         }
-                                        if item.is_hidden {
-                                            rt = rt.color(palette.text_muted);
-                                        }
-
-                                        let btn = egui::Button::new(rt)
-                                            .fill(if is_selected {
-                                                palette.card_hover
-                                            } else {
-                                                Color32::TRANSPARENT
-                                            })
-                                            .rounding(Rounding::same(4.0));
-
-                                        let resp = ui.add_sized([col1_w - 12.0, 24.0], btn);
+                                        // Pack vector icon on left
+                                        let (icon_glyph, accent_rgb) =
+                                            crate::core::icon_packs::IconGlyph::resolve(
+                                                &item.name,
+                                                &item.extension,
+                                                item.is_dir,
+                                                icon_spec.is_image,
+                                                icon_spec.is_media,
+                                                icon_spec.is_archive,
+                                                icon_spec.is_document,
+                                                icon_spec.is_code,
+                                                icon_spec.color_rgb,
+                                            );
+                                        let icon_rect = Rect::from_center_size(
+                                            Pos2::new(row_rect.left() + 10.0, row_rect.center().y),
+                                            Vec2::splat(17.0),
+                                        );
+                                        crate::core::icon_packs::paint_icon(
+                                            ui,
+                                            self.icon_pack,
+                                            icon_glyph,
+                                            icon_rect,
+                                            accent_rgb,
+                                        );
+                                        // Name text right of icon
+                                        let name_color = if is_selected {
+                                            palette.text_primary
+                                        } else if item.is_hidden {
+                                            palette.text_muted
+                                        } else {
+                                            palette.text_primary
+                                        };
+                                        ui.painter().text(
+                                            Pos2::new(row_rect.left() + 24.0, row_rect.center().y),
+                                            egui::Align2::LEFT_CENTER,
+                                            name_text,
+                                            egui::FontId::proportional(11.5),
+                                            name_color,
+                                        );
                                         if resp.clicked() {
                                             self.focused_row = idx;
                                             self.selected_paths.clear();
@@ -3777,38 +3772,86 @@ impl ExplorerView {
 
                                             let symlink_suffix =
                                                 if sub_item.is_symlink { " ↗" } else { "" };
-                                            let text_label = if sub_item.is_dir {
-                                                format!(
-                                                    "{} {}{}  ›",
-                                                    icon_spec.glyph, sub_item.name, symlink_suffix
-                                                )
+                                            let display_name = truncate_middle(
+                                                &format!("{}{}", sub_item.name, symlink_suffix),
+                                                (col2_w / 7.0) as usize,
+                                            );
+                                            let name_text = if sub_item.is_dir {
+                                                format!("{}  ›", display_name)
                                             } else {
-                                                format!(
-                                                    "{} {}{}",
-                                                    icon_spec.glyph, sub_item.name, symlink_suffix
-                                                )
+                                                display_name
                                             };
 
-                                            let mut rt = egui::RichText::new(text_label)
-                                                .size(11.5)
-                                                .color(if is_sel {
-                                                    palette.accent
-                                                } else {
-                                                    palette.text_primary
-                                                });
-                                            if sub_item.is_dir {
-                                                rt = rt.strong();
+                                            let (row_rect, resp) = ui.allocate_exact_size(
+                                                Vec2::new(col2_w - 8.0, 24.0),
+                                                egui::Sense::click(),
+                                            );
+                                            if is_sel {
+                                                ui.painter().rect_filled(
+                                                    row_rect,
+                                                    Rounding::same(5.0),
+                                                    Color32::from_rgba_premultiplied(
+                                                        palette.accent.r(),
+                                                        palette.accent.g(),
+                                                        palette.accent.b(),
+                                                        38,
+                                                    ),
+                                                );
+                                            } else if resp.hovered() {
+                                                ui.painter().rect_filled(
+                                                    row_rect,
+                                                    Rounding::same(5.0),
+                                                    Color32::from_rgba_premultiplied(
+                                                        palette.accent.r(),
+                                                        palette.accent.g(),
+                                                        palette.accent.b(),
+                                                        18,
+                                                    ),
+                                                );
                                             }
-
-                                            let btn = egui::Button::new(rt)
-                                                .fill(if is_sel {
-                                                    palette.card_hover
-                                                } else {
-                                                    Color32::TRANSPARENT
-                                                })
-                                                .rounding(Rounding::same(4.0));
-
-                                            let resp = ui.add_sized([col2_w - 12.0, 24.0], btn);
+                                            let (cglyph, caccent) =
+                                                crate::core::icon_packs::IconGlyph::resolve(
+                                                    &sub_item.name,
+                                                    &sub_item.extension,
+                                                    sub_item.is_dir,
+                                                    icon_spec.is_image,
+                                                    icon_spec.is_media,
+                                                    icon_spec.is_archive,
+                                                    icon_spec.is_document,
+                                                    icon_spec.is_code,
+                                                    icon_spec.color_rgb,
+                                                );
+                                            let icon_rect = Rect::from_center_size(
+                                                Pos2::new(
+                                                    row_rect.left() + 10.0,
+                                                    row_rect.center().y,
+                                                ),
+                                                Vec2::splat(17.0),
+                                            );
+                                            crate::core::icon_packs::paint_icon(
+                                                ui,
+                                                self.icon_pack,
+                                                cglyph,
+                                                icon_rect,
+                                                caccent,
+                                            );
+                                            let name_color = if is_sel {
+                                                palette.text_primary
+                                            } else if sub_item.is_hidden {
+                                                palette.text_muted
+                                            } else {
+                                                palette.text_primary
+                                            };
+                                            ui.painter().text(
+                                                Pos2::new(
+                                                    row_rect.left() + 24.0,
+                                                    row_rect.center().y,
+                                                ),
+                                                egui::Align2::LEFT_CENTER,
+                                                name_text,
+                                                egui::FontId::proportional(11.5),
+                                                name_color,
+                                            );
                                             if resp.clicked() {
                                                 self.selected_paths.clear();
                                                 self.selected_paths.insert(sub_item.path.clone());
@@ -3859,19 +3902,27 @@ impl ExplorerView {
                                             &item_clone.extension,
                                             item_clone.is_dir,
                                         );
-                                        let icon_color = Color32::from_rgb(
-                                            icon_spec.color_rgb[0],
-                                            icon_spec.color_rgb[1],
-                                            icon_spec.color_rgb[2],
-                                        );
-
-                                        // Big 48px Centered Icon
+                                        // Large centered vector icon
                                         ui.vertical_centered(|ui| {
-                                            ui.add_space(8.0);
-                                            ui.label(
-                                                egui::RichText::new(icon_spec.glyph)
-                                                    .size(48.0)
-                                                    .color(icon_color),
+                                            ui.add_space(10.0);
+                                            let (glyph, accent) =
+                                                crate::core::icon_packs::IconGlyph::resolve(
+                                                    &item_clone.name,
+                                                    &item_clone.extension,
+                                                    item_clone.is_dir,
+                                                    icon_spec.is_image,
+                                                    icon_spec.is_media,
+                                                    icon_spec.is_archive,
+                                                    icon_spec.is_document,
+                                                    icon_spec.is_code,
+                                                    icon_spec.color_rgb,
+                                                );
+                                            let (irect, _) = ui.allocate_exact_size(
+                                                Vec2::splat(88.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            crate::core::icon_packs::paint_icon(
+                                                ui, self.icon_pack, glyph, irect, accent,
                                             );
                                             ui.add_space(4.0);
                                             ui.label(
@@ -4474,12 +4525,6 @@ impl ExplorerView {
         let mut peek_item: Option<FileItem> = None;
 
         let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
-        let icon = icon_spec.glyph;
-        let icon_color = Color32::from_rgb(
-            icon_spec.color_rgb[0],
-            icon_spec.color_rgb[1],
-            icon_spec.color_rgb[2],
-        );
 
         egui::Window::new(format!("ℹ Properties — {}", item.name))
             .collapsible(false)
@@ -4496,11 +4541,16 @@ impl ExplorerView {
             .show(ctx, |ui| {
                 // Header with large icon and name
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(icon).size(36.0).color(if item.is_dir {
-                        Color32::from_rgb(79, 168, 255)
-                    } else {
-                        icon_color
-                    }));
+                    let (picon_rect, _) = ui.allocate_exact_size(
+                        Vec2::splat(64.0),
+                        egui::Sense::hover(),
+                    );
+                    let (pglyph, paccent) = crate::core::icon_packs::IconGlyph::resolve(
+                        &item.name, &item.extension, item.is_dir,
+                        icon_spec.is_image, icon_spec.is_media, icon_spec.is_archive,
+                        icon_spec.is_document, icon_spec.is_code, icon_spec.color_rgb,
+                    );
+                    crate::core::icon_packs::paint_icon(ui, self.icon_pack, pglyph, picon_rect, paccent);
                     ui.add_space(8.0);
                     ui.vertical(|ui| {
                         ui.label(
