@@ -8,6 +8,7 @@ pub mod file_icons;
 pub mod fs_utils;
 pub mod fuzzy;
 pub mod gesture;
+pub mod icon_packs;
 pub mod linux_dna;
 pub mod pantone;
 pub mod registry;

@@ -19,7 +19,7 @@ use crate::core::{
     copy_entry_recursive, format_file_size, fuzzy_match, get_system_drives, list_directory_sync,
     move_entry, parse_breadcrumbs, remove_entry_recursive, resolve_file_icon,
     resolve_unique_paste_path, spawn_async_dir_scan, DriveInfo, FileItem, GestureKind,
-    KinematicGestureTracker, ScanBatch,
+    icon_packs, KinematicGestureTracker, ScanBatch,
 };
 use crate::gui::macos_theme::ThemePalette;
 use eframe::egui::{self, Color32, Pos2, Rect, Rounding, Stroke, Ui, Vec2};

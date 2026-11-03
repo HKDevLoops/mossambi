@@ -252,10 +252,18 @@ pub struct MossambiConfig {
     pub calculate_checksums: bool,
     #[serde(default = "default_tui_transparent")]
     pub tui_transparent_bg: bool,
+    #[serde(default = "default_icon_pack")]
+    pub icon_pack: String,
+    #[serde(default)]
+    pub font_family: Option<String>,
 }
 
 fn default_tui_transparent() -> bool {
     true
+}
+
+fn default_icon_pack() -> String {
+    "macos".to_string()
 }
 
 fn default_show_hidden() -> bool {
