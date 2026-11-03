@@ -555,6 +555,14 @@ impl StudioView {
                             .ok();
                         if let Some(home_str) = home_opt {
                             let base = PathBuf::from(home_str);
+                            // Real Windows Recycle Bin (system-drive $Recycle.Bin)
+                            let recycle_target = self
+                                .explorer_view
+                                .drives
+                                .iter()
+                                .find(|d| d.is_system)
+                                .map(|d| d.path.join("$Recycle.Bin"))
+                                .unwrap_or_else(|| base.clone());
                             let pinned = [
                                 ("Desktop", "🖥", base.join("Desktop")),
                                 ("Downloads", "📥", base.join("Downloads")),
@@ -564,7 +572,7 @@ impl StudioView {
                                 ("Videos", "🎬", base.join("Videos")),
                                 ("between_pcs", "📁", base.join("between_pcs")),
                                 ("wallpapers", "📁", base.join("wallpapers")),
-                                ("Recycle Bin", "🗑", base.clone()),
+                                ("Recycle Bin", "🗑", recycle_target),
                             ];
 
                             for (name, icon, path) in pinned {
@@ -574,6 +582,9 @@ impl StudioView {
                                 if render_sidebar_item_with_pin(
                                     ui, &palette, name, icon, is_active, true,
                                 ) {
+                                    if path.to_string_lossy().contains("$Recycle.Bin") {
+                                        self.explorer_view.show_hidden_files = true;
+                                    }
                                     self.current_tab = StudioTab::FileExplorer;
                                     self.explorer_view.navigate_to(path);
                                     self.explorer_view.is_home_view = false;

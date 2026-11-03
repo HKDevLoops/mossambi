@@ -46,6 +46,9 @@ pub struct MossambiApp {
     pub frame_count: u64,
     pub last_applied_theme: Option<ThemeStyle>,
     pub last_applied_glass: Option<crate::core::GlassEffect>,
+
+    // Ctrl+Mouse-Wheel UI zoom (Finder/Explorer parity), 1.0 = native scale
+    pub ui_zoom: f32,
 }
 
 impl Default for MossambiApp {
@@ -77,6 +80,7 @@ impl Default for MossambiApp {
             frame_count: 0,
             last_applied_theme: None,
             last_applied_glass: None,
+            ui_zoom: 1.0,
         }
     }
 }
@@ -93,8 +97,9 @@ impl MossambiApp {
         crate::gui::macos_theme::apply_theme_visuals(&cc.egui_ctx, &palette);
 
         let mut style = (*cc.egui_ctx.style()).clone();
-        style.spacing.item_spacing = Vec2::new(10.0, 8.0);
-        style.spacing.button_padding = Vec2::new(14.0, 7.0);
+        // Finder-grade compact metrics: tight button pills & calm 8px rhythm
+        style.spacing.item_spacing = Vec2::new(8.0, 6.0);
+        style.spacing.button_padding = Vec2::new(10.0, 5.0);
         style.spacing.indent = 16.0;
         cc.egui_ctx.set_style(style);
 
@@ -349,6 +354,27 @@ impl eframe::App for MossambiApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // ── Ctrl + Mouse Wheel Zoom ( Finder / Windows Explorer parity ) ──
+        // Ctrl+wheel scales the whole UI; Ctrl+0 resets to native scale.
+        let (zoom_scroll, zoom_reset) = ctx.input(|i| {
+            let ctrl = i.modifiers.ctrl || i.modifiers.command;
+            let scroll = if ctrl { i.raw_scroll_delta.y } else { 0.0 };
+            let reset = ctrl && i.key_pressed(egui::Key::Num0);
+            (scroll, reset)
+        });
+        if zoom_reset {
+            self.ui_zoom = 1.0;
+            let native = ctx.native_pixels_per_point().unwrap_or(1.0).max(0.5);
+            ctx.set_pixels_per_point(native);
+            self.last_applied_theme = None;
+        } else if zoom_scroll != 0.0 {
+            let step = if zoom_scroll > 0.0 { 1.08_f32 } else { 1.0_f32 / 1.08 };
+            self.ui_zoom = (self.ui_zoom * step).clamp(0.6, 2.5);
+            let native = ctx.native_pixels_per_point().unwrap_or(1.0).max(0.5);
+            ctx.set_pixels_per_point(native * self.ui_zoom);
+            self.last_applied_theme = None;
+        }
+
         // Synchronize Windows DWM Backdrop (Acrylic / Mica) with active theme & glass effect
         self.frame_count = self.frame_count.saturating_add(1);
         let cfg = crate::core::MossambiConfig::load();

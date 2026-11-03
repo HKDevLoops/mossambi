@@ -37,7 +37,7 @@ pub enum ViewMode {
     Columns,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SortColumn {
     Name,
     Size,
@@ -178,6 +178,35 @@ pub struct ExplorerTab {
     pub search_query: String,
 }
 
+/// Lazy per-path image thumbnail cache entry (path -> mtime -> texture)
+struct CachedThumb {
+    mtime: Option<std::time::SystemTime>,
+    state: ThumbState,
+}
+
+enum ThumbState {
+    /// Decoded texture is ready (None = load failed / not an image)
+    Ready(Option<egui::TextureHandle>),
+}
+
+/// Finder-style long-hover preview card state
+struct HoverPreviewState {
+    item: FileItem,
+    /// Pivots the floating card to the right of the hovered row / below a tile
+    anchor: Pos2,
+    started_at: Instant,
+    content: HoverContent,
+}
+
+enum HoverContent {
+    /// Resolved image thumbnail ready to show
+    Image(egui::TextureHandle),
+    /// Folder children (first slice + total child count)
+    Children(Vec<FileItem>, usize),
+    /// Icon + metadata card (non-image files)
+    Meta,
+}
+
 pub struct ExplorerView {
     pub current_dir: PathBuf,
     pub entries: Vec<FileItem>,
@@ -244,6 +273,16 @@ pub struct ExplorerView {
     // Windows 11 & macOS Home Dashboard View
     pub is_home_view: bool,
     pub show_internal_toolbar: bool,
+
+    // Finder-style long-hover preview (files & folders)
+    hover_preview: Option<HoverPreviewState>,
+
+    // Lazy image thumbnail cache used by Grid tiles & hover previews
+    thumb_cache: std::collections::HashMap<PathBuf, CachedThumb>,
+    thumb_decode_budget: (u32, Instant),
+
+    // Shift-range selection anchor (Finder parity)
+    selection_anchor: Option<usize>,
 }
 
 impl Default for ExplorerView {
@@ -319,6 +358,10 @@ impl Default for ExplorerView {
             show_hidden_files: false,
             column_subfolder: None,
             column_preview_item: None,
+            hover_preview: None,
+            thumb_cache: std::collections::HashMap::new(),
+            thumb_decode_budget: (0, Instant::now()),
+            selection_anchor: None,
         };
 
         view.navigate_to(current_dir);
@@ -675,7 +718,7 @@ impl ExplorerView {
                     }
                 }
 
-                // Vim `l` / Right / Enter / Emacs `Ctrl+F`: Enter Directory or Open File
+                // Vim `l` / Right / Enter / Emacs `Ctrl+F`: Enter Directory or Open File (Finder parity)
                 if (i.key_pressed(egui::Key::L)
                     && !i.modifiers.command
                     && !i.modifiers.ctrl
@@ -687,9 +730,36 @@ impl ExplorerView {
                         if item.is_dir {
                             self.navigate_to(item.path.clone());
                         } else {
+                            open_in_default_app(&item.path);
                             on_stage_file(item.path.clone());
                         }
                     }
+                }
+
+                // Space: macOS Quick Look / Peek on the focused item (Finder parity)
+                if i.key_pressed(egui::Key::Space) && !i.modifiers.ctrl && !i.modifiers.command {
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        self.peek_item = Some(item.clone());
+                        self.peek_texture = None;
+                        self.peek_text_cache = None;
+                        self.peek_hash_cache = None;
+                    }
+                }
+
+                // F2: Rename focused item in place
+                if i.key_pressed(egui::Key::F2) {
+                    if let Some(item) = nav_entries.get(self.focused_row) {
+                        if let Some(name) = item.path.file_name() {
+                            self.renaming_path =
+                                Some((item.path.clone(), name.to_string_lossy().to_string()));
+                        }
+                    }
+                }
+
+                // F5: Refresh directory
+                if i.key_pressed(egui::Key::F5) {
+                    let dir = self.current_dir.clone();
+                    self.navigate_to(dir);
                 }
 
                 // Vim `gg` / Emacs `Alt+<`: Jump to First Item
@@ -1640,6 +1710,7 @@ impl ExplorerView {
         let base = home_opt.unwrap_or_else(|| PathBuf::from("."));
 
         let mut nav_to: Option<PathBuf> = None;
+        let mut new_dash_hover: Option<(FileItem, Pos2)> = None;
 
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
@@ -1674,13 +1745,25 @@ impl ExplorerView {
                     }
                 }
 
-                // Append Recycle Bin (or home root)
-                pinned_folders.push(("Recycle Bin".to_string(), "🗑", [16, 185, 129], base.clone()));
+                // Append Recycle Bin -> real system-drive $Recycle.Bin when available
+                let recycle_target = self
+                    .drives
+                    .iter()
+                    .find(|d| d.is_system)
+                    .map(|d| d.path.join("$Recycle.Bin"))
+                    .unwrap_or(base.clone());
+                pinned_folders.push((
+                    "Recycle Bin".to_string(),
+                    "🗑",
+                    [16, 185, 129],
+                    recycle_target,
+                ));
 
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(12.0, 12.0);
 
                     for (label, glyph, rgb, path) in &pinned_folders {
+                        let display_label = truncate_end(label, 14);
                         let card_size = Vec2::new(104.0, 78.0);
                         let (rect, resp) = ui.allocate_exact_size(card_size, egui::Sense::click());
 
@@ -1698,15 +1781,6 @@ impl ExplorerView {
                         // Card frame with subtle depth
                         ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
                         ui.painter().rect_stroke(rect, Rounding::same(8.0), border_stroke);
-
-                        // Pin icon in top-right
-                        ui.painter().text(
-                            rect.right_top() + Vec2::new(-8.0, 8.0),
-                            egui::Align2::RIGHT_TOP,
-                            "📌",
-                            egui::FontId::proportional(9.0),
-                            palette.text_muted,
-                        );
 
                         // 3D-styled Squircle Badge in center top
                         let badge_center = Pos2::new(rect.center().x, rect.top() + 28.0);
@@ -1733,10 +1807,20 @@ impl ExplorerView {
                         ui.painter().text(
                             Pos2::new(rect.center().x, rect.bottom() - 12.0),
                             egui::Align2::CENTER_CENTER,
-                            label,
+                            display_label,
                             egui::FontId::proportional(10.5),
                             palette.text_primary,
                         );
+
+                        // Full name tooltip + hover preview anchor for long hover
+                        if resp.hovered() {
+                            let card_anchor =
+                                rect.center() + Vec2::new(0.0, rect.height() * 0.5 + 14.0);
+                            new_dash_hover = Some((
+                                FileItem::from_path(path.clone()),
+                                card_anchor,
+                            ));
+                        }
 
                         if resp.clicked() || resp.double_clicked() {
                             nav_to = Some(path.clone());
@@ -1957,6 +2041,32 @@ impl ExplorerView {
         if let Some(path) = nav_to {
             self.navigate_to(path);
         }
+
+        // Long-hover preview on dashboard cards (folder contents peek)
+        let keep_existing = matches!(
+            (&self.hover_preview, &new_dash_hover),
+            (Some(active), Some((item, _))) if active.item.path == item.path
+        );
+        if keep_existing {
+            let due = self
+                .hover_preview
+                .as_ref()
+                .map(|h| h.started_at.elapsed() > std::time::Duration::from_millis(450))
+                .unwrap_or(false);
+            if due {
+                self.ensure_hover_content(ui.ctx());
+            }
+        } else if let Some((item, anchor)) = new_dash_hover {
+            self.hover_preview = Some(HoverPreviewState {
+                item,
+                anchor,
+                started_at: Instant::now(),
+                content: HoverContent::Meta,
+            });
+        } else {
+            self.hover_preview = None;
+        }
+        self.render_hover_preview(ui, palette);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1975,320 +2085,365 @@ impl ExplorerView {
             .into_iter()
             .cloned()
             .collect();
-        let total_items = entries.len();
-        let sel_count = self.selected_paths.len();
 
-        let mut clear_all = false;
-        let mut select_all = false;
-        let mut pack_all = false;
-        let mut convert_all = false;
+        // ── Tools & Converters toolbar (sits directly above the parameter row) ──
+        self.render_action_toolbar(
+            ui,
+            palette,
+            &entries,
+            on_transcode_target,
+            on_exam_conform,
+            on_pack_archive,
+            on_inspect_file,
+        );
 
-        // Top summary & batch actions bar
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(format!("{} item(s)", total_items))
-                    .color(palette.text_secondary),
-            );
-            if sel_count > 0 {
-                ui.label(
-                    egui::RichText::new(format!("• {} selected", sel_count))
-                        .color(palette.accent)
-                        .strong(),
+        // Finder-style column metrics: Name | Kind | Size | Date Modified
+        let scrollbar_reserve = 12.0;
+        let content_width = (ui.available_width() - scrollbar_reserve).max(320.0);
+        let kind_w = 118.0_f32;
+        let size_w = 92.0_f32;
+        let date_w = 138.0_f32;
+        let col_pad = 6.0_f32;
+        let name_w = (content_width - kind_w - size_w - date_w).max(220.0);
+
+        // Column header: flat interactive labels, no button boxes, hairline underneath
+        let header_h = 26.0_f32;
+        let (header_rect, _) =
+            ui.allocate_exact_size(Vec2::new(content_width, header_h), egui::Sense::hover());
+        let hp = ui.painter_at(header_rect);
+
+        // Column rects (name starts with left inset so it aligns with row glyphs)
+        let cols = {
+            let x0 = header_rect.left();
+            let y0 = header_rect.top();
+            (
+                Rect::from_min_size(Pos2::new(x0 + col_pad, y0), Vec2::new(name_w, header_h)),
+                Rect::from_min_size(Pos2::new(x0 + name_w, y0), Vec2::new(kind_w, header_h)),
+                Rect::from_min_size(
+                    Pos2::new(x0 + name_w + kind_w, y0),
+                    Vec2::new(size_w, header_h),
+                ),
+                Rect::from_min_size(
+                    Pos2::new(x0 + name_w + kind_w + size_w, y0),
+                    Vec2::new(date_w + col_pad, header_h),
+                ),
+            )
+        };
+
+        let mut header_sort: Option<SortColumn> = None;
+        let header_cells: [(&str, Rect, SortColumn, bool); 4] = [
+            ("Name", cols.0, SortColumn::Name, false),
+            ("Kind", cols.1, SortColumn::Extension, false),
+            ("Size", cols.2, SortColumn::Size, true),
+            ("Date Modified", cols.3, SortColumn::Date, true),
+        ];
+
+        for (label, hrect, col, right_align) in header_cells {
+            let is_active = self.sort_column == col;
+            let id = ui.make_persistent_id(("hdr", col));
+            let resp = ui.interact(hrect, id, egui::Sense::click());
+            if resp.hovered() {
+                hp.rect_filled(
+                    hrect.shrink2(Vec2::new(0.0, 3.0)),
+                    Rounding::same(4.0),
+                    Color32::from_rgba_premultiplied(
+                        palette.card_hover.r(),
+                        palette.card_hover.g(),
+                        palette.card_hover.b(),
+                        160,
+                    ),
                 );
             }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if sel_count > 0 {
-                    if ui.button("Clear Selection").clicked() {
-                        clear_all = true;
-                    }
-                    if ui.button("📦 Pack Selected (ZIP)").clicked() {
-                        pack_all = true;
-                    }
-                    if ui.button("⭐ Convert Selected (ALL)").clicked() {
-                        convert_all = true;
-                    }
-                } else if ui.button("Select All").clicked() {
-                    select_all = true;
-                }
-            });
-        });
-
-        if clear_all {
-            self.selected_paths.clear();
-        }
-        if select_all {
-            for e in &entries {
-                self.selected_paths.insert(e.path.clone());
-            }
-        }
-        if pack_all {
-            let list: Vec<PathBuf> = self.selected_paths.iter().cloned().collect();
-            on_pack_archive(list);
-        }
-        if convert_all {
-            for p in &self.selected_paths {
-                on_transcode_target(p.clone(), "ALL".into());
+            let arrow = if is_active {
+                format!(" {}", self.sort_direction.indicator())
+            } else {
+                String::new()
+            };
+            let align = if right_align {
+                egui::Align2::RIGHT_CENTER
+            } else {
+                egui::Align2::LEFT_CENTER
+            };
+            let tx = if right_align {
+                hrect.right() - col_pad
+            } else {
+                hrect.left() + col_pad
+            };
+            hp.text(
+                Pos2::new(tx, hrect.center().y),
+                align,
+                format!("{}{}", label, arrow),
+                egui::FontId::proportional(11.5),
+                if is_active { palette.accent } else { palette.text_muted },
+            );
+            if resp.clicked() {
+                header_sort = Some(col);
             }
         }
 
-        ui.add_space(4.0);
-        ui.separator();
+        // Hairline under the header (Finder table rule)
+        hp.line_segment(
+            [
+                Pos2::new(header_rect.left(), header_rect.bottom()),
+                Pos2::new(header_rect.right(), header_rect.bottom()),
+            ],
+            Stroke::new(1.0_f32, palette.border),
+        );
+
+        if let Some(col) = header_sort {
+            if self.sort_column == col {
+                self.sort_direction = self.sort_direction.toggle();
+            } else {
+                self.sort_column = col;
+                self.sort_direction = if col == SortColumn::Name {
+                    SortDirection::Ascending
+                } else if col == SortColumn::Date {
+                    SortDirection::Descending
+                } else {
+                    SortDirection::Ascending
+                };
+            }
+        }
+
         ui.add_space(2.0);
 
-        // Fixed Column Layout Constants (Exact Pixel Budgeting - Zero Collision)
-        let scrollbar_reserve = 14.0;
-        let content_width = (ui.available_width() - scrollbar_reserve).max(300.0);
-        let chk_w = 26.0;
-        let type_w = 60.0;
-        let perm_w = 75.0;
-        let size_w = 80.0;
-        let date_w = 120.0;
-        let spacing = 8.0;
-        let fixed_total = chk_w + type_w + perm_w + size_w + date_w + (spacing * 5.0);
-        let name_w = (content_width - fixed_total).max(180.0);
-
-        // 1. Table Column Header Row with Interactive Sorting Indicators
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(spacing, 0.0);
-
-            // Checkbox Header
-            let all_checked = total_items > 0 && sel_count == total_items;
-            let mut chk = all_checked;
-            ui.allocate_ui_with_layout(
-                Vec2::new(chk_w, 24.0),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    if ui.checkbox(&mut chk, "").changed() {
-                        if chk {
-                            for e in &entries {
-                                self.selected_paths.insert(e.path.clone());
-                            }
-                        } else {
-                            self.selected_paths.clear();
-                        }
-                    }
-                },
-            );
-
-            // Name Column Header
-            ui.allocate_ui_with_layout(
-                Vec2::new(name_w, 24.0),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    let text = if self.sort_column == SortColumn::Name {
-                        format!("Name {}", self.sort_direction.indicator())
-                    } else {
-                        "Name".to_string()
-                    };
-                    if ui
-                        .button(
-                            egui::RichText::new(text)
-                                .size(11.0)
-                                .strong()
-                                .color(palette.text_primary),
-                        )
-                        .clicked()
-                    {
-                        if self.sort_column == SortColumn::Name {
-                            self.sort_direction = self.sort_direction.toggle();
-                        } else {
-                            self.sort_column = SortColumn::Name;
-                            self.sort_direction = SortDirection::Ascending;
-                        }
-                    }
-                },
-            );
-
-            // Type Column Header
-            ui.allocate_ui_with_layout(
-                Vec2::new(type_w, 24.0),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    let text = if self.sort_column == SortColumn::Extension {
-                        format!("Type {}", self.sort_direction.indicator())
-                    } else {
-                        "Type".to_string()
-                    };
-                    if ui
-                        .button(
-                            egui::RichText::new(text)
-                                .size(11.0)
-                                .strong()
-                                .color(palette.text_primary),
-                        )
-                        .clicked()
-                    {
-                        if self.sort_column == SortColumn::Extension {
-                            self.sort_direction = self.sort_direction.toggle();
-                        } else {
-                            self.sort_column = SortColumn::Extension;
-                            self.sort_direction = SortDirection::Ascending;
-                        }
-                    }
-                },
-            );
-
-            // Permissions Column Header
-            ui.allocate_ui_with_layout(
-                Vec2::new(perm_w, 24.0),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    let text = if self.sort_column == SortColumn::Permissions {
-                        format!("Mode {}", self.sort_direction.indicator())
-                    } else {
-                        "Mode".to_string()
-                    };
-                    if ui
-                        .button(
-                            egui::RichText::new(text)
-                                .size(11.0)
-                                .strong()
-                                .color(palette.text_primary),
-                        )
-                        .clicked()
-                    {
-                        if self.sort_column == SortColumn::Permissions {
-                            self.sort_direction = self.sort_direction.toggle();
-                        } else {
-                            self.sort_column = SortColumn::Permissions;
-                            self.sort_direction = SortDirection::Ascending;
-                        }
-                    }
-                },
-            );
-
-            // Size Column Header (Right-Aligned)
-            ui.allocate_ui_with_layout(
-                Vec2::new(size_w, 24.0),
-                egui::Layout::right_to_left(egui::Align::Center),
-                |ui| {
-                    let text = if self.sort_column == SortColumn::Size {
-                        format!("Size {}", self.sort_direction.indicator())
-                    } else {
-                        "Size".to_string()
-                    };
-                    if ui
-                        .button(
-                            egui::RichText::new(text)
-                                .size(11.0)
-                                .strong()
-                                .color(palette.text_primary),
-                        )
-                        .clicked()
-                    {
-                        if self.sort_column == SortColumn::Size {
-                            self.sort_direction = self.sort_direction.toggle();
-                        } else {
-                            self.sort_column = SortColumn::Size;
-                            self.sort_direction = SortDirection::Ascending;
-                        }
-                    }
-                },
-            );
-
-            // Date Modified Header (Right-Aligned)
-            ui.allocate_ui_with_layout(
-                Vec2::new(date_w, 24.0),
-                egui::Layout::right_to_left(egui::Align::Center),
-                |ui| {
-                    let text = if self.sort_column == SortColumn::Date {
-                        format!("Date {}", self.sort_direction.indicator())
-                    } else {
-                        "Date".to_string()
-                    };
-                    if ui
-                        .button(
-                            egui::RichText::new(text)
-                                .size(11.0)
-                                .strong()
-                                .color(palette.text_primary),
-                        )
-                        .clicked()
-                    {
-                        if self.sort_column == SortColumn::Date {
-                            self.sort_direction = self.sort_direction.toggle();
-                        } else {
-                            self.sort_column = SortColumn::Date;
-                            self.sort_direction = SortDirection::Ascending;
-                        }
-                    }
-                },
-            );
-        });
-
-        ui.separator();
-
         let mut nav_into_dir: Option<PathBuf> = None;
-        let mut toggled_paths: Vec<(PathBuf, bool)> = Vec::new();
         let mut peek_to_open: Option<FileItem> = None;
+        let mut new_hover: Option<(FileItem, Pos2)> = None;
+        let thumb_budget_reset = self.thumb_decode_budget.1.elapsed() > std::time::Duration::from_millis(300);
+        if thumb_budget_reset {
+            self.thumb_decode_budget = (0, Instant::now());
+        }
 
-        let scroll_output = egui::ScrollArea::vertical()
+        egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
+                // Canvas interact registered FIRST so rows (registered after it) stay
+                // on top: egui gives the pointer to the last-registered widget covering
+                // it. This prevents the empty-canvas menu from swallowing row clicks —
+                // the long-standing "click on a file does nothing" bug.
+                let canvas_resp = ui.interact(
+                    ui.available_rect_before_wrap(),
+                    ui.make_persistent_id("explorer_canvas_bg"),
+                    egui::Sense::click(),
+                );
+                canvas_resp.context_menu(|menu_ui| {
+                    menu_ui.label(egui::RichText::new("Explorer Options").strong());
+                    menu_ui.separator();
+                    if menu_ui.button("📁 New Folder (Ctrl+Shift+N)").clicked() {
+                        self.show_new_folder_dialog = true;
+                        menu_ui.close_menu();
+                    }
+                    if menu_ui.button("🔄 Refresh Directory (F5)").clicked() {
+                        self.navigate_to(self.current_dir.clone());
+                        menu_ui.close_menu();
+                    }
+                    if menu_ui.button("⬆ Go to Parent Folder").clicked() {
+                        if let Some(parent) = self.current_dir.parent() {
+                            let p = parent.to_path_buf();
+                            if !p.as_os_str().is_empty() {
+                                self.navigate_to(p);
+                            }
+                        }
+                        menu_ui.close_menu();
+                    }
+                    menu_ui.separator();
+                    if menu_ui.button("✓ Select All (Ctrl+A)").clicked() {
+                        for e in &entries {
+                            self.selected_paths.insert(e.path.clone());
+                        }
+                        menu_ui.close_menu();
+                    }
+                    if menu_ui.button("✕ Clear Selection").clicked() {
+                        self.selected_paths.clear();
+                        menu_ui.close_menu();
+                    }
+                    menu_ui.separator();
+                    let has_clip = !self.clipboard_paths.is_empty();
+                    let paste_btn = egui::Button::new("📋 Paste (Ctrl+V)");
+                    if menu_ui.add_enabled(has_clip, paste_btn).clicked() {
+                        for src in &self.clipboard_paths {
+                            if let Some(file_name) = src.file_name() {
+                                let dest = self.current_dir.join(file_name);
+                                if self.clipboard_is_cut {
+                                    let _ = move_entry(src, &dest);
+                                } else {
+                                    let unique = resolve_unique_paste_path(&dest);
+                                    let _ = copy_entry_recursive(src, &unique);
+                                }
+                            }
+                        }
+                        if self.clipboard_is_cut {
+                            self.clipboard_paths.clear();
+                            self.clipboard_is_cut = false;
+                        }
+                        self.navigate_to(self.current_dir.clone());
+                        menu_ui.close_menu();
+                    }
+                    menu_ui.separator();
+                    if menu_ui.button("💻 Open in Terminal").clicked() {
+                        open_terminal_in_dir(&self.current_dir);
+                        menu_ui.close_menu();
+                    }
+                    if menu_ui.button("📂 Open in System Explorer").clicked() {
+                        open_in_file_manager(&self.current_dir);
+                        menu_ui.close_menu();
+                    }
+                    if menu_ui.button("ℹ Properties (Alt+Enter)").clicked() {
+                        self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
+                        menu_ui.close_menu();
+                    }
+                });
+
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
 
                 for (idx, item) in entries.iter().enumerate() {
-                    let is_checked = self.selected_paths.contains(&item.path);
-                    let row_height = 26.0;
+                    let is_selected = self.selected_paths.contains(&item.path);
+                    let row_height = 26.0_f32;
 
-                    let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
-                    let icon = icon_spec.glyph;
-                    let icon_color = Color32::from_rgb(
-                        icon_spec.color_rgb[0],
-                        icon_spec.color_rgb[1],
-                        icon_spec.color_rgb[2],
-                    );
-
-                    let row_rect = egui::Rect::from_min_size(
-                        ui.cursor().min,
+                    let (row_rect, row_resp) = ui.allocate_exact_size(
                         Vec2::new(content_width, row_height),
-                    );
-                    let _ = ui.allocate_rect(row_rect, egui::Sense::hover());
-                    let row_resp = ui.interact(
-                        row_rect,
-                        ui.make_persistent_id(("row_item", &item.path)),
                         egui::Sense::click(),
                     );
 
-                    if row_resp.hovered() {
+                    // Row bands: hover = soft accent wash, selected = stronger wash + outline
+                    if is_selected {
                         ui.painter().rect_filled(
                             row_rect,
-                            Rounding::same(4.0),
+                            Rounding::same(5.0),
                             Color32::from_rgba_premultiplied(
                                 palette.accent.r(),
                                 palette.accent.g(),
                                 palette.accent.b(),
-                                30,
-                            ),
-                        );
-                    } else if is_checked {
-                        ui.painter().rect_filled(
-                            row_rect,
-                            Rounding::same(4.0),
-                            Color32::from_rgba_premultiplied(
-                                palette.accent.r(),
-                                palette.accent.g(),
-                                palette.accent.b(),
-                                45,
+                                42,
                             ),
                         );
                         ui.painter().rect_stroke(
                             row_rect,
-                            Rounding::same(4.0),
+                            Rounding::same(5.0),
                             Stroke::new(
                                 1.0_f32,
                                 Color32::from_rgba_premultiplied(
                                     palette.accent.r(),
                                     palette.accent.g(),
                                     palette.accent.b(),
-                                    120,
+                                    110,
                                 ),
+                            ),
+                        );
+                    } else if row_resp.hovered() {
+                        ui.painter().rect_filled(
+                            row_rect,
+                            Rounding::same(5.0),
+                            Color32::from_rgba_premultiplied(
+                                palette.accent.r(),
+                                palette.accent.g(),
+                                palette.accent.b(),
+                                26,
                             ),
                         );
                     }
 
+                    let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+                    let rp = ui.painter();
+
+                    // 1. Name cell: glyph + name (right-truncated, Finder semantics)
+                    let name_x = row_rect.left() + col_pad;
+                    let glyph_color = if is_selected {
+                        palette.accent
+                    } else if row_resp.hovered() {
+                        palette.text_primary
+                    } else {
+                        Color32::from_rgb(
+                            icon_spec.color_rgb[0],
+                            icon_spec.color_rgb[1],
+                            icon_spec.color_rgb[2],
+                        )
+                    };
+                    rp.text(
+                        Pos2::new(name_x + 6.0, row_rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        icon_spec.glyph,
+                        egui::FontId::proportional(12.5),
+                        glyph_color,
+                    );
+                    let mut name_color = if is_selected {
+                        palette.accent
+                    } else {
+                        palette.text_primary
+                    };
+                    if item.is_hidden {
+                        name_color = Color32::from_rgba_premultiplied(
+                            name_color.r(),
+                            name_color.g(),
+                            name_color.b(),
+                            130,
+                        );
+                    }
+                    let name_font = egui::FontId::proportional(if item.is_dir { 12.0 } else { 11.5 });
+                    let name_pos_x = name_x + 22.0;
+                    let name_avail = name_w - 26.0 - col_pad;
+                    let suffix = if item.is_symlink { " ↗" } else { "" };
+                    let display = truncate_middle(
+                        &format!("{}{}", item.name, suffix),
+                        (name_avail / 7.0) as usize,
+                    );
+                    rp.text(
+                        Pos2::new(name_pos_x, row_rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        display,
+                        name_font,
+                        name_color,
+                    );
+
+                    // 2. Kind cell (Finder "Kind": human category, dim)
+                    let kind_rect = Rect::from_min_size(
+                        Pos2::new(
+                            row_rect.left() + name_w,
+                            row_rect.top(),
+                        ),
+                        Vec2::new(kind_w, row_height),
+                    );
+                    rp.text(
+                        Pos2::new(kind_rect.left() + 2.0, kind_rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        icon_spec.category,
+                        egui::FontId::proportional(10.5),
+                        palette.text_secondary,
+                    );
+
+                    // 3. Size cell (right-aligned, monospace)
+                    let size_rect = Rect::from_min_size(
+                        Pos2::new(row_rect.left() + name_w + kind_w, row_rect.top()),
+                        Vec2::new(size_w, row_height),
+                    );
+                    rp.text(
+                        Pos2::new(size_rect.right() - 4.0, size_rect.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        item.formatted_size(),
+                        egui::FontId::monospace(10.5),
+                        palette.text_secondary,
+                    );
+
+                    // 4. Date Modified cell (right-aligned, dim)
+                    let date_rect = Rect::from_min_size(
+                        Pos2::new(
+                            row_rect.left() + name_w + kind_w + size_w,
+                            row_rect.top(),
+                        ),
+                        Vec2::new(date_w, row_height),
+                    );
+                    rp.text(
+                        Pos2::new(date_rect.right() - col_pad, date_rect.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        item.formatted_date(),
+                        egui::FontId::proportional(10.5),
+                        palette.text_muted,
+                    );
+
+                    // ── Interaction: Finder semantics ──
                     if row_resp.double_clicked() {
+                        self.selection_anchor = Some(idx);
                         if item.is_dir {
                             nav_into_dir = Some(item.path.clone());
                         } else {
@@ -2296,145 +2451,37 @@ impl ExplorerView {
                         }
                     } else if row_resp.clicked() {
                         self.focused_row = idx;
-                        if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
-                            toggled_paths.push((item.path.clone(), !is_checked));
+                        let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                        let shift = ui.input(|i| i.modifiers.shift);
+                        if ctrl {
+                            if is_selected {
+                                self.selected_paths.remove(&item.path);
+                            } else {
+                                self.selected_paths.insert(item.path.clone());
+                            }
+                            self.selection_anchor = Some(idx);
+                        } else if shift {
+                            if let Some(anchor) = self.selection_anchor {
+                                self.selected_paths.clear();
+                                let (lo, hi) = (anchor.min(idx), anchor.max(idx));
+                                for e in entries.iter().take(hi + 1).skip(lo) {
+                                    self.selected_paths.insert(e.path.clone());
+                                }
+                            } else {
+                                self.selected_paths.clear();
+                                self.selected_paths.insert(item.path.clone());
+                                self.selection_anchor = Some(idx);
+                            }
                         } else {
                             self.selected_paths.clear();
                             self.selected_paths.insert(item.path.clone());
+                            self.selection_anchor = Some(idx);
                         }
                     }
 
-                    // Render columns inside the row
-                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(row_rect), |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::new(spacing, 0.0);
-
-                            // 1. Checkbox
-                            let mut checked = is_checked;
-                            ui.allocate_ui_with_layout(
-                                Vec2::new(chk_w, row_height),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    if ui.checkbox(&mut checked, "").changed() {
-                                        toggled_paths.push((item.path.clone(), checked));
-                                    }
-                                },
-                            );
-
-                            // 2. Name Column (Label with icon, truncation & tooltip)
-                            ui.allocate_ui_with_layout(
-                                Vec2::new(name_w, row_height),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    let label_color = if is_checked {
-                                        palette.accent
-                                    } else {
-                                        palette.text_primary
-                                    };
-
-                                    let symlink_suffix = if item.is_symlink { " ↗" } else { "" };
-                                    let display_text =
-                                        format!("{} {}{}", icon, item.name, symlink_suffix);
-                                    let mut rt =
-                                        egui::RichText::new(display_text).color(label_color);
-                                    if item.is_dir {
-                                        rt = rt.strong();
-                                    }
-                                    if item.is_hidden {
-                                        rt = rt.color(Color32::from_rgba_premultiplied(
-                                            label_color.r(),
-                                            label_color.g(),
-                                            label_color.b(),
-                                            120,
-                                        ));
-                                    }
-                                    ui.add(egui::Label::new(rt).truncate())
-                                        .on_hover_text(format!(
-                                            "{} • {}",
-                                            item.name, icon_spec.category
-                                        ));
-                                },
-                            );
-
-                            // 3. Type Badge
-                            ui.allocate_ui_with_layout(
-                                Vec2::new(type_w, row_height),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    let type_text = if item.is_dir {
-                                        "DIR"
-                                    } else if item.extension.is_empty() {
-                                        "—"
-                                    } else {
-                                        &item.extension
-                                    };
-                                    ui.label(egui::RichText::new(type_text).size(10.5).color(
-                                        if item.is_dir {
-                                            Color32::from_rgb(79, 168, 255)
-                                        } else {
-                                            icon_color
-                                        },
-                                    ));
-                                },
-                            );
-
-                            // 4. Permissions / Mode Column
-                            ui.allocate_ui_with_layout(
-                                Vec2::new(perm_w, row_height),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    let perm_color = if item.is_hidden {
-                                        Color32::from_rgba_premultiplied(
-                                            palette.text_muted.r(),
-                                            palette.text_muted.g(),
-                                            palette.text_muted.b(),
-                                            120,
-                                        )
-                                    } else {
-                                        palette.text_muted
-                                    };
-                                    ui.label(
-                                        egui::RichText::new(item.formatted_permissions())
-                                            .size(10.5)
-                                            .monospace()
-                                            .color(perm_color),
-                                    )
-                                    .on_hover_text(format!(
-                                        "Mode: {} (octal: {})",
-                                        item.formatted_permissions(),
-                                        item.formatted_octal_permissions()
-                                    ));
-                                },
-                            );
-
-                            // 5. Size Column (Right-Aligned)
-                            ui.allocate_ui_with_layout(
-                                Vec2::new(size_w, row_height),
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new(item.formatted_size())
-                                            .size(11.0)
-                                            .monospace()
-                                            .color(palette.text_secondary),
-                                    );
-                                },
-                            );
-
-                            // 6. Date Modified Column (Right-Aligned)
-                            ui.allocate_ui_with_layout(
-                                Vec2::new(date_w, row_height),
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new(item.formatted_date())
-                                            .size(10.5)
-                                            .color(palette.text_muted),
-                                    );
-                                },
-                            );
-                        });
-                    });
+                    if row_resp.hovered() {
+                        new_hover = Some((item.clone(), row_rect.right_center() + Vec2::new(14.0, 0.0)));
+                    }
 
                     // Comprehensive Right-Click Context Menu for the File Row (matching bug5.png)
                     let path_clone = item.path.clone();
@@ -2573,89 +2620,34 @@ impl ExplorerView {
                 }
             });
 
-        // Background Empty Canvas Context Menu
-        let canvas_rect = scroll_output.inner_rect;
-        let canvas_resp = ui.interact(
-            canvas_rect,
-            ui.make_persistent_id("explorer_canvas_bg"),
-            egui::Sense::click(),
-        );
-        canvas_resp.context_menu(|menu_ui| {
-            menu_ui.label(egui::RichText::new("Explorer Options").strong());
-            menu_ui.separator();
-            if menu_ui.button("📁 New Folder (Ctrl+Shift+N)").clicked() {
-                self.show_new_folder_dialog = true;
-                menu_ui.close_menu();
-            }
-            if menu_ui.button("🔄 Refresh Directory (F5)").clicked() {
-                self.navigate_to(self.current_dir.clone());
-                menu_ui.close_menu();
-            }
-            if menu_ui.button("⬆ Go to Parent Folder").clicked() {
-                if let Some(parent) = self.current_dir.parent() {
-                    let p = parent.to_path_buf();
-                    if !p.as_os_str().is_empty() {
-                        self.navigate_to(p);
-                    }
-                }
-                menu_ui.close_menu();
-            }
-            menu_ui.separator();
-            if menu_ui.button("✓ Select All (Ctrl+A)").clicked() {
-                for e in &entries {
-                    self.selected_paths.insert(e.path.clone());
-                }
-                menu_ui.close_menu();
-            }
-            if menu_ui.button("✕ Clear Selection").clicked() {
-                self.selected_paths.clear();
-                menu_ui.close_menu();
-            }
-            menu_ui.separator();
-            let has_clip = !self.clipboard_paths.is_empty();
-            let paste_btn = egui::Button::new("📋 Paste (Ctrl+V)");
-            if menu_ui.add_enabled(has_clip, paste_btn).clicked() {
-                for src in &self.clipboard_paths {
-                    if let Some(file_name) = src.file_name() {
-                        let dest = self.current_dir.join(file_name);
-                        if self.clipboard_is_cut {
-                            let _ = move_entry(src, &dest);
-                        } else {
-                            let unique = resolve_unique_paste_path(&dest);
-                            let _ = copy_entry_recursive(src, &unique);
-                        }
-                    }
-                }
-                if self.clipboard_is_cut {
-                    self.clipboard_paths.clear();
-                    self.clipboard_is_cut = false;
-                }
-                self.navigate_to(self.current_dir.clone());
-                menu_ui.close_menu();
-            }
-            menu_ui.separator();
-            if menu_ui.button("💻 Open in Terminal").clicked() {
-                open_terminal_in_dir(&self.current_dir);
-                menu_ui.close_menu();
-            }
-            if menu_ui.button("📂 Open in System Explorer").clicked() {
-                open_in_file_manager(&self.current_dir);
-                menu_ui.close_menu();
-            }
-            if menu_ui.button("ℹ Properties (Alt+Enter)").clicked() {
-                self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
-                menu_ui.close_menu();
-            }
-        });
+        // (The empty-canvas context menu is registered FIRST inside the scroll
+        // area above, so row interactions always win the pointer.)
 
-        // Apply toggles
-        for (path, checked) in toggled_paths {
-            if checked {
-                self.selected_paths.insert(path);
-            } else {
-                self.selected_paths.remove(&path);
+        // Apply hover preview state (Finder long-hover preview)
+        let keep_existing = matches!(
+            (&self.hover_preview, &new_hover),
+            (Some(active), Some((item, _))) if active.item.path == item.path
+        );
+        if keep_existing {
+            let due = self
+                .hover_preview
+                .as_ref()
+                .map(|h| h.started_at.elapsed() > std::time::Duration::from_millis(450))
+                .unwrap_or(false);
+            if due {
+                self.ensure_hover_content(ui.ctx());
             }
+        } else if let Some((item, anchor)) = new_hover {
+            self.hover_preview = Some(HoverPreviewState {
+                item,
+                anchor,
+                started_at: Instant::now(),
+                content: HoverContent::Meta,
+            });
+        } else {
+            self.hover_preview = None;
         }
+        self.render_hover_preview(ui, palette);
 
         if let Some(dir) = nav_into_dir {
             self.navigate_to(dir);
@@ -2667,6 +2659,480 @@ impl ExplorerView {
             self.peek_text_cache = None;
             self.peek_hash_cache = None;
         }
+    }
+
+    /// Finder-style Action Toolbar: Tools & Converters sitting directly above the
+    /// Name / Kind / Size / Date parameter row. Ghost-pill styling, enabled by selection.
+    #[allow(clippy::too_many_arguments)]
+    fn render_action_toolbar(
+        &mut self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        entries: &[FileItem],
+        on_transcode_target: &mut impl FnMut(PathBuf, String),
+        on_exam_conform: &mut impl FnMut(PathBuf),
+        on_pack_archive: &mut impl FnMut(Vec<PathBuf>),
+        on_inspect_file: &mut impl FnMut(PathBuf),
+    ) {
+        let bar_h = 34.0_f32;
+        let (bar_rect, _) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), bar_h),
+            egui::Sense::hover(),
+        );
+
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bar_rect), |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                ui.add_space(2.0);
+
+                let sel_files: Vec<PathBuf> = self
+                    .selected_paths
+                    .iter()
+                    .filter(|p| p.is_file())
+                    .cloned()
+                    .collect();
+                let all_sel: Vec<PathBuf> = self.selected_paths.iter().cloned().collect();
+                let has_files = !sel_files.is_empty();
+                let has_sel = !all_sel.is_empty();
+
+                let pill = |ui: &mut Ui, label: String, enabled: bool| {
+                    let btn = egui::Button::new(
+                        egui::RichText::new(label.clone())
+                            .size(11.0)
+                            .color(if enabled {
+                                palette.text_primary
+                            } else {
+                                palette.text_muted
+                            }),
+                    )
+                    .fill(if enabled {
+                        palette.card_bg
+                    } else {
+                        Color32::TRANSPARENT
+                    })
+                    .rounding(Rounding::same(6.0));
+                    ui.add_enabled(enabled, btn)
+                };
+
+                // ── CONVERT (Tools & Converters first group) ──
+                if has_files {
+                    ui.menu_button("↻ Convert", |menu_ui| {
+                        menu_ui.set_min_width(180.0);
+                        for fmt in ["JPG", "PNG", "WEBP", "PDF", "MP3", "FLAC", "ZIP"] {
+                            if menu_ui
+                                .button(
+                                    egui::RichText::new(format!("Convert to {}", fmt)).size(12.0),
+                                )
+                                .clicked()
+                            {
+                                for f in &sel_files {
+                                    on_transcode_target(f.clone(), fmt.to_string());
+                                }
+                                menu_ui.close_menu();
+                            }
+                        }
+                        menu_ui.separator();
+                        if menu_ui
+                            .button(
+                                egui::RichText::new("All Formats (Batch)").strong().size(12.0),
+                            )
+                            .clicked()
+                        {
+                            for f in &sel_files {
+                                on_transcode_target(f.clone(), "ALL".into());
+                            }
+                            menu_ui.close_menu();
+                        }
+                    });
+                } else {
+                    let btn = egui::Button::new(
+                        egui::RichText::new("↻ Convert").size(11.0).color(palette.text_muted),
+                    )
+                    .fill(Color32::TRANSPARENT)
+                    .rounding(Rounding::same(6.0));
+                    let _ = ui.add_enabled(false, btn);
+                }
+
+                if pill(ui, "🎯 Conform".into(), has_files).clicked() {
+                    for f in &sel_files {
+                        on_exam_conform(f.clone());
+                    }
+                }
+                if pill(ui, "📦 Pack ZIP".into(), has_sel).clicked() {
+                    on_pack_archive(all_sel.clone());
+                }
+                if pill(ui, "🔬 Inspect".into(), has_files).clicked() {
+                    if let Some(f) = sel_files.first() {
+                        on_inspect_file(f.clone());
+                    }
+                }
+
+                ui.separator();
+
+                // ── Clipboard & file ops ──
+                if pill(ui, "✂ Cut".into(), has_sel).clicked() {
+                    self.clipboard_paths = all_sel.clone();
+                    self.clipboard_is_cut = true;
+                }
+                if pill(ui, "⧉ Copy".into(), has_sel).clicked() {
+                    self.clipboard_paths = all_sel.clone();
+                    self.clipboard_is_cut = false;
+                }
+                let paste_to = self.current_dir.clone();
+                let clipboard = self.clipboard_paths.clone();
+                let clipboard_is_cut = self.clipboard_is_cut;
+                let can_paste = !clipboard.is_empty();
+                if pill(ui, "📋 Paste".into(), can_paste).clicked() {
+                    for src in &clipboard {
+                        if let Some(name) = src.file_name() {
+                            let dest = paste_to.join(name);
+                            if clipboard_is_cut {
+                                let _ = move_entry(src, &dest);
+                            } else {
+                                let unique = resolve_unique_paste_path(&dest);
+                                let _ = copy_entry_recursive(src, &unique);
+                            }
+                        }
+                    }
+                    if clipboard_is_cut {
+                        self.clipboard_paths.clear();
+                        self.clipboard_is_cut = false;
+                    }
+                    let dir = paste_to.clone();
+                    self.navigate_to(dir);
+                }
+                if pill(ui, "✎ Rename".into(), self.selected_paths.len() == 1).clicked() {
+                    if let Some(p) = all_sel.first() {
+                        if let Some(name) = p.file_name() {
+                            self.renaming_path =
+                                Some((p.clone(), name.to_string_lossy().to_string()));
+                        }
+                    }
+                }
+                if pill(ui, "🗑 Delete".into(), has_sel).clicked() {
+                    for path in &all_sel {
+                        let _ = remove_entry_recursive(path);
+                    }
+                    self.selected_paths.clear();
+                    self.selection_anchor = None;
+                    let dir = self.current_dir.clone();
+                    self.navigate_to(dir);
+                }
+
+                // ── Right-side: selection summary + select all/clear ──
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(8.0);
+                    if has_sel {
+                        if pill(ui, "✕ Clear".into(), true).clicked() {
+                            self.selected_paths.clear();
+                            self.selection_anchor = None;
+                        }
+                    } else if pill(ui, "✓ Select All".into(), !entries.is_empty()).clicked() {
+                        for e in entries {
+                            self.selected_paths.insert(e.path.clone());
+                        }
+                        self.selection_anchor = None;
+                    }
+
+                    if has_sel {
+                        let bytes: u64 = entries
+                            .iter()
+                            .filter(|e| self.selected_paths.contains(&e.path) && !e.is_dir)
+                            .map(|e| e.size_bytes)
+                            .sum();
+                        let label = if bytes > 0 {
+                            format!("{} selected • {}", all_sel.len(), format_file_size(bytes))
+                        } else {
+                            format!("{} selected", all_sel.len())
+                        };
+                        ui.label(
+                            egui::RichText::new(label)
+                                .size(10.5)
+                                .strong()
+                                .color(palette.accent),
+                        );
+                    } else {
+                        ui.label(
+                            egui::RichText::new(format!("{} items enabled", entries.len()))
+                                .size(10.5)
+                                .color(palette.text_muted),
+                        );
+                    }
+                });
+            });
+        });
+        ui.add_space(2.0);
+    }
+
+    /// Lazily resolves hover-card content (folder children or image texture)
+    fn ensure_hover_content(&mut self, ctx: &egui::Context) {
+        let should_resolve = match self.hover_preview.as_ref() {
+            Some(state) => matches!(state.content, HoverContent::Meta),
+            None => false,
+        };
+        if !should_resolve {
+            return;
+        }
+        let item = self.hover_preview.as_ref().unwrap().item.clone();
+
+        if item.is_dir {
+            let mut children = list_directory_sync(&item.path);
+            if !self.show_hidden_files {
+                children.retain(|c| !c.is_hidden);
+            }
+            children.sort_by(|a, b| {
+                b.is_dir
+                    .cmp(&a.is_dir)
+                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            });
+            let total = children.len();
+            children.truncate(10);
+            if let Some(state) = self.hover_preview.as_mut() {
+                state.content = HoverContent::Children(children, total);
+            }
+        } else if is_image_extension(&item.extension) {
+            let tex = self.get_or_load_thumbnail(ctx, &item.path, 260);
+            if tex.is_none() {
+                ctx.request_repaint_after(std::time::Duration::from_millis(60));
+            }
+            if let Some(state) = self.hover_preview.as_mut() {
+                if let Some(tex) = tex {
+                    state.content = HoverContent::Image(tex);
+                }
+            }
+        }
+    }
+
+    /// Floating Finder-style preview card: folder contents / image preview / metadata
+    fn render_hover_preview(&mut self, ui: &Ui, palette: &ThemePalette) {
+        let show = self
+            .hover_preview
+            .as_ref()
+            .map(|h| h.started_at.elapsed() > std::time::Duration::from_millis(450))
+            .unwrap_or(false);
+        if !show {
+            return;
+        }
+
+        let screen = ui.ctx().screen_rect();
+        let card_w = 250.0_f32;
+        let card_h = match self.hover_preview.as_ref().map(|h| &h.content) {
+            Some(HoverContent::Children(_, _)) => 236.0,
+            Some(HoverContent::Meta) => 116.0,
+            Some(HoverContent::Image(tex)) => (tex.size()[1] as f32).clamp(120.0, 200.0) + 58.0,
+            _ => 116.0,
+        };
+        let Some(state) = self.hover_preview.as_ref() else {
+            return;
+        };
+
+        // Anchor placement: right side of row (or under a tile), clamped inside screen
+        let x = if state.anchor.x + card_w > screen.right() - 8.0 {
+            (state.anchor.x - card_w - 20.0).max(screen.left() + 8.0)
+        } else {
+            state.anchor.x
+        };
+        let y = state.anchor.y.min(screen.bottom() - card_h - 12.0);
+
+        let item = state.item.clone();
+        let content_tag = format!("hover_preview_{}", item.path.display());
+        egui::Area::new(egui::Id::new(content_tag))
+            .fixed_pos(egui::pos2(x, y))
+            .order(egui::Order::Tooltip)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style())
+                    .fill(Color32::from_rgba_premultiplied(
+                        palette.window_bg.r(),
+                        palette.window_bg.g(),
+                        palette.window_bg.b(),
+                        245,
+                    ))
+                    .stroke(Stroke::new(1.0_f32, palette.border))
+                    .rounding(Rounding::same(10.0))
+                    .inner_margin(egui::Margin::same(12.0))
+                    .show(ui, |ui| {
+                        ui.set_width(card_w - 26.0);
+                        match &state.content {
+                            HoverContent::Image(tex) => {
+                                let img_rect = Rect::from_min_size(
+                                    ui.cursor().min,
+                                    Vec2::new(card_w - 28.0, card_h - 58.0),
+                                );
+                                let uv = egui::Rect::from_min_max(
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                );
+                                ui.painter().image(tex.id(), img_rect, uv, Color32::WHITE);
+                                ui.advance_cursor_after_rect(img_rect);
+                                ui.add_space(6.0);
+                                ui.label(
+                                    egui::RichText::new(truncate_end(&item.name, 34))
+                                        .strong()
+                                        .size(11.5)
+                                        .color(palette.text_primary),
+                                );
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{} • {}",
+                                        item.formatted_size(),
+                                        resolve_file_icon(&item.name, &item.extension, false)
+                                            .category
+                                    ))
+                                    .size(10.0)
+                                    .color(palette.text_secondary),
+                                );
+                            }
+                            HoverContent::Children(children, total) => {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{}  •  {} items",
+                                        truncate_end(&item.name, 30),
+                                        total
+                                    ))
+                                    .strong()
+                                    .size(11.5)
+                                    .color(palette.text_primary),
+                                );
+                                ui.add_space(6.0);
+                                for c in children.iter() {
+                                    let spec = resolve_file_icon(&c.name, &c.extension, c.is_dir);
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(spec.glyph)
+                                                .size(11.0)
+                                                .color(Color32::from_rgb(
+                                                    spec.color_rgb[0],
+                                                    spec.color_rgb[1],
+                                                    spec.color_rgb[2],
+                                                )),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(truncate_end(&c.name, 30))
+                                                .size(10.5)
+                                                .color(if c.is_dir {
+                                                    palette.text_primary
+                                                } else {
+                                                    palette.text_secondary
+                                                }),
+                                        );
+                                    });
+                                }
+                                if *total > children.len() {
+                                    ui.add_space(3.0);
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "… +{} more",
+                                            total - children.len()
+                                        ))
+                                        .size(10.0)
+                                        .color(palette.text_muted),
+                                    );
+                                }
+                            }
+                            HoverContent::Meta => {
+                                let spec =
+                                    resolve_file_icon(&item.name, &item.extension, item.is_dir);
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(spec.glyph)
+                                            .size(26.0)
+                                            .color(Color32::from_rgb(
+                                                spec.color_rgb[0],
+                                                spec.color_rgb[1],
+                                                spec.color_rgb[2],
+                                            )),
+                                    );
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(truncate_end(&item.name, 32))
+                                                .strong()
+                                                .size(11.5)
+                                                .color(palette.text_primary),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(spec.category)
+                                                .size(10.0)
+                                                .color(palette.text_secondary),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{} • {}",
+                                                item.formatted_size(),
+                                                item.formatted_date()
+                                            ))
+                                            .size(10.0)
+                                            .color(palette.text_muted),
+                                        );
+                                    });
+                                });
+                                if item.is_dir {
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} • Hold to peek contents",
+                                            item.formatted_date()
+                                        ))
+                                        .size(10.0)
+                                        .color(palette.text_muted),
+                                    );
+                                }
+                            }
+                        }
+                    });
+            });
+        // Ensure repaint so the card animates in promptly
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(120));
+    }
+
+    /// Get (or lazily decode) a cached image thumbnail. Returns None while the
+    /// per-frame decode budget is exhausted so the UI stays responsive.
+    fn get_or_load_thumbnail(
+        &mut self,
+        ctx: &egui::Context,
+        path: &Path,
+        max_px: u32,
+    ) -> Option<egui::TextureHandle> {
+        // Per-frame decode budget: at most 3 image decodes per 300ms window
+        if self.thumb_decode_budget.0 >= 3 {
+            if self.thumb_decode_budget.1.elapsed() < std::time::Duration::from_millis(250) {
+                ctx.request_repaint_after(std::time::Duration::from_millis(40));
+                return None;
+            }
+            self.thumb_decode_budget = (0, Instant::now());
+        }
+
+        let mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+        if let Some(entry) = self.thumb_cache.get(path) {
+            if entry.mtime == mtime {
+                let tex = match &entry.state {
+                    ThumbState::Ready(t) => t.clone(),
+                };
+                return tex;
+            }
+        }
+
+        let decoded = decode_thumbnail(path, max_px);
+        self.thumb_decode_budget.0 += 1;
+
+        let tex = decoded.map(|img| {
+            ctx.load_texture(
+                format!("thumb_{}", path.display()),
+                img,
+                egui::TextureOptions::LINEAR,
+            )
+        });
+        self.thumb_cache.insert(
+            path.to_path_buf(),
+            CachedThumb {
+                mtime,
+                state: ThumbState::Ready(tex),
+            },
+        );
+        ctx.request_repaint_after(std::time::Duration::from_millis(10));
+        let tex = self.thumb_cache.get(path).map(|e| match &e.state {
+            ThumbState::Ready(t) => t.clone(),
+        });
+        tex.flatten()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2687,6 +3153,25 @@ impl ExplorerView {
             .collect();
         let mut nav_into_dir: Option<PathBuf> = None;
         let mut peek_to_open: Option<FileItem> = None;
+        let mut new_hover: Option<(FileItem, Pos2)> = None;
+
+        // ── Tools & Converters toolbar over the grid ──
+        self.render_action_toolbar(
+            ui,
+            palette,
+            &entries,
+            on_transcode_target,
+            on_exam_conform,
+            on_pack_archive,
+            on_inspect_file,
+        );
+        {
+            let budget = self.thumb_decode_budget.1.elapsed()
+                > std::time::Duration::from_millis(300);
+            if budget {
+                self.thumb_decode_budget = (0, Instant::now());
+            }
+        }
 
         let icon_sz = self.icon_size.clamp(64.0, 160.0);
         let tile_w = icon_sz * 1.18;
@@ -2697,9 +3182,83 @@ impl ExplorerView {
         let name_font_sz = (icon_sz * 0.115).clamp(10.0, 13.0);
         let size_font_sz = (icon_sz * 0.095).clamp(8.5, 11.0);
 
-        let scroll_output = egui::ScrollArea::vertical()
+        egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
+                // Canvas interact registered FIRST so tiles stay on top for clicks
+                let canvas_resp = ui.interact(
+                    ui.available_rect_before_wrap(),
+                    ui.make_persistent_id("explorer_grid_canvas_bg"),
+                    egui::Sense::click(),
+                );
+                canvas_resp.context_menu(|menu_ui| {
+                    menu_ui.label(egui::RichText::new("Explorer Options").strong());
+                    menu_ui.separator();
+                    if menu_ui.button("📁 New Folder (Ctrl+Shift+N)").clicked() {
+                        self.show_new_folder_dialog = true;
+                        menu_ui.close_menu();
+                    }
+                    if menu_ui.button("🔄 Refresh Directory (F5)").clicked() {
+                        self.navigate_to(self.current_dir.clone());
+                        menu_ui.close_menu();
+                    }
+                    if menu_ui.button("⬆ Go to Parent Folder").clicked() {
+                        if let Some(parent) = self.current_dir.parent() {
+                            let p = parent.to_path_buf();
+                            if !p.as_os_str().is_empty() {
+                                self.navigate_to(p);
+                            }
+                        }
+                        menu_ui.close_menu();
+                    }
+                    menu_ui.separator();
+                    if menu_ui.button("✓ Select All (Ctrl+A)").clicked() {
+                        for e in &entries {
+                            self.selected_paths.insert(e.path.clone());
+                        }
+                        menu_ui.close_menu();
+                    }
+                    if menu_ui.button("✕ Clear Selection").clicked() {
+                        self.selected_paths.clear();
+                        menu_ui.close_menu();
+                    }
+                    menu_ui.separator();
+                    let has_clip = !self.clipboard_paths.is_empty();
+                    let paste_btn = egui::Button::new("📋 Paste (Ctrl+V)");
+                    if menu_ui.add_enabled(has_clip, paste_btn).clicked() {
+                        for src in &self.clipboard_paths {
+                            if let Some(file_name) = src.file_name() {
+                                let dest = self.current_dir.join(file_name);
+                                if self.clipboard_is_cut {
+                                    let _ = move_entry(src, &dest);
+                                } else {
+                                    let unique = resolve_unique_paste_path(&dest);
+                                    let _ = copy_entry_recursive(src, &unique);
+                                }
+                            }
+                        }
+                        if self.clipboard_is_cut {
+                            self.clipboard_paths.clear();
+                            self.clipboard_is_cut = false;
+                        }
+                        self.navigate_to(self.current_dir.clone());
+                        menu_ui.close_menu();
+                    }
+                    menu_ui.separator();
+                    if menu_ui.button("💻 Open in Terminal").clicked() {
+                        open_terminal_in_dir(&self.current_dir);
+                        menu_ui.close_menu();
+                    }
+                    if menu_ui.button("📂 Open in System Explorer").clicked() {
+                        open_in_file_manager(&self.current_dir);
+                        menu_ui.close_menu();
+                    }
+                    if menu_ui.button("ℹ Properties (Alt+Enter)").clicked() {
+                        self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
+                        menu_ui.close_menu();
+                    }
+                });
+
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(10.0, 10.0);
 
@@ -2759,45 +3318,75 @@ impl ExplorerView {
                             icon_color
                         };
 
-                        // Subtle 3D squircle background badge with depth
-                        ui.painter().rect_filled(
-                            badge_rect,
-                            Rounding::same(8.0),
-                            Color32::from_rgba_premultiplied(
-                                icon_tint.r(),
-                                icon_tint.g(),
-                                icon_tint.b(),
-                                26,
-                            ),
-                        );
-                        ui.painter().rect_stroke(
-                            badge_rect,
-                            Rounding::same(8.0),
-                            Stroke::new(
-                                1.0_f32,
+                        // Image files: real thumbnail preview (lazily decoded, cached)
+                        let thumb = if !item.is_dir && is_image_extension(&item.extension) {
+                            self.get_or_load_thumbnail(ui.ctx(), &item.path, 220)
+                        } else {
+                            None
+                        };
+
+                        if let Some(tex) = &thumb {
+                            // Cover-crop the thumbnail into the badge region
+                            let img_sz = (badge_sz * 1.75)
+                                .min(tile_h * 0.60)
+                                .min(tile_w - 14.0);
+                            let img_rect =
+                                Rect::from_center_size(badge_center, Vec2::splat(img_sz));
+                            let tex_wh = tex.size_vec2();
+                            let target_wh = img_rect.size();
+                            let scale = (target_wh.x / tex_wh.x).max(target_wh.y / tex_wh.y);
+                            let shown = tex_wh * scale;
+                            let crop = ((shown - target_wh) * 0.5) / (shown);
+                            let uv = egui::Rect::from_min_max(
+                                egui::pos2(crop.x.max(0.0), crop.y.max(0.0)),
+                                egui::pos2(
+                                    (1.0 - crop.x).clamp(0.0, 1.0),
+                                    (1.0 - crop.y).clamp(0.0, 1.0),
+                                ),
+                            );
+                            ui.painter().rect_filled(
+                                img_rect,
+                                Rounding::same(6.0),
+                                palette.card_hover,
+                            );
+                            ui.painter_at(img_rect).image(tex.id(), img_rect, uv, Color32::WHITE);
+                        } else {
+                            // Subtle 3D squircle background badge with depth
+                            ui.painter().rect_filled(
+                                badge_rect,
+                                Rounding::same(8.0),
                                 Color32::from_rgba_premultiplied(
                                     icon_tint.r(),
                                     icon_tint.g(),
                                     icon_tint.b(),
-                                    65,
+                                    26,
                                 ),
-                            ),
-                        );
+                            );
+                            ui.painter().rect_stroke(
+                                badge_rect,
+                                Rounding::same(8.0),
+                                Stroke::new(
+                                    1.0_f32,
+                                    Color32::from_rgba_premultiplied(
+                                        icon_tint.r(),
+                                        icon_tint.g(),
+                                        icon_tint.b(),
+                                        65,
+                                    ),
+                                ),
+                            );
 
-                        ui.painter().text(
-                            badge_center,
-                            egui::Align2::CENTER_CENTER,
-                            icon,
-                            egui::FontId::proportional(icon_font_sz),
-                            icon_tint,
-                        );
+                            ui.painter().text(
+                                badge_center,
+                                egui::Align2::CENTER_CENTER,
+                                icon,
+                                egui::FontId::proportional(icon_font_sz),
+                                icon_tint,
+                            );
+                        }
 
                         let max_chars = ((tile_w / 8.0) as usize).clamp(8, 22);
-                        let display_name = if item.name.len() > max_chars {
-                            format!("{}...", &item.name[..max_chars.saturating_sub(2)])
-                        } else {
-                            item.name.clone()
-                        };
+                        let display_name = truncate_middle(&item.name, max_chars);
 
                         let name_y_offset = tile_h * 0.18;
                         ui.painter().text(
@@ -2834,6 +3423,11 @@ impl ExplorerView {
                                 self.selected_paths.clear();
                                 self.selected_paths.insert(item.path.clone());
                             }
+                        }
+
+                        if resp.hovered() {
+                            let tile_anchor = rect.center() + Vec2::new(0.0, tile_h * 0.5 + 16.0);
+                            new_hover = Some((item.clone(), tile_anchor));
                         }
 
                         // Rich Context Menu on Grid Tile (matching bug5.png)
@@ -2975,84 +3569,39 @@ impl ExplorerView {
                 });
             });
 
-        // Background Context Menu for Grid View Empty Canvas
-        let canvas_rect = scroll_output.inner_rect;
-        let canvas_resp = ui.interact(
-            canvas_rect,
-            ui.make_persistent_id("explorer_grid_canvas_bg"),
-            egui::Sense::click(),
-        );
-        canvas_resp.context_menu(|menu_ui| {
-            menu_ui.label(egui::RichText::new("Explorer Options").strong());
-            menu_ui.separator();
-            if menu_ui.button("📁 New Folder (Ctrl+Shift+N)").clicked() {
-                self.show_new_folder_dialog = true;
-                menu_ui.close_menu();
-            }
-            if menu_ui.button("🔄 Refresh Directory (F5)").clicked() {
-                self.navigate_to(self.current_dir.clone());
-                menu_ui.close_menu();
-            }
-            if menu_ui.button("⬆ Go to Parent Folder").clicked() {
-                if let Some(parent) = self.current_dir.parent() {
-                    let p = parent.to_path_buf();
-                    if !p.as_os_str().is_empty() {
-                        self.navigate_to(p);
-                    }
-                }
-                menu_ui.close_menu();
-            }
-            menu_ui.separator();
-            if menu_ui.button("✓ Select All (Ctrl+A)").clicked() {
-                for e in &entries {
-                    self.selected_paths.insert(e.path.clone());
-                }
-                menu_ui.close_menu();
-            }
-            if menu_ui.button("✕ Clear Selection").clicked() {
-                self.selected_paths.clear();
-                menu_ui.close_menu();
-            }
-            menu_ui.separator();
-            let has_clip = !self.clipboard_paths.is_empty();
-            let paste_btn = egui::Button::new("📋 Paste (Ctrl+V)");
-            if menu_ui.add_enabled(has_clip, paste_btn).clicked() {
-                for src in &self.clipboard_paths {
-                    if let Some(file_name) = src.file_name() {
-                        let dest = self.current_dir.join(file_name);
-                        if self.clipboard_is_cut {
-                            let _ = move_entry(src, &dest);
-                        } else {
-                            let unique = resolve_unique_paste_path(&dest);
-                            let _ = copy_entry_recursive(src, &unique);
-                        }
-                    }
-                }
-                if self.clipboard_is_cut {
-                    self.clipboard_paths.clear();
-                    self.clipboard_is_cut = false;
-                }
-                self.navigate_to(self.current_dir.clone());
-                menu_ui.close_menu();
-            }
-            menu_ui.separator();
-            if menu_ui.button("💻 Open in Terminal").clicked() {
-                open_terminal_in_dir(&self.current_dir);
-                menu_ui.close_menu();
-            }
-            if menu_ui.button("📂 Open in System Explorer").clicked() {
-                open_in_file_manager(&self.current_dir);
-                menu_ui.close_menu();
-            }
-            if menu_ui.button("ℹ Properties (Alt+Enter)").clicked() {
-                self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
-                menu_ui.close_menu();
-            }
-        });
+        // (The grid empty-canvas context menu is registered FIRST inside the
+        // scroll area above, so tile interactions always win the pointer.)
 
         if let Some(dir) = nav_into_dir {
             self.navigate_to(dir);
         }
+
+        // Apply hover preview state (grid tiles)
+        let keep_existing = matches!(
+            (&self.hover_preview, &new_hover),
+            (Some(active), Some((item, _))) if active.item.path == item.path
+        );
+        if keep_existing {
+            let due = self
+                .hover_preview
+                .as_ref()
+                .map(|h| h.started_at.elapsed() > std::time::Duration::from_millis(450))
+                .unwrap_or(false);
+            if due {
+                self.ensure_hover_content(ui.ctx());
+            }
+        } else if let Some((item, anchor)) = new_hover {
+            self.hover_preview = Some(HoverPreviewState {
+                item,
+                anchor,
+                started_at: Instant::now(),
+                content: HoverContent::Meta,
+            });
+        } else {
+            self.hover_preview = None;
+        }
+        self.render_hover_preview(ui, palette);
+
         if let Some(item) = peek_to_open {
             self.peek_item = Some(item);
         }
@@ -4066,6 +4615,50 @@ fn load_image_thumbnail(ctx: &egui::Context, path: &Path) -> Option<egui::Textur
     None
 }
 
+/// True if the extension maps to an image category we can thumbnail
+fn is_image_extension(ext: &str) -> bool {
+    matches!(
+        ext,
+        "JPG" | "JPEG" | "PNG" | "WEBP" | "GIF" | "AVIF" | "TIFF" | "BMP" | "ICO" | "HEIC" | "RAW"
+    )
+}
+
+/// Decode an image file down to a `max_px` thumbnail ColorImage
+fn decode_thumbnail(path: &Path, max_px: u32) -> Option<egui::ColorImage> {
+    let bytes = std::fs::read(path).ok()?;
+    let img = image::load_from_memory(&bytes).ok()?;
+    let thumb = img.thumbnail(max_px, max_px).to_rgba8();
+    let (w, h) = thumb.dimensions();
+    Some(egui::ColorImage::from_rgba_unmultiplied(
+        [w as usize, h as usize],
+        &thumb.into_raw(),
+    ))
+}
+
+/// Truncate a label in the middle ("verylongfilename.txt" -> "verylo…ame.txt")
+fn truncate_middle(s: &str, max_chars: usize) -> String {
+    let total = s.chars().count();
+    if total <= max_chars || max_chars < 6 {
+        return s.to_string();
+    }
+    let keep = max_chars - 1;
+    let head = keep * 2 / 3;
+    let tail = keep - head;
+    let head_str: String = s.chars().take(head).collect();
+    let tail_str: String = s.chars().skip(total.saturating_sub(tail)).collect();
+    format!("{}…{}", head_str, tail_str)
+}
+
+/// Truncate at the end ("panchang-widget-desktop" -> "panchang-wi…")
+fn truncate_end(s: &str, max_chars: usize) -> String {
+    let total = s.chars().count();
+    if total <= max_chars {
+        return s.to_string();
+    }
+    let keep = max_chars.saturating_sub(1);
+    format!("{}…", s.chars().take(keep).collect::<String>())
+}
+
 fn open_in_file_manager(path: &Path) {
     #[cfg(target_os = "windows")]
     {
@@ -4095,7 +4688,7 @@ fn open_in_default_app(path: &Path) {
         op_open.push(0);
 
         unsafe {
-            ShellExecuteW(
+            let res = ShellExecuteW(
                 std::ptr::null_mut(),
                 op_open.as_ptr(),
                 wide.as_ptr(),
@@ -4103,6 +4696,15 @@ fn open_in_default_app(path: &Path) {
                 std::ptr::null(),
                 SW_SHOWNORMAL,
             );
+            // ShellExecuteW returns an instance handle > 32 on success; fall back
+            // to `cmd /c start` so a failed association never silently drops a launch.
+            if res as usize <= 32 {
+                use std::os::windows::process::CommandExt;
+                let _ = std::process::Command::new("cmd")
+                    .args(["/c", "start", "", path.to_string_lossy().as_ref()])
+                    .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+                    .spawn();
+            }
         }
     }
     #[cfg(target_os = "macos")]
