@@ -810,7 +810,7 @@ static ICON_CACHE: std::sync::LazyLock<Mutex<HashMap<CacheKey, Option<TextureHan
 /// Renders the glyph at `css_px` logical size (physical px computed internally)
 /// and caches the result. Returns None while the rasterizer is busy (rare).
 pub fn icon_texture(
-    ctx: &egui::Context,
+    ctx: &eframe::egui::Context,
     pack: IconPack,
     glyph: IconGlyph,
     css_px: f32,
@@ -841,7 +841,7 @@ pub fn icon_texture(
 }
 
 fn rasterize(
-    ctx: &egui::Context,
+    ctx: &eframe::egui::Context,
     svg: &str,
     phys_px: u32,
     _pack: IconPack,
