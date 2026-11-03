@@ -19,7 +19,7 @@ use crate::core::{
     copy_entry_recursive, format_file_size, fuzzy_match, get_system_drives, list_directory_sync,
     move_entry, parse_breadcrumbs, remove_entry_recursive, resolve_file_icon,
     resolve_unique_paste_path, spawn_async_dir_scan, DriveInfo, FileItem, GestureKind,
-    icon_packs, KinematicGestureTracker, ScanBatch,
+    KinematicGestureTracker, ScanBatch,
 };
 use crate::gui::macos_theme::ThemePalette;
 use eframe::egui::{self, Color32, Pos2, Rect, Rounding, Stroke, Ui, Vec2};
@@ -283,6 +283,9 @@ pub struct ExplorerView {
 
     // Shift-range selection anchor (Finder parity)
     selection_anchor: Option<usize>,
+
+    // Active icon pack (loaded from MossambiConfig every frame)
+    pub icon_pack: crate::core::icon_packs::IconPack,
 }
 
 impl Default for ExplorerView {
@@ -362,6 +365,7 @@ impl Default for ExplorerView {
             thumb_cache: std::collections::HashMap::new(),
             thumb_decode_budget: (0, Instant::now()),
             selection_anchor: None,
+            icon_pack: crate::core::icon_packs::IconPack::MacosFinder,
         };
 
         view.navigate_to(current_dir);
@@ -2345,30 +2349,33 @@ impl ExplorerView {
                     }
 
                     let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
-                    let rp = ui.painter();
+                    let (icon_glyph, icon_accent) = crate::core::icon_packs::IconGlyph::resolve(
+                        &item.name,
+                        &item.extension,
+                        item.is_dir,
+                        icon_spec.is_image,
+                        icon_spec.is_media,
+                        icon_spec.is_archive,
+                        icon_spec.is_document,
+                        icon_spec.is_code,
+                        icon_spec.color_rgb,
+                    );
 
-                    // 1. Name cell: glyph + name (right-truncated, Finder semantics)
+                    // 1. Name cell: icon + name (right-truncated, Finder semantics)
                     let name_x = row_rect.left() + col_pad;
-                    let glyph_color = if is_selected {
-                        palette.accent
-                    } else if row_resp.hovered() {
-                        palette.text_primary
-                    } else {
-                        Color32::from_rgb(
-                            icon_spec.color_rgb[0],
-                            icon_spec.color_rgb[1],
-                            icon_spec.color_rgb[2],
-                        )
-                    };
-                    rp.text(
-                        Pos2::new(name_x + 6.0, row_rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        icon_spec.glyph,
-                        egui::FontId::proportional(12.5),
-                        glyph_color,
+                    let icon_rect = Rect::from_center_size(
+                        Pos2::new(name_x + 8.0, row_rect.center().y),
+                        Vec2::splat(16.0),
+                    );
+                    crate::core::icon_packs::paint_icon(
+                        ui,
+                        self.icon_pack,
+                        icon_glyph,
+                        icon_rect,
+                        icon_accent,
                     );
                     let mut name_color = if is_selected {
-                        palette.accent
+                        palette.text_primary
                     } else {
                         palette.text_primary
                     };
@@ -2381,13 +2388,14 @@ impl ExplorerView {
                         );
                     }
                     let name_font = egui::FontId::proportional(if item.is_dir { 12.0 } else { 11.5 });
-                    let name_pos_x = name_x + 22.0;
-                    let name_avail = name_w - 26.0 - col_pad;
+                    let name_pos_x = name_x + 24.0;
+                    let name_avail = name_w - 30.0 - col_pad;
                     let suffix = if item.is_symlink { " ↗" } else { "" };
                     let display = truncate_middle(
                         &format!("{}{}", item.name, suffix),
                         (name_avail / 7.0) as usize,
                     );
+                    let rp = ui.painter();
                     rp.text(
                         Pos2::new(name_pos_x, row_rect.center().y),
                         egui::Align2::LEFT_CENTER,

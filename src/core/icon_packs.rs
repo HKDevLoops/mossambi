@@ -17,7 +17,7 @@
 //! - Textures are cached per (pack, glyph, physical pixel size); rendering is
 //!   done once per size with full antialiasing and LINEAR filtering.
 
-use egui::{Color32, ColorImage, Rect, TextureHandle, TextureOptions, Ui};
+use eframe::egui::{Color32, ColorImage, Rect, TextureHandle, TextureOptions, Ui};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -685,7 +685,11 @@ fn page_emblem(glyph: IconGlyph, st: &PackStyle, accent: &str) -> Option<String>
             l = ln,
             a = a
         ),
-        _ => None,
+        _ => format!(
+            "<rect x='34' y='46' width='32' height='2.9' rx='1.45' fill='{l}' opacity='0.7'/> \
+             <rect x='34' y='55' width='32' height='2.9' rx='1.45' fill='{l}' opacity='0.7'/>",
+            l = ln
+        ),
     })
 }
 
@@ -800,7 +804,8 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
 // ──────────────────────────────────────────────────────────────────────────
 
 type CacheKey = (IconPack, IconGlyph, u32, [u8; 3]);
-static ICON_CACHE: Mutex<HashMap<CacheKey, Option<TextureHandle>>> = Mutex::new(HashMap::new());
+static ICON_CACHE: std::sync::LazyLock<Mutex<HashMap<CacheKey, Option<TextureHandle>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Renders the glyph at `css_px` logical size (physical px computed internally)
 /// and caches the result. Returns None while the rasterizer is busy (rare).
@@ -841,19 +846,19 @@ fn rasterize(
     phys_px: u32,
     _pack: IconPack,
 ) -> Result<TextureHandle, String> {
-    let opt = usvg::Options::default();
+    let opt = resvg::usvg::Options::default();
     let tree =
-        usvg::Tree::from_str(svg, &opt).map_err(|e| format!("svg parse: {e:?}"))?;
+        resvg::usvg::Tree::from_str(svg, &opt).map_err(|e| format!("svg parse: {e:?}"))?;
     let size = tree.size();
     let scale = (phys_px as f32).max(1.0) / size.width().max(1.0);
     let scaled_w = (size.width() * scale) as u32;
     let scaled_h = (size.height() * scale) as u32;
     let mut pixmap =
-        tiny_skia::Pixmap::new(scaled_w.max(1), scaled_h.max(1)).ok_or("pixmap alloc")?;
+        resvg::tiny_skia::Pixmap::new(scaled_w.max(1), scaled_h.max(1)).ok_or("pixmap alloc")?;
     resvg::render(
         &tree,
-        tiny_skia::Transform::from_scale(scale, scale),
-        pixmap.as_mut(),
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
     );
     // tiny-skia outputs premultiplied RGBA8; egui wants unpremultiplied
     let mut rgba = pixmap.data().to_vec();
@@ -885,8 +890,8 @@ pub fn paint_icon(ui: &Ui, pack: IconPack, glyph: IconGlyph, rect: Rect, accent_
     let Some(tex) = icon_texture(ui.ctx(), pack, glyph, size, accent_rgb) else {
         return;
     };
-    let sq = Rect::from_center_size(rect.center(), egui::Vec2::splat(size));
-    let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    let sq = Rect::from_center_size(rect.center(), eframe::egui::Vec2::splat(size));
+    let uv = Rect::from_min_max(eframe::egui::pos2(0.0, 0.0), eframe::egui::pos2(1.0, 1.0));
     ui.painter()
         .image(tex.id(), sq, uv, Color32::WHITE);
 }

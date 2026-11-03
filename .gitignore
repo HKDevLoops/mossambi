@@ -42,3 +42,5 @@ brain/
 UI-bugs/
 .agents/
 .cursor/
+
+graphify-out/

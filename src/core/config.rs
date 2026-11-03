@@ -323,6 +323,8 @@ impl Default for MossambiConfig {
             default_explorer_layout: 0,
             calculate_checksums: true,
             tui_transparent_bg: true,
+            icon_pack: "macos".to_string(),
+            font_family: None,
         }
     }
 }

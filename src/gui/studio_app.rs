@@ -378,6 +378,8 @@ impl eframe::App for MossambiApp {
         // Synchronize Windows DWM Backdrop (Acrylic / Mica) with active theme & glass effect
         self.frame_count = self.frame_count.saturating_add(1);
         let cfg = crate::core::MossambiConfig::load();
+        // Sync icon pack from config (live)
+        self.studio_view.explorer_view.icon_pack = crate::core::icon_packs::IconPack::from_config_id(&cfg.icon_pack);
         let current_glass = cfg.glass_effect;
         if self.frame_count <= 10
             || self.last_applied_theme != Some(self.theme)
