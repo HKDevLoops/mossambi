@@ -100,7 +100,7 @@ pub fn get_system_drives() -> Vec<DriveInfo> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        crate::linux_dna::discover_linux_mounts()
+        crate::core::linux_dna::discover_linux_mounts()
     }
 }
 

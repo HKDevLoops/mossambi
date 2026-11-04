@@ -286,6 +286,14 @@ pub struct ExplorerView {
 
     // Active icon pack (loaded from MossambiConfig every frame)
     pub icon_pack: crate::core::icon_packs::IconPack,
+
+    // Explorer preference mirror (synced by studio_app from MossambiConfig)
+    pub checkbox_mode: crate::core::config::CheckboxMode,
+    pub menu_style: crate::core::config::MenuStyle,
+    pub animations: crate::core::config::AnimationSettings,
+    pub hover_anims: crate::gui::anim::AnimRegistry,
+    /// Windows-Explorer zoom levels: 0 = Details form, 1-4 = Grid icon sizes.
+    pub explorer_zoom: u8,
 }
 
 impl Default for ExplorerView {
@@ -366,6 +374,11 @@ impl Default for ExplorerView {
             thumb_decode_budget: (0, Instant::now()),
             selection_anchor: None,
             icon_pack: crate::core::icon_packs::IconPack::MacosFinder,
+            checkbox_mode: crate::core::config::CheckboxMode::default(),
+            menu_style: crate::core::config::MenuStyle::default(),
+            animations: crate::core::config::AnimationSettings::default(),
+            hover_anims: crate::gui::anim::AnimRegistry::new(),
+            explorer_zoom: 2,
         };
 
         view.navigate_to(current_dir);
@@ -374,6 +387,23 @@ impl Default for ExplorerView {
 }
 
 impl ExplorerView {
+    /// The five Explorer zoom steps (Windows Explorer parity):
+    /// level 0 is the Details/list **form** — the icon-size scale is not
+    /// applied there; levels 1-4 are Grid icon sizes Small → Medium → Large →
+    /// Extra-large, multiplied over the user's base grid icon size.
+    pub const EXPLORER_ZOOM_LEVELS: [f32; 5] = [0.60, 0.85, 1.0, 1.30, 1.70];
+
+    /// Human readable label for a zoom level (Explorer's status-bar wording).
+    pub fn zoom_level_name(level: u8) -> &'static str {
+        match level {
+            0 => "Details",
+            1 => "Small icons",
+            2 => "Medium icons",
+            3 => "Large icons",
+            _ => "Extra large icons",
+        }
+    }
+
     /// Navigate to a new directory asynchronously with zero UI hitching
     pub fn navigate_to(&mut self, dir: PathBuf) {
         if !dir.exists() {
@@ -3174,13 +3204,18 @@ impl ExplorerView {
             }
         }
 
-        let icon_sz = self.icon_size.clamp(64.0, 160.0);
+        // Icon size is the user's base grid size doubled (2x icon rule) and
+        // scaled by the zoom level (Small → Medium → Large → Extra large).
+        let grid_zoom_scale = Self::EXPLORER_ZOOM_LEVELS[(self.explorer_zoom as usize).min(4)];
+        let grid_checkboxes = self.checkbox_mode;
+        let icon_sz = (self.icon_size * 2.0 * grid_zoom_scale).clamp(64.0, 416.0);
         let tile_w = icon_sz * 1.18;
         let tile_h = icon_sz * 1.15;
         let tile_size = Vec2::new(tile_w, tile_h);
 
-        let name_font_sz = (icon_sz * 0.115).clamp(10.0, 13.0);
-        let size_font_sz = (icon_sz * 0.095).clamp(8.5, 11.0);
+        // Labels grow with the icon ramp (apps +4px font bump included).
+        let name_font_sz = (icon_sz * 0.115 + 4.0).clamp(14.0, 34.0);
+        let size_font_sz = (icon_sz * 0.095 + 3.0).clamp(12.5, 26.0);
 
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
