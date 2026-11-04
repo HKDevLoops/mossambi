@@ -202,6 +202,7 @@ pub enum IconGlyph {
     ActionForward,
     ActionUp,
     ActionList,
+    ActionColumns,
     ActionSun,
     ActionMoon,
     ActionPlay,
@@ -1108,6 +1109,13 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
         IconGlyph::ActionList => format!(
             "{head}<path d='M32 38 L78 38 M32 50 L78 50 M32 62 L78 62' stroke='{a}' stroke-width='6' stroke-linecap='round'/>\
              <circle cx='22' cy='38' r='4' fill='{a}'/><circle cx='22' cy='50' r='4' fill='{a}'/><circle cx='22' cy='62' r='4' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionColumns => format!(
+            "{head}<rect x='18' y='28' width='20' height='44' rx='4' fill='none' stroke='{a}' stroke-width='6'/>\
+             <rect x='40' y='28' width='20' height='44' rx='4' fill='none' stroke='{a}' stroke-width='6'/>\
+             <rect x='62' y='28' width='20' height='44' rx='4' fill='none' stroke='{a}' stroke-width='6'/></svg>",
             head = head,
             a = accent
         ),
