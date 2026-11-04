@@ -411,6 +411,12 @@ pub struct MossambiConfig {
     /// for the highest possible responsiveness ("Max FPS" in Performance).
     #[serde(default = "default_max_fps")]
     pub max_fps: bool,
+    /// Conversion target used when files are dropped on the global Drop
+    /// Overlay from other apps. "AUTO" picks per file category
+    /// (image→PNG, video→MP4, audio→FLAC, doc→PDF, …); any other value is
+    /// treated as a literal target format (e.g. "PDF").
+    #[serde(default = "default_drop_target")]
+    pub drop_target_default: String,
 }
 
 fn default_background_work() -> bool {
@@ -423,6 +429,10 @@ fn default_worker_threads() -> u8 {
 
 fn default_max_fps() -> bool {
     true
+}
+
+fn default_drop_target() -> String {
+    "AUTO".into()
 }
 
 fn default_explorer_zoom() -> u8 {
@@ -508,6 +518,7 @@ impl Default for MossambiConfig {
             background_work: default_background_work(),
             worker_threads: default_worker_threads(),
             max_fps: default_max_fps(),
+            drop_target_default: default_drop_target(),
         }
     }
 }

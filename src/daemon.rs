@@ -7,6 +7,27 @@
 use anyhow::Result;
 use std::io::{self, Write};
 
+/// Copy of the daemon tray icon's NOTIFYICONDATAW so companion services
+/// (drop overlay balloons) can post notifications through it.
+pub static TRAY_NID: std::sync::Mutex<Option<windows_tray_nid::NotifyIconData>> =
+    std::sync::Mutex::new(None);
+
+/// Window-native tray descriptor alias (keeps the static cfg-neutral).
+#[cfg(target_os = "windows")]
+mod windows_tray_nid {
+    pub type NotifyIconData = windows_sys::Win32::UI::Shell::NOTIFYICONDATAW;
+}
+#[cfg(not(target_os = "windows"))]
+mod windows_tray_nid {
+    #[derive(Clone, Copy)]
+    pub struct NotifyIconData;
+}
+
+/// Snapshot of the daemon tray icon descriptor (None when not running).
+pub fn shared_tray_nid() -> Option<windows_tray_nid::NotifyIconData> {
+    TRAY_NID.lock().ok().and_then(|n| n.map(|v| v.clone()))
+}
+
 pub fn handle_daemon_command(action: &str) -> Result<()> {
     match action.to_lowercase().as_str() {
         "run" => {
@@ -185,6 +206,7 @@ pub fn stop_daemon() -> Result<()> {
 pub fn run_daemon_loop() -> Result<()> {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+    use windows_sys::Win32::System::Threading::{CreateMutexW, GetLastError};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
     use windows_sys::Win32::UI::Shell::{
         Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
@@ -207,6 +229,18 @@ pub fn run_daemon_loop() -> Result<()> {
     const VK_C: u32 = 0x43;
     const WM_TRAYICON: u32 = WM_USER + 101;
     const TRAY_UID: u32 = 1001;
+
+    // ── Single-instance guard: only one resident daemon at a time. ──
+    {
+        let mutex_name: Vec<u16> = "Local\\MossambiDaemonSingleInstance\0"
+            .encode_utf16()
+            .collect();
+        let _mutex = CreateMutexW(null_mut(), 0, mutex_name.as_ptr());
+        const ERROR_ALREADY_EXISTS: u32 = 183;
+        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            anyhow::bail!("Mossambi daemon already running (single-instance guard)");
+        }
+    }
 
     const CMD_SUMMON_WIDGET: u32 = 2001;
     const CMD_OPEN_STUDIO: u32 = 2002;
@@ -305,6 +339,10 @@ pub fn run_daemon_loop() -> Result<()> {
     unsafe {
         Shell_NotifyIconW(NIM_ADD, &nid);
     }
+    // Share the tray descriptor with companion services (balloon posts).
+    if let Ok(mut g) = TRAY_NID.lock() {
+        *g = Some(nid);
+    }
 
     fn to_u16(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -322,6 +360,11 @@ pub fn run_daemon_loop() -> Result<()> {
     } else {
         None
     };
+
+    // Global Drop Overlay: files dragged from ANY app (Explorer, browsers,
+    // editors, other managers) onto the lime puck convert automatically.
+    let mut drop_overlay =
+        Some(crate::gui::drop_overlay::DropOverlayHandle::start(cfg.drop_target_default.clone()));
 
     let mut msg: MSG = unsafe { std::mem::zeroed() };
     loop {
@@ -415,6 +458,9 @@ pub fn run_daemon_loop() -> Result<()> {
                                 if let Some(mut listener) = drag_listener.take() {
                                     listener.stop();
                                 }
+                                if let Some(mut overlay) = drop_overlay.take() {
+                                    overlay.stop();
+                                }
                                 UnregisterHotKey(hwnd, HOTKEY_WIDGET_ID);
                                 UnregisterHotKey(hwnd, HOTKEY_GUI_ID);
                                 Shell_NotifyIconW(NIM_DELETE, &nid);
@@ -449,8 +495,10 @@ pub fn run_daemon_loop() -> Result<()> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn run_daemon_loop() -> Result<()> {
-    println!("Mossambi background daemon running on Linux/macOS.");
-    println!("Global Shortcuts configured via Desktop Environment / Autostart (Super+Shift+C / Super+Ctrl+C).");
+    // Resident backend-service loop for Linux/macOS: gesture polling parity.
+    // OLE drop overlay + tray are Windows-only today (XDG portals are the
+    // documented routing path for Linux global drops).
+    log::info!("Mossambi background daemon resident (Linux/macOS service mode)");
     let cfg = crate::core::MossambiConfig::load();
     let allow_shake = cfg.gesture_type == "shake" || cfg.gesture_type == "both";
     let allow_circle = cfg.gesture_type == "circle" || cfg.gesture_type == "both";

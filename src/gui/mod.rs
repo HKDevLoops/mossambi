@@ -3,6 +3,7 @@ pub mod anim;
 pub mod citrus_geometry;
 pub mod custom_widgets;
 pub mod context_menu;
+pub mod drop_overlay;
 pub mod dwm_helper;
 pub mod explorer_view;
 pub mod file_menu;

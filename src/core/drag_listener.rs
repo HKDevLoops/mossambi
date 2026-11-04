@@ -171,17 +171,29 @@ fn run_listener_loop(
 
                 match msg {
                     WM_LBUTTONDOWN => {
-                        // UNIVERSAL SYSTEM-LEVEL FILE DRAG CHECK:
-                        // Supports Total Commander, Directory Opus, OneCommander, FreeCommander,
-                        // 7-Zip, Web Browsers (Chrome, Edge, Firefox), Explorer, and Desktop.
-                        ctx.is_holding_files = true;
+                        // FILE-UNDER-CURSOR GATE (hard requirement): the hold
+                        // gesture arms ONLY when actual files sit beneath the
+                        // press. Plain mouse holds (text selection in browsers,
+                        // window moves, canvas drags) must never summon the
+                        // conversion wheel or replay stale clipboard paths.
+                        //
+                        // UNIVERSAL SYSTEM-LEVEL FILE PROBE, in order:
+                        // 1. clipboard/OLE drag data (Total Commander, Directory
+                        //    Opus, OneCommander, FreeCommander, 7-Zip and most
+                        //    browsers populate CF_HDROP at drag start)
+                        // 2. Explorer/Desktop shell COM selection
+                        // 3. active-file-under-cursor fallback probe
                         ctx.tracker.reset();
-                        // 1. Try clipboard/OLE first (Total Commander, Directory Opus, 7-Zip populate this)
                         let mut files = extract_clipboard_files();
-                        // 2. Try Explorer COM
                         if files.is_empty() {
                             files = query_active_explorer_files(pt);
                         }
+                        if files.is_empty() {
+                            files = crate::gui::active_file::get_active_file_under_cursor(
+                                pt.x, pt.y,
+                            );
+                        }
+                        ctx.is_holding_files = !files.is_empty();
                         ctx.cached_files = files;
                     }
                     WM_LBUTTONUP => {
@@ -195,9 +207,15 @@ fn run_listener_loop(
                         // Only active when user is dragging mouse with button pressed!
                         let now_ms = current_timestamp_ms();
                         if let Some(gesture) = ctx.tracker.feed(pt.x as f32, pt.y as f32, now_ms) {
-                            // If cached files were empty at mousedown, re-probe clipboard in case drag source populated it mid-drag
+                            // HARD GATE: no files under the hold → no event.
+                            // (Mid-drag re-probe kept ONLY to catch async
+                            // drag-source population, never to synthesize files.)
                             if ctx.cached_files.is_empty() {
                                 ctx.cached_files = extract_clipboard_files();
+                            }
+                            if ctx.cached_files.is_empty() {
+                                ctx.is_holding_files = false;
+                                return CallNextHookEx(null_mut(), n_code, w_param, l_param);
                             }
                             maybe_event = Some(DragGestureEvent {
                                 gesture,
