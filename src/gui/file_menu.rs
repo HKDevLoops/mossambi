@@ -261,6 +261,25 @@ pub fn menu_item_labeled(
     .response
 }
 
+/// Render a menu entry with an arbitrary glyph and explicit label — used by
+/// entries that are not plain [`MenuAction`] verbs (counters, plugs, app IDs…).
+pub fn menu_item_glyph(
+    ui: &mut Ui,
+    pack: IconPack,
+    glyph: IconGlyph,
+    label: &str,
+    tint: Color32,
+) -> Response {
+    let rgb = [tint.r(), tint.g(), tint.b()];
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(9.0, 9.0);
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(19.0), Sense::hover());
+        crate::core::icon_packs::paint_icon(ui, pack, glyph, rect, rgb);
+        ui.label(egui_label(label));
+    })
+    .response
+}
+
 /// Bold header line for the selected item's name.
 pub fn menu_header(ui: &mut Ui, name: &str, tint: Color32) {
     ui.label(eframe::egui::RichText::new(name).strong().color(tint));

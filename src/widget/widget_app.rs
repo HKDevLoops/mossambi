@@ -489,7 +489,7 @@ impl eframe::App for MossambiWidgetApp {
                                         egui::RichText::new(
                                             "Win+Shift+C: Wheel\nWin+Ctrl+C: Studio",
                                         )
-                                        .size(9.5)
+                                        .size(13.5)
                                         .color(Color32::from_rgb(130, 136, 148)),
                                     );
 

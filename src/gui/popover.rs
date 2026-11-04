@@ -77,13 +77,13 @@ impl PetalPopover {
         child_ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new(format!("⚙ Quick Settings • {}", format_name))
-                    .size(11.5)
+                    .size(15.5)
                     .strong()
                     .color(PANTONE_FLAVEDO),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
-                    .button(egui::RichText::new("✕").size(10.0).color(MAC_TEXT_MUTED))
+                    .button(egui::RichText::new("✕").size(14.0).color(MAC_TEXT_MUTED))
                     .clicked()
                 {
                     on_close();
@@ -101,17 +101,17 @@ impl PetalPopover {
         if fmt == "PDF" || fmt == "TXT" || fmt == "MD" || fmt == "DOCX" {
             child_ui.label(
                 egui::RichText::new("Vector Typography")
-                    .size(10.5)
+                    .size(14.5)
                     .color(MAC_TEXT_PRIMARY),
             );
             child_ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Page:").size(10.0));
+                ui.label(egui::RichText::new("Page:").size(14.0));
                 ui.selectable_value(&mut settings.pdf_page_size, "A4".to_string(), "A4");
                 ui.selectable_value(&mut settings.pdf_page_size, "Letter".to_string(), "Letter");
             });
 
             child_ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Font:").size(10.0));
+                ui.label(egui::RichText::new("Font:").size(14.0));
                 ui.selectable_value(
                     &mut settings.pdf_font_family,
                     "Helvetica".to_string(),
@@ -130,14 +130,14 @@ impl PetalPopover {
             });
 
             child_ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Size:").size(10.0));
+                ui.label(egui::RichText::new("Size:").size(14.0));
                 ui.selectable_value(&mut settings.pdf_font_size, 10.0, "10pt");
                 ui.selectable_value(&mut settings.pdf_font_size, 11.0, "11pt");
                 ui.selectable_value(&mut settings.pdf_font_size, 12.0, "12pt");
             });
 
             child_ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Margins:").size(10.0));
+                ui.label(egui::RichText::new("Margins:").size(14.0));
                 ui.selectable_value(&mut settings.pdf_margin, 36.0, "Compact");
                 ui.selectable_value(&mut settings.pdf_margin, 54.0, "Normal");
             });
@@ -146,18 +146,18 @@ impl PetalPopover {
         } else if fmt == "JPG" || fmt == "PNG" || fmt == "WEBP" || fmt == "AVIF" {
             child_ui.label(
                 egui::RichText::new("Image Fidelity")
-                    .size(10.5)
+                    .size(14.5)
                     .color(MAC_TEXT_PRIMARY),
             );
             child_ui.checkbox(&mut settings.image_lossless, "Strict 0% Lossless");
             if !settings.image_lossless {
                 child_ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Quality:").size(10.0));
+                    ui.label(egui::RichText::new("Quality:").size(14.0));
                     ui.add(egui::Slider::new(&mut settings.image_quality, 10..=100).text("%"));
                 });
             }
             child_ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("DPI:").size(10.0));
+                ui.label(egui::RichText::new("DPI:").size(14.0));
                 ui.selectable_value(&mut settings.image_dpi, 72, "72");
                 ui.selectable_value(&mut settings.image_dpi, 150, "150");
                 ui.selectable_value(&mut settings.image_dpi, 200, "200");
@@ -166,7 +166,7 @@ impl PetalPopover {
         } else if fmt == "MP3" || fmt == "WAV" || fmt == "FLAC" || fmt == "M4A" || fmt == "OGG" {
             child_ui.label(
                 egui::RichText::new("Audio Encoding")
-                    .size(10.5)
+                    .size(14.5)
                     .color(MAC_TEXT_PRIMARY),
             );
             child_ui.checkbox(
@@ -174,7 +174,7 @@ impl PetalPopover {
                 "Strict 0% Bit-Exact (FLAC/PCM)",
             );
             child_ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Bitrate:").size(10.0));
+                ui.label(egui::RichText::new("Bitrate:").size(14.0));
                 ui.selectable_value(&mut settings.audio_bitrate, "128k".to_string(), "128k");
                 ui.selectable_value(&mut settings.audio_bitrate, "192k".to_string(), "192k");
                 ui.selectable_value(&mut settings.audio_bitrate, "256k".to_string(), "256k");
@@ -183,12 +183,12 @@ impl PetalPopover {
         } else if fmt == "MP4" || fmt == "MKV" || fmt == "MOV" || fmt == "WEBM" {
             child_ui.label(
                 egui::RichText::new("Video HW Acceleration")
-                    .size(10.5)
+                    .size(14.5)
                     .color(MAC_TEXT_PRIMARY),
             );
             child_ui.checkbox(&mut settings.video_hw_accel, "NVENC/AMF/QSV GPU Accel");
             child_ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("CRF:").size(10.0));
+                ui.label(egui::RichText::new("CRF:").size(14.0));
                 ui.selectable_value(&mut settings.video_crf, 16, "16 (Near Lossless)");
                 ui.selectable_value(&mut settings.video_crf, 18, "18");
                 ui.selectable_value(&mut settings.video_crf, 23, "23");
@@ -196,11 +196,11 @@ impl PetalPopover {
         } else if fmt == "ZIP" || fmt == "7Z" || fmt == "TAR" || fmt == "EXTRACT" {
             child_ui.label(
                 egui::RichText::new("Archive Suite")
-                    .size(10.5)
+                    .size(14.5)
                     .color(MAC_TEXT_PRIMARY),
             );
             child_ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Level:").size(10.0));
+                ui.label(egui::RichText::new("Level:").size(14.0));
                 ui.selectable_value(
                     &mut settings.archive_compression,
                     "Fast".to_string(),
@@ -219,19 +219,19 @@ impl PetalPopover {
             });
             child_ui.label(
                 egui::RichText::new("✓ Zip-Slip Protection Active")
-                    .size(9.5)
+                    .size(13.5)
                     .color(PANTONE_FLAVEDO),
             );
         } else if fmt == "ALL" {
             child_ui.label(
                 egui::RichText::new("⭐ Batch ALL Transcoding")
-                    .size(10.5)
+                    .size(14.5)
                     .strong()
                     .color(PANTONE_GOLD),
             );
             child_ui.label(
                 egui::RichText::new("Converts source simultaneously to ALL valid formats in domain using Rayon multi-core worker threads.")
-                    .size(9.5)
+                    .size(13.5)
                     .color(MAC_TEXT_SECONDARY),
             );
         }
@@ -240,7 +240,7 @@ impl PetalPopover {
         child_ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new("Tap to convert • Hold for options")
-                    .size(9.0)
+                    .size(13.0)
                     .color(MAC_TEXT_MUTED),
             );
         });

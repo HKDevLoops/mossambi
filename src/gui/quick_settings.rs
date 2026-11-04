@@ -116,14 +116,14 @@ impl QuickSettingsState {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("⚙ Quick Settings")
-                        .size(13.0)
+                        .size(17.0)
                         .strong()
                         .color(Color32::from_rgb(120, 190, 32)),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         egui::RichText::new(format!("[{}]", self.active_format))
-                            .size(11.0)
+                            .size(15.0)
                             .strong()
                             .color(Color32::from_rgb(255, 199, 44)),
                     );
@@ -140,26 +140,26 @@ impl QuickSettingsState {
             if fmt == "PDF" || fmt == "TXT" || fmt == "MD" || fmt == "DOCX" || fmt == "HTML" {
                 ui.label(
                     egui::RichText::new("Vector PDF Typography & Layout")
-                        .size(11.0)
+                        .size(15.0)
                         .color(Color32::from_rgb(220, 230, 220)),
                 );
                 ui.add_space(4.0);
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Page Size:").size(11.0));
+                    ui.label(egui::RichText::new("Page Size:").size(15.0));
                     ui.selectable_value(&mut self.pdf_page_size, "A4".to_string(), "A4");
                     ui.selectable_value(&mut self.pdf_page_size, "Letter".to_string(), "Letter");
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Font:").size(11.0));
+                    ui.label(egui::RichText::new("Font:").size(15.0));
                     ui.selectable_value(&mut self.pdf_font_family, "Helvetica".to_string(), "Helvetica");
                     ui.selectable_value(&mut self.pdf_font_family, "Times-Roman".to_string(), "Times");
                     ui.selectable_value(&mut self.pdf_font_family, "Courier".to_string(), "Courier");
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Font Size:").size(11.0));
+                    ui.label(egui::RichText::new("Font Size:").size(15.0));
                     ui.selectable_value(&mut self.pdf_font_size, 10.0, "10pt");
                     ui.selectable_value(&mut self.pdf_font_size, 11.0, "11pt");
                     ui.selectable_value(&mut self.pdf_font_size, 12.0, "12pt");
@@ -167,7 +167,7 @@ impl QuickSettingsState {
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Margins:").size(11.0));
+                    ui.label(egui::RichText::new("Margins:").size(15.0));
                     ui.selectable_value(&mut self.pdf_margin, 36.0, "Compact");
                     ui.selectable_value(&mut self.pdf_margin, 54.0, "Normal");
                     ui.selectable_value(&mut self.pdf_margin, 72.0, "Wide");
@@ -179,7 +179,7 @@ impl QuickSettingsState {
             else if fmt == "JPG" || fmt == "JPEG" || fmt == "PNG" || fmt == "WEBP" || fmt == "AVIF" || fmt == "TIFF" {
                 ui.label(
                     egui::RichText::new("Image Quality & Encoding")
-                        .size(11.0)
+                        .size(15.0)
                         .color(Color32::from_rgb(220, 230, 220)),
                 );
                 ui.add_space(4.0);
@@ -188,13 +188,13 @@ impl QuickSettingsState {
 
                 if !self.image_lossless {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Quality:").size(11.0));
+                        ui.label(egui::RichText::new("Quality:").size(15.0));
                         ui.add(egui::Slider::new(&mut self.image_quality, 10..=100).text("%"));
                     });
                 }
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Target DPI:").size(11.0));
+                    ui.label(egui::RichText::new("Target DPI:").size(15.0));
                     ui.selectable_value(&mut self.image_dpi, 72, "72");
                     ui.selectable_value(&mut self.image_dpi, 150, "150");
                     ui.selectable_value(&mut self.image_dpi, 200, "200");
@@ -205,7 +205,7 @@ impl QuickSettingsState {
             else if fmt == "MP3" || fmt == "WAV" || fmt == "FLAC" || fmt == "M4A" || fmt == "OGG" || fmt == "AAC" || fmt == "OPUS" {
                 ui.label(
                     egui::RichText::new("Audio Quality & Bitrate")
-                        .size(11.0)
+                        .size(15.0)
                         .color(Color32::from_rgb(220, 230, 220)),
                 );
                 ui.add_space(4.0);
@@ -213,7 +213,7 @@ impl QuickSettingsState {
                 ui.checkbox(&mut self.audio_strict_lossless, "Strict 0.00% Bit-Exact (FLAC/WAV)");
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Bitrate:").size(11.0));
+                    ui.label(egui::RichText::new("Bitrate:").size(15.0));
                     ui.selectable_value(&mut self.audio_bitrate, "128k".to_string(), "128k");
                     ui.selectable_value(&mut self.audio_bitrate, "192k".to_string(), "192k");
                     ui.selectable_value(&mut self.audio_bitrate, "256k".to_string(), "256k");
@@ -224,7 +224,7 @@ impl QuickSettingsState {
             else if fmt == "MP4" || fmt == "MOV" || fmt == "MKV" || fmt == "WEBM" || fmt == "GIF" {
                 ui.label(
                     egui::RichText::new("Video Hardware Acceleration")
-                        .size(11.0)
+                        .size(15.0)
                         .color(Color32::from_rgb(220, 230, 220)),
                 );
                 ui.add_space(4.0);
@@ -232,7 +232,7 @@ impl QuickSettingsState {
                 ui.checkbox(&mut self.video_hw_accel, "Hardware Acceleration (NVENC/AMF/QSV)");
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("CRF Quality:").size(11.0));
+                    ui.label(egui::RichText::new("CRF Quality:").size(15.0));
                     ui.selectable_value(&mut self.video_crf, 16, "16 (Near Lossless)");
                     ui.selectable_value(&mut self.video_crf, 18, "18 (Visually Lossless)");
                     ui.selectable_value(&mut self.video_crf, 23, "23 (Standard)");
@@ -242,30 +242,30 @@ impl QuickSettingsState {
             else if fmt == "ZIP" || fmt == "7Z" || fmt == "TAR" || fmt == "TAR.GZ" || fmt == "EXTRACT" {
                 ui.label(
                     egui::RichText::new("Archive & Compression Suite")
-                        .size(11.0)
+                        .size(15.0)
                         .color(Color32::from_rgb(220, 230, 220)),
                 );
                 ui.add_space(4.0);
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Compression:").size(11.0));
+                    ui.label(egui::RichText::new("Compression:").size(15.0));
                     ui.selectable_value(&mut self.archive_compression, "Fast".to_string(), "Fast");
                     ui.selectable_value(&mut self.archive_compression, "Normal".to_string(), "Normal");
                     ui.selectable_value(&mut self.archive_compression, "Ultra".to_string(), "Ultra");
                 });
-                ui.label(egui::RichText::new("✓ Zip-Slip Traversal Protection Active").size(10.0).color(Color32::from_rgb(120, 190, 32)));
+                ui.label(egui::RichText::new("✓ Zip-Slip Traversal Protection Active").size(14.0).color(Color32::from_rgb(120, 190, 32)));
             }
             // 6. ALL Sector
             else if fmt == "ALL" {
                 ui.label(
                     egui::RichText::new("⭐ Batch ALL Transcoding Mode")
-                        .size(11.0)
+                        .size(15.0)
                         .strong()
                         .color(Color32::from_rgb(255, 184, 28)),
                 );
                 ui.label(
                     egui::RichText::new("Converts source file simultaneously to ALL valid formats in domain using Rayon multi-core concurrency.")
-                        .size(10.0)
+                        .size(14.0)
                         .color(Color32::from_rgb(200, 210, 200)),
                 );
             }
@@ -304,7 +304,7 @@ impl QuickSettingsState {
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("Envelope: {}x{} px | {}-{} KB @ {} DPI", self.exam_width, self.exam_height, self.exam_min_kb, self.exam_max_kb, self.exam_dpi)).size(10.0).color(Color32::from_rgb(255, 199, 44)));
+                    ui.label(egui::RichText::new(format!("Envelope: {}x{} px | {}-{} KB @ {} DPI", self.exam_width, self.exam_height, self.exam_min_kb, self.exam_max_kb, self.exam_dpi)).size(14.0).color(Color32::from_rgb(255, 199, 44)));
                 });
             }
         });

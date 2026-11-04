@@ -6,6 +6,11 @@
 
 use std::path::Path;
 
+/// Whether the Defender scan verb can execute (Windows only).
+pub fn win_defender_available() -> bool {
+    cfg!(target_os = "windows")
+}
+
 /// Execute a registered shell verb on `path` (e.g. "open", "print", "play", "edit")
 pub fn shell_verb(path: &Path, verb: &str) -> bool {
     #[cfg(target_os = "windows")]

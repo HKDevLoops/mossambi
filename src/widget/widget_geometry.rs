@@ -301,7 +301,7 @@ impl RadialWidgetGeometry {
             text_pos,
             egui::Align2::CENTER_CENTER,
             label,
-            FontId::proportional(11.5),
+            FontId::proportional(15.5),
             text_color,
         );
     }
@@ -667,7 +667,7 @@ impl RadialWidgetGeometry {
                     self.center - Vec2::new(0.0, 6.0),
                     egui::Align2::CENTER_CENTER,
                     format!("{:.0}%", pct * 100.0),
-                    FontId::proportional(22.0),
+                    FontId::proportional(26.0),
                     Color32::from_rgb(30, 36, 48),
                 );
 
@@ -676,7 +676,7 @@ impl RadialWidgetGeometry {
                     self.center + Vec2::new(0.0, 15.0),
                     egui::Align2::CENTER_CENTER,
                     "Converting...",
-                    FontId::proportional(10.5),
+                    FontId::proportional(14.5),
                     Color32::from_rgb(115, 122, 136),
                 );
             }
@@ -713,7 +713,7 @@ impl RadialWidgetGeometry {
                     self.center + Vec2::new(0.0, 5.0),
                     egui::Align2::CENTER_CENTER,
                     "Converted",
-                    FontId::proportional(12.5),
+                    FontId::proportional(16.5),
                     Color32::from_rgb(30, 36, 48),
                 );
 
@@ -727,7 +727,7 @@ impl RadialWidgetGeometry {
                     self.center + Vec2::new(0.0, 20.0),
                     egui::Align2::CENTER_CENTER,
                     file_str,
-                    FontId::proportional(10.0),
+                    FontId::proportional(14.0),
                     Color32::from_rgb(115, 122, 136),
                 );
             }
@@ -782,14 +782,14 @@ impl RadialWidgetGeometry {
                     self.center + Vec2::new(0.0, 10.0),
                     egui::Align2::CENTER_CENTER,
                     "Drop files",
-                    FontId::proportional(11.5),
+                    FontId::proportional(15.5),
                     text_color,
                 );
                 painter.text(
                     self.center + Vec2::new(0.0, 23.5),
                     egui::Align2::CENTER_CENTER,
                     "here",
-                    FontId::proportional(11.5),
+                    FontId::proportional(15.5),
                     text_color,
                 );
             }
