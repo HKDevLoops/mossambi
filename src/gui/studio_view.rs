@@ -83,7 +83,7 @@ impl StudioView {
         quick_settings: &mut QuickSettingsState,
         mut on_pick_file: impl FnMut(),
         mut on_stage_file: impl FnMut(PathBuf),
-        mut on_convert: impl FnMut(String),
+        mut on_convert_batch: impl FnMut(Vec<PathBuf>, String),
         on_open_folder: impl FnMut(&Path),
     ) {
         let palette = current_theme.colors();
@@ -832,7 +832,7 @@ impl StudioView {
             .show(ctx, |ui| match self.current_tab {
                 StudioTab::FileExplorer => {
                     let mut staged: Option<PathBuf> = None;
-                    let mut transcode_req: Option<(PathBuf, String)> = None;
+                    let mut transcode_reqs: Vec<(PathBuf, String)> = Vec::new();
                     let mut exam_req: Option<PathBuf> = None;
                     let mut pack_req: Option<Vec<PathBuf>> = None;
                     let mut inspect_req: Option<PathBuf> = None;
@@ -841,7 +841,7 @@ impl StudioView {
                         ui,
                         &palette,
                         |p| staged = Some(p),
-                        |p, t| transcode_req = Some((p, t)),
+                        |p, t| transcode_reqs.push((p, t)),
                         |p| exam_req = Some(p),
                         |list| pack_req = Some(list),
                         |p| inspect_req = Some(p),
@@ -850,9 +850,26 @@ impl StudioView {
                     if let Some(p) = staged {
                         on_stage_file(p);
                     }
-                    if let Some((p, t)) = transcode_req {
-                        on_stage_file(p);
-                        on_convert(t);
+                    if !transcode_reqs.is_empty() {
+                        // Group the (multi-select) requests by target format so
+                        // each group becomes ONE batch conversion instead of
+                        // N single-file conversions clobbering each other.
+                        let mut groups: Vec<(String, Vec<PathBuf>)> = Vec::new();
+                        for (p, t) in transcode_reqs {
+                            match groups.iter_mut().find(|(ft, _)| *ft == t) {
+                                Some((_, list)) => list.push(p),
+                                None => groups.push((t, vec![p])),
+                            }
+                        }
+                        for (t, mut paths) in groups {
+                            paths.sort();
+                            paths.dedup();
+                            if let Some(first) = paths.first() {
+                                on_stage_file(first.clone());
+                            }
+                            log::info!("Explorer batch: {} file(s) -> {}", paths.len(), t);
+                            on_convert_batch(paths, t);
+                        }
                     }
                     if let Some(p) = exam_req {
                         on_stage_file(p);
@@ -885,7 +902,7 @@ impl StudioView {
                                     current_file,
                                     quick_settings,
                                     &mut on_pick_file,
-                                    &mut on_convert,
+                                    &mut on_convert_batch,
                                 );
                             }
                             StudioTab::ExamStudio => {
@@ -913,7 +930,7 @@ impl StudioView {
                                     current_file,
                                     quick_settings,
                                     &mut on_pick_file,
-                                    on_convert,
+                                    on_convert_batch,
                                 );
                             }
                             StudioTab::HardwareTelemetry => {
@@ -940,7 +957,7 @@ impl StudioView {
         current_file: &Option<PathBuf>,
         settings: &mut QuickSettingsState,
         mut on_pick_file: impl FnMut(),
-        mut on_convert: impl FnMut(String),
+        mut on_convert_batch: impl FnMut(Vec<PathBuf>, String),
     ) {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -1032,7 +1049,10 @@ impl StudioView {
                         .on_hover_text("Generate output in all supported formats simultaneously")
                         .clicked()
                     {
-                        on_convert("ALL".to_string());
+                        on_convert_batch(
+                            current_file.iter().cloned().collect(),
+                            "ALL".to_string(),
+                        );
                     }
                 });
             });
@@ -1109,7 +1129,10 @@ impl StudioView {
                             .rounding(Rounding::same(8.0)),
                         );
                         if convert_btn.clicked() {
-                            on_convert(settings.active_format.clone());
+                            on_convert_batch(
+                            current_file.iter().cloned().collect(),
+                            settings.active_format.clone(),
+                        );
                         }
                     });
                 });
@@ -1719,7 +1742,7 @@ impl StudioView {
         current_file: &Option<PathBuf>,
         _settings: &mut QuickSettingsState,
         mut on_pick_file: impl FnMut(),
-        mut on_convert: impl FnMut(String),
+        mut on_convert_batch: impl FnMut(Vec<PathBuf>, String),
     ) {
         ui.label(
             egui::RichText::new("Archive Suite & Compression")
@@ -1745,19 +1768,28 @@ impl StudioView {
                     .button(egui::RichText::new("📦 Pack to ZIP").size(16.0))
                     .clicked()
                 {
-                    on_convert("ZIP".to_string());
+                    on_convert_batch(
+                            current_file.iter().cloned().collect(),
+                            "ZIP".to_string(),
+                        );
                 }
                 if ui
                     .button(egui::RichText::new("📦 Pack to TAR.GZ").size(16.0))
                     .clicked()
                 {
-                    on_convert("TAR.GZ".to_string());
+                    on_convert_batch(
+                            current_file.iter().cloned().collect(),
+                            "TAR.GZ".to_string(),
+                        );
                 }
                 if ui
                     .button(egui::RichText::new("📦 Pack to 7Z").size(16.0))
                     .clicked()
                 {
-                    on_convert("7Z".to_string());
+                    on_convert_batch(
+                            current_file.iter().cloned().collect(),
+                            "7Z".to_string(),
+                        );
                 }
                 if ui
                     .button(
@@ -1767,7 +1799,10 @@ impl StudioView {
                     )
                     .clicked()
                 {
-                    on_convert("EXTRACT".to_string());
+                    on_convert_batch(
+                            current_file.iter().cloned().collect(),
+                            "EXTRACT".to_string(),
+                        );
                 }
             });
         } else {

@@ -2876,6 +2876,7 @@ impl ExplorerView {
         on_pack_archive: &mut impl FnMut(Vec<PathBuf>),
         on_inspect_file: &mut impl FnMut(PathBuf),
     ) {
+        let style = self.menu_style;
         let bar_h = 34.0_f32;
         let (bar_rect, _) = ui.allocate_exact_size(
             Vec2::new(ui.available_width(), bar_h),
@@ -2932,23 +2933,38 @@ impl ExplorerView {
                 };
 
                 // ── CONVERT (Tools & Converters first group) ──
+                // Targets follow the FIRST selected file's type via the same
+                // UniversalRegistry engine the radial wheel and the Studio
+                // sidebar use — the menu is type-aware, not a fixed list.
                 if has_files {
+                    let lead = sel_files
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| self.current_dir.clone());
+                    let sectors =
+                        crate::core::registry::UniversalRegistry::get_sectors_for_file(&lead);
                     ui.menu_button("Convert", |menu_ui| {
-                        menu_ui.set_min_width(180.0);
-                        for fmt in ["JPG", "PNG", "WEBP", "PDF", "MP3", "FLAC", "ZIP"] {
-                            if fm::menu_item_labeled(
-                                menu_ui,
-                                pack,
-                                fm::MenuAction::Transcode,
-                                &format!("Convert to {fmt}"),
-                                palette.accent,
-                            )
-                            .clicked()
-                            {
-                                for f in &sel_files {
-                                    on_transcode_target(f.clone(), fmt.to_string());
+                        menu_ui.set_min_width(200.0);
+                        for fmt in &sectors {
+                            match *fmt {
+                                "MORE" | "ALL" => continue,
+                                label => {
+                                    if fm::menu_item_labeled(
+                                        menu_ui,
+                                        pack,
+                                        fm::MenuAction::Transcode,
+                                        &format!("Convert to {label}"),
+                                        style,
+                                        palette.accent,
+                                    )
+                                    .clicked()
+                                    {
+                                        for f in &sel_files {
+                                            on_transcode_target(f.clone(), label.to_string());
+                                        }
+                                        menu_ui.close_menu();
+                                    }
                                 }
-                                menu_ui.close_menu();
                             }
                         }
                         menu_ui.separator();
@@ -2957,6 +2973,7 @@ impl ExplorerView {
                             pack,
                             fm::MenuAction::Transcode,
                             "All formats (batch)",
+                            style,
                             palette.accent,
                         )
                         .clicked()
@@ -2985,7 +3002,7 @@ impl ExplorerView {
                     on_pack_archive(all_sel.clone());
                 }
                 if pill(ui, Some(IconGlyph::ActionShield), "Inspect", has_files).clicked() {
-                    if let Some(f) = sel_files.first() {
+                    for f in &sel_files {
                         on_inspect_file(f.clone());
                     }
                 }
@@ -5494,11 +5511,12 @@ fn menu_row_glyph(
     pack: IconPack,
     glyph: IconGlyph,
     label: &str,
+    style: MenuStyle,
     tint: Color32,
 ) -> egui::Response {
     menu_ui
         .add_enabled_ui(enabled, |ui| {
-            fm::menu_item_glyph(ui, pack, glyph, label, tint)
+            fm::menu_item_glyph(ui, pack, glyph, label, style, tint)
         })
         .inner
 }
@@ -5791,7 +5809,7 @@ impl ExplorerView {
             intent.refresh = true;
             menu_ui.close_menu();
         }
-        if menu_row_glyph(menu_ui, true, pack, IconGlyph::ActionUp, "Go to Parent Folder", tint)
+        if menu_row_glyph(menu_ui, true, pack, IconGlyph::ActionUp, "Go to Parent Folder", style, tint)
             .clicked()
         {
             intent.go_up = true;
@@ -5815,7 +5833,7 @@ impl ExplorerView {
                     ""
                 };
                 let item_text = format!("{label}{mark}");
-                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionSort, &item_text, tint)
+                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionSort, &item_text, style, tint)
                     .clicked()
                 {
                     intent.sort_by = Some(col);
@@ -5833,7 +5851,7 @@ impl ExplorerView {
             ] {
                 let mark = if current_view == vm { " ✓" } else { "" };
                 let item_text = format!("{label}{mark}");
-                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionView, &item_text, tint)
+                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionView, &item_text, style, tint)
                     .clicked()
                 {
                     intent.view_mode = Some(vm);
@@ -5853,6 +5871,7 @@ impl ExplorerView {
             pack,
             IconGlyph::ActionMore,
             "Invert Selection",
+            style,
             tint,
         )
         .clicked()
@@ -5860,7 +5879,7 @@ impl ExplorerView {
             intent.invert_selection = true;
             menu_ui.close_menu();
         }
-        if menu_row_glyph(menu_ui, true, pack, IconGlyph::ActionClose, "Clear Selection", tint)
+        if menu_row_glyph(menu_ui, true, pack, IconGlyph::ActionClose, "Clear Selection", style, tint)
             .clicked()
         {
             intent.clear_selection = true;
@@ -5988,38 +6007,60 @@ impl ExplorerView {
                 intent.rotate = Some(path.clone());
                 menu_ui.close_menu();
             }
-            if kind.is_image || kind.is_media || kind.is_printable {
-                menu_ui.menu_button("Convert", |sub_ui| {
-                    sub_ui.set_min_width(180.0);
-                    for fmt in ["JPG", "PNG", "WEBP", "PDF", "MP3", "FLAC"] {
-                        if fm::menu_item_labeled(
-                            sub_ui,
-                            pack,
-                            fm::MenuAction::Transcode,
-                            &format!("Convert to {fmt}"),
-                            tint,
-                        )
-                        .clicked()
-                        {
-                            intent.transcode = Some((targets.to_vec(), fmt.to_string()));
-                            sub_ui.close_menu();
+            // Type-aware Convert submenu — the SAME engine the radial wheel
+            // uses (UniversalRegistry::get_sectors_for_file): every converter
+            // the Studio's left column offers, scoped to this file's type, so
+            // irrelevant formats never appear.
+            let sectors =
+                crate::core::registry::UniversalRegistry::get_sectors_for_file(&path);
+            let in_ext = item.extension.to_ascii_uppercase();
+            menu_ui.menu_button("Convert", |sub_ui| {
+                sub_ui.set_min_width(210.0);
+                for fmt in &sectors {
+                    match *fmt {
+                        // MORE folds into the full list below; ALL gets its
+                        // own explicit row after the separator.
+                        "MORE" | "ALL" => continue,
+                        // Nothing to extract FROM a directory entry itself.
+                        "EXTRACT" if is_dir => continue,
+                        label => {
+                            let text = if label.eq_ignore_ascii_case(&in_ext) {
+                                format!("Rebuild {label} (zero-loss)")
+                            } else {
+                                format!("Convert to {label}")
+                            };
+                            if fm::menu_item_labeled(
+                                sub_ui,
+                                pack,
+                                fm::MenuAction::Transcode,
+                                &text,
+                                style,
+                                tint,
+                            )
+                            .clicked()
+                            {
+                                intent.transcode =
+                                    Some((targets.to_vec(), label.to_string()));
+                                sub_ui.close_menu();
+                            }
                         }
                     }
-                    sub_ui.separator();
-                    if fm::menu_item_labeled(
-                        sub_ui,
-                        pack,
-                        fm::MenuAction::Transcode,
-                        "All formats (batch)",
-                        tint,
-                    )
-                    .clicked()
-                    {
-                        intent.transcode = Some((targets.to_vec(), "ALL".to_string()));
-                        sub_ui.close_menu();
-                    }
-                });
-            }
+                }
+                sub_ui.separator();
+                if fm::menu_item_labeled(
+                    sub_ui,
+                    pack,
+                    fm::MenuAction::Transcode,
+                    "All formats (batch)",
+                    style,
+                    tint,
+                )
+                .clicked()
+                {
+                    intent.transcode = Some((targets.to_vec(), "ALL".to_string()));
+                    sub_ui.close_menu();
+                }
+            });
         }
         if !archive_targets.is_empty()
             && menu_row(menu_ui, true, pack, fm::MenuAction::Extract, style, tint).clicked()
@@ -6050,13 +6091,14 @@ impl ExplorerView {
             menu_ui.close_menu();
         }
 
+        menu_ui.separator();
         // ── Send to (Windows SendTo folder entries) ──
         let send_dests = crate::gui::context_menu::send_to_targets();
         if !send_dests.is_empty() {
             menu_ui.menu_button(fm::MenuAction::SendTo.label(style), |sub_ui| {
                 sub_ui.set_min_width(170.0);
                 for (label, dest) in send_dests.iter().take(12) {
-                    if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionShortcut, label, tint)
+                    if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionShortcut, label, style, tint)
                         .clicked()
                     {
                         intent.send_to =
@@ -6079,7 +6121,7 @@ impl ExplorerView {
                 (CopyPathKind::ForwardSlashes, "Forward slashes (/)"),
                 (CopyPathKind::Parent, "Containing folder"),
             ] {
-                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionPath, label, tint).clicked()
+                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionPath, label, style, tint).clicked()
                 {
                     intent.copy_path = Some((path.clone(), kind));
                     sub_ui.close_menu();

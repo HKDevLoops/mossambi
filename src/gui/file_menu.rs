@@ -113,9 +113,9 @@ impl MenuAction {
             (PackZip, Finder) => "Compress",
             (PackZip, Linux) => "Compress",
 
-            (Compress, Windows) => "Compress to ZIP file",
-            (Compress, Finder) => "Compress",
-            (Compress, Linux) => "Compress",
+            (Compress, Windows) => "Compress & Optimize",
+            (Compress, Finder) => "Compress & Optimize",
+            (Compress, Linux) => "Compress & Optimize",
 
             (Transcode, Windows) => "Convert with Mossambi",
             (Transcode, Finder) => "Convert Using Mossambi",
@@ -244,26 +244,35 @@ pub fn menu_item(
     style: MenuStyle,
     tint: Color32,
 ) -> Response {
-    let label = action.label(style);
-    let rgb = [tint.r(), tint.g(), tint.b()];
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(9.0, 9.0);
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(19.0), Sense::hover());
-        crate::core::icon_packs::paint_icon(ui, pack, action.glyph(), rect, rgb);
-        ui.label(egui_label(label));
-    })
-    .response
+    menu_item_labeled(ui, pack, action, action.label(style), style, tint)
 }
 
 /// Render a menu entry with an explicit override label (e.g. "Transcode to JPG").
+///
+/// Apple HIG (Finder style): menus are text-only — no icon chips, 15 px type,
+/// generous row padding. Windows/Linux keep the glyph + label layout.
 pub fn menu_item_labeled(
     ui: &mut Ui,
     pack: IconPack,
     action: MenuAction,
     label: &str,
+    style: MenuStyle,
     tint: Color32,
 ) -> Response {
     let rgb = [tint.r(), tint.g(), tint.b()];
+    if style == MenuStyle::Finder {
+        return ui
+            .horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+                ui.add_space(6.0);
+                ui.label(
+                    eframe::egui::RichText::new(label)
+                        .size(15.0)
+                        .color(eframe::egui::Color32::WHITE),
+                );
+            })
+            .response;
+    }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(9.0, 9.0);
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(19.0), Sense::hover());
@@ -280,9 +289,23 @@ pub fn menu_item_glyph(
     pack: IconPack,
     glyph: IconGlyph,
     label: &str,
+    style: MenuStyle,
     tint: Color32,
 ) -> Response {
     let rgb = [tint.r(), tint.g(), tint.b()];
+    if style == MenuStyle::Finder {
+        return ui
+            .horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+                ui.add_space(6.0);
+                ui.label(
+                    eframe::egui::RichText::new(label)
+                        .size(15.0)
+                        .color(eframe::egui::Color32::WHITE),
+                );
+            })
+            .response;
+    }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(9.0, 9.0);
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(19.0), Sense::hover());
@@ -292,9 +315,12 @@ pub fn menu_item_glyph(
     .response
 }
 
-/// Bold header line for the selected item's name.
+/// Bold header line for the selected item's name (Apple principle: the only
+/// labeled part of a menu is the context header — groups are separated by
+/// hairlines, not captions).
 pub fn menu_header(ui: &mut Ui, name: &str, tint: Color32) {
-    ui.label(eframe::egui::RichText::new(name).strong().color(tint));
+    ui.label(eframe::egui::RichText::new(name).strong().size(13.5).color(tint));
+    ui.add_space(1.0);
 }
 
 fn egui_label(text: &str) -> eframe::egui::WidgetText {

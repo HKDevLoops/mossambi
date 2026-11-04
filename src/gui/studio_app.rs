@@ -656,7 +656,7 @@ impl eframe::App for MossambiApp {
 
         let mut file_to_pick = false;
         let mut file_to_stage: Option<PathBuf> = None;
-        let mut convert_to_target: Option<String> = None;
+        let mut convert_batch: Option<(Vec<PathBuf>, String)> = None;
         let mut open_target_folder: Option<PathBuf> = None;
 
         self.studio_view.render(
@@ -666,7 +666,7 @@ impl eframe::App for MossambiApp {
             &mut qs,
             || file_to_pick = true,
             |p| file_to_stage = Some(p),
-            |t| convert_to_target = Some(t),
+            |paths, t| convert_batch = Some((paths, t)),
             |p| open_target_folder = Some(p.to_path_buf()),
         );
 
@@ -681,8 +681,10 @@ impl eframe::App for MossambiApp {
                 self.select_file(path);
             }
         }
-        if let Some(target) = convert_to_target {
-            self.start_conversion(&target);
+        if let Some((paths, target)) = convert_batch {
+            // Single batched pipeline for N files -> one format (the old path
+            // staged+converted per file, so only the last file survived).
+            self.start_conversion_batch(paths, &target);
         }
         if let Some(p) = open_target_folder {
             open_in_file_manager(&p);
