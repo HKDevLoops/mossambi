@@ -39,11 +39,11 @@ mod reg {
         REG_SZ,
     };
 
-    pub const ERROR_SUCCESS: i32 = 0;
-    pub const ERROR_FILE_NOT_FOUND: i32 = 2;
+    pub const ERROR_SUCCESS: u32 = 0;
+    pub const ERROR_FILE_NOT_FOUND: u32 = 2;
 
     /// Opens-or-creates `path` under HKCU and hands back the HKEY.
-    pub fn open_or_create(path: &str) -> Result<HKEY, i32> {
+    pub fn open_or_create(path: &str) -> Result<HKEY, u32> {
         let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
         let mut hk: HKEY = std::ptr::null_mut();
         let res = unsafe {
@@ -66,7 +66,7 @@ mod reg {
         }
     }
 
-    pub fn set_sz(hk: HKEY, value: Option<&str>, data: &str) -> Result<(), i32> {
+    pub fn set_sz(hk: HKEY, value: Option<&str>, data: &str) -> Result<(), u32> {
         let vname: Vec<u16> = value
             .map(|v| v.encode_utf16().chain(std::iter::once(0)).collect())
             .unwrap_or_default();
@@ -120,7 +120,7 @@ mod reg {
         Some(String::from_utf16_lossy(&buf[..n]))
     }
 
-    pub fn delete_value(hk: HKEY, value: Option<&str>) -> Result<(), i32> {
+    pub fn delete_value(hk: HKEY, value: Option<&str>) -> Result<(), u32> {
         let vname: Vec<u16> = value
             .map(|v| v.encode_utf16().chain(std::iter::once(0)).collect())
             .unwrap_or_default();
@@ -141,7 +141,7 @@ mod reg {
         }
     }
 
-    pub fn delete_tree(path: &str) -> Result<(), i32> {
+    pub fn delete_tree(path: &str) -> Result<(), u32> {
         let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
         let res = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER as _, wide.as_ptr()) };
         if res == ERROR_SUCCESS || res == ERROR_FILE_NOT_FOUND {
@@ -205,7 +205,7 @@ pub fn take_over() -> Result<()> {
         // Background (empty area) right-click verb — never a default.
         write_shell_verb("Software\\Classes\\Directory\\Background\\shell", false)?;
         log::info!("HKCU Directory/Drive shell verbs registered (Mossambi default open)");
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "linux")]
     {
@@ -267,7 +267,7 @@ pub fn restore() -> Result<()> {
             reg::delete_tree(&format!("{base}\\{VERB}"))
                 .map_err(|e| anyhow::anyhow!("delete_tree {base}\\{VERB} failed: winerror {e}"))?;
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "linux")]
     {

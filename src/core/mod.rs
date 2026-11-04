@@ -13,6 +13,7 @@ pub mod icon_packs;
 pub mod linux_dna;
 pub mod mouse_nav;
 pub mod pantone;
+pub mod preview;
 pub mod registry;
 
 pub use async_worker::{AsyncWorkerPool, TaskUpdate};

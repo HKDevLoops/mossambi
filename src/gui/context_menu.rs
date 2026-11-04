@@ -325,7 +325,7 @@ pub fn delete_to_trash(paths: &[std::path::PathBuf]) -> bool {
             wFunc: FO_DELETE,
             pFrom: wide.as_ptr(),
             pTo: std::ptr::null(),
-            fFlags: FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT,
+            fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT) as u16,
             fAnyOperationsAborted: 0,
             hNameMappings: std::ptr::null_mut(),
             lpszProgressTitle: std::ptr::null(),
@@ -360,8 +360,8 @@ pub fn send_to_targets() -> Vec<(String, std::path::PathBuf)> {
     #[cfg(target_os = "windows")]
     {
         let dir = std::env::var_os("APPDATA")
-            .map(|a| std::path::PathBuf::from(a).join(r"Microsoft\Windows\SendTo"))
-            .map(|d| d);
+            .map(|a| std::path::PathBuf::from(a).join(r"Microsoft\Windows\SendTo"));
+
         let Some(dir) = dir else { return Vec::new() };
         let Ok(rd) = std::fs::read_dir(&dir) else {
             return Vec::new();

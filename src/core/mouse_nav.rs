@@ -9,9 +9,9 @@
 //!   • Mouse thumb Fwd   → go_forward()
 //!   • Long horizontal middle-drag (mouse swipe) → Back / Forward
 
-use std::sync::mpsc::{channel, Receiver};
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,7 +22,7 @@ pub enum MouseNavEvent {
 
 pub struct MouseNavListener {
     receiver: Receiver<MouseNavEvent>,
-    shutdown: Arc<std::sync::atomic::AtomicBool>,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl Default for MouseNavListener {
@@ -40,12 +40,12 @@ impl Drop for MouseNavListener {
 impl MouseNavListener {
     pub fn new() -> Self {
         let (sender, receiver) = channel();
-        let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let shutdown = Arc::new(AtomicBool::new(false));
 
         #[cfg(target_os = "windows")]
         {
             let shutdown_clone = shutdown.clone();
-            thread::spawn(move || run_mouse_hook(sender, shutdown_clone));
+            let _ = std::thread::spawn(move || run_mouse_hook(sender, shutdown_clone));
         }
 
         Self { receiver, shutdown }
@@ -58,8 +58,8 @@ impl MouseNavListener {
 
 #[cfg(target_os = "windows")]
 struct HookContext {
-    shutdown: Arc<std::sync::atomic::AtomicBool>,
-    sender: std::sync::mpsc::Sender<MouseNavEvent>,
+    shutdown: Arc<AtomicBool>,
+    sender: Sender<MouseNavEvent>,
     /// Middle button currently held?
     mb_down: bool,
     mb_origin: (i32, i32),
@@ -71,7 +71,7 @@ struct HookContext {
 }
 
 #[cfg(target_os = "windows")]
-static GLOBAL_CTX: Mutex<Option<HookContext>> = Mutex::new(None);
+static GLOBAL_CTX: std::sync::Mutex<Option<HookContext>> = std::sync::Mutex::new(None);
 
 #[cfg(target_os = "windows")]
 fn is_mossambi_foreground() -> bool {
@@ -94,8 +94,8 @@ fn is_mossambi_foreground() -> bool {
 
 #[cfg(target_os = "windows")]
 fn run_mouse_hook(
-    sender: std::sync::mpsc::Sender<MouseNavEvent>,
-    shutdown: Arc<std::sync::atomic::AtomicBool>,
+    sender: Sender<MouseNavEvent>,
+    shutdown: Arc<AtomicBool>,
 ) {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -194,7 +194,7 @@ fn run_mouse_hook(
         }
 
         let mut msg = std::mem::zeroed::<windows_sys::Win32::UI::WindowsAndMessaging::MSG>();
-        while !shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+        while !shutdown.load(Ordering::Relaxed) {
             use windows_sys::Win32::UI::WindowsAndMessaging::{PeekMessageW, PM_REMOVE};
             while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
                 if msg.message == WM_QUIT_MSG {
@@ -203,7 +203,7 @@ fn run_mouse_hook(
                 windows_sys::Win32::UI::WindowsAndMessaging::TranslateMessage(&msg);
                 windows_sys::Win32::UI::WindowsAndMessaging::DispatchMessageW(&msg);
             }
-            thread::sleep(Duration::from_millis(16));
+            std::thread::sleep(Duration::from_millis(16));
         }
 
         UnhookWindowsHookEx(hook);

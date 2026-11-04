@@ -72,7 +72,7 @@ impl ActivationManager {
 
         #[cfg(target_os = "windows")]
         {
-            let tx_loop = tx.clone();
+            let tx_loop = tx;
             let shutdown_clone = shutdown.clone();
             thread::spawn(move || {
                 run_win32_tray_and_activation_loop(tx_loop, shutdown_clone);
@@ -257,7 +257,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                     let mut pt: POINT = std::mem::zeroed();
                     GetCursorPos(&mut pt);
                     if msg.wParam == HOTKEY_WIDGET_ID as usize {
-                        let active_file = get_active_file_under_cursor(pt.x, pt.y);
+                        let active_file = crate::gui::active_file::get_active_file_under_cursor(pt.x, pt.y);
                         let _ = sender.send(AppControlEvent::SummonWidget {
                             cursor_x: pt.x as f32,
                             cursor_y: pt.y as f32,
@@ -402,7 +402,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                                 let _ = sender.send(AppControlEvent::OpenStudio);
                             }
                             CMD_SUMMON_WIDGET => {
-                                let active_file = get_active_file_under_cursor(pt.x, pt.y);
+                                let active_file = crate::gui::active_file::get_active_file_under_cursor(pt.x, pt.y);
                                 let _ = sender.send(AppControlEvent::SummonWidget {
                                     cursor_x: pt.x as f32,
                                     cursor_y: pt.y as f32,
@@ -475,7 +475,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
             }
         }
 
-        thread::sleep(Duration::from_millis(30)); // Responsive event loop
+        std::thread::sleep(Duration::from_millis(30)); // Responsive event loop
     }
 
     if let Some(mut l) = drag_listener.take() {

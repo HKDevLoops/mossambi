@@ -885,7 +885,7 @@ impl ExplorerView {
                             self.clipboard_paths = vec![item.path.clone()];
                         }
                     } else {
-                        self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+                        self.clipboard_paths = self.selected_paths.iter().cloned().collect::<Vec<_>>();
                     }
                     self.clipboard_is_cut = false;
                 }
@@ -897,7 +897,7 @@ impl ExplorerView {
                             self.clipboard_paths = vec![item.path.clone()];
                         }
                     } else {
-                        self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+                        self.clipboard_paths = self.selected_paths.iter().cloned().collect::<Vec<_>>();
                     }
                     self.clipboard_is_cut = true;
                 }
@@ -1032,7 +1032,7 @@ impl ExplorerView {
                         self.clipboard_paths = vec![item.path.clone()];
                     }
                 } else {
-                    self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+                    self.clipboard_paths = self.selected_paths.iter().cloned().collect::<Vec<_>>();
                 }
                 self.clipboard_is_cut = false;
             }
@@ -1042,7 +1042,7 @@ impl ExplorerView {
                         self.clipboard_paths = vec![item.path.clone()];
                     }
                 } else {
-                    self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+                    self.clipboard_paths = self.selected_paths.iter().cloned().collect::<Vec<_>>();
                 }
                 self.clipboard_is_cut = true;
             }
@@ -1430,7 +1430,7 @@ impl ExplorerView {
         } else {
             palette.text_secondary
         };
-        let dot_btn = egui::Button::new(egui::RichText::new(".dotfiles").size(15.0).color(dot_fg))
+        let dot_btn = egui::Button::new(egui::RichText::new(".dotfiles").size(19.0).color(dot_fg))
             .fill(dot_bg)
             .rounding(Rounding::same(6.0));
         if ui
@@ -1541,7 +1541,7 @@ impl ExplorerView {
                         let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
                         breadcrumb_drop = Some((
                             seg.target_path.clone(),
-                            payload.paths.iter().cloned().collect(),
+                            payload.paths.to_vec(),
                             copy,
                         ));
                     }
@@ -1581,7 +1581,7 @@ impl ExplorerView {
                     if self.is_home_directory() {
                         let btn_dash = egui::Button::new(
                             egui::RichText::new("🏠 Home Dashboard")
-                                .size(15.0)
+                                .size(19.0)
                                 .strong()
                                 .color(if self.is_home_view {
                                     Color32::WHITE
@@ -1605,7 +1605,7 @@ impl ExplorerView {
 
                         let btn_files = egui::Button::new(
                             egui::RichText::new("📂 Folder Files")
-                                .size(15.0)
+                                .size(19.0)
                                 .strong()
                                 .color(if !self.is_home_view {
                                     Color32::WHITE
@@ -1649,7 +1649,7 @@ impl ExplorerView {
 
                         let label_text = format!("{} ({})", cat.label(), count);
                         let btn = egui::Button::new(
-                            egui::RichText::new(label_text).size(15.0).strong().color(
+                            egui::RichText::new(label_text).size(19.0).strong().color(
                                 if is_active {
                                     Color32::WHITE
                                 } else {
@@ -1749,7 +1749,7 @@ impl ExplorerView {
                     );
                     ui.label(
                         egui::RichText::new(format!("{:.0}px", self.icon_size))
-                            .size(14.0)
+                            .size(18.0)
                             .color(palette.text_muted),
                     );
                 }
@@ -1824,12 +1824,12 @@ impl ExplorerView {
                 ));
                 let r = Rect::from_center_size(pos + Vec2::new(16.0, 16.0), Vec2::splat(20.0));
                 bp.rect_filled(r, Rounding::same(10.0), palette.card_bg);
-                bp.rect_stroke(r, Rounding::same(10.0), Stroke::new(1.0, palette.accent));
+                bp.rect_stroke(r, Rounding::same(10.0), Stroke::new(1.0_f32, palette.accent));
                 bp.text(
                     r.center(),
                     egui::Align2::CENTER_CENTER,
                     if copying { "+" } else { "→" },
-                    egui::FontId::proportional(13.0),
+                    egui::FontId::proportional(17.0),
                     palette.text_primary,
                 );
             }
@@ -1865,8 +1865,8 @@ impl ExplorerView {
                 // 1. Quick access Header & Cards Grid
                 // ==========================================
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("⌃").size(16.0).color(palette.text_muted));
-                    ui.label(egui::RichText::new("Quick access").size(16.5).strong().color(palette.text_primary));
+                    ui.label(egui::RichText::new("⌃").size(20.0).color(palette.text_muted));
+                    ui.label(egui::RichText::new("Quick access").size(20.5).strong().color(palette.text_primary));
                 });
                 ui.add_space(8.0);
 
@@ -1952,7 +1952,7 @@ impl ExplorerView {
                             Pos2::new(rect.center().x, rect.bottom() - 12.0),
                             egui::Align2::CENTER_CENTER,
                             display_label,
-                            egui::FontId::proportional(14.5),
+                            egui::FontId::proportional(18.5),
                             palette.text_primary,
                         );
 
@@ -1978,8 +1978,8 @@ impl ExplorerView {
                 // 2. Drives Header & Storage Meter Cards
                 // ==========================================
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("⌃").size(16.0).color(palette.text_muted));
-                    ui.label(egui::RichText::new("Drives").size(16.5).strong().color(palette.text_primary));
+                    ui.label(egui::RichText::new("⌃").size(20.0).color(palette.text_muted));
+                    ui.label(egui::RichText::new("Drives").size(20.5).strong().color(palette.text_primary));
                 });
                 ui.add_space(8.0);
 
@@ -2021,7 +2021,7 @@ impl ExplorerView {
                             Pos2::new(text_left, rect.top() + 14.0),
                             egui::Align2::LEFT_TOP,
                             &drive.display_name,
-                            egui::FontId::proportional(15.5),
+                            egui::FontId::proportional(19.5),
                             palette.text_primary,
                         );
 
@@ -2044,7 +2044,7 @@ impl ExplorerView {
                             Pos2::new(text_left, rect.top() + 44.0),
                             egui::Align2::LEFT_TOP,
                             drive.formatted_space(),
-                            egui::FontId::proportional(13.5),
+                            egui::FontId::proportional(17.5),
                             palette.text_secondary,
                         );
 
@@ -2060,10 +2060,10 @@ impl ExplorerView {
                 // 3. Network locations
                 // ==========================================
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("⌃").size(16.0).color(palette.text_muted));
-                    ui.label(egui::RichText::new("Network locations").size(16.5).strong().color(palette.text_primary));
+                    ui.label(egui::RichText::new("⌃").size(20.0).color(palette.text_muted));
+                    ui.label(egui::RichText::new("Network locations").size(20.5).strong().color(palette.text_primary));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new("⋯").size(17.0).color(palette.text_muted));
+                        ui.label(egui::RichText::new("⋯").size(21.0).color(palette.text_muted));
                     });
                 });
                 ui.add_space(6.0);
@@ -2083,19 +2083,19 @@ impl ExplorerView {
                             info_badge_center,
                             egui::Align2::CENTER_CENTER,
                             "ℹ",
-                            egui::FontId::proportional(14.5),
+                            egui::FontId::proportional(18.5),
                             Color32::WHITE,
                         );
                         ui.add_space(24.0);
                         ui.label(
                             egui::RichText::new("There are no network locations. If you don't use network locations, you can disable the widget.")
-                                .size(15.0)
+                                .size(19.0)
                                 .color(palette.text_secondary)
                         );
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(12.0);
-                            let dis_btn = egui::Button::new(egui::RichText::new("Disable").size(15.0).color(palette.text_primary))
+                            let dis_btn = egui::Button::new(egui::RichText::new("Disable").size(19.0).color(palette.text_primary))
                                 .fill(palette.card_hover)
                                 .rounding(Rounding::same(4.0));
                             let _ = ui.add(dis_btn).on_hover_text("Disable network location discovery");
@@ -2109,14 +2109,14 @@ impl ExplorerView {
                 // 4. Recent Files List
                 // ==========================================
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("⌄").size(16.0).color(palette.text_muted));
-                    ui.label(egui::RichText::new("Recent files").size(16.5).strong().color(palette.text_primary));
+                    ui.label(egui::RichText::new("⌄").size(20.0).color(palette.text_muted));
+                    ui.label(egui::RichText::new("Recent files").size(20.5).strong().color(palette.text_primary));
                 });
                 ui.add_space(8.0);
 
                 let recent_files: Vec<&FileItem> = self.entries.iter().filter(|e| !e.is_dir).take(15).collect();
                 if recent_files.is_empty() {
-                    ui.label(egui::RichText::new("No recent standalone files in home directory. Choose a folder above to browse.").size(14.5).color(palette.text_muted));
+                    ui.label(egui::RichText::new("No recent standalone files in home directory. Choose a folder above to browse.").size(18.5).color(palette.text_muted));
                 } else {
                     for item in recent_files {
                         let row_h = 24.0;
@@ -2149,7 +2149,7 @@ impl ExplorerView {
                             Pos2::new(row_rect.left() + 32.0, row_rect.center().y),
                             egui::Align2::LEFT_CENTER,
                             &item.name,
-                            egui::FontId::proportional(15.0),
+                            egui::FontId::proportional(19.0),
                             palette.text_primary,
                         );
 
@@ -2310,7 +2310,7 @@ impl ExplorerView {
                 Pos2::new(tx, hrect.center().y),
                 align,
                 format!("{}{}", label, arrow),
-                egui::FontId::proportional(15.5),
+                egui::FontId::proportional(19.5),
                 if is_active { palette.accent } else { palette.text_muted },
             );
             if resp.clicked() {
@@ -2345,11 +2345,11 @@ impl ExplorerView {
         ui.add_space(2.0);
 
         let mut nav_into_dir: Option<PathBuf> = None;
-        let mut peek_to_open: Option<FileItem> = None;
+        let peek_to_open: Option<FileItem> = None;
         let mut item_intents: Vec<ItemMenuIntents> = Vec::new();
         let mut canvas_intents = CanvasMenuIntents::default();
         let selection_snapshot: Vec<PathBuf> =
-            self.selected_paths.iter().cloned().collect();
+            self.selected_paths.iter().cloned().collect::<Vec<_>>();
         let mut new_hover: Option<(FileItem, Pos2)> = None;
         let mut drop_ops: Vec<DropOp> = Vec::new();
         let mut marquee_rects: Vec<Rect> = Vec::new();
@@ -2521,7 +2521,7 @@ impl ExplorerView {
                         Pos2::new(kind_rect.left() + 2.0, kind_rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         icon_spec.category,
-                        egui::FontId::proportional(14.5),
+                        egui::FontId::proportional(18.5),
                         palette.text_secondary,
                     );
 
@@ -2555,7 +2555,7 @@ impl ExplorerView {
                         Pos2::new(date_rect.right() - col_pad, date_rect.center().y),
                         egui::Align2::RIGHT_CENTER,
                         item.formatted_date(),
-                        egui::FontId::proportional(14.5),
+                        egui::FontId::proportional(18.5),
                         palette.text_muted,
                     );
 
@@ -2606,7 +2606,7 @@ impl ExplorerView {
                             self.selected_paths.insert(item.path.clone());
                             self.selection_anchor = Some(idx);
                         }
-                        let paths: Vec<PathBuf> = self.selected_paths.iter().cloned().collect();
+                        let paths: Vec<PathBuf> = self.selected_paths.iter().cloned().collect::<Vec<_>>();
                         egui::DragAndDrop::set_payload(ui.ctx(), FileDragPayload { paths });
                     }
 
@@ -2649,7 +2649,7 @@ impl ExplorerView {
                             let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
                             drop_ops.push((
                                 item.path.clone(),
-                                payload.paths.iter().cloned().collect(),
+                                payload.paths.to_vec(),
                                 copy,
                             ));
                         }
@@ -2693,7 +2693,7 @@ impl ExplorerView {
                 let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
                 drop_ops.push((
                     self.current_dir.clone(),
-                    payload.paths.iter().cloned().collect(),
+                    payload.paths.to_vec(),
                     copy,
                 ));
             }
@@ -2721,7 +2721,7 @@ impl ExplorerView {
                         30,
                     ),
                 );
-                mp.rect_stroke(mrect, Rounding::same(2.0), Stroke::new(1.0, palette.accent));
+                mp.rect_stroke(mrect, Rounding::same(2.0), Stroke::new(1.0_f32, palette.accent));
                 let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
                 let hits: Vec<PathBuf> = marquee_rects
                     .iter()
@@ -2894,7 +2894,7 @@ impl ExplorerView {
                     .filter(|p| p.is_file())
                     .cloned()
                     .collect();
-                let all_sel: Vec<PathBuf> = self.selected_paths.iter().cloned().collect();
+                let all_sel: Vec<PathBuf> = self.selected_paths.iter().cloned().collect::<Vec<_>>();
                 let has_files = !sel_files.is_empty();
                 let has_sel = !all_sel.is_empty();
 
@@ -2910,7 +2910,7 @@ impl ExplorerView {
                             enabled: bool|
                       -> egui::Response {
                     let text = egui::RichText::new(label)
-                        .size(15.0)
+                        .size(19.0)
                         .color(if enabled {
                             palette.text_primary
                         } else {
@@ -2986,7 +2986,7 @@ impl ExplorerView {
                     });
                 } else {
                     let btn = egui::Button::new(
-                        egui::RichText::new("Convert").size(15.0).color(palette.text_muted),
+                        egui::RichText::new("Convert").size(19.0).color(palette.text_muted),
                     )
                     .fill(Color32::TRANSPARENT)
                     .rounding(Rounding::same(7.0));
@@ -3096,14 +3096,14 @@ impl ExplorerView {
                         };
                         ui.label(
                             egui::RichText::new(label)
-                                .size(14.5)
+                                .size(18.5)
                                 .strong()
                                 .color(palette.accent),
                         );
                     } else {
                         ui.label(
                             egui::RichText::new(format!("{} items enabled", entries.len()))
-                                .size(14.5)
+                                .size(18.5)
                                 .color(palette.text_muted),
                         );
                     }
@@ -3217,7 +3217,7 @@ impl ExplorerView {
                                 ui.label(
                                     egui::RichText::new(truncate_end(&item.name, 34))
                                         .strong()
-                                        .size(15.5)
+                                        .size(19.5)
                                         .color(palette.text_primary),
                                 );
                                 ui.label(
@@ -3227,7 +3227,7 @@ impl ExplorerView {
                                         resolve_file_icon(&item.name, &item.extension, false)
                                             .category
                                     ))
-                                    .size(14.0)
+                                    .size(18.0)
                                     .color(palette.text_secondary),
                                 );
                             }
@@ -3239,7 +3239,7 @@ impl ExplorerView {
                                         total
                                     ))
                                     .strong()
-                                    .size(15.5)
+                                    .size(19.5)
                                     .color(palette.text_primary),
                                 );
                                 ui.add_space(6.0);
@@ -3260,7 +3260,7 @@ impl ExplorerView {
                                         );
                                         ui.label(
                                             egui::RichText::new(truncate_end(&c.name, 30))
-                                                .size(14.5)
+                                                .size(18.5)
                                                 .color(if c.is_dir {
                                                     palette.text_primary
                                                 } else {
@@ -3276,7 +3276,7 @@ impl ExplorerView {
                                             "… +{} more",
                                             total - children.len()
                                         ))
-                                        .size(14.0)
+                                        .size(18.0)
                                         .color(palette.text_muted),
                                     );
                                 }
@@ -3301,12 +3301,12 @@ impl ExplorerView {
                                         ui.label(
                                             egui::RichText::new(truncate_end(&item.name, 32))
                                                 .strong()
-                                                .size(15.5)
+                                                .size(19.5)
                                                 .color(palette.text_primary),
                                         );
                                         ui.label(
                                             egui::RichText::new(spec.category)
-                                                .size(14.0)
+                                                .size(18.0)
                                                 .color(palette.text_secondary),
                                         );
                                         ui.label(
@@ -3315,7 +3315,7 @@ impl ExplorerView {
                                                 item.formatted_size(),
                                                 item.formatted_date()
                                             ))
-                                            .size(14.0)
+                                            .size(18.0)
                                             .color(palette.text_muted),
                                         );
                                     });
@@ -3327,7 +3327,7 @@ impl ExplorerView {
                                             "{} • Hold to peek contents",
                                             item.formatted_date()
                                         ))
-                                        .size(14.0)
+                                        .size(18.0)
                                         .color(palette.text_muted),
                                     );
                                 }
@@ -3407,11 +3407,11 @@ impl ExplorerView {
             .cloned()
             .collect();
         let mut nav_into_dir: Option<PathBuf> = None;
-        let mut peek_to_open: Option<FileItem> = None;
+        let peek_to_open: Option<FileItem> = None;
         let mut item_intents: Vec<ItemMenuIntents> = Vec::new();
         let mut canvas_intents = CanvasMenuIntents::default();
         let selection_snapshot: Vec<PathBuf> =
-            self.selected_paths.iter().cloned().collect();
+            self.selected_paths.iter().cloned().collect::<Vec<_>>();
         let mut new_hover: Option<(FileItem, Pos2)> = None;
         let mut drop_ops: Vec<DropOp> = Vec::new();
         let mut marquee_rects: Vec<Rect> = Vec::new();
@@ -3517,12 +3517,12 @@ impl ExplorerView {
                             self.animations.hover,
                             crate::gui::anim::frame_dt(ui.ctx()),
                         );
-                        if grid_checkboxes != CheckboxMode::Off {
-                            if grid_checkboxes == CheckboxMode::Always || chk_alpha > 0.02 {
-                                Self::paint_selection_checkbox(
-                                    ui, cb_rect, is_checked, chk_alpha, palette,
-                                );
-                            }
+                        if grid_checkboxes != CheckboxMode::Off
+                            && (grid_checkboxes == CheckboxMode::Always || chk_alpha > 0.02)
+                        {
+                            Self::paint_selection_checkbox(
+                                ui, cb_rect, is_checked, chk_alpha, palette,
+                            );
                         }
                         if cb_resp.clicked() {
                             if is_checked {
@@ -3540,7 +3540,7 @@ impl ExplorerView {
                                 self.selected_paths.insert(item.path.clone());
                             }
                             let paths: Vec<PathBuf> =
-                                self.selected_paths.iter().cloned().collect();
+                                self.selected_paths.iter().cloned().collect::<Vec<_>>();
                             egui::DragAndDrop::set_payload(
                                 ui.ctx(),
                                 FileDragPayload { paths },
@@ -3573,7 +3573,7 @@ impl ExplorerView {
                                     ui.painter().rect_stroke(
                                         rect,
                                         Rounding::same(8.0),
-                                        Stroke::new(2.0, palette.accent),
+                                        Stroke::new(2.0_f32, palette.accent),
                                     );
                                 }
                             } else {
@@ -3588,7 +3588,7 @@ impl ExplorerView {
                                 let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
                                 drop_ops.push((
                                     item.path.clone(),
-                                    payload.paths.iter().cloned().collect(),
+                                    payload.paths.to_vec(),
                                     copy,
                                 ));
                             }
@@ -3741,7 +3741,7 @@ impl ExplorerView {
                 let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
                 drop_ops.push((
                     self.current_dir.clone(),
-                    payload.paths.iter().cloned().collect(),
+                    payload.paths.to_vec(),
                     copy,
                 ));
             }
@@ -3768,7 +3768,7 @@ impl ExplorerView {
                         30,
                     ),
                 );
-                mp.rect_stroke(mrect, Rounding::same(2.0), Stroke::new(1.0, palette.accent));
+                mp.rect_stroke(mrect, Rounding::same(2.0), Stroke::new(1.0_f32, palette.accent));
                 let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
                 let hits: Vec<PathBuf> = marquee_rects
                     .iter()
@@ -3986,7 +3986,7 @@ impl ExplorerView {
                                                 self.selected_paths.insert(item.path.clone());
                                             }
                                             let paths: Vec<PathBuf> =
-                                                self.selected_paths.iter().cloned().collect();
+                                                self.selected_paths.iter().cloned().collect::<Vec<_>>();
                                             egui::DragAndDrop::set_payload(
                                                 ui.ctx(),
                                                 FileDragPayload { paths },
@@ -4035,7 +4035,7 @@ impl ExplorerView {
                                                 });
                                                 column_drop = Some((
                                                     item.path.clone(),
-                                                    payload.paths.iter().cloned().collect(),
+                                                    payload.paths.to_vec(),
                                                     copy,
                                                 ));
                                             }
@@ -4100,7 +4100,7 @@ impl ExplorerView {
                                             Pos2::new(row_rect.left() + 24.0, row_rect.center().y),
                                             egui::Align2::LEFT_CENTER,
                                             name_text,
-                                            egui::FontId::proportional(15.5),
+                                            egui::FontId::proportional(19.5),
                                             name_color,
                                         );
                                         if resp.clicked() {
@@ -4154,7 +4154,7 @@ impl ExplorerView {
                                             ui.add_space(6.0);
                                             ui.label(
                                                 egui::RichText::new(&sub_name)
-                                                    .size(14.5)
+                                                    .size(18.5)
                                                     .strong()
                                                     .color(palette.text_muted),
                                             );
@@ -4249,7 +4249,7 @@ impl ExplorerView {
                                                 ),
                                                 egui::Align2::LEFT_CENTER,
                                                 name_text,
-                                                egui::FontId::proportional(15.5),
+                                                egui::FontId::proportional(19.5),
                                                 name_color,
                                             );
                                             if resp.clicked() {
@@ -4327,13 +4327,13 @@ impl ExplorerView {
                                             ui.add_space(4.0);
                                             ui.label(
                                                 egui::RichText::new(&item_clone.name)
-                                                    .size(17.0)
+                                                    .size(21.0)
                                                     .strong()
                                                     .color(palette.text_primary),
                                             );
                                             ui.label(
                                                 egui::RichText::new(icon_spec.category)
-                                                    .size(14.5)
+                                                    .size(18.5)
                                                     .color(palette.text_muted),
                                             );
                                         });
@@ -4349,7 +4349,7 @@ impl ExplorerView {
                                             .show(ui, |ui| {
                                                 ui.label(
                                                     egui::RichText::new("Kind:")
-                                                        .size(15.0)
+                                                        .size(19.0)
                                                         .color(palette.text_muted),
                                                 );
                                                 ui.label(
@@ -4358,7 +4358,7 @@ impl ExplorerView {
                                                     } else {
                                                         &item_clone.extension
                                                     })
-                                                    .size(15.0)
+                                                    .size(19.0)
                                                     .strong()
                                                     .color(palette.text_primary),
                                                 );
@@ -4366,35 +4366,35 @@ impl ExplorerView {
 
                                                 ui.label(
                                                     egui::RichText::new("Size:")
-                                                        .size(15.0)
+                                                        .size(19.0)
                                                         .color(palette.text_muted),
                                                 );
                                                 ui.label(
                                                     egui::RichText::new(
                                                         item_clone.formatted_size(),
                                                     )
-                                                    .size(15.0)
+                                                    .size(19.0)
                                                     .color(palette.text_secondary),
                                                 );
                                                 ui.end_row();
 
                                                 ui.label(
                                                     egui::RichText::new("Modified:")
-                                                        .size(15.0)
+                                                        .size(19.0)
                                                         .color(palette.text_muted),
                                                 );
                                                 ui.label(
                                                     egui::RichText::new(
                                                         item_clone.formatted_date(),
                                                     )
-                                                    .size(14.5)
+                                                    .size(18.5)
                                                     .color(palette.text_secondary),
                                                 );
                                                 ui.end_row();
 
                                                 ui.label(
                                                     egui::RichText::new("Permissions:")
-                                                        .size(15.0)
+                                                        .size(19.0)
                                                         .color(palette.text_muted),
                                                 );
                                                 ui.label(
@@ -4403,7 +4403,7 @@ impl ExplorerView {
                                                         item_clone.formatted_permissions(),
                                                         item_clone.formatted_octal_permissions()
                                                     ))
-                                                    .size(14.5)
+                                                    .size(18.5)
                                                     .monospace()
                                                     .color(palette.text_secondary),
                                                 );
@@ -4412,7 +4412,7 @@ impl ExplorerView {
                                                 if item_clone.is_symlink {
                                                     ui.label(
                                                         egui::RichText::new("Symlink:")
-                                                            .size(15.0)
+                                                            .size(19.0)
                                                             .color(palette.text_muted),
                                                     );
                                                     let target_str = item_clone
@@ -4425,7 +4425,7 @@ impl ExplorerView {
                                                             "↗ {}",
                                                             target_str
                                                         ))
-                                                        .size(14.5)
+                                                        .size(18.5)
                                                         .color(palette.accent),
                                                     );
                                                     ui.end_row();
@@ -4433,7 +4433,7 @@ impl ExplorerView {
 
                                                 ui.label(
                                                     egui::RichText::new("Hidden:")
-                                                        .size(15.0)
+                                                        .size(19.0)
                                                         .color(palette.text_muted),
                                                 );
                                                 ui.label(
@@ -4442,7 +4442,7 @@ impl ExplorerView {
                                                     } else {
                                                         "No"
                                                     })
-                                                    .size(15.0)
+                                                    .size(19.0)
                                                     .color(palette.text_secondary),
                                                 );
                                                 ui.end_row();
@@ -4568,14 +4568,14 @@ impl ExplorerView {
                         };
                         ui.label(
                             egui::RichText::new(count_text)
-                                .size(14.5)
+                                .size(18.5)
                                 .color(palette.text_secondary),
                         );
 
                         if sel_count > 0 {
                             ui.label(
                                 egui::RichText::new("•")
-                                    .size(14.5)
+                                    .size(18.5)
                                     .color(palette.text_muted),
                             );
                             let sel_text = format!(
@@ -4585,7 +4585,7 @@ impl ExplorerView {
                             );
                             ui.label(
                                 egui::RichText::new(sel_text)
-                                    .size(14.5)
+                                    .size(18.5)
                                     .strong()
                                     .color(palette.accent),
                             );
@@ -4601,12 +4601,12 @@ impl ExplorerView {
                                 );
                                 ui.label(
                                     egui::RichText::new(format!("{:.0}px", self.icon_size))
-                                        .size(14.0)
+                                        .size(18.0)
                                         .color(palette.text_muted),
                                 );
                                 ui.label(
                                     egui::RichText::new("•")
-                                        .size(14.5)
+                                        .size(18.5)
                                         .color(palette.text_muted),
                                 );
                             }
@@ -4614,12 +4614,12 @@ impl ExplorerView {
                             if self.show_hidden_files {
                                 ui.label(
                                     egui::RichText::new("Dotfiles visible")
-                                        .size(14.0)
+                                        .size(18.0)
                                         .color(palette.accent),
                                 );
                                 ui.label(
                                     egui::RichText::new("•")
-                                        .size(14.5)
+                                        .size(18.5)
                                         .color(palette.text_muted),
                                 );
                             }
@@ -4627,7 +4627,7 @@ impl ExplorerView {
                             if let Some(info) = drive_info {
                                 ui.label(
                                     egui::RichText::new(info)
-                                        .size(14.5)
+                                        .size(18.5)
                                         .color(palette.text_muted),
                                 );
                             }
@@ -4677,7 +4677,7 @@ impl ExplorerView {
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(&item.name)
-                            .size(19.0)
+                            .size(23.0)
                             .strong()
                             .color(palette.text_primary),
                     );
@@ -4761,11 +4761,12 @@ impl ExplorerView {
                             .color(palette.text_muted),
                         );
                     }
-                } else if is_text {
+                } else if is_text
+                    || matches!(item.extension.as_str(), "PDF" | "DOCX" | "ODT" | "XLSX" | "XLS" | "ODS" | "CSV" | "TSV" | "PPTX" | "ODP" | "RTF")
+                {
                     if self.peek_text_cache.as_ref().map(|(p, _)| p) != Some(&item.path) {
-                        let text = std::fs::read(&item.path)
-                            .map(|b| String::from_utf8_lossy(&b[..b.len().min(16384)]).to_string())
-                            .unwrap_or_else(|e| format!("Failed to read file: {}", e));
+                        let text = crate::core::preview::extract_preview_text(&item.path)
+                            .unwrap_or_else(|e| format!("Preview unavailable: {}", e));
                         self.peek_text_cache = Some((item.path.clone(), text));
                     }
 
@@ -4792,7 +4793,7 @@ impl ExplorerView {
                 } else {
                     ui.label(
                         egui::RichText::new(format!("File Path: {}", item.path.display()))
-                            .size(15.5)
+                            .size(19.5)
                             .monospace()
                             .color(palette.text_primary),
                     );
@@ -4807,7 +4808,7 @@ impl ExplorerView {
                         ui.add_space(6.0);
                         ui.label(
                             egui::RichText::new(format!("SHA-256: {}", hash))
-                                .size(15.0)
+                                .size(19.0)
                                 .monospace()
                                 .color(palette.accent),
                         );
@@ -4818,7 +4819,7 @@ impl ExplorerView {
                         ui.add_space(8.0);
                         ui.label(
                             egui::RichText::new("Binary Header Hex Dump:")
-                                .size(15.0)
+                                .size(19.0)
                                 .strong()
                                 .color(palette.text_secondary),
                         );
@@ -4847,7 +4848,7 @@ impl ExplorerView {
                                             "{:<48}  |  {}",
                                             hex_str, ascii_str
                                         ))
-                                        .size(14.5)
+                                        .size(18.5)
                                         .monospace()
                                         .color(Color32::from_rgb(180, 215, 255)),
                                     );
@@ -4958,7 +4959,7 @@ impl ExplorerView {
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new(&item.name)
-                                .size(19.0)
+                                .size(23.0)
                                 .strong()
                                 .color(palette.text_primary),
                         );
@@ -4968,7 +4969,7 @@ impl ExplorerView {
                             } else {
                                 format!("{} File", item.extension)
                             })
-                            .size(15.0)
+                            .size(19.0)
                             .color(palette.text_secondary),
                         );
                     });
@@ -5765,7 +5766,7 @@ impl ExplorerView {
     }
 
     pub fn paste_from_clipboard(&mut self) {
-        let srcs: Vec<PathBuf> = self.clipboard_paths.iter().cloned().collect();
+        let srcs: Vec<PathBuf> = self.clipboard_paths.clone();
         let cut = self.clipboard_is_cut;
         for src in &srcs {
             if let Some(name) = src.file_name() {
@@ -5786,6 +5787,7 @@ impl ExplorerView {
     }
 
     /// Shared empty-canvas context menu for the Details and Grid canvases.
+    #[allow(clippy::too_many_arguments)]
     pub fn run_canvas_context_menu(
         menu_ui: &mut Ui,
         pack: IconPack,
@@ -6203,7 +6205,7 @@ impl ExplorerView {
             (stroke_col.b() as f32 * alpha) as u8,
             (stroke_col.a() as f32 * alpha) as u8,
         );
-        ui.painter().rect_stroke(rect, rounding, Stroke::new(1.4, stroke_col));
+        ui.painter().rect_stroke(rect, rounding, Stroke::new(1.4_f32, stroke_col));
         if checked {
             let fill = Color32::from_rgba_premultiplied(
                 (palette.accent.r() as f32 * alpha) as u8,

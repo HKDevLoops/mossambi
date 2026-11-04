@@ -9,23 +9,12 @@ use std::io::{self, Write};
 
 /// Copy of the daemon tray icon's NOTIFYICONDATAW so companion services
 /// (drop overlay balloons) can post notifications through it.
-pub static TRAY_NID: std::sync::Mutex<Option<windows_tray_nid::NotifyIconData>> =
+pub static TRAY_NID: std::sync::Mutex<Option<isize>> =
     std::sync::Mutex::new(None);
 
-/// Window-native tray descriptor alias (keeps the static cfg-neutral).
-#[cfg(target_os = "windows")]
-mod windows_tray_nid {
-    pub type NotifyIconData = windows_sys::Win32::UI::Shell::NOTIFYICONDATAW;
-}
-#[cfg(not(target_os = "windows"))]
-mod windows_tray_nid {
-    #[derive(Clone, Copy)]
-    pub struct NotifyIconData;
-}
-
 /// Snapshot of the daemon tray icon descriptor (None when not running).
-pub fn shared_tray_nid() -> Option<windows_tray_nid::NotifyIconData> {
-    TRAY_NID.lock().ok().and_then(|n| n.map(|v| v.clone()))
+pub fn shared_tray_nid() -> Option<isize> {
+    TRAY_NID.lock().ok().and_then(|n| *n)
 }
 
 pub fn handle_daemon_command(action: &str) -> Result<()> {
@@ -224,7 +213,7 @@ pub fn stop_daemon() -> Result<()> {
 pub fn run_daemon_loop() -> Result<()> {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-    use windows_sys::Win32::System::Threading::{CreateMutexW, GetLastError};
+    use windows_sys::Win32::System::Threading::CreateMutexW;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
     use windows_sys::Win32::UI::Shell::{
         Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
@@ -253,9 +242,9 @@ pub fn run_daemon_loop() -> Result<()> {
         let mutex_name: Vec<u16> = "Local\\MossambiDaemonSingleInstance\0"
             .encode_utf16()
             .collect();
-        let _mutex = CreateMutexW(null_mut(), 0, mutex_name.as_ptr());
+        let _mutex = unsafe { CreateMutexW(null_mut(), 0, mutex_name.as_ptr()) };
         const ERROR_ALREADY_EXISTS: u32 = 183;
-        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        if unsafe { windows_sys::Win32::Foundation::GetLastError() } == ERROR_ALREADY_EXISTS {
             anyhow::bail!("Mossambi daemon already running (single-instance guard)");
         }
     }
@@ -359,7 +348,7 @@ pub fn run_daemon_loop() -> Result<()> {
     }
     // Share the tray descriptor with companion services (balloon posts).
     if let Ok(mut g) = TRAY_NID.lock() {
-        *g = Some(nid);
+        *g = Some(hwnd as isize);
     }
 
     fn to_u16(s: &str) -> Vec<u16> {

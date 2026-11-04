@@ -451,8 +451,8 @@ pub fn render_traffic_lights(
             painter.text(
                 rect_close.center(),
                 egui::Align2::CENTER_CENTER,
-                "✕",
-                FontId::proportional(11.5),
+                "",
+                FontId::proportional(15.5),
                 Color32::from_black_alpha(160),
             );
             if resp_close.clicked() {
@@ -474,8 +474,8 @@ pub fn render_traffic_lights(
             painter.text(
                 rect_min.center(),
                 egui::Align2::CENTER_CENTER,
-                "—",
-                FontId::proportional(11.5),
+                "",
+                FontId::proportional(15.5),
                 Color32::from_black_alpha(160),
             );
             if resp_min.clicked() {
@@ -497,8 +497,8 @@ pub fn render_traffic_lights(
             painter.text(
                 rect_zoom.center(),
                 egui::Align2::CENTER_CENTER,
-                "⤢",
-                FontId::proportional(11.5),
+                "",
+                FontId::proportional(15.5),
                 Color32::from_black_alpha(160),
             );
             if resp_zoom.clicked() {
@@ -573,7 +573,7 @@ pub fn render_sidebar_item_with_pin(
         icon_pos,
         egui::Align2::LEFT_CENTER,
         icon,
-        FontId::proportional(17.5),
+        FontId::proportional(21.5),
         text_color,
     );
 
@@ -583,7 +583,7 @@ pub fn render_sidebar_item_with_pin(
         label_pos,
         egui::Align2::LEFT_CENTER,
         label,
-        FontId::proportional(15.5),
+        FontId::proportional(19.5),
         text_color,
     );
 
@@ -592,8 +592,8 @@ pub fn render_sidebar_item_with_pin(
         painter.text(
             pin_pos,
             egui::Align2::RIGHT_CENTER,
-            "📌",
-            FontId::proportional(13.0),
+            "",
+            FontId::proportional(17.0),
             if is_hovered {
                 theme.text_secondary
             } else {
@@ -619,8 +619,8 @@ pub fn render_fluent_window_controls(
 
         // Minimize Button
         let min_btn = egui::Button::new(
-            egui::RichText::new("—")
-                .size(14.5)
+            egui::RichText::new("")
+                .size(18.5)
                 .color(theme.text_secondary),
         )
         .min_size(Vec2::new(42.0, 28.0))
@@ -631,10 +631,10 @@ pub fn render_fluent_window_controls(
         }
 
         // Maximize / Restore Button
-        let max_glyph = if is_max { "❐" } else { "🗖" };
+        let max_glyph = if is_max { "R" } else { "M" };
         let max_btn = egui::Button::new(
             egui::RichText::new(max_glyph)
-                .size(14.5)
+                .size(18.5)
                 .color(theme.text_secondary),
         )
         .min_size(Vec2::new(42.0, 28.0))
@@ -650,8 +650,8 @@ pub fn render_fluent_window_controls(
 
         // Close Button
         let close_btn = egui::Button::new(
-            egui::RichText::new("✕")
-                .size(15.0)
+            egui::RichText::new("")
+                .size(19.0)
                 .color(theme.text_secondary),
         )
         .min_size(Vec2::new(44.0, 28.0))
@@ -664,8 +664,8 @@ pub fn render_fluent_window_controls(
             ui.painter().text(
                 resp.rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "✕",
-                egui::FontId::proportional(15.0),
+                "",
+                egui::FontId::proportional(19.0),
                 Color32::WHITE,
             );
         }
@@ -734,7 +734,7 @@ pub fn render_segmented_switch(
             for (val, label) in options {
                 let is_active = selected.as_str() == *val;
                 let btn = ui.add(
-                    egui::Button::new(egui::RichText::new(*label).size(15.0).color(if is_active {
+                    egui::Button::new(egui::RichText::new(*label).size(19.0).color(if is_active {
                         Color32::WHITE
                     } else {
                         theme.text_muted

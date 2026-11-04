@@ -124,8 +124,9 @@ unsafe extern "system" fn dt_drag_leave(_this: *mut std::ffi::c_void) -> HResult
 
 /// Reads the file list out of an OLE IDataObject's CF_HDROP medium.
 unsafe fn files_from_data_object(data: *mut std::ffi::c_void) -> Vec<std::path::PathBuf> {
-    use windows_sys::Win32::UI::Shell::DragQueryFileW;
+    
 
+    extern "C" { fn DragQueryFileW(hdrop: *mut std::ffi::c_void, ifile: u32, lpszfile: *mut u16, cch: u32) -> u32; }
     let mut out = Vec::new();
     if data.is_null() {
         return out;
@@ -162,7 +163,7 @@ unsafe fn files_from_data_object(data: *mut std::ffi::c_void) -> Vec<std::path::
         return out;
     }
 
-    let hdrop = medium.h_global as isize;
+    let hdrop = medium.h_global;
     let count = DragQueryFileW(hdrop, 0xFFFF_FFFF, std::ptr::null_mut(), 0);
     for i in 0..count {
         let len = DragQueryFileW(hdrop, i, std::ptr::null_mut(), 0);
@@ -178,7 +179,7 @@ unsafe fn files_from_data_object(data: *mut std::ffi::c_void) -> Vec<std::path::
     }
     // Release the HGLOBAL medium ourselves when nothing owns it.
     if medium.unk_for_release.is_null() {
-        windows_sys::Win32::System::Memory::GlobalFree(medium.h_global);
+        unsafe { extern "C" { fn GlobalFree(hmem: *mut std::ffi::c_void) -> *mut std::ffi::c_void; } GlobalFree(medium.h_global); }
     }
     out
 }
@@ -203,7 +204,7 @@ unsafe extern "system" fn dt_drop(
         .map(|t| t.clone())
         .unwrap_or_else(|_| "AUTO".into());
 
-    std::thread::Builder::new()
+    let spawn_res = std::thread::Builder::new()
         .name("mossambi-drop-convert".into())
         .spawn(move || {
             for f in &files {
@@ -225,8 +226,10 @@ unsafe extern "system" fn dt_drop(
                 }
             }
             show_completion_balloon(files.len());
-        })
-        .unwrap_or_else(|e| log::error!("Drop overlay: conversion thread spawn failed: {e}"));
+        });
+    if let Err(e) = spawn_res {
+        log::error!("Drop overlay: conversion thread spawn failed: {e}");
+    }
     S_OK
 }
 
@@ -235,13 +238,20 @@ static OVERLAY_TARGET: Mutex<String> = Mutex::new(String::new());
 
 /// Tray balloon announcing the drop conversion result (best-effort).
 unsafe fn show_completion_balloon(count: usize) {
-    let Some(mut nid) = crate::daemon::shared_tray_nid() else {
+    use windows_sys::Win32::UI::Shell::{
+        Shell_NotifyIconW, NOTIFYICONDATAW, NIF_INFO, NIM_MODIFY, NIF_MESSAGE, NIF_ICON, NIF_TIP,
+    };
+    let Some(hwnd) = crate::daemon::shared_tray_nid() else {
         return;
     };
-    nid.uFlags |= 0x0000_0004; // NIF_INFO
-    let title: Vec<u16> = "Mossambi\0".encode_utf16().collect();
+    let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
+    nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+    nid.hWnd = hwnd as _;
+    nid.uID = 1001;
+    nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_INFO;
+    let title: Vec<u16> = "Mossambi ".encode_utf16().collect();
     let text: Vec<u16> = format!(
-        "{count} file(s) converted — output saved next to the source\0"
+        "{count} file(s) converted - output saved next to the source "
     )
     .encode_utf16()
     .collect();
@@ -251,7 +261,6 @@ unsafe fn show_completion_balloon(count: usize) {
     for (i, c) in text.iter().take(255).enumerate() {
         nid.szInfo[i] = *c;
     }
-    use windows_sys::Win32::UI::Shell::{Shell_NotifyIconW, NIM_MODIFY};
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
@@ -322,7 +331,7 @@ impl DropOverlayHandle {
         if hwnd != 0 {
             unsafe {
                 use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
-                PostMessageW(hwnd, WM_CLOSE, 0, 0);
+                PostMessageW(hwnd as _, WM_CLOSE, 0, 0);
             }
         }
         if let Some(w) = self.worker.take() {
@@ -334,7 +343,7 @@ impl DropOverlayHandle {
 unsafe fn run_overlay_thread(shutdown: Arc<AtomicBool>, hwnd_out: Arc<Mutex<isize>>) {
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
-        BeginPaint, CreateSolidBrush, DeleteObject, Ellipse, EndPaint, InvalidateRect, SelectObject,
+        BeginPaint, CreateSolidBrush, DeleteObject, Ellipse, EndPaint, SelectObject,
         PAINTSTRUCT,
     };
     use windows_sys::Win32::System::Ole::{OleInitialize, OleUninitialize, RegisterDragDrop, RevokeDragDrop};

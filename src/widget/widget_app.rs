@@ -33,7 +33,7 @@ pub struct MossambiWidgetApp {
     pub success_time: Option<Instant>,
     pub last_output: Option<PathBuf>,
     /// Last conversion failure, surfaced in the hub status area (previously
-    /// the widget discarded errors entirely — the user saw nothing).
+    /// the widget discarded errors entirely  the user saw nothing).
     pub last_error: Option<String>,
     pub error_time: Option<Instant>,
 
@@ -91,7 +91,7 @@ impl MossambiWidgetApp {
     pub fn start_conversion(&mut self, target_format: &str) {
         if self.is_converting {
             log::warn!(
-                "Widget conversion already in progress — ignoring request for {}",
+                "Widget conversion already in progress  ignoring request for {}",
                 target_format
             );
             return;
@@ -484,8 +484,8 @@ impl eframe::App for MossambiWidgetApp {
                     painter.text(
                         rect.center() + egui::vec2(0.0, 46.0),
                         egui::Align2::CENTER_CENTER,
-                        format!("⚠ {}", tail),
-                        egui::FontId::proportional(11.5),
+                        format!(" {}", tail),
+                        egui::FontId::proportional(15.5),
                         Color32::from_rgb(214, 69, 57),
                     );
                 }
@@ -513,9 +513,9 @@ impl eframe::App for MossambiWidgetApp {
                             .show(ui, |ui| {
                                 ui.vertical(|ui| {
                                     let theme_text = if self.geometry.theme == WidgetTheme::Dark {
-                                        "☀️ Light Mode"
+                                        " Light Mode"
                                     } else {
-                                        "🌙 Dark Mode"
+                                        " Dark Mode"
                                     };
                                     if ui.button(theme_text).clicked() {
                                         self.geometry.theme =
@@ -549,9 +549,9 @@ impl eframe::App for MossambiWidgetApp {
                                     let is_autostart =
                                         crate::core::MossambiConfig::is_autostart_configured();
                                     let autostart_label = if is_autostart {
-                                        "✓ Run at Startup"
+                                        "Disable Run at Startup"
                                     } else {
-                                        "🚀 Run at Startup"
+                                        "Enable Run at Startup"
                                     };
                                     if ui.button(autostart_label).clicked() {
                                         let _ = crate::core::MossambiConfig::set_autostart(
@@ -560,7 +560,7 @@ impl eframe::App for MossambiWidgetApp {
                                         self.show_context_menu = false;
                                     }
 
-                                    if ui.button("🖥️ Open Studio").clicked() {
+                                    if ui.button(" Open Studio").clicked() {
                                         self.show_context_menu = false;
                                         #[cfg(target_os = "windows")]
                                         let _ = std::process::Command::new("mossambi.exe")
@@ -577,11 +577,11 @@ impl eframe::App for MossambiWidgetApp {
                                         egui::RichText::new(
                                             "Win+Shift+C: Wheel\nWin+Ctrl+C: Studio",
                                         )
-                                        .size(13.5)
+                                        .size(17.5)
                                         .color(Color32::from_rgb(130, 136, 148)),
                                     );
 
-                                    if ui.button("❌ Close Widget").clicked() {
+                                    if ui.button(" Close Widget").clicked() {
                                         ctx.send_viewport_cmd(ViewportCommand::Close);
                                     }
                                 });
