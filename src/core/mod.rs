@@ -3,6 +3,7 @@
 
 pub mod async_worker;
 pub mod config;
+pub mod default_explorer;
 pub mod drag_listener;
 pub mod file_icons;
 pub mod fs_utils;

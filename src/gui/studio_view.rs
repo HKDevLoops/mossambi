@@ -2333,6 +2333,40 @@ impl StudioView {
                 cfg.enable_gesture_wakeup = gesture_enabled;
                 let _ = cfg.save();
             }
+
+            // ── Default file-manager takeover ──
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new("Default File Manager")
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            use crate::core::default_explorer::TakeoverState;
+            let state = crate::core::default_explorer::status();
+            let status_text = match state {
+                TakeoverState::Active => "Mossambi is the default file manager.",
+                TakeoverState::NotActive => "The OS default file manager is active.",
+                TakeoverState::Unknown => "Takeover status unknown on this platform.",
+            };
+            ui.label(egui::RichText::new(status_text).color(palette.text_secondary));
+            ui.horizontal(|ui| {
+                if state != TakeoverState::Active
+                    && ui.button("Make Default File Manager").clicked()
+                {
+                    match crate::core::default_explorer::take_over() {
+                        Ok(()) => log::info!("Default file manager set to Mossambi (GUI)"),
+                        Err(e) => log::error!("Default file-manager takeover failed: {e:#}"),
+                    }
+                }
+                if ui.button("Restore OS Default").clicked() {
+                    match crate::core::default_explorer::restore() {
+                        Ok(()) => log::info!("Default file manager restored (GUI)"),
+                        Err(e) => log::error!("Default file-manager restore failed: {e:#}"),
+                    }
+                }
+            });
         });
 
         ui.add_space(12.0);

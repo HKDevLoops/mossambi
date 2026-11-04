@@ -57,6 +57,24 @@ pub fn handle_daemon_command(action: &str) -> Result<()> {
             let _ = cfg.save();
             println!("✓ File drag mouse gesture activation disabled.");
         }
+        "takeover" => {
+            crate::core::default_explorer::take_over()?;
+            println!("✓ Mossambi registered as the default file manager.");
+            println!("  Open folders/drives anywhere to launch the Mossambi Explorer.");
+            println!("  Revert anytime with: mossambi daemon release");
+        }
+        "release" => {
+            crate::core::default_explorer::restore()?;
+            println!("✓ Default file manager restored.");
+        }
+        "default-status" => {
+            use crate::core::default_explorer::TakeoverState;
+            match crate::core::default_explorer::status() {
+                TakeoverState::Active => println!("Default file manager: MOSSAMBI (active)"),
+                TakeoverState::NotActive => println!("Default file manager: OS default (Mossambi not active)"),
+                TakeoverState::Unknown => println!("Default file manager: unknown on this platform"),
+            }
+        }
         "install" => {
             crate::core::MossambiConfig::set_autostart(true)?;
             let mut cfg = crate::core::MossambiConfig::load();
