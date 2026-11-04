@@ -115,6 +115,24 @@ fn truncate_str(s: &str, max: usize) -> String {
 
 pub struct BenchmarkEngine;
 
+/// Removes the benchmark temp tree on ANY exit path (Drop guard), including
+/// early error returns that previously leaked `mossambi_bench_<pid>` dirs.
+struct TempDirGuard(std::path::PathBuf);
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_dir_all(&self.0) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log::warn!(
+                    "Failed to clean benchmark temp dir {}: {}",
+                    self.0.display(),
+                    e
+                );
+            }
+        }
+    }
+}
+
 impl BenchmarkEngine {
     /// Benchmark conversion of `input` file into target format.
     /// If `target_format` is None, chooses the optimal format for this file's category.
@@ -164,9 +182,19 @@ impl BenchmarkEngine {
         // Create temporary directory for benchmark output to avoid cluttering source directory during testing
         let temp_dir = std::env::temp_dir().join(format!("mossambi_bench_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&temp_dir);
+        // Drop guard: the temp tree is removed on every exit path — error
+        // early-returns included — not just on the happy path.
+        let _temp_guard = TempDirGuard(temp_dir.clone());
 
         // Warm up memory cache
         let _ = std::fs::read(input);
+
+        log::info!(
+            "benchmark start: {} -> {} (size {:.2} MB)",
+            input.display(),
+            target,
+            input_size_mb
+        );
 
         // Execute timed conversion
         let start = Instant::now();
@@ -257,9 +285,7 @@ impl BenchmarkEngine {
             duration_ms, throughput_mb_per_sec, online_speedup, offline_cli_speedup
         );
 
-        // Clean up temp output
-        let _ = std::fs::remove_file(&output_path);
-        let _ = std::fs::remove_dir(&temp_dir);
+        // Temp files are reclaimed by the Drop guard above; nothing to clean here.
 
         Ok(BenchmarkReport {
             input_file: input.to_path_buf(),

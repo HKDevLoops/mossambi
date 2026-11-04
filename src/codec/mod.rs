@@ -30,7 +30,8 @@ use rayon::prelude::*;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LosslessMode {
@@ -61,63 +62,155 @@ pub fn transcode_file(
             .context("No output generated in ALL transcode");
     }
 
-    let output_path = resolve_clean_sibling_output_path(input, &target_upper, custom_dir);
+    // Archive extraction targets a directory, not a converted file — handle
+    // it before the scratch-file plumbing (nothing atomic to rename).
+    if category == FileCategory::Archive && target_upper == "EXTRACT" {
+        let parent = input.parent().unwrap_or_else(|| Path::new("."));
+        let stem = input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("extracted");
+        let dest = custom_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(|| parent.join(stem));
 
-    match category {
-        FileCategory::Image => {
-            if target_upper == "PDF" {
-                convert_image_to_pdf_vector(input, &output_path, None)?;
-            } else {
-                convert_image_zero_loss(input, &output_path, &target_upper, mode)?;
-            }
-        }
-        FileCategory::Document => {
-            convert_document_native(input, &output_path, &in_ext, &target_upper)?;
-        }
-        FileCategory::Spreadsheet => {
-            convert_spreadsheet_native(input, &output_path, &in_ext, &target_upper)?;
-        }
-        FileCategory::Presentation => {
-            convert_presentation_native(input, &output_path, &in_ext, &target_upper)?;
-        }
-        FileCategory::Archive => {
-            if target_upper == "EXTRACT" {
-                let parent = input.parent().unwrap_or_else(|| Path::new("."));
-                let stem = input
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("extracted");
-                let dest = custom_dir
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| parent.join(stem));
-                unpack_archive(input, &dest)?;
+        let t0 = Instant::now();
+        log::info!(
+            "convert start: {} -> {} (category=Archive, target=EXTRACT)",
+            input.display(),
+            dest.display()
+        );
+        match unpack_archive(input, &dest) {
+            Ok(()) => {
+                log::info!(
+                    "convert ok: {} -> {} in {:.2?}",
+                    input.display(),
+                    dest.display(),
+                    t0.elapsed()
+                );
                 return Ok(dest);
             }
-
-            let arch_type = ArchiveType::from_extension(&target_upper).unwrap_or(ArchiveType::Zip);
-            pack_archive(&[input.to_path_buf()], &output_path, arch_type)?;
-        }
-        FileCategory::Audio => {
-            convert_audio_zero_loss(input, &output_path, &target_upper, mode)?;
-        }
-        FileCategory::Video => {
-            convert_video_zero_loss(input, &output_path, &target_upper, mode)?;
-        }
-        FileCategory::Subtitle => {
-            convert_subtitles(input, &output_path, &target_upper)?;
-        }
-        FileCategory::Unknown => {
-            // Check if input is text-like
-            if is_text_file(input) {
-                convert_document_native(input, &output_path, &in_ext, &target_upper)?;
-            } else {
-                // Try image transcoding
-                convert_image_zero_loss(input, &output_path, &target_upper, mode)?;
+            Err(e) => {
+                log::error!(
+                    "convert failed: {} -> {} after {:.2?}: {:#}",
+                    input.display(),
+                    dest.display(),
+                    t0.elapsed(),
+                    e
+                );
+                return Err(e);
             }
         }
     }
 
-    Ok(output_path)
+    let output_path = resolve_clean_sibling_output_path(input, &target_upper, custom_dir);
+
+    // Archives unpack to directories / pack to explicit archive paths — they
+    // keep writing to their final location. Everything else goes through an
+    // atomic scratch file (see part_path_for) so a crash or a killed ffmpeg
+    // can never leave a truncated file masquerading under the real name.
+    let use_atomic_part = !matches!(category, FileCategory::Archive);
+    let work_path = if use_atomic_part {
+        part_path_for(&output_path)
+    } else {
+        output_path.clone()
+    };
+    // Clear a stale scratch file left behind by a previous crashed run.
+    let _ = fs::remove_file(&work_path);
+
+    let t0 = Instant::now();
+    log::info!(
+        "convert start: {} -> {} (category={:?}, target={})",
+        input.display(),
+        output_path.display(),
+        category,
+        target_upper
+    );
+
+    let outcome: Result<()> = match category {
+        FileCategory::Image => {
+            if target_upper == "PDF" {
+                convert_image_to_pdf_vector(input, &work_path, None)
+            } else {
+                convert_image_zero_loss(input, &work_path, &target_upper, mode)
+            }
+        }
+        FileCategory::Document => {
+            convert_document_native(input, &work_path, &in_ext, &target_upper)
+        }
+        FileCategory::Spreadsheet => {
+            convert_spreadsheet_native(input, &work_path, &in_ext, &target_upper)
+        }
+        FileCategory::Presentation => {
+            convert_presentation_native(input, &work_path, &in_ext, &target_upper)
+        }
+        FileCategory::Archive => {
+            let arch_type =
+                ArchiveType::from_extension(&target_upper).unwrap_or(ArchiveType::Zip);
+            pack_archive(&[input.to_path_buf()], &work_path, arch_type)
+        }
+        FileCategory::Audio => convert_audio_zero_loss(input, &work_path, &target_upper, mode),
+        FileCategory::Video => convert_video_zero_loss(input, &work_path, &target_upper, mode),
+        FileCategory::Subtitle => convert_subtitles(input, &work_path, &target_upper),
+        FileCategory::Unknown => {
+            // Check if input is text-like
+            if is_text_file(input) {
+                convert_document_native(input, &work_path, &in_ext, &target_upper)
+            } else {
+                // Try image transcoding
+                convert_image_zero_loss(input, &work_path, &target_upper, mode)
+            }
+        }
+    };
+
+    // Finalize: sanity-check the scratch payload, then atomically rename it
+    // onto the final name. Any failure removes the scratch file.
+    let min_bytes = match category {
+        FileCategory::Image
+        | FileCategory::Audio
+        | FileCategory::Document
+        | FileCategory::Spreadsheet
+        | FileCategory::Video
+        | FileCategory::Presentation => 64,
+        // Subtitles and unknown/text-like inputs may legitimately be tiny.
+        _ => 1,
+    };
+    let finalized: Result<()> = outcome.and_then(|()| {
+        if use_atomic_part {
+            verify_output_sanity(&work_path, min_bytes)?;
+            fs::rename(&work_path, &output_path).with_context(|| {
+                format!(
+                    "Failed to finalize output {} (scratch: {})",
+                    output_path.display(),
+                    work_path.display()
+                )
+            })?;
+        }
+        Ok(())
+    });
+
+    match finalized {
+        Ok(()) => {
+            log::info!(
+                "convert ok: {} -> {} in {:.2?}",
+                input.display(),
+                output_path.display(),
+                t0.elapsed()
+            );
+            Ok(output_path)
+        }
+        Err(e) => {
+            discard_part(&work_path);
+            log::error!(
+                "convert failed: {} -> {} after {:.2?}: {:#}",
+                input.display(),
+                output_path.display(),
+                t0.elapsed(),
+                e
+            );
+            Err(e)
+        }
+    }
 }
 
 /// Executes parallel transcoding to ALL valid formats in that category simultaneously.
@@ -136,6 +229,15 @@ pub fn transcode_to_all_formats(
         .map(|tgt| transcode_file(input, tgt, mode, custom_dir))
         .collect();
 
+    let failures = results.iter().filter(|r| r.is_err()).count();
+    if failures > 0 {
+        log::warn!(
+            "ALL transcode for {}: {} target(s) failed",
+            input.display(),
+            failures
+        );
+    }
+
     let mut successful = Vec::new();
     for path in results.into_iter().flatten() {
         successful.push(path);
@@ -146,6 +248,53 @@ pub fn transcode_to_all_formats(
     }
 
     Ok(successful)
+}
+
+// ---------------------------------------------------------------------------
+// Atomic scratch-file helpers
+// ---------------------------------------------------------------------------
+
+/// Sibling scratch path for `final_out`: inserts `.part` *before* the last
+/// extension (`song.flac` -> `song.part.flac`). Keeping the real extension as
+/// the suffix preserves extension-guessed tooling (ffmpeg muxer detection,
+/// image-crate format selection) while the name is still clearly a partial.
+pub(crate) fn part_path_for(final_out: &Path) -> PathBuf {
+    let name = final_out
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let scratch = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => format!("{}.part.{}", stem, ext),
+        _ => format!("{}.part", name),
+    };
+    final_out.with_file_name(scratch)
+}
+
+/// Removes the scratch file left behind by a failed conversion (best-effort:
+/// the file is garbage at that point, never surface the cleanup error).
+fn discard_part(part_path: &Path) {
+    if let Err(e) = fs::remove_file(part_path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("Could not remove scratch file {}: {}", part_path.display(), e);
+        }
+    }
+}
+
+/// Sanity-checks a freshly written output: it must exist and carry a real
+/// payload. Catches ffmpeg/decoder failures that exit 0 while emitting nothing
+/// usable, and zero/1-byte phantom files from truncated writes.
+fn verify_output_sanity(path: &Path, min_bytes: u64) -> Result<()> {
+    let meta = fs::metadata(path)
+        .with_context(|| format!("Output file was not created: {}", path.display()))?;
+    if meta.len() < min_bytes {
+        bail!(
+            "Output missing or truncated (got {} bytes, expected > {}): {}",
+            meta.len(),
+            min_bytes,
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -266,12 +415,29 @@ fn convert_document_native(
         }
     }
 
-    // 1. Extract plain text content from various source document formats
+    // 1. Extract plain text content from various source document formats.
+    // Extraction failures are honest errors: the previous behaviour fell back
+    // to a raw byte dump / empty string and produced garbage "successful"
+    // output files.
     let document_text = match src_ext {
-        "DOCX" => extract_text_from_docx(input)
-            .unwrap_or_else(|_| fs::read_to_string(input).unwrap_or_default()),
-        "PDF" => extract_text_from_pdf(input).unwrap_or_else(|_| String::new()),
-        _ => fs::read_to_string(input).unwrap_or_default(),
+        "DOCX" => extract_text_from_docx(input).with_context(|| {
+            format!(
+                "Failed to extract text from DOCX (file may be corrupt or not a real DOCX): {}",
+                input.display()
+            )
+        })?,
+        "PDF" => extract_text_from_pdf(input).with_context(|| {
+            format!(
+                "Failed to extract text from PDF (scanned/image-only PDFs contain no extractable text): {}",
+                input.display()
+            )
+        })?,
+        _ => fs::read_to_string(input).with_context(|| {
+            format!(
+                "Input document is not readable UTF-8 text: {}",
+                input.display()
+            )
+        })?,
     };
 
     let title = input
@@ -438,6 +604,12 @@ fn convert_spreadsheet_native(
                         wtr.write_record(&rec)?;
                     }
                     wtr.flush()?;
+                } else {
+                    bail!(
+                        "Spreadsheet {} contains no worksheets — nothing to convert to {}",
+                        input.display(),
+                        dst_ext
+                    );
                 }
             } else if ["CSV", "TSV"].contains(&src_ext) {
                 let in_delim = if src_ext == "TSV" { b'\t' } else { b',' };
@@ -488,11 +660,20 @@ fn convert_spreadsheet_native(
                     }
                 }
                 workbook.save(output)?;
+            } else {
+                bail!(
+                    "Spreadsheet conversion {} -> XLSX is not supported (supported sources: CSV, TSV, XLS, ODS)",
+                    src_ext
+                );
             }
         }
         _ => {
-            let content = fs::read(input)?;
-            fs::write(output, content)?;
+            // Never blind-copy bytes: writing XLSX payloads under a foreign
+            // extension produced corrupt, mislabeled files.
+            bail!(
+                "Spreadsheet conversion to .{} is not supported (supported targets: CSV, TSV, XLSX, HTML, PDF)",
+                dst_ext.to_lowercase()
+            );
         }
     }
 
@@ -627,35 +808,104 @@ fn convert_spreadsheet_to_html(input: &Path, output: &Path) -> Result<()> {
 
 fn convert_presentation_native(
     input: &Path,
-    output: &Path,
+    _output: &Path,
     _src_ext: &str,
     target_format: &str,
 ) -> Result<()> {
-    let title = input
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("Presentation");
-    let content = format!(
-        "# {}\n\n[Presentation Slide Deck]\nConverted with Mossambi Zero-Loss Engine.\n",
-        title
+    // The previous stub wrote placeholder slide text and reported success,
+    // which silently destroyed user trust in the output. Fail honestly until
+    // a real lossless presentation pipeline exists.
+    bail!(
+        "PPTX/ODP→{} conversion is not yet lossless-capable (input: {}). No output was written.",
+        target_format,
+        input.display()
     );
+}
 
-    match target_format {
-        "PDF" => {
-            render_text_to_pdf(&content, output, &TextPdfSettings::default())?;
-        }
-        "HTML" | "HTM" => {
-            let html = format!(
-                "<!DOCTYPE html><html><head><title>{}</title></head><body><h1>{}</h1><p>Converted with Mossambi.</p></body></html>",
-                title, title
-            );
-            fs::write(output, html)?;
-        }
-        _ => {
-            fs::write(output, content.as_bytes())?;
-        }
+// ---------------------------------------------------------------------------
+// FFmpeg subprocess plumbing (piped stderr, Windows-no-console)
+// ---------------------------------------------------------------------------
+
+/// Explicit ffmpeg output muxer for a target extension. Required because we
+/// transcode into a scratch file first and must not depend on extension
+/// guessing for correct container selection.
+fn ffmpeg_muxer(target: &str) -> Option<&'static str> {
+    Some(match target {
+        // Audio containers / codecs
+        "FLAC" => "flac",
+        "WAV" => "wav",
+        "AIFF" => "aiff",
+        "ALAC" | "M4A" => "ipod",
+        "MP3" => "mp3",
+        "AAC" => "adts",
+        "OPUS" | "OGG" => "ogg",
+        "WMA" => "asf",
+        // Video containers
+        "MP4" | "M4V" => "mp4",
+        "MOV" => "mov",
+        "MKV" => "matroska",
+        "TS" | "MTS" | "M2TS" => "mpegts",
+        "WEBM" => "webm",
+        "AVI" => "avi",
+        "GIF" => "gif",
+        "PRORES" => "mov",
+        _ => return None,
+    })
+}
+
+/// Runs ffmpeg with stdin/stdout nulled and stderr PIPED so failures report
+/// the actual ffmpeg diagnosis instead of a bare exit status. Keeps the last
+/// ~2000 characters of stderr and attaches them to the error context.
+fn run_ffmpeg(mut cmd: Command, stage: &str) -> Result<()> {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
+        cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+    }
+
+    let mut child = cmd.spawn().with_context(|| {
+        format!(
+            "Failed to run FFmpeg for {stage}. Ensure FFmpeg is installed and accessible in PATH."
+        )
+    })?;
+
+    // Drain stderr while ffmpeg runs (it streams progress there), then keep
+    // only the tail — the summary lines right before the error are the useful
+    // part of a multi-megabyte progress log.
+    let mut stderr_tail = String::new();
+    if let Some(mut err_pipe) = child.stderr.take() {
+        let _ = err_pipe.read_to_string(&mut stderr_tail);
+    }
+    let status = child
+        .wait()
+        .context("Failed to wait for the FFmpeg process to finish")?;
+
+    if !status.success() {
+        bail!(
+            "FFmpeg {stage} failed ({status}). ffmpeg stderr (tail):\n{}",
+            stderr_tail_of(&stderr_tail, 2000)
+        );
     }
     Ok(())
+}
+
+/// Last `max_chars` characters of `s`, char-boundary safe.
+fn stderr_tail_of(s: &str, max_chars: usize) -> String {
+    let total = s.chars().count();
+    if total <= max_chars {
+        return s.trim_end().to_string();
+    }
+    s.chars()
+        .skip(total - max_chars)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -732,22 +982,14 @@ fn convert_audio_zero_loss(
         }
     }
 
+    // Force the output muxer so the scratch (.part) filename never confuses
+    // ffmpeg's container detection.
+    if let Some(muxer) = ffmpeg_muxer(target_format) {
+        cmd.arg("-f").arg(muxer);
+    }
     cmd.arg(output);
-    cmd.stdin(std::process::Stdio::null());
 
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
-        cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
-    }
-
-    let status = cmd.status().context("Failed to run FFmpeg for audio transcode. Ensure FFmpeg is installed and accessible in PATH.")?;
-    if !status.success() {
-        bail!("FFmpeg audio transcode failed with status {:?}", status);
-    }
-
+    run_ffmpeg(cmd, "audio transcode")?;
     Ok(())
 }
 
@@ -813,21 +1055,13 @@ fn convert_video_zero_loss(
                 cmd.args(["-c:a", "aac", "-b:a", "320k"]);
             }
         }
+        // Force the muxer so the scratch (.part) filename cannot confuse ffmpeg.
+        if let Some(muxer) = ffmpeg_muxer(target_format) {
+            cmd.arg("-f").arg(muxer);
+        }
         cmd.arg(output);
-        cmd.stdin(std::process::Stdio::null());
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
-            cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
-        }
-        let status = cmd
-            .status()
-            .context("Failed to run FFmpeg for audio extraction.")?;
-        if !status.success() {
-            bail!("FFmpeg audio extraction failed with status {:?}", status);
-        }
+
+        run_ffmpeg(cmd, "audio extraction")?;
         return Ok(());
     }
 
@@ -848,29 +1082,36 @@ fn convert_video_zero_loss(
         if matches!(target_format, "MP4" | "MOV" | "M4V") {
             remux_cmd.args(["-movflags", "+faststart"]);
         }
-        remux_cmd.arg(output);
-        remux_cmd.stdin(std::process::Stdio::null());
-
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
-            remux_cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+        if let Some(muxer) = ffmpeg_muxer(target_format) {
+            remux_cmd.arg("-f").arg(muxer);
         }
+        remux_cmd.arg(output);
 
-        if let Ok(status) = remux_cmd.status() {
-            if status.success()
-                && output.exists()
-                && fs::metadata(output)
-                    .map(|m| m.len() > 1024)
-                    .unwrap_or(false)
-            {
-                return Ok(());
+        match run_ffmpeg(remux_cmd, "stream-copy remux") {
+            Ok(()) if output.exists() => {
+                if fs::metadata(output).map(|m| m.len() > 1024).unwrap_or(false) {
+                    return Ok(());
+                }
+                log::warn!(
+                    "Remux output suspiciously small ({}), re-encoding instead",
+                    output.display()
+                );
+                let _ = fs::remove_file(output);
+            }
+            Ok(()) => {
+                let _ = fs::remove_file(output);
+            }
+            Err(remux_err) => {
+                // Stream copy is impossible for this codec/container pair —
+                // fall back to the full encode pipeline below.
+                log::warn!(
+                    "Remux fast-path failed for target {} (will re-encode): {:#}",
+                    target_format,
+                    remux_err
+                );
+                let _ = fs::remove_file(output);
             }
         }
-        // Clean up partial output from failed remux attempt before re-encode fallback
-        let _ = fs::remove_file(output);
     }
 
     // 2. STUDIO ENCODING PIPELINE (DaVinci Resolve / Premiere Pro Broadcast Standard)
@@ -972,22 +1213,12 @@ fn convert_video_zero_loss(
         }
     }
 
+    if let Some(muxer) = ffmpeg_muxer(target_format) {
+        cmd.arg("-f").arg(muxer);
+    }
     cmd.arg(output);
-    cmd.stdin(std::process::Stdio::null());
 
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
-        cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
-    }
-
-    let status = cmd.status().context("Failed to run FFmpeg for video conversion. Ensure FFmpeg is installed and accessible in PATH.")?;
-    if !status.success() {
-        bail!("FFmpeg video conversion failed with status {:?}", status);
-    }
-
+    run_ffmpeg(cmd, "video conversion")?;
     Ok(())
 }
 
@@ -1015,21 +1246,47 @@ fn convert_subtitles(input: &Path, output: &Path, target_ext: &str) -> Result<()
     let converted = match (in_ext.as_str(), target_ext) {
         ("SRT", "VTT") => {
             let re = SRT_TO_VTT_RE.get_or_init(|| {
-                regex::Regex::new(r"(\d{2}:\d{2}:\d{2}),(\d{3})").expect("valid regex")
+                regex::Regex::new(r"(\d{2}:\d{2}:\d{2}),(\d{3})").unwrap_or_else(|err| {
+                    log::error!(
+                        "SRT→VTT timestamp regex failed to compile ({}); \
+                         falling back to a pass-through (timestamps keep commas)",
+                        err
+                    );
+                    // Statically valid pattern that never matches: graceful
+                    // no-op instead of a panic.
+                    regex::Regex::new(r"\A\x00mossambi-noop\x00\z")
+                        .expect("static no-op regex is valid by construction")
+                })
             });
             format!("WEBVTT\n\n{}", re.replace_all(&raw, "$1.$2"))
         }
         ("VTT", "SRT") => {
             let body = raw.trim_start_matches("WEBVTT").trim();
             let re = VTT_TO_SRT_RE.get_or_init(|| {
-                regex::Regex::new(r"(\d{2}:\d{2}:\d{2})\.(\d{3})").expect("valid regex")
+                regex::Regex::new(r"(\d{2}:\d{2}:\d{2})\.(\d{3})").unwrap_or_else(|err| {
+                    log::error!(
+                        "VTT→SRT timestamp regex failed to compile ({}); \
+                         falling back to a pass-through (timestamps keep dots)",
+                        err
+                    );
+                    regex::Regex::new(r"\A\x00mossambi-noop\x00\z")
+                        .expect("static no-op regex is valid by construction")
+                })
             });
             re.replace_all(body, "$1,$2").to_string()
         }
         (_, "TXT") => {
             let re = TXT_CLEANUP_RE.get_or_init(|| {
                 regex::Regex::new(r"(?m)^\d+\r?$|^\d{2}:\d{2}:\d{2}[,\.]\d{3}.*|^WEBVTT.*")
-                    .expect("valid regex")
+                    .unwrap_or_else(|err| {
+                        log::error!(
+                            "Subtitle cleanup regex failed to compile ({}); \
+                             falling back to line trimming only",
+                            err
+                        );
+                        regex::Regex::new(r"\A\x00mossambi-noop\x00\z")
+                            .expect("static no-op regex is valid by construction")
+                    })
             });
             re.replace_all(&raw, "")
                 .lines()

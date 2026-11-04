@@ -162,7 +162,32 @@ pub fn convert_text_to_pdf_vector(
         cfg.title = Some(doc_title);
     }
 
-    render_text_to_pdf(&raw_text, output_path, &cfg)
+    let t0 = std::time::Instant::now();
+    log::info!(
+        "vector PDF start: {} -> {} ({} chars)",
+        input_path.display(),
+        output_path.display(),
+        raw_text.len()
+    );
+    match render_text_to_pdf(&raw_text, output_path, &cfg) {
+        Ok(()) => {
+            log::info!(
+                "vector PDF ok: {} in {:.2?}",
+                output_path.display(),
+                t0.elapsed()
+            );
+            Ok(())
+        }
+        Err(e) => {
+            log::error!(
+                "vector PDF failed: {} after {:.2?}: {:#}",
+                output_path.display(),
+                t0.elapsed(),
+                e
+            );
+            Err(e)
+        }
+    }
 }
 
 /// Core renderer: converts string slice to pure vector PDF document.
@@ -499,21 +524,70 @@ pub fn render_text_to_pdf(text: &str, output_path: &Path, cfg: &TextPdfSettings)
     });
     doc.trailer.set("Root", catalog_id);
 
-    // Save document to file
-    let mut file = fs::File::create(output_path).with_context(|| {
-        format!(
-            "Failed to create destination PDF: {}",
-            output_path.display()
-        )
-    })?;
-    doc.save_to(&mut file)
-        .with_context(|| "Failed to write PDF binary stream")?;
+    // Save document to file — atomically: write the .part scratch sibling and
+    // rename onto the final path only on success, so a crash mid-write can
+    // never leave a truncated PDF under the real name.
+    let scratch_path = super::part_path_for(output_path);
+    let write_result: Result<()> = (|| {
+        let mut file = fs::File::create(&scratch_path).with_context(|| {
+            format!(
+                "Failed to create destination PDF: {}",
+                scratch_path.display()
+            )
+        })?;
+        doc.save_to(&mut file)
+            .with_context(|| "Failed to write PDF binary stream")?;
+        Ok(())
+    })();
 
-    Ok(())
+    match write_result {
+        Ok(()) => {
+            fs::rename(&scratch_path, output_path).with_context(|| {
+                format!(
+                    "Failed to finalize PDF output {} (scratch: {})",
+                    output_path.display(),
+                    scratch_path.display()
+                )
+            })
+        }
+        Err(e) => {
+            let _ = fs::remove_file(&scratch_path);
+            Err(e)
+        }
+    }
 }
 
 /// Converts an image file (PNG, JPG, WEBP, TIFF, BMP) into a PDF container with 100% vector fidelity and zero resampling loss.
 pub fn convert_image_to_pdf_vector(
+    input_path: &Path,
+    output_path: &Path,
+    target_dpi: Option<f32>,
+) -> Result<()> {
+    let t0 = std::time::Instant::now();
+    log::info!(
+        "image→PDF start: {} -> {} (dpi {:?})",
+        input_path.display(),
+        output_path.display(),
+        target_dpi
+    );
+    let result = convert_image_to_pdf_vector_inner(input_path, output_path, target_dpi);
+    match &result {
+        Ok(()) => log::info!(
+            "image→PDF ok: {} in {:.2?}",
+            output_path.display(),
+            t0.elapsed()
+        ),
+        Err(e) => log::error!(
+            "image→PDF failed: {} after {:.2?}: {:#}",
+            output_path.display(),
+            t0.elapsed(),
+            e
+        ),
+    }
+    result
+}
+
+fn convert_image_to_pdf_vector_inner(
     input_path: &Path,
     output_path: &Path,
     target_dpi: Option<f32>,
@@ -619,7 +693,25 @@ pub fn convert_image_to_pdf_vector(
     });
     doc.trailer.set("Root", catalog_id);
 
-    let mut file = fs::File::create(output_path)?;
-    doc.save_to(&mut file)?;
-    Ok(())
+    // Atomic save: write the .part scratch sibling, rename on success.
+    let scratch_path = super::part_path_for(output_path);
+    let write_result: Result<()> = (|| {
+        let mut file = fs::File::create(&scratch_path)?;
+        doc.save_to(&mut file)?;
+        Ok(())
+    })();
+
+    match write_result {
+        Ok(()) => fs::rename(&scratch_path, output_path).with_context(|| {
+            format!(
+                "Failed to finalize image-PDF output {} (scratch: {})",
+                output_path.display(),
+                scratch_path.display()
+            )
+        }),
+        Err(e) => {
+            let _ = fs::remove_file(&scratch_path);
+            Err(e)
+        }
+    }
 }

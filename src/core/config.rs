@@ -549,15 +549,65 @@ impl MossambiConfig {
             }
         }
 
+        // NOTE: load() is side-effect free. A missing config simply starts
+        // from defaults in memory; the first user-initiated `save()`
+        // materialises the file. Writing defaults from inside load() used to
+        // race with the per-frame GUI load and clobber freshly written prefs.
         let cfg = if stamp.is_some() {
-            fs::read_to_string(&path)
-                .ok()
-                .and_then(|content| serde_json::from_str::<MossambiConfig>(&content).ok())
-                .unwrap_or_default()
+            match fs::read_to_string(&path) {
+                Ok(content) => match serde_json::from_str::<MossambiConfig>(&content) {
+                    Ok(mut parsed) => {
+                        // Validation clamp: 0 stays "auto", values above the
+                        // 64-thread ceiling are capped on load.
+                        let raw_threads = parsed.worker_threads;
+                        parsed.worker_threads = raw_threads.min(64);
+                        if parsed.worker_threads != raw_threads {
+                            log::warn!(
+                                "config.worker_threads = {} exceeds the 64-thread ceiling — clamped to {}",
+                                raw_threads,
+                                parsed.worker_threads
+                            );
+                        }
+                        parsed
+                    }
+                    Err(parse_err) => {
+                        // Corrupt config: keep a recoverable backup before
+                        // defaults take over, so the next save() can never
+                        // destroy the user's restorable configuration.
+                        let ts = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        let backup = path.with_extension(format!("json.backup-{}", ts));
+                        match fs::copy(&path, &backup) {
+                            Ok(_) => log::warn!(
+                                "Corrupt config at {} ({}); backed up to {} and loaded defaults",
+                                path.display(),
+                                parse_err,
+                                backup.display()
+                            ),
+                            Err(copy_err) => log::warn!(
+                                "Corrupt config at {} ({}); backup to {} failed ({}), loaded defaults",
+                                path.display(),
+                                parse_err,
+                                backup.display(),
+                                copy_err
+                            ),
+                        }
+                        Self::default()
+                    }
+                },
+                Err(read_err) => {
+                    log::warn!(
+                        "Config file unreadable at {} ({}); loaded defaults",
+                        path.display(),
+                        read_err
+                    );
+                    Self::default()
+                }
+            }
         } else {
-            let default_cfg = Self::default();
-            let _ = default_cfg.save();
-            return default_cfg;
+            Self::default()
         };
 
         if let Ok(mut guard) = cache.lock() {
