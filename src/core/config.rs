@@ -217,6 +217,143 @@ pub enum OutputMode {
     Custom,
 }
 
+/// How selection checkboxes are presented in the explorer surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckboxMode {
+    /// Checkbox always visible on every row / tile.
+    #[default]
+    Always,
+    /// Checkbox only materialises while the pointer is over the row / tile.
+    Hover,
+    /// No checkboxes at all (multi-select still works via Ctrl / Shift).
+    Off,
+}
+
+impl CheckboxMode {
+    pub fn all() -> &'static [CheckboxMode] {
+        &[CheckboxMode::Always, CheckboxMode::Hover, CheckboxMode::Off]
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Always => "Always visible",
+            Self::Hover => "On hover only",
+            Self::Off => "Off",
+        }
+    }
+
+    pub fn visible_for(&self, hovered: bool) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Hover => hovered,
+            Self::Off => false,
+        }
+    }
+}
+
+/// Visual treatment used for the explorer's right-click menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MenuStyle {
+    /// Windows 11 Explorer shell layout and wording.
+    #[default]
+    Windows,
+    /// macOS Finder layout and wording.
+    Finder,
+    /// Linux / Nautilus layout and wording.
+    Linux,
+}
+
+impl MenuStyle {
+    pub fn all() -> &'static [MenuStyle] {
+        &[MenuStyle::Windows, MenuStyle::Finder, MenuStyle::Linux]
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Windows => "Windows Explorer",
+            Self::Finder => "macOS Finder",
+            Self::Linux => "Linux (Nautilus)",
+        }
+    }
+}
+
+/// Motion primitive used for a single animated surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AnimStyle {
+    /// Critically-damped spring — the UX best-practice default.
+    #[default]
+    Spring,
+    /// Fast ease-out curve — snappy, no overshoot.
+    Snappy,
+    /// Linear opacity fade.
+    Fade,
+    /// Motion disabled entirely.
+    None,
+}
+
+impl AnimStyle {
+    pub fn all() -> &'static [AnimStyle] {
+        &[
+            AnimStyle::Spring,
+            AnimStyle::Snappy,
+            AnimStyle::Fade,
+            AnimStyle::None,
+        ]
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Spring => "Spring",
+            Self::Snappy => "Snappy",
+            Self::Fade => "Fade",
+            Self::None => "None",
+        }
+    }
+}
+
+/// Per-feature motion configuration. Every explorer/widget animation can be
+/// re-tuned independently from Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AnimationSettings {
+    #[serde(default)]
+    pub hover: AnimStyle,
+    #[serde(default)]
+    pub selection: AnimStyle,
+    #[serde(default)]
+    pub open: AnimStyle,
+    #[serde(default)]
+    pub peek: AnimStyle,
+    #[serde(default)]
+    pub toolbar: AnimStyle,
+    #[serde(default)]
+    pub widget: AnimStyle,
+    #[serde(default)]
+    pub scroll: AnimStyle,
+}
+
+/// Accessor signature for one animated field inside [`AnimationSettings`].
+pub type AnimFieldAccessor = fn(&mut AnimationSettings) -> &mut AnimStyle;
+
+/// The full tuple describing one animation dropdown in Settings.
+pub type AnimField = (&'static str, &'static str, AnimFieldAccessor);
+
+impl AnimationSettings {
+    pub fn all_fields() -> [AnimField; 7] {
+        [
+            ("hover", "Hover", |s| &mut s.hover),
+            ("selection", "Selection", |s| &mut s.selection),
+            ("open", "Open / close", |s| &mut s.open),
+            ("peek", "Peek preview", |s| &mut s.peek),
+            ("toolbar", "Toolbar", |s| &mut s.toolbar),
+            ("widget", "Radial widget", |s| &mut s.widget),
+            ("scroll", "Scroll", |s| &mut s.scroll),
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MossambiConfig {
     pub theme_mode: ThemeMode,
@@ -256,6 +393,44 @@ pub struct MossambiConfig {
     pub icon_pack: String,
     #[serde(default)]
     pub font_family: Option<String>,
+    #[serde(default = "default_grid_icon_size")]
+    pub grid_icon_size: u32, // 64..160
+    #[serde(default)]
+    pub checkbox_mode: CheckboxMode,
+    #[serde(default)]
+    pub menu_style: MenuStyle,
+    #[serde(default)]
+    pub animations: AnimationSettings,
+    #[serde(default = "default_explorer_zoom")]
+    pub explorer_zoom: u8, // 0 = smallest, 4 = largest
+    #[serde(default = "default_background_work")]
+    pub background_work: bool,
+    #[serde(default = "default_worker_threads")]
+    pub worker_threads: u8,
+    /// Uncapped frame rate: disables vsync and drives continuous repaints
+    /// for the highest possible responsiveness ("Max FPS" in Performance).
+    #[serde(default = "default_max_fps")]
+    pub max_fps: bool,
+}
+
+fn default_background_work() -> bool {
+    true
+}
+
+fn default_worker_threads() -> u8 {
+    0 // 0 = auto (available_parallelism)
+}
+
+fn default_max_fps() -> bool {
+    true
+}
+
+fn default_explorer_zoom() -> u8 {
+    2
+}
+
+fn default_grid_icon_size() -> u32 {
+    92
 }
 
 fn default_tui_transparent() -> bool {
@@ -325,9 +500,29 @@ impl Default for MossambiConfig {
             tui_transparent_bg: true,
             icon_pack: "macos".to_string(),
             font_family: None,
+            grid_icon_size: default_grid_icon_size(),
+            checkbox_mode: CheckboxMode::default(),
+            menu_style: MenuStyle::default(),
+            animations: AnimationSettings::default(),
+            explorer_zoom: default_explorer_zoom(),
+            background_work: default_background_work(),
+            worker_threads: default_worker_threads(),
+            max_fps: default_max_fps(),
         }
     }
 }
+
+/// Parsed-config cache keyed by (path, mtime).
+///
+/// The GUI calls [`MossambiConfig::load`] once per egui frame. Re-reading and
+/// re-parsing the JSON document every frame was a measurable source of
+/// frame-time jitter, so the parsed value is memoised and only refreshed
+/// when the file on disk actually changes.
+/// The memoised configuration document.
+type CachedConfig = (PathBuf, Option<std::time::SystemTime>, MossambiConfig);
+
+static CONFIG_CACHE: std::sync::OnceLock<std::sync::Mutex<Option<CachedConfig>>> =
+    std::sync::OnceLock::new();
 
 impl MossambiConfig {
     pub fn config_path() -> PathBuf {
@@ -337,18 +532,38 @@ impl MossambiConfig {
         PathBuf::from(home).join(".mossambi").join("config.json")
     }
 
+    fn file_stamp(path: &std::path::Path) -> Option<std::time::SystemTime> {
+        fs::metadata(path).ok().and_then(|m| m.modified().ok())
+    }
+
     pub fn load() -> Self {
         let path = Self::config_path();
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(cfg) = serde_json::from_str(&content) {
-                    return cfg;
+        let stamp = Self::file_stamp(&path);
+
+        let cache = CONFIG_CACHE.get_or_init(|| std::sync::Mutex::new(None));
+        if let Ok(guard) = cache.lock() {
+            if let Some((cached_path, cached_stamp, cfg)) = guard.as_ref() {
+                if cached_path == &path && cached_stamp == &stamp {
+                    return cfg.clone();
                 }
             }
         }
-        let default_cfg = Self::default();
-        let _ = default_cfg.save();
-        default_cfg
+
+        let cfg = if stamp.is_some() {
+            fs::read_to_string(&path)
+                .ok()
+                .and_then(|content| serde_json::from_str::<MossambiConfig>(&content).ok())
+                .unwrap_or_default()
+        } else {
+            let default_cfg = Self::default();
+            let _ = default_cfg.save();
+            return default_cfg;
+        };
+
+        if let Ok(mut guard) = cache.lock() {
+            *guard = Some((path, stamp, cfg.clone()));
+        }
+        cfg
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
@@ -357,7 +572,13 @@ impl MossambiConfig {
             fs::create_dir_all(parent)?;
         }
         let data = serde_json::to_string_pretty(self)?;
-        fs::write(path, data)?;
+        fs::write(&path, data)?;
+        // Keep the memoised copy in sync so the very next `load()` is free.
+        let cache = CONFIG_CACHE.get_or_init(|| std::sync::Mutex::new(None));
+        if let Ok(mut guard) = cache.lock() {
+            let stamp = Self::file_stamp(&path);
+            *guard = Some((path, stamp, self.clone()));
+        }
         Ok(())
     }
 

@@ -145,6 +145,10 @@ pub enum IconGlyph {
     Drive,
     DriveSystem,
     Cloud,
+    Search,
+    Gear,
+    Power,
+    Git,
     // Documents on paper
     PageDefault,
     PageText,
@@ -160,6 +164,47 @@ pub enum IconGlyph {
     PageArchive,
     PageExe,
     PageLibrary,
+    // ── Action glyphs (context menus, toolbars, buttons) ──
+    ActionOpen,
+    ActionEdit,
+    ActionDelete,
+    ActionCopy,
+    ActionCut,
+    ActionRename,
+    ActionProperties,
+    ActionTerminal,
+    ActionPrint,
+    ActionMedia,
+    ActionShield,
+    ActionRefresh,
+    ActionSelectAll,
+    ActionPaste,
+    ActionNewFolder,
+    ActionWallpaper,
+    ActionRotate,
+    ActionExtract,
+    ActionShortcut,
+    ActionPath,
+    ActionSort,
+    ActionView,
+    ActionMore,
+    ActionCheck,
+    ActionEye,
+    ActionFolderOpen,
+    ActionCompress,
+    ActionPin,
+    ActionMinimize,
+    ActionMaximize,
+    ActionRestore,
+    ActionClose,
+    ActionPlus,
+    ActionBack,
+    ActionForward,
+    ActionUp,
+    ActionList,
+    ActionSun,
+    ActionMoon,
+    ActionPlay,
 }
 
 impl IconGlyph {
@@ -198,6 +243,7 @@ impl IconGlyph {
     }
 
     /// Map a resolved FileIconSpec (category flags + rgb) to our glyph + accent
+    #[allow(clippy::too_many_arguments)]
     pub fn resolve(
         name: &str,
         extension: &str,
@@ -707,9 +753,7 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
             // Neutral folder gets a subtle paper peek; special folders get a
             // white emblem in the accent's contrast channel
             let emblem_final = if glyph == IconGlyph::Folder {
-                format!(
-                    "<rect x='30' y='44' width='34' height='2.4' rx='1.2' fill='#FFFFFF' opacity='0.32'/>"
-                )
+                "<rect x='30' y='44' width='34' height='2.4' rx='1.2' fill='#FFFFFF' opacity='0.32'/>".to_string()
             } else {
                 emblem_for(glyph, "#FFFFFF", "#FFFFFF")
                     .map(|e| format!("<g>{}</g>", e))
@@ -770,6 +814,47 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
             a = accent
         ),
 
+        IconGlyph::Search => format!(
+            "{head}<circle cx='43' cy='43' r='15.5' fill='none' stroke='{a}' stroke-width='7' stroke-linecap='round'/><path d='M55 55 L74 74' stroke='{a}' stroke-width='7' stroke-linecap='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+
+        IconGlyph::Gear => {
+            let teeth: String = (0..8)
+                .map(|i| {
+                    let ang = i as f32 * std::f32::consts::FRAC_PI_4;
+                    let (x1, y1) = (50.0 + 15.0 * ang.cos(), 50.0 + 15.0 * ang.sin());
+                    let (x2, y2) = (50.0 + 25.0 * ang.cos(), 50.0 + 25.0 * ang.sin());
+                    format!(
+                        "<path d='M{x1:.1} {y1:.1} L{x2:.1} {y2:.1}' stroke='{a}' stroke-width='9' stroke-linecap='round'/>",
+                        x1 = x1, y1 = y1, x2 = x2, y2 = y2, a = accent
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!(
+                "{head}{teeth}<circle cx='50' cy='50' r='15' fill='none' stroke='{a}' stroke-width='6' /><circle cx='50' cy='50' r='4.5' fill='{a}'/></svg>",
+                head = head,
+                teeth = teeth,
+                a = accent
+            )
+        }
+
+        IconGlyph::Power => format!(
+            "{head}<path d='M50 12 L50 46' stroke='{a}' stroke-width='9' stroke-linecap='round'/>\
+             <path d='M28 27 A30 30 0 1 0 72 27' fill='none' stroke='{a}' stroke-width='9' stroke-linecap='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+
+        IconGlyph::Git => format!(
+            "{head}<circle cx='37' cy='31' r='7.2' fill='{a}'/><circle cx='37' cy='69' r='7.2' fill='{a}'/><circle cx='63' cy='50' r='7.2' fill='{a}'/>\
+             <path d='M37 38 L37 62 M37 38 C37 49 46 50 56 50 M63 43 C63 56 48 55 37 55' stroke='{a}' stroke-width='5' stroke-linecap='round' fill='none'/></svg>",
+            head = head,
+            a = accent
+        ),
+
         // ── File pages ──
         IconGlyph::PageDefault | IconGlyph::PageText | IconGlyph::PageDoc | IconGlyph::PageSheet
         | IconGlyph::PageSlide | IconGlyph::PagePdf | IconGlyph::PageImage | IconGlyph::PageVideo
@@ -796,6 +881,254 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
                 e2 = em
             )
         }
+
+        // ── Action glyphs ──────────────────────────────────────────────────
+        // Monochrome line-art that reads correctly on every pack: the stroke
+        // colour follows the pack's line colour with the accent as a tint.
+        IconGlyph::ActionOpen => format!(
+            "{head}<path d='M40 24 L68 50 L40 76 Z' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionFolderOpen => format!(
+            "{head}<path d='M16 32 L42 32 L50 42 L84 42 L84 74 L16 74 Z' fill='{a}' opacity='0.85'/>\
+             <path d='M16 44 L90 44 L79 76 L20 76 Z' fill='{a}' opacity='0.55'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionEdit => format!(
+            "{head}<path d='M70 18 L82 30 L40 72 L22 78 L28 60 Z' fill='{a}'/>\
+             <path d='M64 24 L76 36' stroke='#FFFFFF' stroke-width='3' opacity='0.45'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionDelete => format!(
+            "{head}<path d='M32 34 L68 34 L64 80 Q64 84 60 84 L40 84 Q36 84 36 80 Z' fill='{a}' opacity='0.9'/>\
+             <rect x='27' y='25' width='46' height='8' rx='4' fill='{a}'/>\
+             <rect x='41' y='17' width='18' height='7' rx='3.5' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionCopy => format!(
+            "{head}<rect x='22' y='20' width='40' height='52' rx='5' fill='none' stroke='{a}' stroke-width='6' opacity='0.7'/>\
+             <rect x='38' y='34' width='40' height='50' rx='5' fill='none' stroke='{a}' stroke-width='6'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionCut => format!(
+            "{head}<circle cx='32' cy='72' r='10' fill='none' stroke='{a}' stroke-width='6'/>\
+             <circle cx='68' cy='72' r='10' fill='none' stroke='{a}' stroke-width='6'/>\
+             <path d='M36 64 L62 22 M64 64 L38 22' stroke='{a}' stroke-width='6' stroke-linecap='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionRename => format!(
+            "{head}<path d='M22 74 L31 42 L58 42 L67 74 Z' fill='none' stroke='{a}' stroke-width='6' stroke-linejoin='round'/>\
+             <path d='M28 58 L61 58' stroke='{a}' stroke-width='6'/>\
+             <rect x='74' y='26' width='6' height='48' rx='3' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionProperties => format!(
+            "{head}<circle cx='50' cy='50' r='32' fill='none' stroke='{a}' stroke-width='7'/>\
+             <rect x='46' y='42' width='8' height='26' rx='4' fill='{a}'/>\
+             <circle cx='50' cy='32' r='5' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionTerminal => format!(
+            "{head}<rect x='14' y='22' width='72' height='56' rx='7' fill='none' stroke='{a}' stroke-width='6'/>\
+             <path d='M28 40 L42 50 L28 60' fill='none' stroke='{a}' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/>\
+             <path d='M50 62 L72 62' stroke='{a}' stroke-width='6' stroke-linecap='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionPrint => format!(
+            "{head}<rect x='30' y='16' width='40' height='22' rx='4' fill='none' stroke='{a}' stroke-width='6'/>\
+             <rect x='16' y='38' width='68' height='30' rx='6' fill='none' stroke='{a}' stroke-width='6'/>\
+             <rect x='30' y='60' width='40' height='26' rx='4' fill='{a}' opacity='0.85'/>\
+             <circle cx='72' cy='48' r='4' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionMedia => format!(
+            "{head}<circle cx='50' cy='50' r='32' fill='none' stroke='{a}' stroke-width='7'/>\
+             <path d='M42 34 L68 50 L42 66 Z' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionShield => format!(
+            "{head}<path d='M50 14 L80 26 L80 52 Q80 72 50 86 Q20 72 20 52 L20 26 Z' fill='none' stroke='{a}' stroke-width='7' stroke-linejoin='round'/>\
+             <path d='M36 50 L46 60 L66 38' fill='none' stroke='{a}' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionRefresh => format!(
+            "{head}<path d='M76 44 A28 28 0 1 0 78 56' fill='none' stroke='{a}' stroke-width='7' stroke-linecap='round'/>\
+             <path d='M78 24 L78 46 L58 44' fill='none' stroke='{a}' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionSelectAll => format!(
+            "{head}<rect x='18' y='18' width='64' height='64' rx='9' fill='none' stroke='{a}' stroke-width='6'/>\
+             <path d='M32 50 L45 63 L70 36' fill='none' stroke='{a}' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionCheck => format!(
+            "{head}<path d='M24 52 L42 68 L78 30' fill='none' stroke='{a}' stroke-width='9' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionPaste => format!(
+            "{head}<rect x='22' y='20' width='56' height='64' rx='7' fill='none' stroke='{a}' stroke-width='6'/>\
+             <rect x='36' y='12' width='28' height='14' rx='5' fill='{a}'/>\
+             <rect x='34' y='48' width='32' height='6' rx='3' fill='{a}' opacity='0.75'/>\
+             <rect x='34' y='62' width='22' height='6' rx='3' fill='{a}' opacity='0.55'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionNewFolder => format!(
+            "{head}<path d='M16 30 L42 30 L50 40 L84 40 L84 76 L16 76 Z' fill='none' stroke='{a}' stroke-width='6' stroke-linejoin='round'/>\
+             <path d='M62 52 L62 72 M52 62 L72 62' stroke='{a}' stroke-width='6' stroke-linecap='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionWallpaper => format!(
+            "{head}<rect x='16' y='22' width='68' height='56' rx='7' fill='none' stroke='{a}' stroke-width='6'/>\
+             <circle cx='36' cy='40' r='7' fill='{a}'/>\
+             <path d='M22 70 L44 46 L60 62 L70 52 L82 70 Z' fill='{a}' opacity='0.8'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionRotate => format!(
+            "{head}<path d='M76 42 A28 28 0 1 0 78 58' fill='none' stroke='{a}' stroke-width='7' stroke-linecap='round'/>\
+             <path d='M78 20 L78 44 L56 42' fill='none' stroke='{a}' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionExtract => format!(
+            "{head}<rect x='18' y='46' width='64' height='38' rx='7' fill='none' stroke='{a}' stroke-width='6'/>\
+             <path d='M50 14 L50 42 M38 30 L50 42 L62 30' fill='none' stroke='{a}' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionCompress => format!(
+            "{head}<rect x='18' y='46' width='64' height='38' rx='7' fill='none' stroke='{a}' stroke-width='6'/>\
+             <path d='M50 14 L50 38 M38 26 L50 14 L62 26' fill='none' stroke='{a}' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionShortcut => format!(
+            "{head}<path d='M38 62 L62 38' stroke='{a}' stroke-width='8' stroke-linecap='round'/>\
+             <path d='M30 54 A16 16 0 1 1 42 42' fill='none' stroke='{a}' stroke-width='7' stroke-linecap='round'/>\
+             <path d='M70 46 A16 16 0 1 1 58 58' fill='none' stroke='{a}' stroke-width='7' stroke-linecap='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionPath => format!(
+            "{head}<rect x='14' y='28' width='44' height='44' rx='7' fill='none' stroke='{a}' stroke-width='6'/>\
+             <path d='M24 44 L48 44 M24 56 L40 56' stroke='{a}' stroke-width='5' stroke-linecap='round'/>\
+             <path d='M56 50 L78 50 M70 42 L78 50 L70 58' fill='none' stroke='{a}' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionSort => format!(
+            "{head}<path d='M26 24 L26 76 M26 24 L16 36 M26 24 L36 36' stroke='{a}' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/>\
+             <path d='M52 32 L82 32 M52 50 L74 50 M52 68 L66 68' stroke='{a}' stroke-width='6' stroke-linecap='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionView => format!(
+            "{head}<rect x='18' y='18' width='28' height='28' rx='5' fill='{a}' opacity='0.9'/>\
+             <rect x='54' y='18' width='28' height='28' rx='5' fill='{a}' opacity='0.6'/>\
+             <rect x='18' y='54' width='28' height='28' rx='5' fill='{a}' opacity='0.6'/>\
+             <rect x='54' y='54' width='28' height='28' rx='5' fill='{a}' opacity='0.9'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionMore => format!(
+            "{head}<circle cx='28' cy='50' r='7' fill='{a}'/><circle cx='50' cy='50' r='7' fill='{a}'/><circle cx='72' cy='50' r='7' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionEye => format!(
+            "{head}<path d='M12 50 Q28 24 50 24 Q72 24 88 50 Q72 76 50 76 Q28 76 12 50 Z' fill='none' stroke='{a}' stroke-width='6' stroke-linejoin='round'/>\
+             <circle cx='50' cy='50' r='11' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionPin => format!(
+            "{head}<path d='M62 14 L86 38 L74 44 L60 66 L56 84 L44 72 L28 88 L20 80 L36 64 L28 56 L44 50 L56 26 Z' fill='{a}'/>\
+             <path d='M62 14 L86 38' stroke='#FFFFFF' stroke-width='2' opacity='0.35'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionMinimize => format!(
+            "{head}<path d='M22 50 L78 50' stroke='{a}' stroke-width='7' stroke-linecap='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionMaximize => format!(
+            "{head}<rect x='24' y='24' width='52' height='52' rx='6' fill='none' stroke='{a}' stroke-width='6'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionRestore => format!(
+            "{head}<rect x='20' y='30' width='42' height='42' rx='6' fill='none' stroke='{a}' stroke-width='6'/>\
+             <path d='M36 30 L36 22 Q36 18 40 18 L70 18 Q78 18 78 26 L78 56 Q78 62 72 62 L64 62' fill='none' stroke='{a}' stroke-width='6'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionClose => format!(
+            "{head}<path d='M28 28 L72 72 M72 28 L28 72' stroke='{a}' stroke-width='7' stroke-linecap='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionPlus => format!(
+            "{head}<path d='M50 24 L50 76 M24 50 L76 50' stroke='{a}' stroke-width='8' stroke-linecap='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionBack => format!(
+            "{head}<path d='M56 22 L30 50 L56 78' fill='none' stroke='{a}' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionForward => format!(
+            "{head}<path d='M44 22 L70 50 L44 78' fill='none' stroke='{a}' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionUp => format!(
+            "{head}<path d='M22 62 L50 34 L78 62' fill='none' stroke='{a}' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionList => format!(
+            "{head}<path d='M32 38 L78 38 M32 50 L78 50 M32 62 L78 62' stroke='{a}' stroke-width='6' stroke-linecap='round'/>\
+             <circle cx='22' cy='38' r='4' fill='{a}'/><circle cx='22' cy='50' r='4' fill='{a}'/><circle cx='22' cy='62' r='4' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionSun => format!(
+            "{head}<circle cx='50' cy='50' r='16' fill='none' stroke='{a}' stroke-width='6'/>\
+             <g stroke='{a}' stroke-width='6' stroke-linecap='round'>\
+             <path d='M50 16 L50 28 M50 72 L50 84 M16 50 L28 50 M72 50 L84 50 M26 26 L34 34 M66 66 L74 74 M74 26 L66 34 M34 66 L26 74'/></g></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionMoon => format!(
+            "{head}<path d='M62 20 A32 32 0 1 0 62 80 A26 26 0 1 1 62 20 Z' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionPlay => format!(
+            "{head}<circle cx='50' cy='50' r='34' fill='none' stroke='{a}' stroke-width='6'/>\
+             <path d='M42 34 L68 50 L42 66 Z' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
     }
 }
 
@@ -883,17 +1216,29 @@ fn rasterize(
 
 /// Paints a glyph inside `rect` (square centering) at the pack's language.
 pub fn paint_icon(ui: &Ui, pack: IconPack, glyph: IconGlyph, rect: Rect, accent_rgb: [u8; 3]) {
+    paint_icon_with(ui.painter(), ui.ctx(), pack, glyph, rect, accent_rgb);
+}
+
+/// Paints a glyph with an explicit painter — used by widget surfaces that draw
+/// straight onto a `Painter` rather than a `Ui`.
+pub fn paint_icon_with(
+    painter: &eframe::egui::Painter,
+    ctx: &eframe::egui::Context,
+    pack: IconPack,
+    glyph: IconGlyph,
+    rect: Rect,
+    accent_rgb: [u8; 3],
+) {
     let size = rect.width().min(rect.height());
     if size < 4.0 {
         return;
     }
-    let Some(tex) = icon_texture(ui.ctx(), pack, glyph, size, accent_rgb) else {
+    let Some(tex) = icon_texture(ctx, pack, glyph, size, accent_rgb) else {
         return;
     };
     let sq = Rect::from_center_size(rect.center(), eframe::egui::Vec2::splat(size));
     let uv = Rect::from_min_max(eframe::egui::pos2(0.0, 0.0), eframe::egui::pos2(1.0, 1.0));
-    ui.painter()
-        .image(tex.id(), sq, uv, Color32::WHITE);
+    painter.image(tex.id(), sq, uv, Color32::WHITE);
 }
 
 /// Convenience: paint with a slightly padded rect

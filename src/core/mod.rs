@@ -10,6 +10,7 @@ pub mod fuzzy;
 pub mod gesture;
 pub mod icon_packs;
 pub mod linux_dna;
+pub mod mouse_nav;
 pub mod pantone;
 pub mod registry;
 
@@ -26,6 +27,7 @@ pub use fs_utils::{
 };
 pub use fuzzy::{fuzzy_match, sort_by_fuzzy_match};
 pub use gesture::{GestureKind, GesturePoint, KinematicGestureTracker};
+pub use mouse_nav::MouseNavListener;
 pub use linux_dna::{
     discover_linux_mounts, install_linux_desktop_integration, send_linux_notification,
 };

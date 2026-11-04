@@ -1,8 +1,11 @@
 pub mod active_file;
+pub mod anim;
 pub mod citrus_geometry;
 pub mod custom_widgets;
+pub mod context_menu;
 pub mod dwm_helper;
 pub mod explorer_view;
+pub mod file_menu;
 pub mod gesture;
 pub mod macos_theme;
 pub mod popover;

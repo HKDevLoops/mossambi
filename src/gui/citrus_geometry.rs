@@ -316,11 +316,11 @@ impl CitrusGeometry {
                 .unwrap_or(if is_all { "ALL" } else { "FMT" });
 
             let font = if is_all {
-                FontId::proportional(12.0)
+                FontId::proportional(16.0)
             } else if is_hover {
-                FontId::proportional(12.5)
+                FontId::proportional(16.5)
             } else {
-                FontId::proportional(11.0)
+                FontId::proportional(15.0)
             };
 
             let text_color = if is_all {
@@ -332,9 +332,7 @@ impl CitrusGeometry {
             };
 
             let display_text = if is_all {
-                "⭐ ALL"
-            } else if fmt_name == "MORE" {
-                "🔍 MORE"
+                "ALL"
             } else {
                 fmt_name
             };
@@ -376,15 +374,8 @@ impl CitrusGeometry {
             painter.text(
                 Pos2::new(c.x, c.y - 6.0),
                 eframe::egui::Align2::CENTER_CENTER,
-                "✓",
-                FontId::proportional(22.0),
-                Color32::WHITE,
-            );
-            painter.text(
-                Pos2::new(c.x, c.y + 11.0),
-                eframe::egui::Align2::CENTER_CENTER,
                 "DONE",
-                FontId::proportional(10.0),
+                FontId::proportional(23.0),
                 Color32::WHITE,
             );
         } else {
@@ -424,8 +415,8 @@ impl CitrusGeometry {
                 painter.text(
                     Pos2::new(c.x, c.y + 2.0),
                     eframe::egui::Align2::CENTER_CENTER,
-                    "▶",
-                    FontId::proportional(18.0),
+                    "CONVERT",
+                    FontId::proportional(15.0),
                     pal.text_dark,
                 );
             } else {
@@ -433,15 +424,15 @@ impl CitrusGeometry {
                 painter.text(
                     Pos2::new(c.x, c.y - 6.0),
                     eframe::egui::Align2::CENTER_CENTER,
-                    "🍋",
-                    FontId::proportional(16.0),
+                    "READY",
+                    FontId::proportional(20.0),
                     pal.text_dark,
                 );
                 painter.text(
                     Pos2::new(c.x, c.y + 10.0),
                     eframe::egui::Align2::CENTER_CENTER,
                     hub_status,
-                    FontId::proportional(9.5),
+                    FontId::proportional(13.5),
                     pal.text_dark,
                 );
             }
