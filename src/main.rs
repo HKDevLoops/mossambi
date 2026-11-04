@@ -327,6 +327,9 @@ pub enum Commands {
 }
 
 fn main() -> Result<()> {
+    // Logging must initialise at the very first line so every entrypoint
+    // (CLI, GUI, widget, TUI) captures logs, including these early intercepts.
+    let _ = env_logger::try_init();
     let args: Vec<String> = std::env::args().collect();
 
     // 1. Intercept help flags -> Print ONLY table structure as requested!
@@ -366,6 +369,22 @@ fn main() -> Result<()> {
     }
 
     let cli = Cli::parse();
+
+    // Wire the rayon global pool from live config knobs BEFORE any conversion
+    // work. config.worker_threads == 0 means "auto" and maps to
+    // available_parallelism inside init_multi_threading.
+    let cfg = MossambiConfig::load();
+    let requested_threads = if cfg.worker_threads == 0 {
+        None
+    } else {
+        Some(cfg.worker_threads as usize)
+    };
+    let pool_threads = mossambi::hwaccel::init_multi_threading(requested_threads);
+    log::info!(
+        "Rayon global pool initialised with {} worker thread(s) (config.worker_threads = {})",
+        pool_threads,
+        cfg.worker_threads
+    );
 
     // Handle flag-style operations
     if cli.banner {

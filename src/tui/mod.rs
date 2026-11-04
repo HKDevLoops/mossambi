@@ -178,6 +178,8 @@ pub struct AppState {
     pub active_pane: ActivePane,
 
     // Async Scanning & Generation Counters
+    // NOTE: must stay Arc<AtomicU64> — spawn_async_dir_scan (core::fs_utils)
+    // takes Arc<AtomicU64>, and that module is out of this change's scope.
     pub scan_gen: Arc<AtomicU64>,
     pub scan_tx: Sender<ScanBatch>,
     pub scan_rx: Receiver<ScanBatch>,
@@ -546,7 +548,14 @@ impl AppState {
         let total = targets.len();
         self.worker_pool
             .spawn_task("Transcode", move |_cancel, tx, task_id| {
+                // TODO: thread `_cancel` into the codec engine once it supports
+                // cooperative cancellation; for now the token is honoured only
+                // BETWEEN files in this loop (a single long ffmpeg still runs
+                // to completion unless the watchdog fires).
                 for (idx, in_file) in targets.iter().enumerate() {
+                    if _cancel.load(Ordering::Relaxed) {
+                        return;
+                    }
                     let stem = in_file
                         .file_stem()
                         .and_then(|s| s.to_str())
@@ -780,6 +789,9 @@ pub fn run() -> Result<()> {
 }
 
 pub fn run_with_path(initial_path: Option<PathBuf>) -> Result<()> {
+    // Logging must initialise at the TUI entrypoint (before raw mode, so any
+    // startup failures are still visible in the normal terminal).
+    let _ = env_logger::try_init();
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;

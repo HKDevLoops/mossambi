@@ -3,14 +3,14 @@
 //! Faithful reproduction of all 6 visual states from `Image reference.png`.
 
 use crate::codec::{transcode_file, LosslessMode};
-use crate::core::{FileCategory, UniversalRegistry};
+use crate::core::{AsyncWorkerPool, FileCategory, TaskUpdate, UniversalRegistry};
 use crate::widget::{RadialWidgetGeometry, WidgetState, WidgetTheme};
 use eframe::egui::{
     self, Color32, Key, Pos2, Rect, Stroke, Vec2, ViewportBuilder, ViewportCommand,
 };
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
@@ -32,6 +32,10 @@ pub struct MossambiWidgetApp {
     pub converted_count: usize,
     pub success_time: Option<Instant>,
     pub last_output: Option<PathBuf>,
+    /// Last conversion failure, surfaced in the hub status area (previously
+    /// the widget discarded errors entirely — the user saw nothing).
+    pub last_error: Option<String>,
+    pub error_time: Option<Instant>,
 
     // Context Menu & Dragging
     pub show_context_menu: bool,
@@ -41,6 +45,7 @@ pub struct MossambiWidgetApp {
     // Worker Channels
     pub result_rx: Receiver<WidgetResult>,
     pub result_tx: Sender<WidgetResult>,
+    pub worker_pool: AsyncWorkerPool,
 }
 
 impl Default for MossambiWidgetApp {
@@ -61,6 +66,8 @@ impl Default for MossambiWidgetApp {
             converted_count: 0,
             success_time: None,
             last_output: None,
+            last_error: None,
+            error_time: None,
 
             show_context_menu: false,
             context_menu_pos: Pos2::ZERO,
@@ -68,6 +75,7 @@ impl Default for MossambiWidgetApp {
 
             result_rx: rx,
             result_tx: tx,
+            worker_pool: AsyncWorkerPool::new(),
         }
     }
 }
@@ -81,6 +89,14 @@ impl MossambiWidgetApp {
     }
 
     pub fn start_conversion(&mut self, target_format: &str) {
+        if self.is_converting {
+            log::warn!(
+                "Widget conversion already in progress — ignoring request for {}",
+                target_format
+            );
+            return;
+        }
+
         let input = match self.current_file.clone() {
             Some(f) => f,
             None => return,
@@ -88,14 +104,35 @@ impl MossambiWidgetApp {
 
         self.is_converting = true;
         self.progress = 0.15;
+        self.last_error = None;
         let sender = self.result_tx.clone();
         let target = target_format.to_string();
 
-        thread::spawn(move || {
-            let res = match transcode_file(&input, &target, LosslessMode::StrictBitExact, None) {
-                Ok(out) => WidgetResult::Success(vec![out]),
-                Err(e) => WidgetResult::Failure(e.to_string()),
+        self.worker_pool.spawn_task("WidgetConvert", move |cancel, tx, task_id| {
+            let res = if cancel.load(Ordering::Relaxed) {
+                WidgetResult::Failure("cancelled before it could start".to_string())
+            } else {
+                match transcode_file(&input, &target, LosslessMode::StrictBitExact, None) {
+                    Ok(out) => WidgetResult::Success(vec![out]),
+                    Err(e) => WidgetResult::Failure(e.to_string()),
+                }
             };
+
+            match &res {
+                WidgetResult::Success(files) => {
+                    let _ = tx.send(TaskUpdate::Completed {
+                        id: task_id,
+                        output: files.first().cloned(),
+                        message: format!("Widget converted file to {}", target),
+                    });
+                }
+                WidgetResult::Failure(err) => {
+                    let _ = tx.send(TaskUpdate::Failed {
+                        id: task_id,
+                        error: err.clone(),
+                    });
+                }
+            }
             let _ = sender.send(res);
         });
     }
@@ -248,26 +285,46 @@ impl eframe::App for MossambiWidgetApp {
             enforce_borderless_win32();
         }
 
+        // Continuous driver honoring the Max-FPS knob (disables idle pacing).
+        let max_fps = crate::core::MossambiConfig::load().max_fps;
         let is_active = self.is_converting || self.success_time.is_some();
-        let repaint_delay = if is_active {
+        let repaint_delay = if max_fps {
+            Duration::from_millis(2)
+        } else if is_active {
             Duration::from_millis(16)
         } else {
             Duration::from_millis(120)
         };
         ctx.request_repaint_after(repaint_delay);
 
+        // Drain pooled worker updates (keeps the pool channel bounded).
+        while let Some(update) = self.worker_pool.try_recv() {
+            match update {
+                TaskUpdate::Started { name, .. } => log::debug!("widget worker started: {}", name),
+                TaskUpdate::Progress {
+                    fraction, status, ..
+                } => log::debug!("widget worker progress {:.0}%: {}", fraction * 100.0, status),
+                TaskUpdate::Completed { message, .. } => log::info!("widget worker finished: {}", message),
+                TaskUpdate::Failed { error, .. } => log::error!("widget worker failed: {}", error),
+            }
+        }
+
         // 1. Process Conversion Results
-        if let Ok(res) = self.result_rx.try_recv() {
+        while let Ok(res) = self.result_rx.try_recv() {
             self.is_converting = false;
             match res {
                 WidgetResult::Success(files) => {
                     self.converted_count = files.len();
                     self.success_time = Some(Instant::now());
                     self.last_output = files.first().cloned();
+                    self.last_error = None;
                 }
-                WidgetResult::Failure(_err) => {
+                WidgetResult::Failure(err) => {
                     self.converted_count = 0;
                     self.success_time = None;
+                    self.error_time = Some(Instant::now());
+                    log::error!("Widget conversion failed: {}", err);
+                    self.last_error = Some(err);
                 }
             }
         }
@@ -280,10 +337,16 @@ impl eframe::App for MossambiWidgetApp {
             }
         }
 
-        // 3. Clear Success State after 4 seconds
+        // 3. Clear Success / Error State after a few seconds
         if let Some(t) = self.success_time {
             if t.elapsed() >= Duration::from_secs(4) {
                 self.success_time = None;
+            }
+        }
+        if let Some(t) = self.error_time {
+            if t.elapsed() >= Duration::from_secs(6) {
+                self.error_time = None;
+                self.last_error = None;
             }
         }
 
@@ -401,6 +464,31 @@ impl eframe::App for MossambiWidgetApp {
 
                 self.geometry
                     .render(&painter, &self.sectors, current_state, self.hovered_carpel);
+
+                // Hub status area: surface the last conversion failure where
+                // success feedback appears (previously swallowed entirely).
+                if !self.is_converting
+                    && self.success_time.is_none()
+                    && self.last_error.is_some()
+                {
+                    let err = self.last_error.clone().unwrap_or_default();
+                    // Tail of the message: ffmpeg errors carry their verdict last.
+                    let tail: String = err
+                        .chars()
+                        .rev()
+                        .take(80)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect();
+                    painter.text(
+                        rect.center() + egui::vec2(0.0, 46.0),
+                        egui::Align2::CENTER_CENTER,
+                        format!("⚠ {}", tail),
+                        egui::FontId::proportional(11.5),
+                        Color32::from_rgb(214, 69, 57),
+                    );
+                }
 
                 if self.show_context_menu {
                     let menu_rect =
@@ -532,6 +620,9 @@ pub fn run_widget_with_args(
     initial_pos: Option<Pos2>,
     initial_file: Option<PathBuf>,
 ) -> Result<(), eframe::Error> {
+    // Logging must come first so widget-scope diagnostics are captured.
+    let _ = env_logger::try_init();
+
     let mut builder = ViewportBuilder::default()
         .with_title("Mossambi Radial Widget")
         .with_inner_size([400.0, 400.0])
@@ -553,8 +644,12 @@ pub fn run_widget_with_args(
         builder = builder.with_position([pos.x.max(0.0), pos.y.max(0.0)]);
     }
 
+    // Honor the Max-FPS knob: when enabled, uncap the frame driver by
+    // disabling vsync (repaint pacing is handled per-frame in update()).
+    let max_fps = crate::core::MossambiConfig::load().max_fps;
     let options = eframe::NativeOptions {
         viewport: builder,
+        vsync: !max_fps,
         ..Default::default()
     };
 

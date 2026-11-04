@@ -5,7 +5,8 @@ use crate::codec::{
     convert_text_to_pdf_vector, transcode_file, transcode_to_all_formats, LosslessMode,
     TextPdfSettings,
 };
-use crate::core::{FileCategory, UniversalRegistry};
+use crate::core::mouse_nav::{MouseNavEvent, MouseNavListener};
+use crate::core::{AsyncWorkerPool, FileCategory, TaskUpdate, UniversalRegistry};
 use crate::exam::{optimize_exam_media, ExamConstraint};
 use crate::gui::macos_theme::*;
 use crate::gui::quick_settings::QuickSettingsState;
@@ -13,8 +14,8 @@ use crate::gui::studio_view::StudioView;
 use crate::gui::tray::{ActivationManager, AppControlEvent};
 use eframe::egui::{self, Vec2, ViewportBuilder, ViewportCommand};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
@@ -41,6 +42,14 @@ pub struct MossambiApp {
     // Background worker channels
     pub result_receiver: Receiver<ConversionResult>,
     pub result_sender: Sender<ConversionResult>,
+
+    // Pooled background execution: conversions run through the shared
+    // watchdog-supervised worker pool instead of ad-hoc thread::spawn.
+    pub worker_pool: AsyncWorkerPool,
+
+    // System-wide mouse thumb-button / swipe history navigation (Windows
+    // low-level hook; a harmless no-op on other platforms).
+    pub mouse_nav: MouseNavListener,
 
     // Windows DWM & Backdrop Sync
     pub frame_count: u64,
@@ -76,6 +85,9 @@ impl Default for MossambiApp {
 
             result_receiver: rx,
             result_sender: tx,
+
+            worker_pool: AsyncWorkerPool::new(),
+            mouse_nav: MouseNavListener::new(),
 
             frame_count: 0,
             last_applied_theme: None,
@@ -155,30 +167,111 @@ impl MossambiApp {
         }
     }
 
+    /// Starts a conversion for the currently staged file (explicit user action).
+    /// Delegates to [`start_conversion_batch`] — `studio_view.rs` calls this.
     pub fn start_conversion(&mut self, target_format: &str) {
-        let input_file = match self.current_file.clone() {
-            Some(f) => f,
-            None => {
-                self.status_message = "Please drop or select a file first.".to_string();
-                return;
-            }
-        };
+        let files: Vec<PathBuf> = self.current_file.clone().into_iter().collect();
+        self.start_conversion_batch(files, target_format);
+    }
+
+    /// Converts a batch of files through the worker pool, reporting one final
+    /// `ConversionResult` per batch on the result channel. Explicit user
+    /// action — always allowed, even when `background_work` is disabled
+    /// (that knob only gates AUTO-triggered conversions).
+    pub fn start_conversion_batch(&mut self, files: Vec<PathBuf>, target: &str) {
+        if files.is_empty() {
+            self.status_message = "Please drop or select a file first.".to_string();
+            return;
+        }
+
+        // Double-start guard: a second click used to spawn two threads
+        // clobbering the same output names.
+        if self.is_converting {
+            log::warn!(
+                "Conversion already in progress — ignoring start request for {} file(s) -> {}",
+                files.len(),
+                target
+            );
+            self.status_message = "⏳ A conversion is already running — please wait."
+                .to_string();
+            return;
+        }
 
         self.is_converting = true;
         self.status_message = format!(
-            "Converting '{}' -> {}...",
-            input_file.file_name().unwrap_or_default().to_string_lossy(),
-            target_format
+            "Converting {} file(s) -> {}...",
+            files.len(),
+            target
         );
+        log::info!("conversion batch: {} file(s) -> {}", files.len(), target);
 
         let sender = self.result_sender.clone();
-        let target_str = target_format.to_string();
+        let target_str = target.to_string();
         let settings = self.quick_settings.clone();
 
-        thread::spawn(move || {
-            let res = execute_conversion(&input_file, &target_str, &settings);
-            let _ = sender.send(res);
+        self.worker_pool.spawn_task("StudioConversion", move |cancel, tx, task_id| {
+            let total = files.len();
+            let mut outputs: Vec<PathBuf> = Vec::new();
+            let mut first_error: Option<String> = None;
+
+            for (idx, file) in files.iter().enumerate() {
+                // Cooperative stop between files (the codec engine itself has
+                // no cancellation hook yet).
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                match execute_conversion(file, &target_str, &settings) {
+                    ConversionResult::Success(mut outs) => outputs.append(&mut outs),
+                    ConversionResult::Failure(err) => {
+                        if first_error.is_none() {
+                            first_error = Some(format!("{}: {}", file.display(), err));
+                        }
+                    }
+                }
+                let _ = tx.send(TaskUpdate::Progress {
+                    id: task_id,
+                    fraction: (idx + 1) as f32 / total.max(1) as f32,
+                    status: format!("Converted {}/{} file(s)", idx + 1, total),
+                });
+            }
+
+            let result = match first_error {
+                Some(err) => ConversionResult::Failure(err),
+                None => ConversionResult::Success(outputs),
+            };
+            match &result {
+                ConversionResult::Success(outs) => {
+                    let _ = tx.send(TaskUpdate::Completed {
+                        id: task_id,
+                        output: outs.first().cloned(),
+                        message: format!("Converted {} file(s) to {}", outs.len(), target_str),
+                    });
+                }
+                ConversionResult::Failure(err) => {
+                    let _ = tx.send(TaskUpdate::Failed {
+                        id: task_id,
+                        error: err.clone(),
+                    });
+                }
+            }
+            let _ = sender.send(result);
         });
+    }
+
+    /// AUTO-triggered conversion hook (reserved for programmatic converters).
+    /// Honors `config.background_work == false` by refusing automatic work,
+    /// while explicit user conversions always remain available.
+    pub fn start_conversion_auto(&mut self, file: PathBuf, target: &str) {
+        let cfg = crate::core::MossambiConfig::load();
+        if !cfg.background_work {
+            log::info!(
+                "background work disabled — skipping AUTO conversion of {} ({})",
+                file.display(),
+                target
+            );
+            return;
+        }
+        self.start_conversion_batch(vec![file], target);
     }
 
     pub fn launch_radial_widget(&self) {
@@ -343,25 +436,68 @@ impl eframe::App for MossambiApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // ── Ctrl + Mouse Wheel Zoom ( Finder / Windows Explorer parity ) ──
-        // Ctrl+wheel scales the whole UI; Ctrl+0 resets to native scale.
-        let (zoom_scroll, zoom_reset) = ctx.input(|i| {
-            let ctrl = i.modifiers.ctrl || i.modifiers.command;
-            let scroll = if ctrl { i.raw_scroll_delta.y } else { 0.0 };
-            let reset = ctrl && i.key_pressed(egui::Key::Num0);
-            (scroll, reset)
-        });
-        if zoom_reset {
+        // ── Ctrl + Mouse Wheel ───────────────────────────────────────────────
+        // Plain Ctrl+wheel    → Explorer content zoom levels (0..=4, persisted)
+        // Ctrl+0              → reset explorer zoom to the default level 2
+        // Ctrl+Shift+wheel    → whole-UI pixel scale (Finder/Explorer parity)
+        // Ctrl+Shift+0        → reset UI scale to native
+        let (ui_zoom_scroll, ui_zoom_reset, explorer_scroll, explorer_reset) =
+            ctx.input(|i| {
+                let ctrl = i.modifiers.ctrl || i.modifiers.command;
+                let shift = i.modifiers.shift;
+                let scroll = if ctrl { i.raw_scroll_delta.y } else { 0.0 };
+                let num0 = i.key_pressed(egui::Key::Num0);
+                (
+                    if ctrl && shift { scroll } else { 0.0 },
+                    ctrl && shift && num0,
+                    if ctrl && !shift { scroll } else { 0.0 },
+                    ctrl && !shift && num0,
+                )
+            });
+        if explorer_reset {
+            self.studio_view.explorer_view.explorer_zoom = 2;
+            log::debug!("explorer zoom reset to level 2 (Ctrl+0)");
+        } else if explorer_scroll != 0.0 {
+            let step = if explorer_scroll > 0.0 { 1 } else { -1 };
+            let next = (self.studio_view.explorer_view.explorer_zoom as i32 + step).clamp(0, 4) as u8;
+            if next != self.studio_view.explorer_view.explorer_zoom {
+                log::debug!(
+                    "explorer zoom level: {} -> {}",
+                    self.studio_view.explorer_view.explorer_zoom,
+                    next
+                );
+                self.studio_view.explorer_view.explorer_zoom = next;
+            }
+        } else if ui_zoom_reset {
             self.ui_zoom = 1.0;
             let native = ctx.native_pixels_per_point().unwrap_or(1.0).max(0.5);
             ctx.set_pixels_per_point(native);
             self.last_applied_theme = None;
-        } else if zoom_scroll != 0.0 {
-            let step = if zoom_scroll > 0.0 { 1.08_f32 } else { 1.0_f32 / 1.08 };
+        } else if ui_zoom_scroll != 0.0 {
+            let step = if ui_zoom_scroll > 0.0 { 1.08_f32 } else { 1.0_f32 / 1.08 };
             self.ui_zoom = (self.ui_zoom * step).clamp(0.6, 2.5);
             let native = ctx.native_pixels_per_point().unwrap_or(1.0).max(0.5);
             ctx.set_pixels_per_point(native * self.ui_zoom);
             self.last_applied_theme = None;
+        }
+
+        // ── Mouse history navigation (thumb buttons / middle-drag swipe) ────
+        while let Some(evt) = self.mouse_nav.try_recv() {
+            let explorer = &mut self.studio_view.explorer_view;
+            match evt {
+                MouseNavEvent::Back => {
+                    if explorer.can_go_back() {
+                        log::debug!("mouse nav: back");
+                        explorer.go_back();
+                    }
+                }
+                MouseNavEvent::Forward => {
+                    if explorer.can_go_forward() {
+                        log::debug!("mouse nav: forward");
+                        explorer.go_forward();
+                    }
+                }
+            }
         }
 
         // Synchronize Windows DWM Backdrop (Acrylic / Mica) with active theme & glass effect
@@ -381,13 +517,30 @@ impl eframe::App for MossambiApp {
             self.last_applied_glass = Some(current_glass);
         }
 
+        // Continuous driver honoring the Max-FPS knob: when enabled, drop
+        // vsync-driven pacing and repaint at ~500Hz for maximum responsiveness.
         let is_animating = self.is_converting || self.completion_time.is_some();
-        let repaint_interval = if is_animating {
+        let repaint_interval = if cfg.max_fps {
+            Duration::from_millis(2)
+        } else if is_animating {
             Duration::from_millis(16)
         } else {
             Duration::from_millis(200)
         };
         ctx.request_repaint_after(repaint_interval);
+
+        // Drain pooled worker updates (keeps the pool channel bounded and the
+        // log informative; authoritative status comes from the result channel).
+        while let Some(update) = self.worker_pool.try_recv() {
+            match update {
+                TaskUpdate::Started { name, .. } => log::debug!("worker started: {}", name),
+                TaskUpdate::Progress {
+                    fraction, status, ..
+                } => log::debug!("worker progress {:.0}%: {}", fraction * 100.0, status),
+                TaskUpdate::Completed { message, .. } => log::info!("worker finished: {}", message),
+                TaskUpdate::Failed { error, .. } => log::error!("worker reported failure: {}", error),
+            }
+        }
 
         // 1. Check for activation events from global hotkey or system tray
         while let Some(control_event) = self.activation_manager.try_recv() {
@@ -438,8 +591,9 @@ impl eframe::App for MossambiApp {
             }
         }
 
-        // 2. Poll for background conversion results
-        if let Ok(res) = self.result_receiver.try_recv() {
+        // 2. Poll for background conversion results (drain the WHOLE queue —
+        // batch conversions may stack several results between frames)
+        while let Ok(res) = self.result_receiver.try_recv() {
             self.is_converting = false;
             match res {
                 ConversionResult::Success(files) => {
@@ -451,6 +605,7 @@ impl eframe::App for MossambiApp {
                         format!("✨ Successfully converted {} file(s)!", files.len());
                 }
                 ConversionResult::Failure(err) => {
+                    log::error!("Studio conversion failed: {}", err);
                     self.status_message = format!("❌ {}", err);
                 }
             }
@@ -532,6 +687,52 @@ impl eframe::App for MossambiApp {
         if let Some(p) = open_target_folder {
             open_in_file_manager(&p);
         }
+
+        // 6. Persist any explorer preference mutations from this frame
+        // (icon pack, zoom level, checkboxes, menu style, animations) into the
+        // config — same save pattern as the theme-change handlers above.
+        self.sync_explorer_prefs();
+    }
+}
+
+impl MossambiApp {
+    /// Dirty-checks the live [`StudioView`]'s explorer preference fields
+    /// against the persisted config and saves only when something changed.
+    fn sync_explorer_prefs(&self) {
+        let explorer = &self.studio_view.explorer_view;
+        let mut cfg = crate::core::MossambiConfig::load();
+        let mut dirty = false;
+
+        let pack_id = explorer.icon_pack.id().to_string();
+        if cfg.icon_pack != pack_id {
+            cfg.icon_pack = pack_id;
+            dirty = true;
+        }
+        if cfg.explorer_zoom != explorer.explorer_zoom {
+            cfg.explorer_zoom = explorer.explorer_zoom;
+            dirty = true;
+        }
+        if cfg.checkbox_mode != explorer.checkbox_mode {
+            cfg.checkbox_mode = explorer.checkbox_mode;
+            dirty = true;
+        }
+        if cfg.menu_style != explorer.menu_style {
+            cfg.menu_style = explorer.menu_style;
+            dirty = true;
+        }
+        if cfg.animations != explorer.animations {
+            cfg.animations = explorer.animations;
+            dirty = true;
+        }
+
+        if dirty {
+            log::debug!(
+                "explorer prefs changed — saving config (zoom={}, pack={})",
+                cfg.explorer_zoom,
+                cfg.icon_pack
+            );
+            let _ = cfg.save();
+        }
     }
 }
 
@@ -586,8 +787,12 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
         builder = builder.with_icon(icon);
     }
 
+    // Honor the Max-FPS knob: when enabled, uncap the frame driver by
+    // disabling vsync (repaint pacing is handled per-frame in update()).
+    let max_fps = crate::core::MossambiConfig::load().max_fps;
     let options = eframe::NativeOptions {
         viewport: builder,
+        vsync: !max_fps,
         ..Default::default()
     };
 
