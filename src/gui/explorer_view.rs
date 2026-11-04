@@ -2348,6 +2348,8 @@ impl ExplorerView {
         let mut peek_to_open: Option<FileItem> = None;
         let mut item_intents: Vec<ItemMenuIntents> = Vec::new();
         let mut canvas_intents = CanvasMenuIntents::default();
+        let selection_snapshot: Vec<PathBuf> =
+            self.selected_paths.iter().cloned().collect();
         let mut new_hover: Option<(FileItem, Pos2)> = None;
         let mut drop_ops: Vec<DropOp> = Vec::new();
         let mut marquee_rects: Vec<Rect> = Vec::new();
@@ -2375,6 +2377,7 @@ impl ExplorerView {
                     egui::Sense::click_and_drag(),
                 );
                 canvas_resp.context_menu(|menu_ui| {
+                    let dir_desc = self.sort_direction == SortDirection::Descending;
                     canvas_intents = Self::run_canvas_context_menu(
                         menu_ui,
                         icon_pack,
@@ -2382,6 +2385,9 @@ impl ExplorerView {
                         palette.accent,
                         has_clipboard,
                         !entries.is_empty(),
+                        self.sort_column,
+                        dir_desc,
+                        self.view_mode,
                     );
                 });
 
@@ -2656,6 +2662,13 @@ impl ExplorerView {
                     // Comprehensive Right-Click Context Menu for the File Row.
                     // Pure menu builder returns intents; mutations apply below.
                     row_resp.context_menu(|menu_ui| {
+                        let targets = if selection_snapshot.len() > 1
+                            && selection_snapshot.contains(&item.path)
+                        {
+                            selection_snapshot.clone()
+                        } else {
+                            vec![item.path.clone()]
+                        };
                         item_intents.clear();
                         item_intents.push(Self::run_item_context_menu(
                             menu_ui,
@@ -2663,6 +2676,7 @@ impl ExplorerView {
                             menu_style,
                             tint,
                             item,
+                            &targets,
                         ));
                     });
                 }
@@ -2770,6 +2784,27 @@ impl ExplorerView {
         if canvas_intents.paste.is_some() {
             self.paste_from_clipboard();
         }
+        if let Some(col) = canvas_intents.sort_by {
+            if self.sort_column == col {
+                self.sort_direction = self.sort_direction.toggle();
+            } else {
+                self.sort_column = col;
+                self.sort_direction = SortDirection::Ascending;
+            }
+        }
+        if let Some(vm) = canvas_intents.view_mode {
+            self.view_mode = vm;
+        }
+        if canvas_intents.invert_selection {
+            let listed: std::collections::HashSet<PathBuf> =
+                entries.iter().map(|e| e.path.clone()).collect();
+            let currently: std::collections::HashSet<PathBuf> = self
+                .selected_paths
+                .intersection(&listed)
+                .cloned()
+                .collect();
+            self.selected_paths = listed.difference(&currently).cloned().collect();
+        }
         if canvas_intents.terminal {
             open_terminal_in_dir(&self.current_dir);
         }
@@ -2780,52 +2815,14 @@ impl ExplorerView {
             self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
         }
         for intent in item_intents {
-            if let Some(dir) = intent.nav_into_dir {
-                nav_into_dir = Some(dir);
-            }
-            if let Some(item) = intent.peek {
-                peek_to_open = Some(item);
-            }
-            if let Some((path, fmt)) = intent.transcode {
-                on_transcode_target(path, fmt);
-            }
-            if let Some(path) = intent.exam_conform {
-                on_exam_conform(path);
-            }
-            if let Some(paths) = intent.pack {
-                on_pack_archive(paths);
-            }
-            if let Some(path) = intent.inspect {
-                on_inspect_file(path);
-            }
-            if let Some(path) = intent.extract {
-                if let Some(parent) = path.parent() {
-                    let parent = parent.to_path_buf();
-                    log_result("Extract", &path, crate::archive::unpack_archive(&path, &parent));
-                    self.navigate_to(self.current_dir.clone());
-                }
-            }
-            if let Some((path, name)) = intent.rename {
-                self.renaming_path = Some((path, name));
-            }
-            if let Some(item) = intent.properties {
-                self.properties_item = Some(item);
-            }
-            if let Some(path) = intent.deleted {
-                let _ = remove_entry_recursive(&path);
-                self.selected_paths.remove(&path);
-                self.navigate_to(self.current_dir.clone());
-            }
-            if let Some(paths) = intent.cut {
-                self.clipboard_paths = paths.clone();
-                self.clipboard_is_cut = true;
-                crate::gui::context_menu::set_clipboard_files_with_effect(&paths, true);
-            }
-            if let Some(paths) = intent.copy {
-                self.clipboard_paths = paths.clone();
-                self.clipboard_is_cut = false;
-                crate::gui::context_menu::set_clipboard_files_with_effect(&paths, false);
-            }
+            self.apply_item_intent(
+                ui,
+                intent,
+                on_transcode_target,
+                on_exam_conform,
+                on_pack_archive,
+                on_inspect_file,
+            );
         }
 
         // Apply hover preview state (Finder long-hover preview)
@@ -3396,6 +3393,8 @@ impl ExplorerView {
         let mut peek_to_open: Option<FileItem> = None;
         let mut item_intents: Vec<ItemMenuIntents> = Vec::new();
         let mut canvas_intents = CanvasMenuIntents::default();
+        let selection_snapshot: Vec<PathBuf> =
+            self.selected_paths.iter().cloned().collect();
         let mut new_hover: Option<(FileItem, Pos2)> = None;
         let mut drop_ops: Vec<DropOp> = Vec::new();
         let mut marquee_rects: Vec<Rect> = Vec::new();
@@ -3445,6 +3444,7 @@ impl ExplorerView {
                     egui::Sense::click_and_drag(),
                 );
                 canvas_resp.context_menu(|menu_ui| {
+                    let dir_desc = self.sort_direction == SortDirection::Descending;
                     canvas_intents = Self::run_canvas_context_menu(
                         menu_ui,
                         icon_pack,
@@ -3452,6 +3452,9 @@ impl ExplorerView {
                         palette.accent,
                         has_clipboard,
                         !entries.is_empty(),
+                        self.sort_column,
+                        dir_desc,
+                        self.view_mode,
                     );
                 });
 
@@ -3691,6 +3694,13 @@ impl ExplorerView {
 
                         // Rich Context Menu on Grid Tile (pure builder → intents).
                         resp.context_menu(|menu_ui| {
+                            let targets = if selection_snapshot.len() > 1
+                                && selection_snapshot.contains(&item.path)
+                            {
+                                selection_snapshot.clone()
+                            } else {
+                                vec![item.path.clone()]
+                            };
                             item_intents.clear();
                             item_intents.push(Self::run_item_context_menu(
                                 menu_ui,
@@ -3698,6 +3708,7 @@ impl ExplorerView {
                                 menu_style,
                                 palette.accent,
                                 item,
+                                &targets,
                             ));
                         });
                     }
@@ -3798,6 +3809,27 @@ impl ExplorerView {
         if canvas_intents.paste.is_some() {
             self.paste_from_clipboard();
         }
+        if let Some(col) = canvas_intents.sort_by {
+            if self.sort_column == col {
+                self.sort_direction = self.sort_direction.toggle();
+            } else {
+                self.sort_column = col;
+                self.sort_direction = SortDirection::Ascending;
+            }
+        }
+        if let Some(vm) = canvas_intents.view_mode {
+            self.view_mode = vm;
+        }
+        if canvas_intents.invert_selection {
+            let listed: std::collections::HashSet<PathBuf> =
+                entries.iter().map(|e| e.path.clone()).collect();
+            let currently: std::collections::HashSet<PathBuf> = self
+                .selected_paths
+                .intersection(&listed)
+                .cloned()
+                .collect();
+            self.selected_paths = listed.difference(&currently).cloned().collect();
+        }
         if canvas_intents.terminal {
             open_terminal_in_dir(&self.current_dir);
         }
@@ -3808,52 +3840,14 @@ impl ExplorerView {
             self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
         }
         for intent in item_intents {
-            if let Some(dir) = intent.nav_into_dir {
-                nav_into_dir = Some(dir);
-            }
-            if let Some(item) = intent.peek {
-                peek_to_open = Some(item);
-            }
-            if let Some((path, fmt)) = intent.transcode {
-                on_transcode_target(path, fmt);
-            }
-            if let Some(path) = intent.exam_conform {
-                on_exam_conform(path);
-            }
-            if let Some(paths) = intent.pack {
-                on_pack_archive(paths);
-            }
-            if let Some(path) = intent.inspect {
-                on_inspect_file(path);
-            }
-            if let Some(path) = intent.extract {
-                if let Some(parent) = path.parent() {
-                    let parent = parent.to_path_buf();
-                    log_result("Extract", &path, crate::archive::unpack_archive(&path, &parent));
-                    self.navigate_to(self.current_dir.clone());
-                }
-            }
-            if let Some((path, name)) = intent.rename {
-                self.renaming_path = Some((path, name));
-            }
-            if let Some(item) = intent.properties {
-                self.properties_item = Some(item);
-            }
-            if let Some(path) = intent.deleted {
-                let _ = remove_entry_recursive(&path);
-                self.selected_paths.remove(&path);
-                self.navigate_to(self.current_dir.clone());
-            }
-            if let Some(paths) = intent.cut {
-                self.clipboard_paths = paths.clone();
-                self.clipboard_is_cut = true;
-                crate::gui::context_menu::set_clipboard_files_with_effect(&paths, true);
-            }
-            if let Some(paths) = intent.copy {
-                self.clipboard_paths = paths.clone();
-                self.clipboard_is_cut = false;
-                crate::gui::context_menu::set_clipboard_files_with_effect(&paths, false);
-            }
+            self.apply_item_intent(
+                ui,
+                intent,
+                on_transcode_target,
+                on_exam_conform,
+                on_pack_archive,
+                on_inspect_file,
+            );
         }
 
         if let Some(dir) = nav_into_dir {
@@ -5380,23 +5374,63 @@ pub struct CanvasMenuIntents {
     pub terminal: bool,
     pub open_in_file_manager: bool,
     pub properties_dir: bool,
+    /// Requested sort column (caller toggles direction when re-clicked).
+    pub sort_by: Option<SortColumn>,
+    /// Requested view mode (Details/Grid/Columns submenu).
+    pub view_mode: Option<ViewMode>,
+    /// Invert selection within the current filtered listing.
+    pub invert_selection: bool,
+}
+
+/// Variants of "copy as path" (Explorer 11's flyout + terminal niceties).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyPathKind {
+    /// Absolute path, native separators.
+    Full,
+    /// File name only.
+    Name,
+    /// Absolute path wrapped in double quotes (paste-safe for CLIs).
+    Quoted,
+    /// Absolute path with forward slashes (paste-safe for *nix tools).
+    ForwardSlashes,
+    /// The containing directory path.
+    Parent,
 }
 
 /// Everything an item (row/tile) menu may ask the caller to do.
+///
+/// Multi-select: when the right-clicked item is part of the current
+/// selection, `deleted`/`cut`/`copy`/`duplicate`/`pack`/`extract`/
+/// `inspect`/`exam_conform`/`transcode`/`print` carry EVERY selected path
+/// (Explorer rule); otherwise just the clicked one.
 #[derive(Default, Debug, Clone)]
 pub struct ItemMenuIntents {
     pub nav_into_dir: Option<PathBuf>,
     pub peek: Option<FileItem>,
-    pub transcode: Option<(PathBuf, String)>,
-    pub exam_conform: Option<PathBuf>,
+    pub open_default: Option<PathBuf>,
+    pub open_in_editor: Option<PathBuf>,
+    pub open_with: Option<PathBuf>,
+    pub play: Option<PathBuf>,
+    pub print: Option<Vec<PathBuf>>,
+    pub transcode: Option<(Vec<PathBuf>, String)>,
+    pub exam_conform: Option<Vec<PathBuf>>,
     pub pack: Option<Vec<PathBuf>>,
-    pub inspect: Option<PathBuf>,
-    pub extract: Option<PathBuf>,
+    pub inspect: Option<Vec<PathBuf>>,
+    pub extract: Option<Vec<PathBuf>>,
     pub rename: Option<(PathBuf, String)>,
     pub properties: Option<FileItem>,
-    pub deleted: Option<PathBuf>,
+    pub deleted: Option<Vec<PathBuf>>,
     pub cut: Option<Vec<PathBuf>>,
     pub copy: Option<Vec<PathBuf>>,
+    pub duplicate: Option<Vec<PathBuf>>,
+    pub defender: Option<PathBuf>,
+    pub wallpaper: Option<PathBuf>,
+    pub rotate: Option<PathBuf>,
+    pub shortcut: Option<PathBuf>,
+    pub copy_path: Option<(PathBuf, CopyPathKind)>,
+    pub send_to: Option<(Vec<PathBuf>, PathBuf, String)>,
+    pub terminal_here: Option<PathBuf>,
+    pub reveal: Option<PathBuf>,
 }
 
 /// Extension classification shared by both item menus.
@@ -5405,6 +5439,15 @@ struct ItemKind {
     is_printable: bool,
     is_image: bool,
     is_archive: bool,
+}
+
+/// Classifies via a path's extension (multi-select-friendly).
+fn item_kind_ext(p: &Path) -> ItemKind {
+    let ext = p
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_uppercase())
+        .unwrap_or_default();
+    item_kind(&ext)
 }
 
 fn item_kind(extension: &str) -> ItemKind {
@@ -5505,6 +5548,204 @@ impl ExplorerView {
         }
     }
 
+    /// Applies one item menu's intents. All filesystem side effects are
+    /// logged; conversions/inspections route through the app-level callbacks.
+    /// Trash-aware delete with a logged permanent-delete fallback.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_item_intent(
+        &mut self,
+        ui: &mut Ui,
+        intent: ItemMenuIntents,
+        on_transcode_target: &mut impl FnMut(PathBuf, String),
+        on_exam_conform: &mut impl FnMut(PathBuf),
+        on_pack_archive: &mut impl FnMut(Vec<PathBuf>),
+        on_inspect_file: &mut impl FnMut(PathBuf),
+    ) {
+        use crate::gui::context_menu as cm;
+        use CopyPathKind::*;
+
+        if let Some(dir) = intent.nav_into_dir {
+            self.navigate_to(dir);
+        }
+        if let Some(file) = intent.peek {
+            self.peek_item = Some(file);
+            self.peek_texture = None;
+            self.peek_text_cache = None;
+            self.peek_hash_cache = None;
+        }
+        if let Some(p) = intent.open_default {
+            log::debug!("Open (default app): {}", p.display());
+            open_in_default_app(&p);
+        }
+        if let Some(p) = intent.open_in_editor {
+            log::debug!("Open in editor: {}", p.display());
+            open_in_default_editor(&p);
+        }
+        if let Some(p) = intent.open_with {
+            if !cm::open_with_choose(&p) {
+                log::warn!("Open With chooser unavailable for {}", p.display());
+            }
+        }
+        if let Some(p) = intent.play {
+            if !cm::play_file(&p) {
+                log::warn!("Play verb unavailable for {}", p.display());
+            }
+        }
+        if let Some(paths) = intent.print {
+            for p in &paths {
+                if !cm::print_file(p) {
+                    log::warn!("Print verb unavailable for {}", p.display());
+                }
+            }
+        }
+        if let Some((paths, fmt)) = intent.transcode {
+            if paths.len() > 1 {
+                log::info!("Transcode batch: {} file(s) -> {}", paths.len(), fmt);
+            }
+            for p in paths {
+                on_transcode_target(p, fmt.clone());
+            }
+        }
+        if let Some(paths) = intent.exam_conform {
+            for p in paths {
+                on_exam_conform(p);
+            }
+        }
+        if let Some(paths) = intent.pack {
+            on_pack_archive(paths);
+        }
+        if let Some(paths) = intent.inspect {
+            for p in paths {
+                on_inspect_file(p);
+            }
+        }
+        if let Some(paths) = intent.extract {
+            for path in paths {
+                if let Some(parent) = path.parent() {
+                    let parent = parent.to_path_buf();
+                    log_result("Extract", &path, crate::archive::unpack_archive(&path, &parent));
+                }
+            }
+            self.navigate_to(self.current_dir.clone());
+        }
+        if let Some((path, name)) = intent.rename {
+            self.renaming_path = Some((path, name));
+        }
+        if let Some(item) = intent.properties {
+            self.properties_item = Some(item);
+        }
+        if let Some(paths) = intent.deleted {
+            if cm::delete_to_trash(&paths) {
+                log::info!("Moved {} item(s) to Recycle Bin/Trash", paths.len());
+            } else {
+                for p in &paths {
+                    log_result("Delete (permanent fallback)", p, remove_entry_recursive(p));
+                }
+            }
+            for p in &paths {
+                self.selected_paths.remove(p);
+            }
+            self.selection_anchor = None;
+            self.navigate_to(self.current_dir.clone());
+        }
+        if let Some(paths) = intent.cut {
+            self.clipboard_paths = paths.clone();
+            self.clipboard_is_cut = true;
+            if !cm::set_clipboard_files_with_effect(&paths, true) {
+                log::warn!("OS clipboard (cut) sync failed for {} item(s)", paths.len());
+            }
+        }
+        if let Some(paths) = intent.copy {
+            self.clipboard_paths = paths.clone();
+            self.clipboard_is_cut = false;
+            if !cm::set_clipboard_files_with_effect(&paths, false) {
+                log::warn!("OS clipboard (copy) sync failed for {} item(s)", paths.len());
+            }
+        }
+        if let Some(paths) = intent.duplicate {
+            for src in &paths {
+                let name = src
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let parent = src.parent().unwrap_or(src);
+                let copy_name = match src.extension() {
+                    Some(ext) => format!(
+                        "{} copy.{}",
+                        src.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default(),
+                        ext.to_string_lossy()
+                    ),
+                    None => format!("{name} copy"),
+                };
+                let target = resolve_unique_paste_path(&parent.join(copy_name));
+                log_result("Duplicate", src, crate::core::fs_utils::copy_entry_recursive(src, &target).map(|_| ()));
+            }
+            self.navigate_to(self.current_dir.clone());
+        }
+        if let Some(p) = intent.defender {
+            if !cm::scan_with_defender(&p) {
+                log::warn!("Defender scan unavailable for {}", p.display());
+            }
+        }
+        if let Some(p) = intent.wallpaper {
+            if !cm::set_desktop_wallpaper(&p) {
+                log::warn!("Set wallpaper unavailable for {}", p.display());
+            } else {
+                log::info!("Desktop wallpaper set: {}", p.display());
+            }
+        }
+        if let Some(p) = intent.rotate {
+            if !cm::rotate_image_90(&p) {
+                log::warn!("Rotate 90° failed for {}", p.display());
+            } else {
+                log::info!("Rotated 90°: {}", p.display());
+                self.navigate_to(self.current_dir.clone());
+            }
+        }
+        if let Some(p) = intent.shortcut {
+            if !cm::create_shortcut(&p) {
+                log::warn!("Shortcut creation unavailable for {}", p.display());
+            }
+        }
+        if let Some((p, kind)) = intent.copy_path {
+            let text = match kind {
+                Full => p.to_string_lossy().to_string(),
+                Name => p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                Quoted => format!("\"{}\"", p.to_string_lossy()),
+                ForwardSlashes => p.to_string_lossy().replace('\\', "/"),
+                Parent => p
+                    .parent()
+                    .map(|d| d.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+            };
+            let verb = match kind {
+                Full => "path",
+                Name => "name",
+                Quoted => "quoted path",
+                ForwardSlashes => "forward-slash path",
+                Parent => "parent path",
+            };
+            ui.output_mut(|o| o.copied_text = text.clone());
+            log::debug!("Copied {verb}: {text}");
+        }
+        if let Some((paths, dest, label)) = intent.send_to {
+            log::info!("Send to '{label}': {} item(s)", paths.len());
+            if !cm::send_to(&paths, &dest) {
+                log::warn!("Send to '{label}' failed for {} item(s)", paths.len());
+            }
+        }
+        if let Some(dir) = intent.terminal_here {
+            log::debug!("Terminal at {}", dir.display());
+            open_terminal_in_dir(&dir);
+        }
+        if let Some(p) = intent.reveal {
+            reveal_in_file_manager(&p);
+        }
+    }
+
     pub fn paste_from_clipboard(&mut self) {
         let srcs: Vec<PathBuf> = self.clipboard_paths.iter().cloned().collect();
         let cut = self.clipboard_is_cut;
@@ -5534,6 +5775,9 @@ impl ExplorerView {
         tint: Color32,
         has_clipboard: bool,
         has_entries: bool,
+        current_sort: SortColumn,
+        sort_desc: bool,
+        current_view: ViewMode,
     ) -> CanvasMenuIntents {
         let mut intent = CanvasMenuIntents::default();
         fm::menu_header(menu_ui, "Explorer", tint);
@@ -5555,8 +5799,65 @@ impl ExplorerView {
         }
 
         menu_ui.separator();
+        // ── Sort by submenu (re-picking the active column reverses order) ──
+        menu_ui.menu_button("Sort by", |sub_ui| {
+            sub_ui.set_min_width(170.0);
+            for (col, label) in [
+                (SortColumn::Name, "Name"),
+                (SortColumn::Extension, "Kind"),
+                (SortColumn::Size, "Size"),
+                (SortColumn::Date, "Date Modified"),
+                (SortColumn::Permissions, "Permissions"),
+            ] {
+                let mark = if current_sort == col {
+                    if sort_desc { " ↓" } else { " ↑" }
+                } else {
+                    ""
+                };
+                let item_text = format!("{label}{mark}");
+                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionSort, &item_text, tint)
+                    .clicked()
+                {
+                    intent.sort_by = Some(col);
+                    sub_ui.close_menu();
+                }
+            }
+        });
+        // ── View submenu (Details / Grid / Columns) ──
+        menu_ui.menu_button("View", |sub_ui| {
+            sub_ui.set_min_width(170.0);
+            for (vm, label) in [
+                (ViewMode::Details, "Details / List"),
+                (ViewMode::Grid, "Icons / Grid"),
+                (ViewMode::Columns, "Miller Columns"),
+            ] {
+                let mark = if current_view == vm { " ✓" } else { "" };
+                let item_text = format!("{label}{mark}");
+                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionView, &item_text, tint)
+                    .clicked()
+                {
+                    intent.view_mode = Some(vm);
+                    sub_ui.close_menu();
+                }
+            }
+        });
+
+        menu_ui.separator();
         if menu_row(menu_ui, has_entries, pack, fm::MenuAction::SelectAll, style, tint).clicked() {
             intent.select_all = true;
+            menu_ui.close_menu();
+        }
+        if menu_row_glyph(
+            menu_ui,
+            has_entries,
+            pack,
+            IconGlyph::ActionMore,
+            "Invert Selection",
+            tint,
+        )
+        .clicked()
+        {
+            intent.invert_selection = true;
             menu_ui.close_menu();
         }
         if menu_row_glyph(menu_ui, true, pack, IconGlyph::ActionClose, "Clear Selection", tint)
@@ -5587,6 +5888,11 @@ impl ExplorerView {
     }
 
     /// Shared file/folder item context menu for Details rows and Grid tiles.
+    ///
+    /// `targets` is the effective selection: the clicked path plus every
+    /// co-selected path when the click landed inside the selection (Explorer
+    /// rule). File-only groups (print/convert/conform/inspect) automatically
+    /// restrict to files; hirez verbs stay on the clicked item only.
     #[allow(clippy::too_many_lines)]
     pub fn run_item_context_menu(
         menu_ui: &mut Ui,
@@ -5594,14 +5900,32 @@ impl ExplorerView {
         style: MenuStyle,
         tint: Color32,
         item: &FileItem,
+        targets: &[PathBuf],
     ) -> ItemMenuIntents {
         let mut intent = ItemMenuIntents::default();
         let is_dir = item.is_dir;
-        let spec = resolve_file_icon(&item.name, &item.extension, is_dir);
-        let kind = item_kind(&item.extension);
         let path: PathBuf = item.path.clone();
 
-        fm::menu_header(menu_ui, &item.name, tint);
+        // Multi-select bookkeeping (Explorer rule).
+        let multi = targets.len() > 1;
+        let file_targets: Vec<PathBuf> =
+            targets.iter().filter(|p| p.is_file()).cloned().collect();
+        let archive_targets: Vec<PathBuf> = targets
+            .iter()
+            .filter(|p| {
+                p.extension()
+                    .map(|e| item_kind(&e.to_string_lossy().to_ascii_uppercase()).is_archive)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+
+        let header = if multi {
+            format!("{} items", targets.len())
+        } else {
+            item.name.clone()
+        };
+        fm::menu_header(menu_ui, &header, tint);
         menu_ui.separator();
 
         // ── Open group ──
@@ -5612,26 +5936,36 @@ impl ExplorerView {
             }
         } else {
             if menu_row(menu_ui, true, pack, fm::MenuAction::OpenFile, style, tint).clicked() {
-                open_in_default_app(&path);
+                intent.open_default = Some(path.clone());
                 menu_ui.close_menu();
             }
-            if menu_row(menu_ui, true, pack, fm::MenuAction::Edit, style, tint).clicked() {
-                open_in_default_editor(&path);
+            if menu_row(menu_ui, !multi, pack, fm::MenuAction::Edit, style, tint).clicked() {
+                intent.open_in_editor = Some(path.clone());
                 menu_ui.close_menu();
             }
+            let kind = item_kind(&item.extension);
             if kind.is_media
-                && menu_row(menu_ui, true, pack, fm::MenuAction::Play, style, tint).clicked()
+                && menu_row(menu_ui, !multi, pack, fm::MenuAction::Play, style, tint).clicked()
             {
-                crate::gui::context_menu::play_file(&path);
+                intent.play = Some(path.clone());
                 menu_ui.close_menu();
             }
-            if kind.is_printable
+            if !file_targets.is_empty()
+                && file_targets
+                    .iter()
+                    .any(|p| item_kind_ext(p).is_printable)
                 && menu_row(menu_ui, true, pack, fm::MenuAction::Print, style, tint).clicked()
             {
-                crate::gui::context_menu::print_file(&path);
+                intent.print = Some(
+                    file_targets
+                        .iter()
+                        .filter(|p| item_kind_ext(p).is_printable)
+                        .cloned()
+                        .collect(),
+                );
                 menu_ui.close_menu();
             }
-            if menu_row(menu_ui, true, pack, fm::MenuAction::QuickLook, style, tint).clicked() {
+            if menu_row(menu_ui, !multi, pack, fm::MenuAction::QuickLook, style, tint).clicked() {
                 intent.peek = Some(item.clone());
                 menu_ui.close_menu();
             }
@@ -5639,21 +5973,22 @@ impl ExplorerView {
 
         menu_ui.separator();
 
-        // ── Media/image group (files only; directories are packed instead) ──
-        if !is_dir {
+        // ── Media/image verbs (single item, non-dir) ──
+        if !is_dir && !multi {
+            let kind = item_kind(&item.extension);
             if kind.is_image
                 && menu_row(menu_ui, true, pack, fm::MenuAction::Wallpaper, style, tint).clicked()
             {
-                crate::gui::context_menu::set_desktop_wallpaper(&path);
+                intent.wallpaper = Some(path.clone());
                 menu_ui.close_menu();
             }
             if kind.is_image
                 && menu_row(menu_ui, true, pack, fm::MenuAction::Rotate, style, tint).clicked()
             {
-                crate::gui::context_menu::rotate_image_90(&path);
+                intent.rotate = Some(path.clone());
                 menu_ui.close_menu();
             }
-            if is_image_extension(&item.extension) || kind.is_media || kind.is_printable {
+            if kind.is_image || kind.is_media || kind.is_printable {
                 menu_ui.menu_button("Convert", |sub_ui| {
                     sub_ui.set_min_width(180.0);
                     for fmt in ["JPG", "PNG", "WEBP", "PDF", "MP3", "FLAC"] {
@@ -5666,7 +6001,7 @@ impl ExplorerView {
                         )
                         .clicked()
                         {
-                            intent.transcode = Some((path.clone(), fmt.to_string()));
+                            intent.transcode = Some((targets.to_vec(), fmt.to_string()));
                             sub_ui.close_menu();
                         }
                     }
@@ -5680,45 +6015,79 @@ impl ExplorerView {
                     )
                     .clicked()
                     {
-                        intent.transcode = Some((path.clone(), "ALL".to_string()));
+                        intent.transcode = Some((targets.to_vec(), "ALL".to_string()));
                         sub_ui.close_menu();
                     }
                 });
             }
         }
-        if !is_dir
-            && kind.is_archive
+        if !archive_targets.is_empty()
             && menu_row(menu_ui, true, pack, fm::MenuAction::Extract, style, tint).clicked()
         {
-            intent.extract = Some(path.clone());
+            intent.extract = Some(archive_targets.clone());
             menu_ui.close_menu();
         }
         if menu_row(menu_ui, true, pack, fm::MenuAction::PackZip, style, tint).clicked() {
-            intent.pack = Some(vec![path.clone()]);
+            intent.pack = Some(targets.to_vec());
             menu_ui.close_menu();
         }
-        if !is_dir {
+        if !file_targets.is_empty() {
             if menu_row(menu_ui, true, pack, fm::MenuAction::Conform, style, tint).clicked() {
-                intent.exam_conform = Some(path.clone());
+                intent.exam_conform = Some(file_targets.clone());
                 menu_ui.close_menu();
             }
             if menu_row(menu_ui, true, pack, fm::MenuAction::Inspect, style, tint).clicked() {
-                intent.inspect = Some(path.clone());
+                intent.inspect = Some(file_targets.clone());
                 menu_ui.close_menu();
             }
+            if menu_row(menu_ui, !multi, pack, fm::MenuAction::OpenWith, style, tint).clicked() {
+                intent.open_with = Some(path.clone());
+                menu_ui.close_menu();
+            }
+        }
+        if menu_row(menu_ui, true, pack, fm::MenuAction::Duplicate, style, tint).clicked() {
+            intent.duplicate = Some(targets.to_vec());
+            menu_ui.close_menu();
+        }
+
+        // ── Send to (Windows SendTo folder entries) ──
+        let send_dests = crate::gui::context_menu::send_to_targets();
+        if !send_dests.is_empty() {
+            menu_ui.menu_button(fm::MenuAction::SendTo.label(style), |sub_ui| {
+                sub_ui.set_min_width(170.0);
+                for (label, dest) in send_dests.iter().take(12) {
+                    if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionShortcut, label, tint)
+                        .clicked()
+                    {
+                        intent.send_to =
+                            Some((targets.to_vec(), dest.clone(), label.clone()));
+                        sub_ui.close_menu();
+                    }
+                }
+            });
         }
 
         menu_ui.separator();
 
-        // ── Shell helpers row ──
-        if menu_row_glyph(menu_ui, true, pack, IconGlyph::ActionPath, fm::MenuAction::CopyPath.label(style), tint)
-            .clicked()
-        {
-            menu_ui.output_mut(|o| o.copied_text = path.to_string_lossy().to_string());
-            menu_ui.close_menu();
-        }
+        // ── Shell helpers ──
+        menu_ui.menu_button("Copy as path", |sub_ui| {
+            sub_ui.set_min_width(190.0);
+            for (kind, label) in [
+                (CopyPathKind::Full, "Native separators"),
+                (CopyPathKind::Name, "Name only"),
+                (CopyPathKind::Quoted, "Quoted (\"...\")"),
+                (CopyPathKind::ForwardSlashes, "Forward slashes (/)"),
+                (CopyPathKind::Parent, "Containing folder"),
+            ] {
+                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionPath, label, tint).clicked()
+                {
+                    intent.copy_path = Some((path.clone(), kind));
+                    sub_ui.close_menu();
+                }
+            }
+        });
         if menu_row(menu_ui, true, pack, fm::MenuAction::Reveal, style, tint).clicked() {
-            reveal_in_file_manager(&path);
+            intent.reveal = Some(path.clone());
             menu_ui.close_menu();
         }
         if menu_row(menu_ui, true, pack, fm::MenuAction::Terminal, style, tint).clicked() {
@@ -5727,48 +6096,48 @@ impl ExplorerView {
             } else {
                 path.parent().unwrap_or(&path).to_path_buf()
             };
-            open_terminal_in_dir(&dir_target);
+            intent.terminal_here = Some(dir_target);
             menu_ui.close_menu();
         }
-        if menu_row_glyph(menu_ui, true, pack, IconGlyph::ActionShortcut, fm::MenuAction::Shortcut.label(style), tint)
-            .clicked()
+        if cfg!(windows)
+            && menu_row(menu_ui, true, pack, fm::MenuAction::Shortcut, style, tint).clicked()
         {
-            crate::gui::context_menu::create_shortcut(&path);
+            intent.shortcut = Some(path.clone());
             menu_ui.close_menu();
         }
 
         // ── Clipboard group ──
         menu_ui.separator();
         if menu_row(menu_ui, true, pack, fm::MenuAction::Cut, style, tint).clicked() {
-            intent.cut = Some(vec![path.clone()]);
+            intent.cut = Some(targets.to_vec());
             menu_ui.close_menu();
         }
         if menu_row(menu_ui, true, pack, fm::MenuAction::Copy, style, tint).clicked() {
-            intent.copy = Some(vec![path.clone()]);
+            intent.copy = Some(targets.to_vec());
             menu_ui.close_menu();
         }
 
         // ── Danger group ──
         menu_ui.separator();
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Rename, style, tint).clicked() {
+        if menu_row(menu_ui, !multi, pack, fm::MenuAction::Rename, style, tint).clicked() {
             if let Some(name) = path.file_name() {
                 intent.rename = Some((path.clone(), name.to_string_lossy().to_string()));
             }
             menu_ui.close_menu();
         }
         if menu_row(menu_ui, true, pack, fm::MenuAction::Delete, style, tint).clicked() {
-            intent.deleted = Some(path.clone());
+            intent.deleted = Some(targets.to_vec());
             menu_ui.close_menu();
         }
         if crate::gui::context_menu::win_defender_available()
             && menu_row(menu_ui, true, pack, fm::MenuAction::Defender, style, tint).clicked()
         {
-            crate::gui::context_menu::scan_with_defender(&path);
+            intent.defender = Some(path.clone());
             menu_ui.close_menu();
         }
 
         menu_ui.separator();
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Properties, style, tint).clicked() {
+        if menu_row(menu_ui, !multi, pack, fm::MenuAction::Properties, style, tint).clicked() {
             intent.properties = Some(item.clone());
             menu_ui.close_menu();
         }

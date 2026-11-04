@@ -35,6 +35,8 @@ pub enum MenuAction {
     Inspect,
     CopyPath,
     Shortcut,
+    Duplicate,
+    SendTo,
     Cut,
     Copy,
     Paste,
@@ -135,6 +137,14 @@ impl MenuAction {
             (Shortcut, Finder) => "Make Alias",
             (Shortcut, Linux) => "Create Link",
 
+            (Duplicate, Windows) => "Create a copy",
+            (Duplicate, Finder) => "Duplicate",
+            (Duplicate, Linux) => "Duplicate",
+
+            (SendTo, Windows) => "Send to",
+            (SendTo, Finder) => "Send To",
+            (SendTo, Linux) => "Send To…",
+
             (Cut, Windows) => "Cut",
             (Cut, Finder) => "Cut",
             (Cut, Linux) => "Cut",
@@ -204,6 +214,8 @@ impl MenuAction {
             Inspect => IconGlyph::ActionShield,
             CopyPath => IconGlyph::ActionPath,
             Shortcut => IconGlyph::ActionShortcut,
+            Duplicate => IconGlyph::ActionCopy,
+            SendTo => IconGlyph::ActionMore,
             Cut => IconGlyph::ActionCut,
             Copy => IconGlyph::ActionCopy,
             Paste => IconGlyph::ActionPaste,

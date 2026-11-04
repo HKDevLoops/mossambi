@@ -291,3 +291,143 @@ pub fn rotate_image_90(path: &Path) -> bool {
     let rotated = img.rotate90();
     rotated.save(path).is_ok()
 }
+
+/// Deletes `paths` to the OS trash/recycle.
+///
+/// Windows: `SHFileOperationW` with `FOF_ALLOWUNDO` (true Recycle Bin).
+/// macOS: hidden `.Trash` move; Linux: `gio trash` when available.
+/// Returns `false` (caller may fall back to a permanent, logged delete).
+pub fn delete_to_trash(paths: &[std::path::PathBuf]) -> bool {
+    if paths.is_empty() {
+        return true;
+    }
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::{
+            SHFileOperationW, SHFILEOPSTRUCTW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT,
+            FO_DELETE,
+        };
+
+        // One double-NUL-terminated UTF-16 list for the whole batch.
+        let mut wide: Vec<u16> = Vec::new();
+        for p in paths {
+            let s: Vec<u16> = p
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+            wide.extend_from_slice(&s);
+        }
+        wide.push(0); // terminating NUL
+        let mut op = SHFILEOPSTRUCTW {
+            hwnd: std::ptr::null_mut(),
+            wFunc: FO_DELETE,
+            pFrom: wide.as_ptr(),
+            pTo: std::ptr::null(),
+            fFlags: FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT,
+            fAnyOperationsAborted: 0,
+            hNameMappings: std::ptr::null_mut(),
+            lpszProgressTitle: std::ptr::null(),
+        };
+        let ok = SHFileOperationW(&mut op) == 0 && op.fAnyOperationsAborted == 0;
+        if !ok {
+            log::warn!(target: "mossambi::context_menu",
+                "SHFileOperationW(FO_DELETE, allowundo) failed for {} item(s)", paths.len());
+        }
+        ok
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Linux desktops / GNOME: gio trash honors userland rules + XDG spec.
+        for p in paths {
+            let res = std::process::Command::new("gio")
+                .args(["trash", "--"])
+                .arg(p)
+                .status();
+            match res {
+                Ok(s) if s.success() => {}
+                _ => return false,
+            }
+        }
+        true
+    }
+}
+
+/// Enumerates "Send to" destinations from the Windows SendTo folder.
+/// Label pairs are (display label, .lnk path). Non-Windows yields nothing.
+pub fn send_to_targets() -> Vec<(String, std::path::PathBuf)> {
+    #[cfg(target_os = "windows")]
+    {
+        let dir = std::env::var_os("APPDATA")
+            .map(|a| std::path::PathBuf::from(a).join(r"Microsoft\Windows\SendTo"))
+            .map(|d| d);
+        let Some(dir) = dir else { return Vec::new() };
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if !matches!(
+                p.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase()).as_deref(),
+                Some("lnk"),
+            ) {
+                continue;
+            }
+            let label = p
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Destination".into());
+            out.push((label, p));
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Vec::new()
+    }
+}
+
+/// Invokes a SendTo destination (.lnk) with the given files as arguments.
+pub fn send_to(paths: &[std::path::PathBuf], destination: &std::path::Path) -> bool {
+    if paths.is_empty() {
+        return false;
+    }
+    let joined = paths
+        .iter()
+        .map(|p| format!("\"{}\"", p.to_string_lossy()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let wide: Vec<u16> = destination
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let params: Vec<u16> = OsStr::new(&joined).encode_wide().chain(std::iter::once(0)).collect();
+        let verb_open: Vec<u16> =
+            OsStr::new("open").encode_wide().chain(std::iter::once(0)).collect();
+        let res = ShellExecuteW(
+            std::ptr::null_mut(),
+            verb_open.as_ptr(),
+            wide.as_ptr(),
+            params.as_ptr(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
+        (res as usize) > 32
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (destination, joined);
+        false
+    }
+}
