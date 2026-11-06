@@ -49,6 +49,8 @@ pub enum MenuAction {
     SortBy,
     ViewMode,
     Compress,
+    Tags,
+    PinSidebar,
 }
 
 impl MenuAction {
@@ -188,6 +190,14 @@ impl MenuAction {
             (ViewMode, Windows) => "View",
             (ViewMode, Finder) => "View",
             (ViewMode, Linux) => "View",
+
+            (Tags, Windows) => "Tags",
+            (Tags, Finder) => "Tags",
+            (Tags, Linux) => "Tags",
+
+            (PinSidebar, Windows) => "Pin to Sidebar",
+            (PinSidebar, Finder) => "Pin to Sidebar",
+            (PinSidebar, Linux) => "Pin to Sidebar",
         }
     }
 
@@ -227,6 +237,8 @@ impl MenuAction {
             NewFolder => IconGlyph::ActionNewFolder,
             SortBy => IconGlyph::ActionSort,
             ViewMode => IconGlyph::ActionView,
+            Tags => IconGlyph::ActionMore,
+            PinSidebar => IconGlyph::ActionPin,
         }
     }
 }

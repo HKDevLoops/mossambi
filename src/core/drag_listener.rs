@@ -10,9 +10,9 @@ use crate::core::gesture::KinematicGestureTracker;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 #[cfg(target_os = "windows")]
 use std::sync::Mutex;
-use std::sync::Arc;
 use std::thread::{Builder, JoinHandle};
 #[cfg(target_os = "windows")]
 use std::time::{SystemTime, UNIX_EPOCH};

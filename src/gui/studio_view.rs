@@ -47,6 +47,9 @@ pub struct StudioView {
     pub network_expanded: bool,
     pub tags_expanded: bool,
     pub tools_expanded: bool,
+
+    // macOS System Settings-style Preferences surface
+    pub prefs_view: crate::gui::preferences_view::PreferencesView,
 }
 
 impl Default for StudioView {
@@ -68,6 +71,8 @@ impl Default for StudioView {
             network_expanded: false,
             tags_expanded: true,
             tools_expanded: true,
+
+            prefs_view: crate::gui::preferences_view::PreferencesView::default(),
         }
     }
 }
@@ -103,6 +108,19 @@ impl StudioView {
                 // ==============================================================
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+
+                    // Finder traffic lights on the LEFT of the tab strip.
+                    // The Windows-style Fluent dots (plus a stray maximize
+                    // glyph) were replaced: macOS puts the controls first.
+                    crate::gui::finder_chrome::render_traffic_lights(
+                        ui,
+                        &palette,
+                        || ctx.send_viewport_cmd(ViewportCommand::Close),
+                        || ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
+                        || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
+                    );
+
+                    ui.add_space(6.0);
 
                     // Brand Icon
                     ui.label(egui::RichText::new("🍋").size(23.0));
@@ -255,16 +273,6 @@ impl StudioView {
                     if drag_resp.double_clicked() {
                         ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max));
                     }
-
-                    // Window Controls (Minimize, Maximize, Close)
-                    render_fluent_window_controls(
-                        ui,
-                        &palette,
-                        is_max,
-                        || ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
-                        || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
-                        || ctx.send_viewport_cmd(ViewportCommand::Close),
-                    );
                 });
 
                 ui.add_space(6.0);
@@ -523,7 +531,7 @@ impl StudioView {
                             ui,
                             &palette,
                             "Home",
-                            "🏠",
+                            "Hm",
                             is_home_active,
                             false,
                         ) {
@@ -539,10 +547,16 @@ impl StudioView {
 
                         ui.add_space(8.0);
 
-                        // 2. PINNED Section
+                        // 2. FAVORITES Section
+                        //
+                        // Standard library folders only. The custom pinned
+                        // folders (between_pcs, wallpapers) were hard-coded
+                        // before; user-pinned folders now live behind the
+                        // `show_custom_pinned` preference and are appended
+                        // below the standard set.
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new("Pinned")
+                                egui::RichText::new("Favorites")
                                     .size(18.5)
                                     .strong()
                                     .color(palette.text_muted),
@@ -550,6 +564,7 @@ impl StudioView {
                         });
                         ui.add_space(2.0);
 
+                        let cfg = crate::core::MossambiConfig::load();
                         let home_opt = std::env::var("USERPROFILE")
                             .or_else(|_| std::env::var("HOME"))
                             .ok();
@@ -564,14 +579,12 @@ impl StudioView {
                                 .map(|d| d.path.join("$Recycle.Bin"))
                                 .unwrap_or_else(|| base.clone());
                             let pinned = [
-                                ("Desktop", "🖥", base.join("Desktop")),
-                                ("Downloads", "📥", base.join("Downloads")),
-                                ("Documents", "📄", base.join("Documents")),
-                                ("Pictures", "🖼", base.join("Pictures")),
-                                ("Music", "🎵", base.join("Music")),
-                                ("Videos", "🎬", base.join("Videos")),
-                                ("between_pcs", "📁", base.join("between_pcs")),
-                                ("wallpapers", "📁", base.join("wallpapers")),
+                                ("Desktop", "Dk", base.join("Desktop")),
+                                ("Downloads", "Dl", base.join("Downloads")),
+                                ("Documents", "Dc", base.join("Documents")),
+                                ("Pictures", "Pc", base.join("Pictures")),
+                                ("Music", "Mu", base.join("Music")),
+                                ("Videos", "Vd", base.join("Videos")),
                                 ("Recycle Bin", "🗑", recycle_target),
                             ];
 
@@ -590,6 +603,39 @@ impl StudioView {
                                     self.explorer_view.is_home_view = false;
                                 }
                                 ui.add_space(1.0);
+                            }
+
+                            // User-pinned folders: opt-in via Preferences
+                            // ("Show custom pinned folders"). Entries are
+                            // added from a folder row's right-click menu
+                            // ("Pin to Sidebar").
+                            if cfg.show_custom_pinned && !cfg.pinned_custom.is_empty() {
+                                ui.add_space(6.0);
+                                ui.label(
+                                    egui::RichText::new("Pinned Folders")
+                                        .size(17.0)
+                                        .color(palette.text_muted),
+                                );
+                                ui.add_space(1.0);
+                                let custom = cfg.pinned_custom.clone();
+                                for raw in custom {
+                                    let path = PathBuf::from(&raw);
+                                    let name = path
+                                        .file_name()
+                                        .map(|n| n.to_string_lossy().into_owned())
+                                        .unwrap_or_else(|| raw.clone());
+                                    let is_active = self.current_tab == StudioTab::FileExplorer
+                                        && !self.explorer_view.is_home_view
+                                        && self.explorer_view.current_dir == path;
+                                    if render_sidebar_item_with_pin(
+                                        ui, &palette, &name, "📁", is_active, true,
+                                    ) {
+                                        self.current_tab = StudioTab::FileExplorer;
+                                        self.explorer_view.navigate_to(path);
+                                        self.explorer_view.is_home_view = false;
+                                    }
+                                    ui.add_space(1.0);
+                                }
                             }
                         }
 
@@ -697,50 +743,67 @@ impl StudioView {
                         ui.add_space(4.0);
 
                         // 6. TAGS Section (Collapsible)
-                        let tags_header =
-                            format!("{} Tags", if self.tags_expanded { "⌄" } else { "›" });
-                        if ui
-                            .selectable_label(
-                                self.tags_expanded,
-                                egui::RichText::new(tags_header)
-                                    .size(18.5)
-                                    .strong()
-                                    .color(palette.text_muted),
-                            )
-                            .clicked()
-                        {
-                            self.tags_expanded = !self.tags_expanded;
-                        }
-                        if self.tags_expanded {
-                            ui.add_space(2.0);
-                            let tags = [
-                                ("Home", Color32::from_rgb(0, 122, 255)),
-                                ("Work", Color32::from_rgb(255, 149, 0)),
-                                ("Photos", Color32::from_rgb(255, 149, 0)),
-                                ("Important", Color32::from_rgb(52, 199, 89)),
-                            ];
-                            for (tag_name, tag_col) in tags {
-                                ui.horizontal(|ui| {
-                                    ui.add_space(14.0);
-                                    ui.painter().circle_filled(
-                                        ui.cursor().min + Vec2::new(4.0, 7.0),
-                                        4.0,
-                                        tag_col,
-                                    );
-                                    ui.add_space(12.0);
-                                    ui.label(
-                                        egui::RichText::new(tag_name)
-                                            .size(19.0)
-                                            .color(palette.text_secondary),
-                                    );
-                                });
-                                ui.add_space(2.0);
+                        //
+                        // Opt-in via Preferences ("Show Tags section"). The
+                        // rows are now real smart lists: clicking one
+                        // filters the explorer to items carrying that tag.
+                        if cfg.show_tags_section {
+                            let tags_header =
+                                format!("{} Tags", if self.tags_expanded { "⌄" } else { "›" });
+                            if ui
+                                .selectable_label(
+                                    self.tags_expanded,
+                                    egui::RichText::new(tags_header)
+                                        .size(18.5)
+                                        .strong()
+                                        .color(palette.text_muted),
+                                )
+                                .clicked()
+                            {
+                                self.tags_expanded = !self.tags_expanded;
                             }
-                        }
+                            if self.tags_expanded {
+                                ui.add_space(2.0);
+                                for tag_name in crate::core::tags::TAG_PRESETS {
+                                    let tag_col = crate::core::tags::tag_color(tag_name);
+                                    let is_active =
+                                        self.explorer_view.active_tag.as_deref() == Some(tag_name);
+                                    let mut row_color = palette.text_secondary;
+                                    if is_active {
+                                        row_color = palette.accent;
+                                    }
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(14.0);
+                                        ui.painter().circle_filled(
+                                            ui.cursor().min + Vec2::new(4.0, 7.0),
+                                            4.0,
+                                            tag_col,
+                                        );
+                                        ui.add_space(12.0);
+                                        if ui
+                                            .label(
+                                                egui::RichText::new(tag_name)
+                                                    .size(19.0)
+                                                    .color(row_color),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.current_tab = StudioTab::FileExplorer;
+                                            self.explorer_view.set_active_tag(if is_active {
+                                                None
+                                            } else {
+                                                Some(tag_name.to_string())
+                                            });
+                                        }
+                                    });
+                                    ui.add_space(2.0);
+                                }
+                            }
 
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.add_space(4.0);
+                            ui.add_space(8.0);
+                            ui.separator();
+                            ui.add_space(4.0);
+                        }
 
                         // 7. TOOLS & CONVERTERS Section (Collapsible)
                         let tools_header = format!(
@@ -992,7 +1055,7 @@ impl StudioView {
 
             staged_frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("📄").size(40.0));
+                    ui.label(egui::RichText::new("Dc").size(40.0));
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new(
@@ -1897,501 +1960,10 @@ impl StudioView {
         current_theme: &mut ThemeStyle,
         _settings: &mut QuickSettingsState,
     ) {
-        ui.label(
-            egui::RichText::new("Preferences & Appearance")
-                .size(30.0)
-                .strong()
-                .color(palette.text_primary),
-        );
-        ui.label(
-            egui::RichText::new("Theme Selection, Gestures, and Certified Pantone Swatches")
-                .size(20.0)
-                .color(palette.text_secondary),
-        );
-        ui.add_space(14.0);
-
-        // 1. Certified Pantone Theme Selector (10 Dark & 10 Light)
-        let theme_frame = egui::Frame::none()
-            .fill(palette.card_bg)
-            .stroke(Stroke::new(1.0_f32, palette.border))
-            .rounding(Rounding::same(10.0))
-            .inner_margin(egui::Margin::same(16.0));
-
-        theme_frame.show(ui, |ui| {
-            ui.label(egui::RichText::new("🎨 20 Certified Pantone Themes (10 Dark & 10 Light)").size(23.0).strong().color(palette.text_primary));
-            ui.label(egui::RichText::new("100% Certified Pantone Matching System (PMS) & FHI Standards with exact hex colorimetry.").size(19.5).color(palette.text_muted));
-            ui.add_space(10.0);
-
-            // Section A: 10 Dark Themes
-            ui.label(egui::RichText::new("🌙 10 Certified Dark Pantone Themes").size(21.0).strong().color(palette.text_primary));
-            ui.add_space(4.0);
-
-            let dark_themes = ThemeStyle::dark_themes();
-            for chunk in dark_themes.chunks(2) {
-                ui.columns(2, |cols| {
-                    for (col_idx, theme_opt) in chunk.iter().enumerate() {
-                        let is_active = *current_theme == *theme_opt;
-                        let pt = theme_opt.to_pantone();
-                        let (bg_r, bg_g, bg_b) = pt.bg.to_rgb();
-                        let (surf_r, surf_g, surf_b) = pt.surface.to_rgb();
-                        let (bord_r, bord_g, bord_b) = pt.border.to_rgb();
-                        let (acc_r, acc_g, acc_b) = pt.accent.to_rgb();
-
-                        let bg_col = Color32::from_rgb(bg_r, bg_g, bg_b);
-                        let surf_col = Color32::from_rgb(surf_r, surf_g, surf_b);
-                        let bord_col = Color32::from_rgb(bord_r, bord_g, bord_b);
-                        let acc_col = Color32::from_rgb(acc_r, acc_g, acc_b);
-
-                        let card = egui::Frame::none()
-                            .fill(if is_active { Color32::from_rgb(28, 38, 24) } else { palette.card_bg })
-                            .stroke(Stroke::new(
-                                if is_active { 1.5_f32 } else { 1.0_f32 },
-                                if is_active { PANTONE_FLAVEDO } else { palette.border },
-                            ))
-                            .rounding(Rounding::same(8.0))
-                            .inner_margin(egui::Margin::symmetric(10.0, 7.0));
-
-                        card.show(&mut cols[col_idx], |ui| {
-                            let resp = ui.interact(ui.max_rect(), ui.id().with(pt.id), Sense::click());
-                            if resp.clicked() {
-                                *current_theme = *theme_opt;
-                                let mut cfg = crate::core::MossambiConfig::load();
-                                cfg.theme_mode = (*theme_opt).into();
-                                let _ = cfg.save();
-                            }
-
-                            ui.horizontal(|ui| {
-                                let label_text = if is_active {
-                                    format!("✓ {}", pt.name)
-                                } else {
-                                    pt.name.to_string()
-                                };
-                                ui.label(
-                                    egui::RichText::new(label_text)
-                                        .size(19.5)
-                                        .strong()
-                                        .color(if is_active { PANTONE_FLAVEDO } else { palette.text_primary }),
-                                );
-
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    for col in [acc_col, bord_col, surf_col, bg_col] {
-                                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
-                                        ui.painter().circle_filled(rect.center(), 5.0, col);
-                                        ui.painter().circle_stroke(rect.center(), 5.0, Stroke::new(0.5_f32, Color32::from_black_alpha(50)));
-                                    }
-                                });
-                            });
-                        });
-                    }
-                });
-                ui.add_space(4.0);
-            }
-
-            ui.add_space(10.0);
-
-            // Section B: 10 Light Themes
-            ui.label(egui::RichText::new("☀️ 10 Certified Light Pantone Themes").size(21.0).strong().color(palette.text_primary));
-            ui.add_space(4.0);
-
-            let light_themes = ThemeStyle::light_themes();
-            for chunk in light_themes.chunks(2) {
-                ui.columns(2, |cols| {
-                    for (col_idx, theme_opt) in chunk.iter().enumerate() {
-                        let is_active = *current_theme == *theme_opt;
-                        let pt = theme_opt.to_pantone();
-                        let (bg_r, bg_g, bg_b) = pt.bg.to_rgb();
-                        let (surf_r, surf_g, surf_b) = pt.surface.to_rgb();
-                        let (bord_r, bord_g, bord_b) = pt.border.to_rgb();
-                        let (acc_r, acc_g, acc_b) = pt.accent.to_rgb();
-
-                        let bg_col = Color32::from_rgb(bg_r, bg_g, bg_b);
-                        let surf_col = Color32::from_rgb(surf_r, surf_g, surf_b);
-                        let bord_col = Color32::from_rgb(bord_r, bord_g, bord_b);
-                        let acc_col = Color32::from_rgb(acc_r, acc_g, acc_b);
-
-                        let card = egui::Frame::none()
-                            .fill(if is_active { Color32::from_rgb(238, 246, 230) } else { palette.card_bg })
-                            .stroke(Stroke::new(
-                                if is_active { 1.5_f32 } else { 1.0_f32 },
-                                if is_active { PANTONE_FLAVEDO } else { palette.border },
-                            ))
-                            .rounding(Rounding::same(8.0))
-                            .inner_margin(egui::Margin::symmetric(10.0, 7.0));
-
-                        card.show(&mut cols[col_idx], |ui| {
-                            let resp = ui.interact(ui.max_rect(), ui.id().with(pt.id), Sense::click());
-                            if resp.clicked() {
-                                *current_theme = *theme_opt;
-                                let mut cfg = crate::core::MossambiConfig::load();
-                                cfg.theme_mode = (*theme_opt).into();
-                                let _ = cfg.save();
-                            }
-
-                            ui.horizontal(|ui| {
-                                let label_text = if is_active {
-                                    format!("✓ {}", pt.name)
-                                } else {
-                                    pt.name.to_string()
-                                };
-                                ui.label(
-                                    egui::RichText::new(label_text)
-                                        .size(19.5)
-                                        .strong()
-                                        .color(if is_active { PANTONE_FLAVEDO } else { palette.text_primary }),
-                                );
-
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    for col in [acc_col, bord_col, surf_col, bg_col] {
-                                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
-                                        ui.painter().circle_filled(rect.center(), 5.0, col);
-                                        ui.painter().circle_stroke(rect.center(), 5.0, Stroke::new(0.5_f32, Color32::from_black_alpha(50)));
-                                    }
-                                });
-                            });
-                        });
-                    }
-                });
-                ui.add_space(4.0);
-            }
-
-            ui.add_space(10.0);
-
-            // Section C: Active Theme Specifications
-            let active_pt = current_theme.to_pantone();
-            let spec_card = egui::Frame::none()
-                .fill(palette.card_bg)
-                .stroke(Stroke::new(1.0_f32, palette.border))
-                .rounding(Rounding::same(8.0))
-                .inner_margin(egui::Margin::same(12.0));
-
-            spec_card.show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "Active Specification: {} ({})",
-                        active_pt.name,
-                        if active_pt.is_dark { "Dark Set" } else { "Light Set" }
-                    ))
-                    .size(20.0)
-                    .strong()
-                    .color(palette.text_primary),
-                );
-                ui.add_space(4.0);
-                ui.columns(4, |cols| {
-                    cols[0].label(
-                        egui::RichText::new(format!(
-                            "Background:\n{}\n{}\n{}",
-                            active_pt.bg.name, active_pt.bg.code, active_pt.bg.hex
-                        ))
-                        .size(18.5)
-                        .color(palette.text_secondary),
-                    );
-                    cols[1].label(
-                        egui::RichText::new(format!(
-                            "Surface:\n{}\n{}\n{}",
-                            active_pt.surface.name, active_pt.surface.code, active_pt.surface.hex
-                        ))
-                        .size(18.5)
-                        .color(palette.text_secondary),
-                    );
-                    cols[2].label(
-                        egui::RichText::new(format!(
-                            "Accent:\n{}\n{}\n{}",
-                            active_pt.accent.name, active_pt.accent.code, active_pt.accent.hex
-                        ))
-                        .size(18.5)
-                        .color(palette.text_secondary),
-                    );
-                    cols[3].label(
-                        egui::RichText::new(format!(
-                            "Highlight:\n{}\n{}\n{}",
-                            active_pt.highlight.name, active_pt.highlight.code, active_pt.highlight.hex
-                        ))
-                        .size(18.5)
-                        .color(palette.text_secondary),
-                    );
-                });
-            });
-        });
-
-        ui.add_space(12.0);
-
-        // 2. Apple Glass & Translucency Engine
-        let mut cfg = crate::core::MossambiConfig::load();
-        let glass_frame = egui::Frame::none()
-            .fill(palette.card_bg)
-            .stroke(Stroke::new(1.0_f32, palette.border))
-            .rounding(Rounding::same(10.0))
-            .inner_margin(egui::Margin::same(16.0));
-
-        glass_frame.show(ui, |ui| {
-            ui.label(
-                egui::RichText::new("🍏 Apple Glass & Translucency Engine (Sequoia & Sonoma)")
-                    .size(23.0)
-                    .strong()
-                    .color(palette.text_primary),
-            );
-            ui.label(
-                egui::RichText::new(
-                    "Switchable glass materials and continuous alpha blending over all 20 certified Pantone themes.",
-                )
-                .size(19.5)
-                .color(palette.text_muted),
-            );
-            ui.add_space(8.0);
-
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Glass Material:").strong().color(palette.text_primary));
-                for effect in crate::core::GlassEffect::all() {
-                    let is_active = cfg.glass_effect == *effect;
-                    let btn = ui.add(
-                        egui::Button::new(
-                            egui::RichText::new(effect.name())
-                                .size(19.0)
-                                .color(if is_active { Color32::WHITE } else { palette.text_secondary }),
-                        )
-                        .fill(if is_active { PANTONE_FLAVEDO } else { palette.card_bg })
-                        .stroke(Stroke::new(1.0_f32, if is_active { PANTONE_FLAVEDO } else { palette.border }))
-                        .rounding(Rounding::same(6.0)),
-                    );
-                    if btn.clicked() {
-                        cfg.glass_effect = *effect;
-                        let _ = cfg.save();
-                    }
-                }
-            });
-
-            ui.add_space(8.0);
-
-            // Window Opacity Slider
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(format!("Window & Surface Opacity: {:.0}%", cfg.window_opacity * 100.0))
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                let slider_resp = ui.add(
-                    egui::Slider::new(&mut cfg.window_opacity, 0.20..=1.00)
-                        .show_value(false)
-                        .step_by(0.01),
-                );
-                if slider_resp.changed() {
-                    let _ = cfg.save();
-                }
-            });
-
-            ui.add_space(6.0);
-
-            // Live Glass Refraction Preview Strip
-            let preview_frame = egui::Frame::none()
-                .fill(palette.window_bg)
-                .stroke(Stroke::new(1.5_f32, palette.specular))
-                .rounding(Rounding::same(8.0))
-                .inner_margin(egui::Margin::symmetric(14.0, 10.0));
-
-            preview_frame.show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("✨ Live Glass Preview:")
-                            .size(19.0)
-                            .strong()
-                            .color(palette.text_primary),
-                    );
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "Material: {:?} • Opacity: {:.0}% • Translucent: {}",
-                            cfg.glass_effect,
-                            cfg.window_opacity * 100.0,
-                            palette.is_translucent
-                        ))
-                        .size(19.0)
-                        .color(palette.text_secondary),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new("Dual-Layer Specular Highlight Active")
-                                .size(18.0)
-                                .color(PANTONE_FLAVEDO),
-                        );
-                    });
-                });
-            });
-        });
-
-        ui.add_space(12.0);
-
-        // 3. File Explorer Architecture & Operations (Synthesized from Yazi, File Pilot, Finder, Total Commander, Opus)
-        let explorer_frame = egui::Frame::none()
-            .fill(palette.card_bg)
-            .stroke(Stroke::new(1.0_f32, palette.border))
-            .rounding(Rounding::same(10.0))
-            .inner_margin(egui::Margin::same(16.0));
-
-        explorer_frame.show(ui, |ui| {
-            ui.label(
-                egui::RichText::new("📁 File Explorer Architecture & Operations")
-                    .size(23.0)
-                    .strong()
-                    .color(palette.text_primary),
-            );
-            ui.label(
-                egui::RichText::new(
-                    "Multi-threaded explorer operations, conflict handling, and real-time checksum calculation.",
-                )
-                .size(19.5)
-                .color(palette.text_muted),
-            );
-            ui.add_space(8.0);
-
-            // Layout Mode Switcher
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Default Explorer Layout:").strong().color(palette.text_primary));
-                let layouts = [
-                    (0u8, "🏛️ Miller 3-Column (Yazi/Finder)"),
-                    (1u8, "🖥️ Full-Screen Grid (File Pilot)"),
-                    (2u8, "⚔️ Dual-Pane Commander (Total Commander)"),
-                ];
-                for (code, name) in layouts {
-                    let is_active = cfg.default_explorer_layout == code;
-                    let btn = ui.add(
-                        egui::Button::new(
-                            egui::RichText::new(name)
-                                .size(19.0)
-                                .color(if is_active { Color32::WHITE } else { palette.text_secondary }),
-                        )
-                        .fill(if is_active { PANTONE_FLAVEDO } else { palette.card_bg })
-                        .stroke(Stroke::new(1.0_f32, if is_active { PANTONE_FLAVEDO } else { palette.border }))
-                        .rounding(Rounding::same(6.0)),
-                    );
-                    if btn.clicked() {
-                        cfg.default_explorer_layout = code;
-                        let _ = cfg.save();
-                    }
-                }
-            });
-
-            ui.add_space(8.0);
-
-            let mut hidden = cfg.show_hidden_files;
-            if ui.checkbox(&mut hidden, "Show Hidden & System Dotfiles (e.g. .git, .env, hidden folders)").changed() {
-                cfg.show_hidden_files = hidden;
-                let _ = cfg.save();
-            }
-
-            let mut checksums = cfg.calculate_checksums;
-            if ui.checkbox(&mut checksums, "🛡️ Real-Time SHA-256 & CRC-32 Integrity Checksumming during inspection").changed() {
-                cfg.calculate_checksums = checksums;
-                let _ = cfg.save();
-            }
-
-            let mut zero_loss = cfg.enforce_zero_loss;
-            if ui.checkbox(&mut zero_loss, "💎 Enforce Strict 0.00% Zero-Loss Standard (Bit-exact stream copy remuxing)").changed() {
-                cfg.enforce_zero_loss = zero_loss;
-                let _ = cfg.save();
-            }
-        });
-
-        ui.add_space(12.0);
-
-        // 4. Activation Triggers Card
-        let trigger_frame = egui::Frame::none()
-            .fill(palette.card_bg)
-            .stroke(Stroke::new(1.0_f32, palette.border))
-            .rounding(Rounding::same(10.0))
-            .inner_margin(egui::Margin::same(16.0));
-
-        trigger_frame.show(ui, |ui| {
-            ui.label(egui::RichText::new("Background Resident Daemon & Global Triggers").strong().color(palette.text_primary));
-            ui.label("• Win + Shift + C: Summon Floating Radial Wheel centered under cursor (with file auto-detection).");
-            ui.label("• Win + Ctrl + C: Open Full Desktop Studio GUI.");
-            ui.label("• Shake or Circle Gesture: Shake cursor or sweep arc while dragging file(s) to overlay wheel under cursor.");
-            ui.label("• System-Level Gated Hook: 0.00% CPU overhead - motion is only analyzed when files/folders are actively held.");
-            ui.label("• System Tray: Right-click citrus tray icon for themes, exam presets, and autostart toggle.");
-            ui.add_space(8.0);
-
-            let mut autostart = crate::core::MossambiConfig::is_autostart_configured();
-            let check_resp = ui.checkbox(&mut autostart, "🚀 Run in Background at Startup (Auto-start on boot like Whisper Flow)");
-            if check_resp.changed() {
-                let _ = crate::core::MossambiConfig::set_autostart(autostart);
-            }
-
-            let mut cfg = crate::core::MossambiConfig::load();
-            let mut gesture_enabled = cfg.enable_gesture_wakeup;
-            let gesture_resp = ui.checkbox(&mut gesture_enabled, "🖱️ Enable File Drag Mouse Gesture Activation (Shake or Circle while dragging)");
-            if gesture_resp.changed() {
-                cfg.enable_gesture_wakeup = gesture_enabled;
-                let _ = cfg.save();
-            }
-
-            // ── Default file-manager takeover ──
-            ui.add_space(6.0);
-            ui.separator();
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new("Default File Manager")
-                    .strong()
-                    .color(palette.text_primary),
-            );
-            use crate::core::default_explorer::TakeoverState;
-            let state = crate::core::default_explorer::status();
-            let status_text = match state {
-                TakeoverState::Active => "Mossambi is the default file manager.",
-                TakeoverState::NotActive => "The OS default file manager is active.",
-                TakeoverState::Unknown => "Takeover status unknown on this platform.",
-            };
-            ui.label(egui::RichText::new(status_text).color(palette.text_secondary));
-            ui.horizontal(|ui| {
-                if state != TakeoverState::Active
-                    && ui.button("Make Default File Manager").clicked()
-                {
-                    match crate::core::default_explorer::take_over() {
-                        Ok(()) => log::info!("Default file manager set to Mossambi (GUI)"),
-                        Err(e) => log::error!("Default file-manager takeover failed: {e:#}"),
-                    }
-                }
-                if ui.button("Restore OS Default").clicked() {
-                    match crate::core::default_explorer::restore() {
-                        Ok(()) => log::info!("Default file manager restored (GUI)"),
-                        Err(e) => log::error!("Default file-manager restore failed: {e:#}"),
-                    }
-                }
-            });
-        });
-
-        ui.add_space(12.0);
-
-        // 3. Certified Pantone Swatches
-        let pantone_frame = egui::Frame::none()
-            .fill(palette.card_bg)
-            .stroke(Stroke::new(1.0_f32, palette.border))
-            .rounding(Rounding::same(10.0))
-            .inner_margin(egui::Margin::same(16.0));
-
-        pantone_frame.show(ui, |ui| {
-            ui.label(
-                egui::RichText::new("Certified Pantone Citrus Palette")
-                    .strong()
-                    .color(palette.text_primary),
-            );
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("■").color(PANTONE_FLAVEDO).size(24.0));
-                ui.label("Pantone 376 C (#78BE20) - Raw Peel Green (Active Accents)");
-            });
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("■").color(PANTONE_GOLD).size(24.0));
-                ui.label("Pantone 1235 C (#FFB81C) - Citrus Gold (ALL Sector)");
-            });
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("■").color(PANTONE_CARPEL).size(24.0));
-                ui.label("Pantone 123 C (#FFC72C) - Sweet Lime Carpel Pulp");
-            });
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("■").color(PANTONE_CORE).size(24.0));
-                ui.label("Pantone 102 C (#FCE300) - Central Core Columella");
-            });
-        });
+        self.prefs_view
+            .render(ui, palette, current_theme, _settings);
     }
 
-    /// Dedicated Quality & Integrity Inspector Tab (GUI Studio Only)
     fn render_quality_inspector_tab(
         &mut self,
         ui: &mut Ui,
@@ -2484,7 +2056,7 @@ impl StudioView {
                         }
                     });
                 } else {
-                    ui.label(egui::RichText::new("📥").size(30.0));
+                    ui.label(egui::RichText::new("Dl").size(30.0));
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new("No File Selected")

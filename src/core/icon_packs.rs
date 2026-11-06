@@ -187,6 +187,7 @@ pub enum IconGlyph {
     ActionPath,
     ActionSort,
     ActionView,
+    ActionFilter,
     ActionMore,
     ActionCheck,
     ActionEye,
@@ -1058,6 +1059,11 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
              <rect x='54' y='18' width='28' height='28' rx='5' fill='{a}' opacity='0.6'/>\
              <rect x='18' y='54' width='28' height='28' rx='5' fill='{a}' opacity='0.6'/>\
              <rect x='54' y='54' width='28' height='28' rx='5' fill='{a}' opacity='0.9'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionFilter => format!(
+            "{head}<path d='M16 22 L84 22 L58 52 L58 78 L42 70 L42 52 Z' fill='none' stroke='{a}' stroke-width='6' stroke-linejoin='round'/></svg>",
             head = head,
             a = accent
         ),

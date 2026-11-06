@@ -96,8 +96,8 @@ pub fn path_to_file_uri(path: &Path) -> String {
 #[cfg(target_os = "linux")]
 pub mod linux {
     //! Session clipboard helpers storing the shared payloads.
-    pub use super::{ClipboardOp, ClipboardOutcome};
     use super::build_payloads;
+    pub use super::{ClipboardOp, ClipboardOutcome};
     use std::io::Write;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};

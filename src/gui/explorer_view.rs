@@ -16,10 +16,10 @@
 //! - Rich Right-Click Context Menus for files, folders, and canvas background
 
 use crate::core::{
-    copy_entry_recursive, format_file_size, fuzzy_match, get_system_drives, list_directory_sync,
-    move_entry, parse_breadcrumbs, remove_entry_recursive, resolve_file_icon,
-    resolve_unique_paste_path, spawn_async_dir_scan, DriveInfo, FileItem, GestureKind,
-    KinematicGestureTracker, ScanBatch,
+    copy_entry_recursive, format_file_size, fuzzy_match, get_system_drives, is_library_folder_name,
+    list_directory_sync, move_entry, parse_breadcrumbs, pluralize_items, remove_entry_recursive,
+    resolve_file_icon, resolve_unique_paste_path, spawn_async_dir_scan, DriveInfo, FileItem,
+    GestureKind, KinematicGestureTracker, ScanBatch,
 };
 use crate::gui::macos_theme::ThemePalette;
 use eframe::egui::{self, Color32, Pos2, Rect, Rounding, Stroke, Ui, Vec2};
@@ -36,6 +36,9 @@ pub enum ViewMode {
     Grid,
     Columns,
 }
+
+/// ASCII funnel glyph for the compact filter popover button.
+const FILTER_FUNNEL_GLYPH: &str = "|v";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SortColumn {
@@ -80,15 +83,16 @@ pub enum CategoryFilter {
 }
 
 impl CategoryFilter {
+    /// Plain-ASCII label (the overhaul removed the emoji chips).
     pub fn label(self) -> &'static str {
         match self {
-            Self::All => "🌐 All",
-            Self::Images => "🖼 Images",
-            Self::Audio => "🎵 Audio",
-            Self::Video => "🎬 Video",
-            Self::Documents => "📄 Docs",
-            Self::Archives => "📦 Archives",
-            Self::Code => "💻 Code",
+            Self::All => "All",
+            Self::Images => "Images",
+            Self::Audio => "Audio",
+            Self::Video => "Video",
+            Self::Documents => "Docs",
+            Self::Archives => "Archives",
+            Self::Code => "Code",
         }
     }
 
@@ -229,6 +233,9 @@ pub struct ExplorerView {
     pub sort_column: SortColumn,
     pub sort_direction: SortDirection,
     pub category_filter: CategoryFilter,
+    /// Active tag smart-list filter (from the sidebar Tags section).
+    /// `None` means no tag filtering is applied.
+    pub active_tag: Option<String>,
 
     // Path Editing
     pub is_editing_path: bool,
@@ -268,6 +275,7 @@ pub struct ExplorerView {
     // macOS Finder & Linux System Features
     pub show_hidden_files: bool,
     pub column_subfolder: Option<(PathBuf, Vec<FileItem>)>,
+    pub column_stack: Vec<(PathBuf, Vec<FileItem>)>,
     pub column_preview_item: Option<FileItem>,
 
     // Windows 11 & macOS Home Dashboard View
@@ -332,7 +340,7 @@ impl Default for ExplorerView {
                     .unwrap_or("Files")
                     .to_string()
             },
-            icon: if is_home { "🏠" } else { "📁" },
+            icon: if is_home { "H" } else { "D" },
             path: current_dir.clone(),
             is_home,
             search_query: String::new(),
@@ -354,6 +362,7 @@ impl Default for ExplorerView {
             sort_column: SortColumn::Name,
             sort_direction: SortDirection::Ascending,
             category_filter: CategoryFilter::All,
+            active_tag: None,
             is_editing_path: false,
             path_edit_buffer: current_dir.to_string_lossy().to_string(),
             renaming_path: None,
@@ -379,6 +388,7 @@ impl Default for ExplorerView {
             focus_search_requested: false,
             show_hidden_files: false,
             column_subfolder: None,
+            column_stack: Vec::new(),
             column_preview_item: None,
             hover_preview: None,
             thumb_cache: std::collections::HashMap::new(),
@@ -455,7 +465,7 @@ impl ExplorerView {
                     .unwrap_or("Folder")
                     .to_string()
             };
-            tab.icon = if self.is_home_view { "🏠" } else { "📁" };
+            tab.icon = if self.is_home_view { "H" } else { "D" };
         }
 
         let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
@@ -481,7 +491,7 @@ impl ExplorerView {
                 .unwrap_or("Folder")
                 .to_string()
         };
-        let icon = if is_home { "🏠" } else { "📁" };
+        let icon = if is_home { "H" } else { "D" };
         let id = self.next_tab_id;
         self.next_tab_id += 1;
         self.tabs.push(ExplorerTab {
@@ -580,12 +590,20 @@ impl ExplorerView {
     pub fn filtered_and_sorted_entries(&self) -> Vec<&FileItem> {
         let q = self.search_query.trim();
         let is_searching = !q.is_empty();
+        let active_tag = self.active_tag.as_deref();
 
         let mut scored_list: Vec<(&FileItem, i64)> = self
             .entries
             .iter()
             .filter(|e| self.show_hidden_files || !e.is_hidden)
             .filter(|e| self.category_filter.matches(e))
+            .filter(|e| match active_tag {
+                // Tag smart-list: keep only items carrying the active tag.
+                Some(tag) => crate::core::tags::read_tags_cache(&e.path)
+                    .iter()
+                    .any(|t| t == tag),
+                None => true,
+            })
             .filter_map(|e| {
                 if is_searching {
                     let score = fuzzy_match(q, &e.name)?;
@@ -637,6 +655,11 @@ impl ExplorerView {
             .iter()
             .filter(|e| !e.is_dir && filter.matches(e))
             .count()
+    }
+
+    /// Sets (or clears) the active tag smart-list filter.
+    pub fn set_active_tag(&mut self, tag: Option<String>) {
+        self.active_tag = tag;
     }
 
     /// Renders the complete File Pilot-Grade Explorer interface
@@ -1013,14 +1036,20 @@ impl ExplorerView {
                     let mut deleted = false;
                     if self.selected_paths.is_empty() {
                         if let Some(item) = nav_entries.get(self.focused_row) {
-                            log_result("Delete", &item.path, remove_entry_recursive(&item.path));
+                            log_result(
+                                "Delete",
+                                &item.path,
+                                crate::core::action_journal::stage_delete(std::slice::from_ref(
+                                    &item.path,
+                                )),
+                            );
                             deleted = true;
                         }
                     } else {
-                        for path in &self.selected_paths {
-                            log_result("Delete", path, remove_entry_recursive(path));
-                            deleted = true;
-                        }
+                        let paths: Vec<PathBuf> = self.selected_paths.iter().cloned().collect();
+                        let r = crate::core::action_journal::stage_delete(&paths);
+                        log_result("Delete", &paths[0], r);
+                        deleted = !paths.is_empty();
                         self.selected_paths.clear();
                     }
                     if deleted {
@@ -1099,6 +1128,50 @@ impl ExplorerView {
                 self.path_edit_buffer = self.current_dir.to_string_lossy().to_string();
                 self.is_editing_path = true;
             }
+            // Ctrl+Z / Cmd+Z: reverse the last journaled action.
+            //
+            // The journal records rename/move/copy/create/delete/tag, so this
+            // single binding covers every reversible mutation the explorer
+            // performs. Ctrl+Shift+Z redoes is intentionally NOT offered: the
+            // journal appends an Undo marker instead of replaying, so the
+            // stack always walks backwards.
+            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::Z) {
+                let note = crate::core::action_journal::undo_last();
+                self.show_status_note(note);
+                // The undo may have changed the current directory (a moved or
+                // restored folder), so rescan whatever we are looking at.
+                self.navigate_to(self.current_dir.clone());
+            }
+            // Context-tagged keystroke logging. The journal keeps these
+            // separate from the file actions; they record what the user was
+            // doing, so a future history panel can explain an action.
+            {
+                let context = if self.renaming_path.is_some() {
+                    "rename-edit"
+                } else if self.is_editing_path {
+                    "path-edit"
+                } else if ui.memory(|m| m.focused().is_some()) {
+                    "text-input"
+                } else {
+                    "explorer-nav"
+                };
+                let modifiers = modifier_string(i.modifiers);
+                for ev in &i.events {
+                    if let egui::Event::Key {
+                        key,
+                        pressed: true,
+                        repeat: false,
+                        ..
+                    } = ev
+                    {
+                        crate::core::action_journal::record_keystroke(
+                            context,
+                            &format!("{key:?}"),
+                            &modifiers,
+                        );
+                    }
+                }
+            }
             if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::C) {
                 if self.selected_paths.is_empty() {
                     if let Some(item) = nav_entries.get(self.focused_row) {
@@ -1145,7 +1218,13 @@ impl ExplorerView {
                 let mut deleted = false;
                 if self.selected_paths.is_empty() {
                     if let Some(item) = nav_entries.get(self.focused_row) {
-                        log_result("Delete", &item.path, remove_entry_recursive(&item.path));
+                        log_result(
+                            "Delete",
+                            &item.path,
+                            crate::core::action_journal::stage_delete(std::slice::from_ref(
+                                &item.path,
+                            )),
+                        );
                         deleted = true;
                     }
                 } else {
@@ -1207,6 +1286,7 @@ impl ExplorerView {
                 if !clean_name.is_empty() {
                     let target_dir = self.current_dir.join(clean_name);
                     let _ = std::fs::create_dir_all(&target_dir);
+                    crate::core::action_journal::record_create_dir(target_dir.clone());
                     self.navigate_to(self.current_dir.clone());
                 }
                 self.show_new_folder_dialog = false;
@@ -1261,6 +1341,10 @@ impl ExplorerView {
                     if let Some(parent) = old_path.parent() {
                         let new_path = parent.join(trimmed);
                         let _ = std::fs::rename(&old_path, &new_path);
+                        crate::core::action_journal::record_rename(
+                            old_path.clone(),
+                            new_path.clone(),
+                        );
                         self.navigate_to(self.current_dir.clone());
                     }
                 }
@@ -1306,6 +1390,10 @@ impl ExplorerView {
 
             // macOS Finder Bottom Status Bar (Items, Available Space, Zoom)
             self.render_status_bar(ui, palette);
+
+            // Finder path bar sits BELOW the status bar: the top chrome owns
+            // navigation and view controls, the bottom owns "where am I".
+            self.render_bottom_path_bar(ui, palette);
         });
 
         // 5. Modal Quick Look / Peek Display Overlay (macOS Finder style)
@@ -1398,7 +1486,6 @@ impl ExplorerView {
     }
 
     fn render_breadcrumb_nav_buttons(&mut self, ui: &mut Ui, palette: &ThemePalette, max_w: f32) {
-        let mut breadcrumb_drop: Option<(PathBuf, Vec<PathBuf>, bool)> = None;
         // macOS Segmented Navigation Pill: Back & Forward (vector glyph buttons)
         let pack = self.icon_pack;
         let nav_tint = [
@@ -1580,52 +1667,93 @@ impl ExplorerView {
                 self.is_editing_path = false;
             }
         } else {
-            // Interactive Breadcrumb Segments
-            let segments = parse_breadcrumbs(&self.current_dir);
-            let seg_count = segments.len();
-            let (to_skip, has_ellipsis) = if seg_count > 4 && max_w < 550.0 {
-                (seg_count - 3, true)
-            } else {
-                (0, false)
-            };
-
-            if has_ellipsis {
-                if ui
-                    .button("…")
-                    .on_hover_text("Intermediate folders")
-                    .clicked()
-                {
-                    if let Some(first) = segments.first() {
-                        self.navigate_to(first.target_path.clone());
-                    }
-                }
-                ui.label(egui::RichText::new("›").color(palette.text_muted));
+            // Finder-style title: the CURRENT FOLDER NAME only.
+            //
+            // The full ancestor chain lives in the bottom path bar, so
+            // repeating it up here would duplicate the chrome and squeeze
+            // the search field. The title is also the click target that opens
+            // the inline path editor.
+            let folder_name = self
+                .current_dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| self.current_dir.to_string_lossy().into_owned());
+            let title_text = egui::RichText::new(&folder_name)
+                .size(20.0)
+                .strong()
+                .color(palette.text_primary);
+            if ui
+                .add(
+                    egui::Button::new(title_text)
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(Stroke::NONE),
+                )
+                .on_hover_text("Current folder - click to edit the path (Ctrl+L)")
+                .clicked()
+            {
+                self.path_edit_buffer = self.current_dir.to_string_lossy().to_string();
+                self.is_editing_path = true;
             }
 
-            for seg in segments.into_iter().skip(to_skip) {
-                let is_current = seg.target_path == self.current_dir;
-                let btn = egui::Button::new(egui::RichText::new(&seg.label).strong().color(
-                    if is_current {
-                        palette.accent
-                    } else {
-                        palette.text_primary
-                    },
-                ))
-                .fill(if is_current {
-                    palette.card_hover
-                } else {
-                    palette.card_bg
-                })
-                .rounding(Rounding::same(6.0));
+            // Edit Path button
+            if ui
+                .button("Edit path")
+                .on_hover_text("Edit path directly (Ctrl+L / Alt+D)")
+                .clicked()
+            {
+                self.path_edit_buffer = self.current_dir.to_string_lossy().to_string();
+                self.is_editing_path = true;
+            }
+        }
+    }
 
-                let seg_resp = ui.add(btn);
-                if seg_resp.clicked() {
-                    self.navigate_to(seg.target_path.clone());
+    /// Renders the Finder-style path bar at the BOTTOM of the file area.
+    ///
+    /// macOS puts the path bar under the content, not above it: the top
+    /// carries navigation and view controls, the bottom carries "where am I".
+    /// Each segment is clickable (navigates to that ancestor) and is a drop
+    /// target (drag a file onto an ancestor to move/copy it there).
+    fn render_bottom_path_bar(&mut self, ui: &mut Ui, palette: &ThemePalette) {
+        if self.is_home_view {
+            return;
+        }
+        let segments = parse_breadcrumbs(&self.current_dir);
+        if segments.is_empty() {
+            return;
+        }
+        let mut breadcrumb_drop: Option<(PathBuf, Vec<PathBuf>, bool)> = None;
+        let current_dir = self.current_dir.clone();
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+            for (i, seg) in segments.iter().enumerate() {
+                if i > 0 {
+                    ui.label(
+                        egui::RichText::new(">")
+                            .size(16.0)
+                            .color(palette.text_muted),
+                    );
                 }
-                // Drag files onto a breadcrumb segment to move/copy into that
-                // ancestor directory (Finder path-bar parity).
+                let is_current = seg.target_path == current_dir;
+                let text = egui::RichText::new(&seg.label)
+                    .size(17.0)
+                    .color(if is_current {
+                        palette.text_primary
+                    } else {
+                        palette.text_secondary
+                    });
+                let btn = egui::Button::new(text)
+                    .fill(Color32::TRANSPARENT)
+                    .stroke(Stroke::NONE)
+                    .min_size(Vec2::new(0.0, 22.0));
+                let resp = ui.add(btn);
+                if resp.clicked() {
+                    let target = seg.target_path.clone();
+                    self.navigate_to(target);
+                }
+                // Dragging a file onto an ancestor path segment moves it there.
                 if !is_current {
-                    if let Some(payload) = seg_resp.dnd_hover_payload::<FileDragPayload>() {
+                    if let Some(payload) = resp.dnd_hover_payload::<FileDragPayload>() {
                         let legal = payload
                             .paths
                             .iter()
@@ -1637,13 +1765,9 @@ impl ExplorerView {
                                 self.animations.hover,
                                 crate::gui::anim::frame_dt(ui.ctx()),
                             );
-                            let hl = Rect::from_min_size(
-                                seg_resp.rect.left_top() - Vec2::new(3.0, 3.0),
-                                seg_resp.rect.size() + Vec2::new(6.0, 6.0),
-                            );
                             ui.painter().rect_stroke(
-                                hl,
-                                Rounding::same(7.0),
+                                resp.rect,
+                                Rounding::same(5.0),
                                 Stroke::new(
                                     (a * 2.0).max(1.0),
                                     Color32::from_rgba_premultiplied(
@@ -1655,30 +1779,25 @@ impl ExplorerView {
                                 ),
                             );
                         }
+                    } else {
+                        self.hover_anims.drive(
+                            drop_highlight_id(&seg.target_path),
+                            0.0,
+                            self.animations.hover,
+                            crate::gui::anim::frame_dt(ui.ctx()),
+                        );
                     }
-                    if let Some(payload) = seg_resp.dnd_release_payload::<FileDragPayload>() {
+                    if let Some(payload) = resp.dnd_release_payload::<FileDragPayload>() {
                         let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
                         breadcrumb_drop =
                             Some((seg.target_path.clone(), payload.paths.to_vec(), copy));
                     }
                 }
-                ui.label(egui::RichText::new("›").color(palette.text_muted));
             }
+        });
 
-            // Edit Path button
-            if ui
-                .button("✏")
-                .on_hover_text("Edit path directly (Ctrl+L / Alt+D)")
-                .clicked()
-            {
-                self.path_edit_buffer = self.current_dir.to_string_lossy().to_string();
-                self.is_editing_path = true;
-            }
-
-            // Commit any drop that landed on a breadcrumb segment.
-            if let Some((dest_dir, paths, copy)) = breadcrumb_drop {
-                self.perform_drop(dest_dir, &paths, copy);
-            }
+        if let Some((dest_dir, paths, copy)) = breadcrumb_drop {
+            self.perform_drop(dest_dir, &paths, copy);
         }
     }
 
@@ -1689,7 +1808,12 @@ impl ExplorerView {
         let pills_w = (avail_w - toggle_w - 12.0).max(180.0);
 
         ui.horizontal(|ui| {
-            // Left Container: Category Tabs with Wrapping
+            // Left Container: Home toggle + compact filter popover.
+            //
+            // The file-type filter chips row was removed: a full row of
+            // All/Images/Audio/Video/Docs/Archives/Code buttons crowded the
+            // top chrome and broke the Finder-style layout. Filtering now
+            // survives only inside a compact popover.
             ui.allocate_ui_with_layout(
                 Vec2::new(pills_w, 28.0),
                 egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
@@ -1746,44 +1870,7 @@ impl ExplorerView {
                         ui.separator();
                     }
 
-                    let categories = [
-                        CategoryFilter::All,
-                        CategoryFilter::Images,
-                        CategoryFilter::Audio,
-                        CategoryFilter::Video,
-                        CategoryFilter::Documents,
-                        CategoryFilter::Archives,
-                        CategoryFilter::Code,
-                    ];
-
-                    for cat in categories {
-                        let is_active = self.category_filter == cat;
-                        let count = match cat {
-                            CategoryFilter::All => self.entries.len(),
-                            _ => self.count_category(cat),
-                        };
-
-                        let label_text = format!("{} ({})", cat.label(), count);
-                        let btn = egui::Button::new(
-                            egui::RichText::new(label_text).size(19.0).strong().color(
-                                if is_active {
-                                    Color32::WHITE
-                                } else {
-                                    palette.text_secondary
-                                },
-                            ),
-                        )
-                        .fill(if is_active {
-                            palette.accent
-                        } else {
-                            palette.card_bg
-                        })
-                        .rounding(Rounding::same(6.0));
-
-                        if ui.add(btn).clicked() {
-                            self.category_filter = cat;
-                        }
-                    }
+                    self.render_filter_popover(ui, palette);
                 },
             );
 
@@ -1883,6 +1970,121 @@ impl ExplorerView {
                 }
             });
         });
+    }
+
+    /// Compact Finder-style filter popover that replaces the removed
+    /// file-type chips row.
+    ///
+    /// The button shows a funnel glyph plus the active filter name; the
+    /// popup lists every category with its live item count.
+    fn render_filter_popover(&mut self, ui: &mut Ui, palette: &ThemePalette) {
+        const CATEGORIES: [CategoryFilter; 7] = [
+            CategoryFilter::All,
+            CategoryFilter::Images,
+            CategoryFilter::Audio,
+            CategoryFilter::Video,
+            CategoryFilter::Documents,
+            CategoryFilter::Archives,
+            CategoryFilter::Code,
+        ];
+
+        let active = self.category_filter;
+        let is_filtered = active != CategoryFilter::All;
+        let tint: [u8; 3] = if is_filtered {
+            [255, 255, 255]
+        } else {
+            [
+                palette.text_secondary.r(),
+                palette.text_secondary.g(),
+                palette.text_secondary.b(),
+            ]
+        };
+        let btn = match crate::core::icon_packs::icon_texture(
+            ui.ctx(),
+            self.icon_pack,
+            IconGlyph::ActionFilter,
+            18.0,
+            tint,
+        ) {
+            Some(tex) => egui::Button::image_and_text(
+                egui::load::SizedTexture::new(tex.id(), Vec2::splat(15.0)),
+                egui::RichText::new(active.label())
+                    .size(19.0)
+                    .strong()
+                    .color(if is_filtered {
+                        Color32::WHITE
+                    } else {
+                        palette.text_secondary
+                    }),
+            ),
+            None => egui::Button::new(
+                egui::RichText::new(format!("{} {}", FILTER_FUNNEL_GLYPH, active.label()))
+                    .size(19.0)
+                    .strong()
+                    .color(if is_filtered {
+                        Color32::WHITE
+                    } else {
+                        palette.text_secondary
+                    }),
+            ),
+        }
+        .fill(if is_filtered {
+            palette.accent
+        } else {
+            palette.card_bg
+        })
+        .rounding(Rounding::same(6.0));
+
+        let response = ui.add(btn).on_hover_text("Filter files by type");
+        let popup_id = ui.make_persistent_id("explorer_filter_popover");
+        if response.clicked() {
+            ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+        }
+
+        egui::popup::popup_below_widget(
+            ui,
+            popup_id,
+            &response,
+            egui::popup::PopupCloseBehavior::CloseOnClickOutside,
+            |popup_ui| {
+                popup_ui.set_min_width(180.0);
+                popup_ui.label(
+                    egui::RichText::new("Filter by Type")
+                        .size(17.0)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                popup_ui.separator();
+
+                for cat in CATEGORIES {
+                    let is_active = self.category_filter == cat;
+                    let count = match cat {
+                        CategoryFilter::All => self.entries.len(),
+                        _ => self.count_category(cat),
+                    };
+                    let row = egui::Button::new(
+                        egui::RichText::new(format!("{}  ({})", cat.label(), count))
+                            .size(18.0)
+                            .color(if is_active {
+                                palette.accent
+                            } else {
+                                palette.text_secondary
+                            }),
+                    )
+                    .fill(if is_active {
+                        palette.card_hover
+                    } else {
+                        Color32::TRANSPARENT
+                    })
+                    .rounding(Rounding::same(5.0));
+
+                    if popup_ui.add(row).clicked() {
+                        self.category_filter = cat;
+                        popup_ui.close_menu();
+                    }
+                }
+            },
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2011,14 +2213,31 @@ impl ExplorerView {
                     ("Videos".to_string(), "🎬", [139, 92, 246], base.join("Videos")),
                 ];
 
-                // Append custom subdirectories found in home folder (like between_pcs, wallpapers)
+                // Only real library folders belong in Quick access. The
+                // previous code appended every visible subdirectory of the
+                // user profile, which dumped NT junctions (NetHood,
+                // PrintHood, SendTo, Start Menu, Recent, Templates, Local
+                // Settings) into the grid.
                 for entry in &self.entries {
-                    if entry.is_dir && !entry.is_hidden {
-                        let lower = entry.name.to_lowercase();
-                        if !["desktop", "downloads", "documents", "pictures", "music", "videos", "appdata", "contacts", "searches", "saved games", "links"].contains(&lower.as_str()) {
-                            pinned_folders.push((entry.name.clone(), "📁", [235, 175, 60], entry.path.clone()));
-                        }
+                    if !entry.is_dir || entry.is_hidden {
+                        continue;
                     }
+                    if !is_library_folder_name(&entry.name) {
+                        continue;
+                    }
+                    // Skip a junction: `is_symlink` is set for reparse
+                    // points that point elsewhere in the profile tree.
+                    if entry.is_symlink {
+                        continue;
+                    }
+                    let lower = entry.name.to_lowercase();
+                    if pinned_folders
+                        .iter()
+                        .any(|(label, _, _, _)| label.to_lowercase() == lower)
+                    {
+                        continue;
+                    }
+                    pinned_folders.push((entry.name.clone(), "📁", [235, 175, 60], entry.path.clone()));
                 }
 
                 // Append Recycle Bin -> real system-drive $Recycle.Bin when available
@@ -2632,8 +2851,12 @@ impl ExplorerView {
                     }
                     let name_font =
                         egui::FontId::proportional(if item.is_dir { 16.0 } else { 15.5 });
-                    let name_pos_x = name_x + 48.0;
-                    let name_avail = name_w - 54.0 - col_pad;
+                    // Tag dots sit immediately before the name, so the name
+                    // shifts right by the width the dots occupy.
+                    let row_tags = crate::core::tags::read_tags_cache(&item.path);
+                    let dots_w = tag_dots_width(&row_tags);
+                    let name_pos_x = name_x + 48.0 + dots_w;
+                    let name_avail = name_w - 54.0 - col_pad - dots_w;
                     let suffix = if item.is_symlink { " ↗" } else { "" };
                     let display = truncate_middle(
                         &format!("{}{}", item.name, suffix),
@@ -2647,6 +2870,9 @@ impl ExplorerView {
                         name_font,
                         name_color,
                     );
+                    if !row_tags.is_empty() {
+                        paint_tag_dots(ui, &row_tags, name_pos_x - 4.0, row_rect.center().y);
+                    }
 
                     // 2. Kind cell (Finder "Kind": human category, dim)
                     let kind_rect = Rect::from_min_size(
@@ -3222,9 +3448,13 @@ impl ExplorerView {
                             .map(|e| e.size_bytes)
                             .sum();
                         let label = if bytes > 0 {
-                            format!("{} selected • {}", all_sel.len(), format_file_size(bytes))
+                            format!(
+                                "{} selected • {}",
+                                pluralize_items(all_sel.len()),
+                                format_file_size(bytes)
+                            )
                         } else {
-                            format!("{} selected", all_sel.len())
+                            format!("{} selected", pluralize_items(all_sel.len()))
                         };
                         ui.label(
                             egui::RichText::new(label)
@@ -3232,13 +3462,11 @@ impl ExplorerView {
                                 .strong()
                                 .color(palette.accent),
                         );
-                    } else {
-                        ui.label(
-                            egui::RichText::new(format!("{} items enabled", entries.len()))
-                                .size(18.5)
-                                .color(palette.text_muted),
-                        );
                     }
+                    // No count label in the no-selection state: the status bar
+                    // already reports the item total, and drawing it here
+                    // collided with the "Select All" pill (both were painted
+                    // into the same right-aligned slot).
                 });
             });
         });
@@ -3366,9 +3594,9 @@ impl ExplorerView {
                             HoverContent::Children(children, total) => {
                                 ui.label(
                                     egui::RichText::new(format!(
-                                        "{}  •  {} items",
+                                        "{}  •  {}",
                                         truncate_end(&item.name, 30),
-                                        total
+                                        pluralize_items(*total)
                                     ))
                                     .strong()
                                     .size(19.5)
@@ -3810,6 +4038,11 @@ impl ExplorerView {
                         // Grid mirrors Details conventions: symlink arrows and
                         // dimmed-to-alpha text for hidden entries.
                         let symlink_suffix = if item.is_symlink { " ↗" } else { "" };
+                        // Tag dots ride above the tile label, centred with it.
+                        // Finder draws them in the icon's bottom-left corner;
+                        // here they sit directly under the icon so they never
+                        // fight the label for horizontal space.
+                        let tile_tags = crate::core::tags::read_tags_cache(&item.path);
                         let display_name =
                             truncate_middle(&format!("{}{}", item.name, symlink_suffix), max_chars);
 
@@ -3831,6 +4064,15 @@ impl ExplorerView {
                             egui::FontId::proportional(name_font_sz),
                             tile_name_color,
                         );
+                        if !tile_tags.is_empty() {
+                            let dots_w = tag_dots_width(&tile_tags);
+                            paint_tag_dots(
+                                ui,
+                                &tile_tags,
+                                center.x + dots_w / 2.0 - 2.0,
+                                center.y + name_y_offset - name_font_sz * 0.85,
+                            );
+                        }
 
                         let size_y_offset = tile_h * 0.33;
                         let size_text = if item.is_dir {
@@ -4253,13 +4495,28 @@ impl ExplorerView {
                                         } else {
                                             palette.text_primary
                                         };
+                                        // Tag dots sit between the icon and the
+                                        // name, so the name shifts right by the
+                                        // width the dots occupy.
+                                        let col_tags =
+                                            crate::core::tags::read_tags_cache(&item.path);
+                                        let col_dots_w = tag_dots_width(&col_tags);
+                                        let col_name_x = row_rect.left() + 24.0 + col_dots_w;
                                         ui.painter().text(
-                                            Pos2::new(row_rect.left() + 24.0, row_rect.center().y),
+                                            Pos2::new(col_name_x, row_rect.center().y),
                                             egui::Align2::LEFT_CENTER,
                                             name_text,
                                             egui::FontId::proportional(19.5),
                                             name_color,
                                         );
+                                        if !col_tags.is_empty() {
+                                            paint_tag_dots(
+                                                ui,
+                                                &col_tags,
+                                                col_name_x - 4.0,
+                                                row_rect.center().y,
+                                            );
+                                        }
                                         if resp.clicked() {
                                             self.focused_row = idx;
                                             self.selected_paths.clear();
@@ -4789,9 +5046,9 @@ impl ExplorerView {
                     |ui| {
                         // Left: Item count & selection
                         let count_text = if total_hidden > 0 && !self.show_hidden_files {
-                            format!("{} items ({} hidden)", total_items, total_hidden)
+                            format!("{} ({} hidden)", pluralize_items(total_items), total_hidden)
                         } else {
-                            format!("{} items", total_items)
+                            pluralize_items(total_items)
                         };
                         ui.label(
                             egui::RichText::new(count_text)
@@ -5371,6 +5628,61 @@ fn truncate_end(s: &str, max_chars: usize) -> String {
     format!("{}…", s.chars().take(keep).collect::<String>())
 }
 
+/// Renders the active modifier set as a compact, ASCII, stable string.
+///
+/// The journal stores this alongside every keystroke so a history panel can
+/// tell "Ctrl+Z" apart from a bare "z".
+fn modifier_string(mods: egui::Modifiers) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if mods.ctrl {
+        parts.push("CTRL");
+    }
+    if mods.shift {
+        parts.push("SHIFT");
+    }
+    if mods.alt {
+        parts.push("ALT");
+    }
+    if mods.command {
+        parts.push("CMD");
+    }
+    if parts.is_empty() {
+        "NONE".to_string()
+    } else {
+        parts.join("+")
+    }
+}
+
+/// The width a row must reserve for its tag dots at the given tag count.
+///
+/// Finder shows one coloured dot per assigned tag immediately before the
+/// name. The dots are painted rather than laid out, so the caller reserves
+/// this width up front and the name never collides with them.
+pub fn tag_dots_width(tags: &[String]) -> f32 {
+    if tags.is_empty() {
+        0.0
+    } else {
+        (tags.len() as f32) * 10.0 + 4.0
+    }
+}
+
+/// Draws the tag dots for `tags` with the right edge at `right_x`.
+///
+/// Tags are drawn right-to-left so the first tag sits closest to the name,
+/// matching Finder's ordering.
+fn paint_tag_dots(ui: &Ui, tags: &[String], right_x: f32, center_y: f32) {
+    if tags.is_empty() {
+        return;
+    }
+    let painter = ui.painter();
+    let mut x = right_x;
+    for tag in tags.iter().rev() {
+        let color = crate::core::tags::tag_color(tag);
+        painter.circle_filled(egui::Pos2::new(x - 4.0, center_y), 3.5, color);
+        x -= 10.0;
+    }
+}
+
 fn open_in_file_manager(path: &Path) {
     #[cfg(target_os = "windows")]
     {
@@ -5693,6 +6005,12 @@ pub struct ItemMenuIntents {
     pub send_to: Option<(Vec<PathBuf>, PathBuf, String)>,
     pub terminal_here: Option<PathBuf>,
     pub reveal: Option<PathBuf>,
+    /// Set a tag on the affected items: (paths, tag name).
+    pub set_tag: Option<(Vec<PathBuf>, String)>,
+    /// Clear a tag from the affected items: (paths, tag name).
+    pub clear_tag: Option<(Vec<PathBuf>, String)>,
+    /// Pin/unpin a folder to the sidebar: (path, pin=true) / (path, pin=false).
+    pub pin_sidebar: Option<(PathBuf, bool)>,
 }
 
 /// Extension classification shared by both item menus.
@@ -5830,8 +6148,10 @@ impl ExplorerView {
                     src,
                     copy_entry_recursive(src, &unique).map(|_| ()),
                 );
+                crate::core::action_journal::record_copy(src.clone(), unique.clone());
             } else {
                 log_result("Drag move", src, move_entry(src, &dest));
+                crate::core::action_journal::record_move(src.clone(), dest.clone());
                 self.selected_paths.remove(src);
             }
             moved = true;
@@ -6057,6 +6377,58 @@ impl ExplorerView {
         if let Some(p) = intent.reveal {
             reveal_in_file_manager(&p);
         }
+
+        // ── Tags ──
+        //
+        // Every tag change is journaled with its before/after state so the
+        // undo stack can reverse it.
+        if let Some((paths, tag)) = intent.set_tag {
+            for p in &paths {
+                let before = crate::core::tags::get_tags(p);
+                match crate::core::tags::set_tag(p, &tag) {
+                    Ok(()) => {
+                        let after = crate::core::tags::get_tags(p);
+                        crate::core::action_journal::record_tag_set(p.clone(), before, after);
+                        log::info!("Tagged {} as {}", p.display(), tag);
+                    }
+                    Err(e) => log::warn!("Tag failed for {}: {e}", p.display()),
+                }
+            }
+            self.navigate_to(self.current_dir.clone());
+        }
+        if let Some((paths, tag)) = intent.clear_tag {
+            for p in &paths {
+                let before = crate::core::tags::get_tags(p);
+                match crate::core::tags::clear_tag(p, &tag) {
+                    Ok(()) => {
+                        let after = crate::core::tags::get_tags(p);
+                        crate::core::action_journal::record_tag_set(p.clone(), before, after);
+                        log::info!("Removed tag {tag} from {}", p.display());
+                    }
+                    Err(e) => log::warn!("Tag removal failed for {}: {e}", p.display()),
+                }
+            }
+            self.navigate_to(self.current_dir.clone());
+        }
+
+        // ── Pin / Unpin to the sidebar ──
+        if let Some((path, pin)) = intent.pin_sidebar {
+            let mut cfg = crate::core::MossambiConfig::load();
+            let raw = path.to_string_lossy().to_string();
+            cfg.pinned_custom.retain(|p| p != &raw);
+            if pin {
+                cfg.pinned_custom.push(raw);
+            }
+            if let Err(e) = cfg.save() {
+                log::warn!("Could not persist sidebar pins: {e}");
+            } else {
+                log::info!(
+                    "{} {} to the sidebar",
+                    if pin { "Pinned" } else { "Unpinned" },
+                    path.display()
+                );
+            }
+        }
     }
 
     pub fn paste_from_clipboard(&mut self) {
@@ -6273,7 +6645,7 @@ impl ExplorerView {
             .collect();
 
         let header = if multi {
-            format!("{} items", targets.len())
+            pluralize_items(targets.len())
         } else {
             item.name.clone()
         };
@@ -6502,6 +6874,67 @@ impl ExplorerView {
         if menu_row(menu_ui, true, pack, fm::MenuAction::Copy, style, tint).clicked() {
             intent.copy = Some(targets.to_vec());
             menu_ui.close_menu();
+        }
+
+        // ── Tags submenu (Finder-style coloured tag assignment) ──
+        menu_ui.separator();
+        {
+            // Current tags of the clicked item drive the checkbox state.
+            let current_tags = crate::core::tags::read_tags_cache(&path);
+            menu_ui.menu_button(fm::MenuAction::Tags.label(style), |sub_ui| {
+                sub_ui.set_min_width(190.0);
+                for tag_name in crate::core::tags::TAG_PRESETS {
+                    let is_tagged = current_tags.iter().any(|t| t == tag_name);
+                    let label = if is_tagged {
+                        format!("Remove {tag_name}")
+                    } else {
+                        format!("Add {tag_name}")
+                    };
+                    if fm::menu_item_labeled(
+                        sub_ui,
+                        pack,
+                        fm::MenuAction::Tags,
+                        &label,
+                        style,
+                        tint,
+                    )
+                    .clicked()
+                    {
+                        if is_tagged {
+                            intent.clear_tag = Some((targets.to_vec(), tag_name.to_string()));
+                        } else {
+                            intent.set_tag = Some((targets.to_vec(), tag_name.to_string()));
+                        }
+                        sub_ui.close_menu();
+                    }
+                }
+            });
+        }
+
+        // ── Pin to Sidebar (folders only) ──
+        if is_dir {
+            let is_pinned = crate::core::MossambiConfig::load()
+                .pinned_custom
+                .iter()
+                .any(|p| Path::new(p) == path);
+            let label = if is_pinned {
+                "Unpin from Sidebar"
+            } else {
+                fm::MenuAction::PinSidebar.label(style)
+            };
+            if fm::menu_item_labeled(
+                menu_ui,
+                pack,
+                fm::MenuAction::PinSidebar,
+                label,
+                style,
+                tint,
+            )
+            .clicked()
+            {
+                intent.pin_sidebar = Some((path.clone(), !is_pinned));
+                menu_ui.close_menu();
+            }
         }
 
         // ── Danger group ──

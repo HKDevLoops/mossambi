@@ -1,6 +1,7 @@
 //! Mossambi Core Library
 //! Format registry, Pantone color palette, sibling output path logic, and persistent configuration.
 
+pub mod action_journal;
 pub mod async_worker;
 pub mod config;
 pub mod default_explorer;
@@ -20,7 +21,12 @@ pub mod ole_drag_out;
 pub mod pantone;
 pub mod preview;
 pub mod registry;
+pub mod tags;
 
+pub use action_journal::{
+    record_copy, record_create_dir, record_move, record_rename, record_tag_set, stage_delete,
+    undo_last,
+};
 pub use async_worker::{AsyncWorkerPool, TaskUpdate};
 pub use config::{GlassEffect, MossambiConfig, OutputMode, ThemeMode};
 #[cfg(target_os = "windows")]
@@ -29,9 +35,10 @@ pub use drag_listener::{extract_clipboard_files, DragGestureEvent, DragGestureLi
 pub use drag_out::begin_file_drag_out;
 pub use file_icons::{resolve_file_icon, FileIconSpec};
 pub use fs_utils::{
-    copy_entry_recursive, format_file_size, get_system_drives, list_directory_sync, move_entry,
-    parse_breadcrumbs, remove_entry_recursive, resolve_unique_paste_path, spawn_async_dir_scan,
-    BreadcrumbSegment, DriveInfo, FileItem, ScanBatch,
+    copy_entry_recursive, format_file_size, get_system_drives, is_library_folder_name,
+    list_directory_sync, move_entry, parse_breadcrumbs, pluralize_items, remove_entry_recursive,
+    resolve_unique_paste_path, spawn_async_dir_scan, BreadcrumbSegment, DriveInfo, FileItem,
+    ScanBatch,
 };
 pub use fuzzy::{fuzzy_match, sort_by_fuzzy_match};
 pub use gesture::{GestureKind, GesturePoint, KinematicGestureTracker};

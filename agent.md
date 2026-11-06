@@ -13,7 +13,7 @@ Status: clippy clean (all targets), 12 lib tests + all integration suites pass, 
 ## ASCII discipline (mandatory)
 
 - All NEW file content must be **pure ASCII**. After every authored file/edits, re-verify with a
-  `[^\x00-\x7F]` regex sweep (write findings to a UTF-8 file when the console codepage mangles
+  `[^\\x00-\\x7F]` regex sweep (write findings to a UTF-8 file when the console codepage mangles
   output - the pwsh console renders Unicode as `??` soup).
 - **No emoji in GUI strings.** Emoji are removed from any string the user sees.
 - Pre-existing glyphs are explicitly OFF-LIST (leave alone, do not fix, do not reformat):
@@ -23,43 +23,25 @@ Status: clippy clean (all targets), 12 lib tests + all integration suites pass, 
   vertical/box-drawing tree chars in daemon banner, window-control glyphs (restore/minimize
   squares), sort-direction..drawer glyphs (plus, minus-over-dot, info sign, degree sign,
   micro sign, implies-arrow, check, two-line arrow), and the pre-existing emoji tab/category/
-  button labels that the next UI overhaul replaces wholesale (home, folder, globe, image, music,
+  button labels that the UI overhaul replaces wholesale (home, folder, globe, image, music,
   clapper, page, package, laptop, magnifier, folder-open, monitor, download, waste basket,
   target, microscope, clipboard, floppy, plus, pencil nib, gear, warning, sun, cloud, hamburger,
   trigram, crossed swords, star, heavy check, heavy cross, right-pointing arrow, VS16 selector).
-- Twice agents slipped foreign text into authored files (CJK word "biaoji", the word "coeur") -
-  the regex sweep is the regression guard; names in docs are ASCII phrasings only.
 
-## Drag & drop status (Windows + Linux, est. 2026-11-06)
+## Drag & drop status (Windows + Linux, est. 2026-11-06) - milestone CLOSED
 
-| Flavor | Windows | Linux X11 | Linux Wayland |
-|---|---|---|---|
-| External drop-in | works (winit + Studio `active_file` cursor-rescue fallback) | works (winit XDND receive) | receives existed via forced-X11 policy see below |
-| Internal drag to folder | egui payload, move / Ctrl-copy, copy-only to OS | same | same |
-| Drag out to other apps | real OLE `DoDragDrop` (CF_HDROP + Preferred DropEffect, COPY-only) | typed `text/uri-list` clipboard hand-off (xclip) | same via wl-copy |
+Commits `b65ceed` (real OS drag-out, drop-in polish, platform policy) and `7452250` (cross-platform
+gates clean). See git history for the full matrix; key contracts preserved:
 
-Key facts to preserve when touching this code:
-
-- Windows OLE lives in `src/core/ole_drag_out.rs` using the windows 0.59 macro contract:
-  implement `<Interface>_Impl` traits on the GENERATED outer type (`X_Impl`,
-  `impl windows_core::IUnknownImpl for X_Impl` with `type Impl = X`), access inner state via the
-  outer's `Deref`, obtain interfaces with `value.into()`, pass to `DoDragDrop` BY REFERENCE
-  (`&data_object`), and `&mut effect` coerces to a raw effect pointer.
-- Linux clipboard file hand-off lives in `src/core/linux_clipboard_files.rs`. The payload builder is
-  OS-neutral (testable everywhere); only the write is Linux-gated. One helper process serves ONE
-  MIME type (wl-copy cannot multi-type: wl-clipboard issue #71), so the universal `text/uri-list`
-  is written; receivers fall back to it as COPY (COPY-only semantics).
-- Cross-OS dispatch is `src/core/drag_out.rs::begin_file_drag_out`, called by:
-  - Explorer (`explorer_view.rs`): hand-off when the payload leaves the viewport bounds
-    (dual-signal: `interact_pos()` outside `ctx.screen_rect()` OR `None` after `PointerGone` while
-    `is_decidedly_dragging()` holds); per-press `drag_out_in_flight` latch resets on release.
-  - Widget hub (`widget_app.rs`): hand-off on drag threshold when a file is loaded;
-    `ViewportCommand::StartDrag` (window move) only when none.
-- `src/core/dnd_backend.rs::apply_backend_policy` wires eframe/winit options at both GUI entry
-  points (Studio + Widget); egui 0.29 eframe has NO `clipboard` feature; winit 0.30 XDND receive
-  exists on X11 only, so Wayland sessions bridge through the forced-X11 policy. Verify the
-  `Drag & drop backend policy` log line when smoke-testing Linux.
-- winit 0.30 `ViewportCommand::StartDrag` only window-drags; it is NOT an OS file drag.
+- Windows OLE in `src/core/ole_drag_out.rs` (windows 0.59 `<Interface>_Impl` outer-type contract;
+  pass data object BY REFERENCE to `DoDragDrop`; `&mut effect` coerces to a raw effect pointer).
+- Linux hand-off in `src/core/linux_clipboard_files.rs`: OS-neutral payload builder at file root
+  (testable on every platform), Linux-gated single-target `text/uri-list` write (wl-copy on
+  Wayland, xclip on X11; one helper = one MIME type, wl-clipboard issue #71).
+- `src/core/drag_out.rs::begin_file_drag_out` dispatches per-OS; dual-signal viewport-exit
+  detection hands drags to the OS from Explorer and the hub.
+- `dnd_backend.rs::apply_backend_policy` forces X11 on Wayland at both GUI entry points.
+- winit `ViewportCommand::StartDrag` is a window drag only, never a file drag.
 
 ## Gates before any commit
 
@@ -67,12 +49,149 @@ Key facts to preserve when touching this code:
 2. `cargo clippy --all-targets -- -D warnings`
 3. `cargo test`
 4. `cargo build --release`
-5. ASCII sweep of every file touched (see above).
+5. ASCII sweep of every file touched.
 6. open-computer-use QA pass on Windows for GUI work.
-7. Keep `graphify-out/` untracked. Do not stage scratch artifacts (screenshots etc.).
+7. Keep `graphify-out/` untracked. Do not stage scratch artifacts (screenshots, test dirs).
+
+## ACTIVE USER INSTRUCTIONS - UI OVERHAUL PHASE (est. 2026-11-06)
+
+The user opened the UI overhaul. Target design language: **macOS Finder**, not Windows-style
+chrome. Windows-only QA until the wave closes (Linux round parked on user request). Instructions
+passed so far, verbatim-in-intent - follow all of them:
+
+1. **Remove the file-type filter chips row** (All/Images/Audio/Video/Docs/Archives/Code with
+   counts) from the top of the file area and replace it. Filtering may survive only inside a
+   compact popover. The top chrome must be **clean and neat, Finder-style** (not the Windows-style
+   navigation bar currently there).
+2. **Window title buttons are badly designed** (Fluent dots plus a stray maximize glyph). Redesign
+   minimize/maximize/close properly - Finder traffic lights with real hover glyphs, positioned
+   like Finder (left), wired to Minimized/Maximized/Close viewport commands.
+3. **Sidebar: remove custom pinned folders** (between_pcs, wallpapers are hard-coded today).
+   Show ONLY standard folders (Desktop, Downloads, Documents, Pictures, Music, Videos, Recycle
+   Bin). Provide a Preferences option to show custom pinned folders, plus the ability to
+   pin custom folders (context menu on a folder row) and to create desktop shortcuts.
+4. **Remove the Tags sidebar section** (hard-coded Home/Work/Photos/Important dots). It becomes
+   an optional Preferences setting, and **tags must actually be implemented in the explorer**:
+   assign tags via the right-click menu, show tag dots on file rows in all views, and honor the
+   tag smart-list when the section is enabled.
+5. **Miller columns view is unacceptable** (giant blurry blown-up folder preview, clipped vertical
+   "Quick" label hanging over the separator, and clicking a folder does not expand column 2).
+   Check it personally, then rebuild it Finder-like: proper column stack, chevron expansion,
+   selection sync, no oversized preview card, clean meta panel for files only.
+6. **The right-click menu is incomplete.** Complete it: Open, Open With, Peek, Rename, Delete,
+   Cut/Copy/Paste, Copy Path, Tags submenu, Properties for items; New Folder and Paste Allowed
+   on blank canvas; Pin/Unpin (folders); consistent with the existing file_menu actions.
+7. **Implement an action journal for undo:** log all recent in-app actions (rename, move, copy,
+   delete, create folder, tag changes) AND user keystrokes (context-tagged) so an undo method can
+   be built on them. Undo must be able to reverse at least rename/move/copy/create/delete/tag.
+8. **Fix found bugs while in there:**
+   - Toolbar text collision ("N items enabled" overlaps "Select All" - two labels drawn on
+     each other).
+   - "1 items" grammar (pluralize correctly).
+   - Wrong Date Modified: app showed 2026-11-24 for a folder created 2026-11-06. Find the
+     broken conversion/formatting and fix.
+   - Home "Quick access" dumps raw user-profile contents including hidden NT junctions
+     (NetHood, PrintHood, SendTo, Start Menu, Recent, Templates, Local Settings). Only real
+     library folders belong there.
+   - Tile labels collide in the Home grid (row 2 renders "apple-music-tApplication D...").
+   - The window background is so translucent other windows bleed through - reads as dirty.
+   - "Custom Conforme" truncation in the sidebar (no ellipsis discipline).
+   - Stale selection ring on Home ("temp") persisted across restarts.
+   - Drive captions rendered as underlined links - off-style for Finder design.
+9. **QA method note:** the OpenCode terminal window keeps grabbing foreground, so OCU screenshots
+   of a covered Mossambi fail or capture the wrong window. Verify visuals with a pwsh
+   PrintWindow snapshot helper (PW_RENDERFULLCONTENT) that captures Mossambi's window even when
+   occluded; drive input with OCU app_post clicks (work even when covered).
+10. DnD residue policy stands: delete `Desktop\\qa_dnd_scratch` when QA closes.
 
 ## Known intentional pre-existing glyphs
 
 `studio_app.rs` and other legacy files keep their em dashes; `explorer_view.rs` keeps its category
-emoji labels until the UI overhaul swaps in the real icon pipeline. Remove emoji only from touched
-strings.
+emoji labels until this overhaul swaps them out. Any string the overhaul touches must end up
+pure ASCII.
+
+## FULL USER INSTRUCTION LEDGER (compiled from Big_session.md + this session)
+
+Every line below is a user instruction, not an agent suggestion. All of it stands until the user
+says otherwise. Ordered by the phase that must satisfy it.
+
+### A. Product identity and focus
+
+- The app began as a file CONVERTER plus radial widget, then became a FILE EXPLORER project.
+  The explorer is now the primary surface; the widget is equally important and must stay
+  visually and behaviorally unified with the explorer.
+- The target is a macOS Finder CLONE in design language, carrying the FEATURES of Windows File
+  Explorer, Linux file managers (Nautilus, Thunar, GNOME Files), and FilePilot. Apple design,
+  everyone else's feature set.
+- Home dashboard is mandatory. It must open as a clean first surface (standard folders only, no
+  NT junctions, no colliding tile labels), not be removed.
+- Windows first. Linux verification round is parked until the Windows wave closes.
+- The converter engine must be integrated into the GUI (right-click Convert, batch actions,
+  progress, quality gates), not left as a separate CLI-only product.
+
+### B. Design direction (the governing brief)
+
+- STRICT macOS Finder chrome: traffic lights on the LEFT with real hover glyphs, ONE merged
+  toolbar, path bar at the BOTTOM, sheet-style popovers, sheet-style preferences.
+- Pixel-perfect alignment, padding, margins, border presence, and padding around text. Wrapping
+  must be correct (no label collisions, no overlap, no overflow into the next column).
+- Responsive like a Tailwind-built app: a real spacing/type scale and consistent tokens, not
+  ad-hoc pixel values scattered through 6500 lines of explorer code.
+- The Settings/Preferences page is currently clutter and clumsy; it must be rebuilt for clarity
+  of every setting LABEL and every property VALUE, with clear grouping and hierarchy.
+- No emoji as icons anywhere in the GUI. Real vector icons from the embedded icon packs, each
+  file type mapped to a proper icon.
+- The user has called the current UI "clumsy and dirty", the column headers "shit", and the
+  Miller column view "shit". Do not ship anything in that class.
+- No default background highlight bands behind file/folder icons. Selection reads through the
+  checkbox (existing checkbox-mode contract: Always / Hover / Off).
+- Motion everywhere: zappy, snappy, smooth scrolling and movement across the whole program.
+- Icons roughly twice the current size; app default font +4px (existing contract).
+- Max-FPS support, highly responsive, multi-threaded heavy work, no algorithmic complexity above
+  O(log n) in hot paths.
+
+### C. Feature parity checklist
+
+- Clicking a file must launch/open it (Finder parity). Ctrl+wheel zooms in/out; zoom down snaps
+  to the list form, zoom up grows icons and their labels (Windows Explorer behavior).
+- Preview/Peek for images, folders, PDF, Word, Excel, PPT, text and code files. Long hover shows
+  the inside of a folder.
+- Right-click menu must be COMPLETE and copied properly from the real thing: Open, Open With,
+  Peek, Rename, Delete, Cut, Copy, Paste, Copy Path variants, Tags submenu, Properties, New
+  Folder, Paste Allowed, Pin/Unpin, Convert submenu (type-aware, registry-driven), Duplicate,
+  Send To, Sort By, View, Invert Selection.
+- Tools and converters are reachable from the top of the file area, above the Name/Kind/Size/
+  Date columns, not buried in a wall of text.
+- Tags: real implementation in the explorer (assign from the context menu, tag dots on rows in
+  every view, smart-list filtering). The Tags sidebar section is OFF by default and becomes a
+  Preferences setting.
+- Sidebar shows ONLY standard folders by default (Desktop, Downloads, Documents, Pictures,
+  Music, Videos, Recycle Bin). Custom pins and desktop shortcuts are opt-in via Preferences and
+  a "Pin to Sidebar" context-menu action.
+- The file-type filter chip row (All/Images/Audio/Video/Docs/Archives/Code with counts) is
+  removed from the top; filtering survives only inside a compact popover.
+- Action and keystroke journal: log recent in-app actions (rename, move, copy, delete, create
+  folder, tag change) AND context-tagged keystrokes so undo can be implemented on top of it.
+- Bugs to fix: "N items enabled" overlapping "Select All"; "1 items" grammar; wrong Date
+  Modified (2026-11-24 shown for a 2026-11-06 folder); Home Quick-access dumping NT junctions;
+  colliding Home tile labels; see-through window background; truncated "Custom Conforme";
+  stale selection ring persisting across restarts; underlined drive captions; broken Miller
+  column expansion; vertical clipped "Quic" label in the column view.
+
+### D. Workflow the user demands (repeat every session)
+
+- Mantra: RESEARCH -> deep research (how it integrates with THIS project and its current
+  state) -> PLAN (what, where, how, and which prerequisites to prepare) -> PLAN WITH GSD
+  (gsd-plan-phase / gsd-autonomous) -> IMPLEMENT THOROUGHLY -> FORMAT, LINT, DEBUG, OPTIMIZE
+  -> VERIFY with computer use as four roles (developer, real user, pessimistic tester, noob
+  computer user), screenshotting at HOVER and at CLICK for every interaction -> VERIFIER AGENT
+  checks code quality, integrity, and ticks the todo list. If the verifier did not do that, the
+  task is not complete.
+- Use the skills and MCP servers that fit: impeccable for design, gsd-* for planning, computer
+  use / OS-level control to drive the real app, and professional sub-agents for parallel work.
+- Keep every instruction in this file updated; the user treats it as the memory of record.
+- Gates before landing: cargo fmt, cargo clippy --all-targets -- -D warnings, cargo test,
+  cargo build --release, ASCII sweep of touched files, computer-use QA pass, graphify-out/
+  untracked, no scratch artifacts staged.
+- The user expects long autonomous runs with no hand-holding, and will not interrupt once the
+  interview questions are answered.

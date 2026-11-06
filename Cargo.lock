@@ -2493,6 +2493,7 @@ dependencies = [
  "anyhow",
  "bzip2 0.4.4",
  "calamine",
+ "chrono",
  "clap",
  "clap_complete",
  "crc32fast",

@@ -12,9 +12,9 @@
 use std::sync::atomic::AtomicBool;
 #[cfg(target_os = "windows")]
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::{channel, Receiver};
 #[cfg(target_os = "windows")]
 use std::sync::mpsc::Sender;
+use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 #[cfg(target_os = "windows")]
 use std::time::{Duration, Instant};

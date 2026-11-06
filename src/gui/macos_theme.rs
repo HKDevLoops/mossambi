@@ -426,88 +426,6 @@ pub const MAC_TEXT_MUTED: Color32 = Color32::from_rgb(120, 120, 126);
 // macOS UI Component Renderers
 // ---------------------------------------------------------------------------
 
-/// Renders authentic macOS traffic light window controls (Close, Minimize, Zoom).
-pub fn render_traffic_lights(
-    ui: &mut Ui,
-    on_close: impl FnOnce(),
-    on_min: impl FnOnce(),
-    on_zoom: impl FnOnce(),
-) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
-        let size = Vec2::splat(12.0);
-
-        // Close
-        let (rect_close, resp_close) = ui.allocate_exact_size(size, Sense::click());
-        let painter = ui.painter_at(rect_close);
-        let hovered_close = resp_close.hovered();
-        painter.circle_filled(rect_close.center(), 6.0, TRAFFIC_CLOSE);
-        painter.circle_stroke(
-            rect_close.center(),
-            6.0,
-            Stroke::new(0.5_f32, Color32::from_black_alpha(40)),
-        );
-        if hovered_close {
-            painter.text(
-                rect_close.center(),
-                egui::Align2::CENTER_CENTER,
-                "",
-                FontId::proportional(15.5),
-                Color32::from_black_alpha(160),
-            );
-            if resp_close.clicked() {
-                on_close();
-            }
-        }
-
-        // Minimize
-        let (rect_min, resp_min) = ui.allocate_exact_size(size, Sense::click());
-        let painter = ui.painter_at(rect_min);
-        let hovered_min = resp_min.hovered();
-        painter.circle_filled(rect_min.center(), 6.0, TRAFFIC_MIN);
-        painter.circle_stroke(
-            rect_min.center(),
-            6.0,
-            Stroke::new(0.5_f32, Color32::from_black_alpha(40)),
-        );
-        if hovered_min {
-            painter.text(
-                rect_min.center(),
-                egui::Align2::CENTER_CENTER,
-                "",
-                FontId::proportional(15.5),
-                Color32::from_black_alpha(160),
-            );
-            if resp_min.clicked() {
-                on_min();
-            }
-        }
-
-        // Zoom / Maximize
-        let (rect_zoom, resp_zoom) = ui.allocate_exact_size(size, Sense::click());
-        let painter = ui.painter_at(rect_zoom);
-        let hovered_zoom = resp_zoom.hovered();
-        painter.circle_filled(rect_zoom.center(), 6.0, TRAFFIC_MAX);
-        painter.circle_stroke(
-            rect_zoom.center(),
-            6.0,
-            Stroke::new(0.5_f32, Color32::from_black_alpha(40)),
-        );
-        if hovered_zoom {
-            painter.text(
-                rect_zoom.center(),
-                egui::Align2::CENTER_CENTER,
-                "",
-                FontId::proportional(15.5),
-                Color32::from_black_alpha(160),
-            );
-            if resp_zoom.clicked() {
-                on_zoom();
-            }
-        }
-    });
-}
-
 /// Renders an authentic Fluent & macOS sidebar item with smooth pill highlight and theme awareness.
 pub fn render_sidebar_item(
     ui: &mut Ui,
@@ -578,26 +496,49 @@ pub fn render_sidebar_item_with_pin(
     );
 
     // Render Label
-    let label_pos = Pos2::new(rect.min.x + 36.0, rect.center().y);
+    //
+    // The label is elided to the space that is actually free. Painting the
+    // raw string let long entries ("Custom Conformer") bleed past the
+    // sidebar edge and collide with the next column - the "Custom Conforme"
+    // truncation the user reported.
+    let pin_w = if show_pin { 18.0 } else { 0.0 };
+    let label_x = rect.min.x + 36.0;
+    let label_max_w = (rect.max.x - label_x - pin_w - 8.0).max(24.0);
+    let label_font = FontId::proportional(19.5);
+    let display_label = crate::gui::design::elide_end(ui, label, &label_font, label_max_w);
+    let label_pos = Pos2::new(label_x, rect.center().y);
     painter.text(
         label_pos,
         egui::Align2::LEFT_CENTER,
-        label,
-        FontId::proportional(19.5),
+        display_label,
+        label_font,
         text_color,
     );
 
     if show_pin {
-        let pin_pos = Pos2::new(rect.max.x - 12.0, rect.center().y);
-        painter.text(
-            pin_pos,
-            egui::Align2::RIGHT_CENTER,
-            "",
-            FontId::proportional(17.0),
+        // A real vector pin glyph. The previous implementation painted an
+        // empty string here, so the pin column was invisible.
+        let pin_rect = Rect::from_center_size(
+            Pos2::new(rect.max.x - 13.0, rect.center().y),
+            Vec2::splat(15.0),
+        );
+        crate::core::icon_packs::paint_icon(
+            ui,
+            crate::core::icon_packs::IconPack::MacosFinder,
+            crate::core::icon_packs::IconGlyph::ActionPin,
+            pin_rect,
             if is_hovered {
-                theme.text_secondary
+                [
+                    theme.text_secondary.r(),
+                    theme.text_secondary.g(),
+                    theme.text_secondary.b(),
+                ]
             } else {
-                theme.text_muted
+                [
+                    theme.text_muted.r(),
+                    theme.text_muted.g(),
+                    theme.text_muted.b(),
+                ]
             },
         );
     }

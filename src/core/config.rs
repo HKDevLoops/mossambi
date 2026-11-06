@@ -417,6 +417,18 @@ pub struct MossambiConfig {
     /// treated as a literal target format (e.g. "PDF").
     #[serde(default = "default_drop_target")]
     pub drop_target_default: String,
+    /// Show the Tags smart-list section in the sidebar (optional Finder-like
+    /// tags feature). Off by default per user preference.
+    #[serde(default)]
+    pub show_tags_section: bool,
+    /// Show user-defined pinned folders in the sidebar below the standard ones.
+    /// Custom pins are added from a folder's right-click menu ("Pin to Sidebar").
+    #[serde(default)]
+    pub show_custom_pinned: bool,
+    /// Custom pinned folder paths (absolute). Rendered only when
+    /// `show_custom_pinned` is on.
+    #[serde(default)]
+    pub pinned_custom: Vec<String>,
 }
 
 fn default_background_work() -> bool {
@@ -519,6 +531,9 @@ impl Default for MossambiConfig {
             worker_threads: default_worker_threads(),
             max_fps: default_max_fps(),
             drop_target_default: default_drop_target(),
+            show_tags_section: false,
+            show_custom_pinned: false,
+            pinned_custom: Vec::new(),
         }
     }
 }
