@@ -297,6 +297,14 @@ pub struct ExplorerView {
     /// Rubber-band marquee: drag origin + the selection snapshot it modifies.
     /// `Some` while a canvas rubber-band drag is in flight.
     marquee: Option<(Pos2, HashSet<PathBuf>)>,
+
+    /// Latched once per press while a native drag hand-off is in flight
+    /// (the drag left the window bounds); reset when the pointer is released.
+    drag_out_in_flight: bool,
+
+    /// Transient user-facing status note for drag hand-offs and other
+    /// non-modal feedback (auto-fades after a few seconds).
+    status_note: Option<(String, Instant)>,
 }
 
 impl Default for ExplorerView {
@@ -383,6 +391,8 @@ impl Default for ExplorerView {
             hover_anims: crate::gui::anim::AnimRegistry::new(),
             explorer_zoom: 2,
             marquee: None,
+            drag_out_in_flight: false,
+            status_note: None,
         };
 
         view.navigate_to(current_dir);
@@ -657,9 +667,11 @@ impl ExplorerView {
             drop_frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("📥 Drop external files or folders here to stage, inspect, or transcode")
-                            .strong()
-                            .color(Color32::from_rgb(215, 255, 120)),
+                        egui::RichText::new(
+                            "Drop external files or folders here to stage, inspect, or transcode",
+                        )
+                        .strong()
+                        .color(Color32::from_rgb(215, 255, 120)),
                     );
                 });
             });
@@ -667,15 +679,74 @@ impl ExplorerView {
         }
 
         if !dropped_files.is_empty() {
+            // Ingestion rule (Explorer parity): navigate into the first
+            // directory of the drop and stage every non-directory file, so a
+            // mixed multi-path drop no longer thrashes between folders.
+            let mut navigated = false;
             for file in dropped_files {
                 if let Some(path) = file.path {
                     if path.is_dir() {
-                        self.navigate_to(path);
+                        if !navigated {
+                            self.navigate_to(path);
+                            navigated = true;
+                        }
                     } else {
                         on_stage_file(path);
                     }
                 }
             }
+        }
+
+        // 1b. OS drag-out hand-off: when an intra-app drag payload is active
+        // and the pointer leaves the viewport with the button held, the drag
+        // is leaving the app, so hand it to the native mechanism (Windows
+        // OLE `DoDragDrop`; Linux typed file clipboard) and clear the egui
+        // payload. Intra-app drops are unaffected: as long as the pointer
+        // stays inside, `dnd_release_payload` on the folder rows keeps its
+        // Explorer-parity semantics.
+        if egui::DragAndDrop::has_payload_of_type::<FileDragPayload>(ui.ctx()) {
+            let (any_down, pos_outside, decided) = ui.input(|i| {
+                (
+                    i.pointer.any_down(),
+                    i.pointer
+                        .interact_pos()
+                        .map(|p| !ui.ctx().screen_rect().contains(p))
+                        // `PointerGone` cleared `latest_pos`: the pointer is
+                        // not over the viewport, i.e. it exited the window.
+                        .unwrap_or(true),
+                    i.pointer.is_decidedly_dragging(),
+                )
+            });
+            if !any_down {
+                self.drag_out_in_flight = false;
+            }
+            if any_down && decided && !self.drag_out_in_flight && pos_outside {
+                self.drag_out_in_flight = true;
+                if let Some(payload) = egui::DragAndDrop::take_payload::<FileDragPayload>(ui.ctx())
+                {
+                    log::info!(
+                        "Drag-out hand-off: {} path(s) leaving the window",
+                        payload.paths.len()
+                    );
+                    let note = crate::core::begin_file_drag_out(&payload.paths);
+                    self.show_status_note(note);
+                    egui::DragAndDrop::clear_payload(ui.ctx());
+                }
+            }
+        }
+
+        // Transient status note (drag hand-off feedback), auto-faded.
+        let note_alive = self
+            .status_note
+            .as_ref()
+            .map(|(_, at)| at.elapsed() < std::time::Duration::from_secs(4))
+            .unwrap_or(false);
+        if note_alive {
+            if let Some((note, _)) = &self.status_note {
+                ui.label(egui::RichText::new(note).size(16.0).color(palette.accent));
+            }
+        } else {
+            self.status_note = None;
         }
 
         // 2. Global Explorer Hotkey Interceptions with Vim & Emacs Navigation Engine
@@ -885,7 +956,8 @@ impl ExplorerView {
                             self.clipboard_paths = vec![item.path.clone()];
                         }
                     } else {
-                        self.clipboard_paths = self.selected_paths.iter().cloned().collect::<Vec<_>>();
+                        self.clipboard_paths =
+                            self.selected_paths.iter().cloned().collect::<Vec<_>>();
                     }
                     self.clipboard_is_cut = false;
                 }
@@ -897,7 +969,8 @@ impl ExplorerView {
                             self.clipboard_paths = vec![item.path.clone()];
                         }
                     } else {
-                        self.clipboard_paths = self.selected_paths.iter().cloned().collect::<Vec<_>>();
+                        self.clipboard_paths =
+                            self.selected_paths.iter().cloned().collect::<Vec<_>>();
                     }
                     self.clipboard_is_cut = true;
                 }
@@ -1268,7 +1341,9 @@ impl ExplorerView {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if !self.search_query.is_empty()
-                        && nav_icon_button(ui, IconGlyph::ActionClose, 16.0).on_hover_text("Clear filter (Esc)").clicked()
+                        && nav_icon_button(ui, IconGlyph::ActionClose, 16.0)
+                            .on_hover_text("Clear filter (Esc)")
+                            .clicked()
                     {
                         self.search_query.clear();
                     }
@@ -1297,7 +1372,9 @@ impl ExplorerView {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if !self.search_query.is_empty()
-                        && nav_icon_button(ui, IconGlyph::ActionClose, 16.0).on_hover_text("Clear filter (Esc)").clicked()
+                        && nav_icon_button(ui, IconGlyph::ActionClose, 16.0)
+                            .on_hover_text("Clear filter (Esc)")
+                            .clicked()
                     {
                         self.search_query.clear();
                     }
@@ -1331,12 +1408,22 @@ impl ExplorerView {
         ];
         let can_back = self.can_go_back();
         let back_btn = match crate::core::icon_packs::icon_texture(
-            ui.ctx(), pack, IconGlyph::ActionBack, 18.0, nav_tint,
+            ui.ctx(),
+            pack,
+            IconGlyph::ActionBack,
+            18.0,
+            nav_tint,
         ) {
-            Some(t) => egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0))),
+            Some(t) => {
+                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0)))
+            }
             None => egui::Button::new("Back"),
         }
-        .fill(if can_back { palette.card_bg } else { Color32::TRANSPARENT })
+        .fill(if can_back {
+            palette.card_bg
+        } else {
+            Color32::TRANSPARENT
+        })
         .rounding(Rounding {
             nw: 6.0,
             sw: 6.0,
@@ -1353,12 +1440,22 @@ impl ExplorerView {
 
         let can_fwd = self.can_go_forward();
         let fwd_btn = match crate::core::icon_packs::icon_texture(
-            ui.ctx(), pack, IconGlyph::ActionForward, 18.0, nav_tint,
+            ui.ctx(),
+            pack,
+            IconGlyph::ActionForward,
+            18.0,
+            nav_tint,
         ) {
-            Some(t) => egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0))),
+            Some(t) => {
+                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0)))
+            }
             None => egui::Button::new("Forward"),
         }
-        .fill(if can_fwd { palette.card_bg } else { Color32::TRANSPARENT })
+        .fill(if can_fwd {
+            palette.card_bg
+        } else {
+            Color32::TRANSPARENT
+        })
         .rounding(Rounding {
             nw: 0.0,
             sw: 0.0,
@@ -1375,9 +1472,15 @@ impl ExplorerView {
 
         // Up Folder Button
         let up_btn = match crate::core::icon_packs::icon_texture(
-            ui.ctx(), pack, IconGlyph::ActionUp, 18.0, nav_tint,
+            ui.ctx(),
+            pack,
+            IconGlyph::ActionUp,
+            18.0,
+            nav_tint,
         ) {
-            Some(t) => egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0))),
+            Some(t) => {
+                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0)))
+            }
             None => egui::Button::new("Up"),
         };
         if ui
@@ -1395,20 +1498,36 @@ impl ExplorerView {
 
         // Refresh Button
         let refresh_btn = match crate::core::icon_packs::icon_texture(
-            ui.ctx(), pack, IconGlyph::ActionRefresh, 18.0, nav_tint,
+            ui.ctx(),
+            pack,
+            IconGlyph::ActionRefresh,
+            18.0,
+            nav_tint,
         ) {
-            Some(t) => egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0))),
+            Some(t) => {
+                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0)))
+            }
             None => egui::Button::new("Refresh"),
         };
-        if ui.add(refresh_btn).on_hover_text("Refresh directory (F5)").clicked() {
+        if ui
+            .add(refresh_btn)
+            .on_hover_text("Refresh directory (F5)")
+            .clicked()
+        {
             self.navigate_to(self.current_dir.clone());
         }
 
         // New Folder Button
         let newfolder_btn = match crate::core::icon_packs::icon_texture(
-            ui.ctx(), pack, IconGlyph::ActionNewFolder, 18.0, nav_tint,
+            ui.ctx(),
+            pack,
+            IconGlyph::ActionNewFolder,
+            18.0,
+            nav_tint,
         ) {
-            Some(t) => egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0))),
+            Some(t) => {
+                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0)))
+            }
             None => egui::Button::new("New Folder"),
         };
         if ui
@@ -1539,11 +1658,8 @@ impl ExplorerView {
                     }
                     if let Some(payload) = seg_resp.dnd_release_payload::<FileDragPayload>() {
                         let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-                        breadcrumb_drop = Some((
-                            seg.target_path.clone(),
-                            payload.paths.to_vec(),
-                            copy,
-                        ));
+                        breadcrumb_drop =
+                            Some((seg.target_path.clone(), payload.paths.to_vec(), copy));
                     }
                 }
                 ui.label(egui::RichText::new("›").color(palette.text_muted));
@@ -1683,9 +1799,13 @@ impl ExplorerView {
                                     fallback: &str,
                                     is_active: bool,
                                     rounding: egui::Rounding|
-                      -> egui::Response {
+                 -> egui::Response {
                     let btn = match crate::core::icon_packs::icon_texture(
-                        ui.ctx(), self.icon_pack, glyph, 18.0, switch_tint,
+                        ui.ctx(),
+                        self.icon_pack,
+                        glyph,
+                        18.0,
+                        switch_tint,
                     ) {
                         Some(t) => egui::Button::image(egui::load::SizedTexture::new(
                             t.id(),
@@ -1693,7 +1813,11 @@ impl ExplorerView {
                         )), // icon-only segmented switcher (glyph is self-describing)
                         None => menu_fallback_button(fallback),
                     }
-                    .fill(if is_active { palette.accent } else { palette.card_bg })
+                    .fill(if is_active {
+                        palette.accent
+                    } else {
+                        palette.card_bg
+                    })
                     .rounding(rounding);
                     ui.add(btn).on_hover_text(match glyph {
                         IconGlyph::ActionColumns => "Miller Columns View",
@@ -1708,7 +1832,12 @@ impl ExplorerView {
                     IconGlyph::ActionColumns,
                     "Columns",
                     is_columns,
-                    Rounding { nw: 0.0, sw: 0.0, ne: 6.0, se: 6.0 },
+                    Rounding {
+                        nw: 0.0,
+                        sw: 0.0,
+                        ne: 6.0,
+                        se: 6.0,
+                    },
                 )
                 .clicked()
                 {
@@ -1716,14 +1845,8 @@ impl ExplorerView {
                 }
 
                 let is_grid = self.view_mode == ViewMode::Grid;
-                if glyph_button(
-                    ui,
-                    IconGlyph::ActionView,
-                    "Icons",
-                    is_grid,
-                    Rounding::ZERO,
-                )
-                .clicked()
+                if glyph_button(ui, IconGlyph::ActionView, "Icons", is_grid, Rounding::ZERO)
+                    .clicked()
                 {
                     self.view_mode = ViewMode::Grid;
                 }
@@ -1734,7 +1857,12 @@ impl ExplorerView {
                     IconGlyph::ActionList,
                     "List",
                     is_details,
-                    Rounding { nw: 6.0, sw: 6.0, ne: 0.0, se: 0.0 },
+                    Rounding {
+                        nw: 6.0,
+                        sw: 6.0,
+                        ne: 0.0,
+                        se: 0.0,
+                    },
                 )
                 .clicked()
                 {
@@ -1824,7 +1952,11 @@ impl ExplorerView {
                 ));
                 let r = Rect::from_center_size(pos + Vec2::new(16.0, 16.0), Vec2::splat(20.0));
                 bp.rect_filled(r, Rounding::same(10.0), palette.card_bg);
-                bp.rect_stroke(r, Rounding::same(10.0), Stroke::new(1.0_f32, palette.accent));
+                bp.rect_stroke(
+                    r,
+                    Rounding::same(10.0),
+                    Stroke::new(1.0_f32, palette.accent),
+                );
                 bp.text(
                     r.center(),
                     egui::Align2::CENTER_CENTER,
@@ -2311,7 +2443,11 @@ impl ExplorerView {
                 align,
                 format!("{}{}", label, arrow),
                 egui::FontId::proportional(19.5),
-                if is_active { palette.accent } else { palette.text_muted },
+                if is_active {
+                    palette.accent
+                } else {
+                    palette.text_muted
+                },
             );
             if resp.clicked() {
                 header_sort = Some(col);
@@ -2354,7 +2490,8 @@ impl ExplorerView {
         let mut drop_ops: Vec<DropOp> = Vec::new();
         let mut marquee_rects: Vec<Rect> = Vec::new();
         let mut canvas_dragging = false;
-        let thumb_budget_reset = self.thumb_decode_budget.1.elapsed() > std::time::Duration::from_millis(300);
+        let thumb_budget_reset =
+            self.thumb_decode_budget.1.elapsed() > std::time::Duration::from_millis(300);
         if thumb_budget_reset {
             self.thumb_decode_budget = (0, Instant::now());
         }
@@ -2419,10 +2556,7 @@ impl ExplorerView {
                     // Hover/Always reveal drives the alpha with the pack's spring.
                     if checkbox_w > 0.5 {
                         let cb_rect = Rect::from_center_size(
-                            Pos2::new(
-                                row_rect.left() + checkbox_w * 0.5,
-                                row_rect.center().y,
-                            ),
+                            Pos2::new(row_rect.left() + checkbox_w * 0.5, row_rect.center().y),
                             Vec2::splat(18.0_f32.min(checkbox_w - 12.0)),
                         );
                         let cb_resp = ui.interact(
@@ -2442,7 +2576,11 @@ impl ExplorerView {
                         );
                         if self.checkbox_mode == CheckboxMode::Always || chk_alpha > 0.02 {
                             Self::paint_selection_checkbox(
-                                ui, cb_rect, is_selected, chk_alpha, palette,
+                                ui,
+                                cb_rect,
+                                is_selected,
+                                chk_alpha,
+                                palette,
                             );
                         }
                         if cb_resp.clicked() {
@@ -2492,7 +2630,8 @@ impl ExplorerView {
                             130,
                         );
                     }
-                    let name_font = egui::FontId::proportional(if item.is_dir { 16.0 } else { 15.5 });
+                    let name_font =
+                        egui::FontId::proportional(if item.is_dir { 16.0 } else { 15.5 });
                     let name_pos_x = name_x + 48.0;
                     let name_avail = name_w - 54.0 - col_pad;
                     let suffix = if item.is_symlink { " ↗" } else { "" };
@@ -2511,10 +2650,7 @@ impl ExplorerView {
 
                     // 2. Kind cell (Finder "Kind": human category, dim)
                     let kind_rect = Rect::from_min_size(
-                        Pos2::new(
-                            row_rect.left() + checkbox_w + name_w,
-                            row_rect.top(),
-                        ),
+                        Pos2::new(row_rect.left() + checkbox_w + name_w, row_rect.top()),
                         Vec2::new(kind_w, row_height),
                     );
                     rp.text(
@@ -2527,7 +2663,10 @@ impl ExplorerView {
 
                     // 3. Size cell (right-aligned, monospace). Dirs report "--".
                     let size_rect = Rect::from_min_size(
-                        Pos2::new(row_rect.left() + checkbox_w + name_w + kind_w, row_rect.top()),
+                        Pos2::new(
+                            row_rect.left() + checkbox_w + name_w + kind_w,
+                            row_rect.top(),
+                        ),
                         Vec2::new(size_w, row_height),
                     );
                     let size_text = if item.is_dir {
@@ -2606,7 +2745,8 @@ impl ExplorerView {
                             self.selected_paths.insert(item.path.clone());
                             self.selection_anchor = Some(idx);
                         }
-                        let paths: Vec<PathBuf> = self.selected_paths.iter().cloned().collect::<Vec<_>>();
+                        let paths: Vec<PathBuf> =
+                            self.selected_paths.iter().cloned().collect::<Vec<_>>();
                         egui::DragAndDrop::set_payload(ui.ctx(), FileDragPayload { paths });
                     }
 
@@ -2615,10 +2755,8 @@ impl ExplorerView {
                     if item.is_dir {
                         let drop_hl = drop_highlight_id(&item.path);
                         if let Some(payload) = row_resp.dnd_hover_payload::<FileDragPayload>() {
-                            let legal = payload
-                                .paths
-                                .iter()
-                                .all(|p| !same_or_within(&item.path, p));
+                            let legal =
+                                payload.paths.iter().all(|p| !same_or_within(&item.path, p));
                             if legal {
                                 let a = self.hover_anims.drive(
                                     drop_hl,
@@ -2647,16 +2785,13 @@ impl ExplorerView {
                         }
                         if let Some(payload) = row_resp.dnd_release_payload::<FileDragPayload>() {
                             let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-                            drop_ops.push((
-                                item.path.clone(),
-                                payload.paths.to_vec(),
-                                copy,
-                            ));
+                            drop_ops.push((item.path.clone(), payload.paths.to_vec(), copy));
                         }
                     }
 
                     if row_resp.hovered() {
-                        new_hover = Some((item.clone(), row_rect.right_center() + Vec2::new(14.0, 0.0)));
+                        new_hover =
+                            Some((item.clone(), row_rect.right_center() + Vec2::new(14.0, 0.0)));
                     }
 
                     // Comprehensive Right-Click Context Menu for the File Row.
@@ -2671,12 +2806,7 @@ impl ExplorerView {
                         };
                         item_intents.clear();
                         item_intents.push(Self::run_item_context_menu(
-                            menu_ui,
-                            icon_pack,
-                            menu_style,
-                            tint,
-                            item,
-                            &targets,
+                            menu_ui, icon_pack, menu_style, tint, item, &targets,
                         ));
                     });
                 }
@@ -2691,11 +2821,7 @@ impl ExplorerView {
         if ui.input(|i| i.pointer.any_released()) {
             if let Some(payload) = egui::DragAndDrop::take_payload::<FileDragPayload>(ui.ctx()) {
                 let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-                drop_ops.push((
-                    self.current_dir.clone(),
-                    payload.paths.to_vec(),
-                    copy,
-                ));
+                drop_ops.push((self.current_dir.clone(), payload.paths.to_vec(), copy));
             }
         }
 
@@ -2705,9 +2831,7 @@ impl ExplorerView {
             if canvas_dragging {
                 let cur = ui.input(|i| i.pointer.hover_pos()).unwrap_or(origin);
                 let mrect = Rect::from_two_pos(origin, cur);
-                let mp = ui.painter()
-                    .clone()
-                    .with_layer_id(egui::LayerId::new(
+                let mp = ui.painter().clone().with_layer_id(egui::LayerId::new(
                     egui::Order::Foreground,
                     egui::Id::new("mossambi_marquee"),
                 ));
@@ -2721,7 +2845,11 @@ impl ExplorerView {
                         30,
                     ),
                 );
-                mp.rect_stroke(mrect, Rounding::same(2.0), Stroke::new(1.0_f32, palette.accent));
+                mp.rect_stroke(
+                    mrect,
+                    Rounding::same(2.0),
+                    Stroke::new(1.0_f32, palette.accent),
+                );
                 let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
                 let hits: Vec<PathBuf> = marquee_rects
                     .iter()
@@ -2745,9 +2873,7 @@ impl ExplorerView {
         }
 
         // Keep springs + marquee + drag badge animating between pointer moves.
-        if canvas_dragging
-            || egui::DragAndDrop::has_payload_of_type::<FileDragPayload>(ui.ctx())
-        {
+        if canvas_dragging || egui::DragAndDrop::has_payload_of_type::<FileDragPayload>(ui.ctx()) {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(16));
         }
@@ -2798,11 +2924,8 @@ impl ExplorerView {
         if canvas_intents.invert_selection {
             let listed: std::collections::HashSet<PathBuf> =
                 entries.iter().map(|e| e.path.clone()).collect();
-            let currently: std::collections::HashSet<PathBuf> = self
-                .selected_paths
-                .intersection(&listed)
-                .cloned()
-                .collect();
+            let currently: std::collections::HashSet<PathBuf> =
+                self.selected_paths.intersection(&listed).cloned().collect();
             self.selected_paths = listed.difference(&currently).cloned().collect();
         }
         if canvas_intents.terminal {
@@ -2878,10 +3001,8 @@ impl ExplorerView {
     ) {
         let style = self.menu_style;
         let bar_h = 34.0_f32;
-        let (bar_rect, _) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), bar_h),
-            egui::Sense::hover(),
-        );
+        let (bar_rect, _) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), bar_h), egui::Sense::hover());
 
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bar_rect), |ui| {
             ui.horizontal(|ui| {
@@ -2908,14 +3029,12 @@ impl ExplorerView {
                             glyph: Option<IconGlyph>,
                             label: &str,
                             enabled: bool|
-                      -> egui::Response {
-                    let text = egui::RichText::new(label)
-                        .size(19.0)
-                        .color(if enabled {
-                            palette.text_primary
-                        } else {
-                            palette.text_muted
-                        });
+                 -> egui::Response {
+                    let text = egui::RichText::new(label).size(19.0).color(if enabled {
+                        palette.text_primary
+                    } else {
+                        palette.text_muted
+                    });
                     let tex = glyph.and_then(|g| {
                         crate::core::icon_packs::icon_texture(ui.ctx(), pack, g, 16.0, tint_rgb)
                     });
@@ -2927,7 +3046,11 @@ impl ExplorerView {
                         None => egui::Button::new(text),
                     };
                     btn = btn
-                        .fill(if enabled { palette.card_bg } else { Color32::TRANSPARENT })
+                        .fill(if enabled {
+                            palette.card_bg
+                        } else {
+                            Color32::TRANSPARENT
+                        })
                         .rounding(Rounding::same(7.0));
                     ui.add_enabled(enabled, btn)
                 };
@@ -2986,7 +3109,9 @@ impl ExplorerView {
                     });
                 } else {
                     let btn = egui::Button::new(
-                        egui::RichText::new("Convert").size(19.0).color(palette.text_muted),
+                        egui::RichText::new("Convert")
+                            .size(19.0)
+                            .color(palette.text_muted),
                     )
                     .fill(Color32::TRANSPARENT)
                     .rounding(Rounding::same(7.0));
@@ -3043,7 +3168,14 @@ impl ExplorerView {
                     let dir = paste_to.clone();
                     self.navigate_to(dir);
                 }
-                if pill(ui, Some(IconGlyph::ActionRename), "Rename", self.selected_paths.len() == 1).clicked() {
+                if pill(
+                    ui,
+                    Some(IconGlyph::ActionRename),
+                    "Rename",
+                    self.selected_paths.len() == 1,
+                )
+                .clicked()
+                {
                     if let Some(p) = all_sel.first() {
                         if let Some(name) = p.file_name() {
                             self.renaming_path =
@@ -3245,18 +3377,29 @@ impl ExplorerView {
                                 ui.add_space(6.0);
                                 for c in children.iter() {
                                     let spec = resolve_file_icon(&c.name, &c.extension, c.is_dir);
-                                    let (cglyph, caccent) = crate::core::icon_packs::IconGlyph::resolve(
-                                        &c.name, &c.extension, c.is_dir,
-                                        spec.is_image, spec.is_media, spec.is_archive,
-                                        spec.is_document, spec.is_code, spec.color_rgb,
-                                    );
+                                    let (cglyph, caccent) =
+                                        crate::core::icon_packs::IconGlyph::resolve(
+                                            &c.name,
+                                            &c.extension,
+                                            c.is_dir,
+                                            spec.is_image,
+                                            spec.is_media,
+                                            spec.is_archive,
+                                            spec.is_document,
+                                            spec.is_code,
+                                            spec.color_rgb,
+                                        );
                                     ui.horizontal(|ui| {
                                         let (crect, _) = ui.allocate_exact_size(
                                             Vec2::splat(15.0),
                                             egui::Sense::hover(),
                                         );
                                         crate::core::icon_packs::paint_icon(
-                                            ui, self.icon_pack, cglyph, crect, caccent,
+                                            ui,
+                                            self.icon_pack,
+                                            cglyph,
+                                            crect,
+                                            caccent,
                                         );
                                         ui.label(
                                             egui::RichText::new(truncate_end(&c.name, 30))
@@ -3289,13 +3432,24 @@ impl ExplorerView {
                                         Vec2::splat(40.0),
                                         egui::Sense::hover(),
                                     );
-                                    let (mglyph, maccent) = crate::core::icon_packs::IconGlyph::resolve(
-                                        &item.name, &item.extension, item.is_dir,
-                                        spec.is_image, spec.is_media, spec.is_archive,
-                                        spec.is_document, spec.is_code, spec.color_rgb,
-                                    );
+                                    let (mglyph, maccent) =
+                                        crate::core::icon_packs::IconGlyph::resolve(
+                                            &item.name,
+                                            &item.extension,
+                                            item.is_dir,
+                                            spec.is_image,
+                                            spec.is_media,
+                                            spec.is_archive,
+                                            spec.is_document,
+                                            spec.is_code,
+                                            spec.color_rgb,
+                                        );
                                     crate::core::icon_packs::paint_icon(
-                                        ui, self.icon_pack, mglyph, mrect, maccent,
+                                        ui,
+                                        self.icon_pack,
+                                        mglyph,
+                                        mrect,
+                                        maccent,
                                     );
                                     ui.vertical(|ui| {
                                         ui.label(
@@ -3336,7 +3490,8 @@ impl ExplorerView {
                     });
             });
         // Ensure repaint so the card animates in promptly
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(120));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(120));
     }
 
     /// Get (or lazily decode) a cached image thumbnail. Returns None while the
@@ -3431,8 +3586,8 @@ impl ExplorerView {
             on_inspect_file,
         );
         {
-            let budget = self.thumb_decode_budget.1.elapsed()
-                > std::time::Duration::from_millis(300);
+            let budget =
+                self.thumb_decode_budget.1.elapsed() > std::time::Duration::from_millis(300);
             if budget {
                 self.thumb_decode_budget = (0, Instant::now());
             }
@@ -3541,18 +3696,13 @@ impl ExplorerView {
                             }
                             let paths: Vec<PathBuf> =
                                 self.selected_paths.iter().cloned().collect::<Vec<_>>();
-                            egui::DragAndDrop::set_payload(
-                                ui.ctx(),
-                                FileDragPayload { paths },
-                            );
+                            egui::DragAndDrop::set_payload(ui.ctx(), FileDragPayload { paths });
                         }
                         if item.is_dir {
                             let drop_hl = drop_highlight_id(&item.path);
                             if let Some(payload) = resp.dnd_hover_payload::<FileDragPayload>() {
-                                let legal = payload
-                                    .paths
-                                    .iter()
-                                    .all(|p| !same_or_within(&item.path, p));
+                                let legal =
+                                    payload.paths.iter().all(|p| !same_or_within(&item.path, p));
                                 if legal {
                                     let a = self.hover_anims.drive(
                                         drop_hl,
@@ -3586,11 +3736,7 @@ impl ExplorerView {
                             }
                             if let Some(payload) = resp.dnd_release_payload::<FileDragPayload>() {
                                 let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-                                drop_ops.push((
-                                    item.path.clone(),
-                                    payload.paths.to_vec(),
-                                    copy,
-                                ));
+                                drop_ops.push((item.path.clone(), payload.paths.to_vec(), copy));
                             }
                         }
 
@@ -3627,30 +3773,45 @@ impl ExplorerView {
                                 img_rect,
                                 Rounding::same(6.0),
                                 Color32::from_rgba_premultiplied(
-                                    palette.border.r(), palette.border.g(), palette.border.b(), 40,
+                                    palette.border.r(),
+                                    palette.border.g(),
+                                    palette.border.b(),
+                                    40,
                                 ),
                             );
-                            ui.painter_at(img_rect).image(tex.id(), img_rect, uv, Color32::WHITE);
+                            ui.painter_at(img_rect)
+                                .image(tex.id(), img_rect, uv, Color32::WHITE);
                         } else {
                             // Large embedded vector icon (pack-agnostic, antialiased)
                             let (glyph, accent) = crate::core::icon_packs::IconGlyph::resolve(
-                                &item.name, &item.extension, item.is_dir,
-                                icon_spec.is_image, icon_spec.is_media, icon_spec.is_archive,
-                                icon_spec.is_document, icon_spec.is_code, icon_spec.color_rgb,
+                                &item.name,
+                                &item.extension,
+                                item.is_dir,
+                                icon_spec.is_image,
+                                icon_spec.is_media,
+                                icon_spec.is_archive,
+                                icon_spec.is_document,
+                                icon_spec.is_code,
+                                icon_spec.color_rgb,
                             );
                             let icon_block = (tile_w * 0.52).min(tile_h * 0.56);
-                            let irect = Rect::from_center_size(badge_center, Vec2::splat(icon_block));
-                            crate::core::icon_packs::paint_icon(ui, self.icon_pack, glyph, irect, accent);
+                            let irect =
+                                Rect::from_center_size(badge_center, Vec2::splat(icon_block));
+                            crate::core::icon_packs::paint_icon(
+                                ui,
+                                self.icon_pack,
+                                glyph,
+                                irect,
+                                accent,
+                            );
                         }
 
                         let max_chars = ((tile_w / 8.0) as usize).clamp(8, 22);
                         // Grid mirrors Details conventions: symlink arrows and
                         // dimmed-to-alpha text for hidden entries.
                         let symlink_suffix = if item.is_symlink { " ↗" } else { "" };
-                        let display_name = truncate_middle(
-                            &format!("{}{}", item.name, symlink_suffix),
-                            max_chars,
-                        );
+                        let display_name =
+                            truncate_middle(&format!("{}{}", item.name, symlink_suffix), max_chars);
 
                         let name_y_offset = tile_h * 0.18;
                         let tile_name_color = if item.is_hidden {
@@ -3739,11 +3900,7 @@ impl ExplorerView {
         if ui.input(|i| i.pointer.any_released()) {
             if let Some(payload) = egui::DragAndDrop::take_payload::<FileDragPayload>(ui.ctx()) {
                 let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-                drop_ops.push((
-                    self.current_dir.clone(),
-                    payload.paths.to_vec(),
-                    copy,
-                ));
+                drop_ops.push((self.current_dir.clone(), payload.paths.to_vec(), copy));
             }
         }
 
@@ -3752,12 +3909,10 @@ impl ExplorerView {
             if canvas_dragging {
                 let cur = ui.input(|i| i.pointer.hover_pos()).unwrap_or(origin);
                 let mrect = Rect::from_two_pos(origin, cur);
-                let mp = ui.painter()
-                    .clone()
-                    .with_layer_id(egui::LayerId::new(
-                        egui::Order::Foreground,
-                        egui::Id::new("mossambi_marquee_grid"),
-                    ));
+                let mp = ui.painter().clone().with_layer_id(egui::LayerId::new(
+                    egui::Order::Foreground,
+                    egui::Id::new("mossambi_marquee_grid"),
+                ));
                 mp.rect_filled(
                     mrect,
                     Rounding::same(2.0),
@@ -3768,7 +3923,11 @@ impl ExplorerView {
                         30,
                     ),
                 );
-                mp.rect_stroke(mrect, Rounding::same(2.0), Stroke::new(1.0_f32, palette.accent));
+                mp.rect_stroke(
+                    mrect,
+                    Rounding::same(2.0),
+                    Stroke::new(1.0_f32, palette.accent),
+                );
                 let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
                 let hits: Vec<PathBuf> = marquee_rects
                     .iter()
@@ -3790,9 +3949,7 @@ impl ExplorerView {
                 self.marquee = None;
             }
         }
-        if canvas_dragging
-            || egui::DragAndDrop::has_payload_of_type::<FileDragPayload>(ui.ctx())
-        {
+        if canvas_dragging || egui::DragAndDrop::has_payload_of_type::<FileDragPayload>(ui.ctx()) {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(16));
         }
@@ -3840,11 +3997,8 @@ impl ExplorerView {
         if canvas_intents.invert_selection {
             let listed: std::collections::HashSet<PathBuf> =
                 entries.iter().map(|e| e.path.clone()).collect();
-            let currently: std::collections::HashSet<PathBuf> = self
-                .selected_paths
-                .intersection(&listed)
-                .cloned()
-                .collect();
+            let currently: std::collections::HashSet<PathBuf> =
+                self.selected_paths.intersection(&listed).cloned().collect();
             self.selected_paths = listed.difference(&currently).cloned().collect();
         }
         if canvas_intents.terminal {
@@ -3985,8 +4139,11 @@ impl ExplorerView {
                                                 self.selected_paths.clear();
                                                 self.selected_paths.insert(item.path.clone());
                                             }
-                                            let paths: Vec<PathBuf> =
-                                                self.selected_paths.iter().cloned().collect::<Vec<_>>();
+                                            let paths: Vec<PathBuf> = self
+                                                .selected_paths
+                                                .iter()
+                                                .cloned()
+                                                .collect::<Vec<_>>();
                                             egui::DragAndDrop::set_payload(
                                                 ui.ctx(),
                                                 FileDragPayload { paths },
@@ -4184,8 +4341,74 @@ impl ExplorerView {
 
                                             let (row_rect, resp) = ui.allocate_exact_size(
                                                 Vec2::new(col2_w - 8.0, 24.0),
-                                                egui::Sense::click(),
+                                                egui::Sense::click_and_drag(),
                                             );
+                                            // Drag source + folder-row drop
+                                            // targets (subfolder column has
+                                            // the same parity as column 1).
+                                            if resp.drag_started_by(egui::PointerButton::Primary) {
+                                                if !is_sel {
+                                                    self.selected_paths.clear();
+                                                    self.selected_paths
+                                                        .insert(sub_item.path.clone());
+                                                }
+                                                let paths: Vec<PathBuf> = self
+                                                    .selected_paths
+                                                    .iter()
+                                                    .cloned()
+                                                    .collect::<Vec<_>>();
+                                                egui::DragAndDrop::set_payload(
+                                                    ui.ctx(),
+                                                    FileDragPayload { paths },
+                                                );
+                                            }
+                                            if sub_item.is_dir {
+                                                let drop_hl = drop_highlight_id(&sub_item.path);
+                                                if let Some(payload) =
+                                                    resp.dnd_hover_payload::<FileDragPayload>()
+                                                {
+                                                    let legal = payload.paths.iter().all(|p| {
+                                                        !same_or_within(&sub_item.path, p)
+                                                    });
+                                                    if legal {
+                                                        let a = self.hover_anims.drive(
+                                                            drop_hl,
+                                                            1.0,
+                                                            self.animations.hover,
+                                                            crate::gui::anim::frame_dt(ui.ctx()),
+                                                        );
+                                                        ui.painter().rect_filled(
+                                                            row_rect,
+                                                            Rounding::same(5.0),
+                                                            Color32::from_rgba_premultiplied(
+                                                                palette.accent.r(),
+                                                                palette.accent.g(),
+                                                                palette.accent.b(),
+                                                                (a * 70.0) as u8,
+                                                            ),
+                                                        );
+                                                    }
+                                                } else {
+                                                    self.hover_anims.drive(
+                                                        drop_hl,
+                                                        0.0,
+                                                        self.animations.hover,
+                                                        crate::gui::anim::frame_dt(ui.ctx()),
+                                                    );
+                                                }
+                                                if let Some(payload) =
+                                                    resp.dnd_release_payload::<FileDragPayload>()
+                                                {
+                                                    let copy = ui.input(|i| {
+                                                        i.modifiers.ctrl || i.modifiers.command
+                                                    });
+                                                    column_drop = Some((
+                                                        sub_item.path.clone(),
+                                                        payload.paths.to_vec(),
+                                                        copy,
+                                                    ));
+                                                }
+                                            }
                                             if is_sel {
                                                 ui.painter().rect_filled(
                                                     row_rect,
@@ -4322,7 +4545,11 @@ impl ExplorerView {
                                                 egui::Sense::hover(),
                                             );
                                             crate::core::icon_packs::paint_icon(
-                                                ui, self.icon_pack, glyph, irect, accent,
+                                                ui,
+                                                self.icon_pack,
+                                                glyph,
+                                                irect,
+                                                accent,
                                             );
                                             ui.add_space(4.0);
                                             ui.label(
@@ -4756,13 +4983,26 @@ impl ExplorerView {
                     } else {
                         ui.label(
                             egui::RichText::new(
-                                "📷 Image preview not available or unsupported raw format.",
+                                "Image preview not available or unsupported raw format.",
                             )
                             .color(palette.text_muted),
                         );
                     }
                 } else if is_text
-                    || matches!(item.extension.as_str(), "PDF" | "DOCX" | "ODT" | "XLSX" | "XLS" | "ODS" | "CSV" | "TSV" | "PPTX" | "ODP" | "RTF")
+                    || matches!(
+                        item.extension.as_str(),
+                        "PDF"
+                            | "DOCX"
+                            | "ODT"
+                            | "XLSX"
+                            | "XLS"
+                            | "ODS"
+                            | "CSV"
+                            | "TSV"
+                            | "PPTX"
+                            | "ODP"
+                            | "RTF"
+                    )
                 {
                     if self.peek_text_cache.as_ref().map(|(p, _)| p) != Some(&item.path) {
                         let text = crate::core::preview::extract_preview_text(&item.path)
@@ -4945,16 +5185,26 @@ impl ExplorerView {
             .show(ctx, |ui| {
                 // Header with large icon and name
                 ui.horizontal(|ui| {
-                    let (picon_rect, _) = ui.allocate_exact_size(
-                        Vec2::splat(64.0),
-                        egui::Sense::hover(),
-                    );
+                    let (picon_rect, _) =
+                        ui.allocate_exact_size(Vec2::splat(64.0), egui::Sense::hover());
                     let (pglyph, paccent) = crate::core::icon_packs::IconGlyph::resolve(
-                        &item.name, &item.extension, item.is_dir,
-                        icon_spec.is_image, icon_spec.is_media, icon_spec.is_archive,
-                        icon_spec.is_document, icon_spec.is_code, icon_spec.color_rgb,
+                        &item.name,
+                        &item.extension,
+                        item.is_dir,
+                        icon_spec.is_image,
+                        icon_spec.is_media,
+                        icon_spec.is_archive,
+                        icon_spec.is_document,
+                        icon_spec.is_code,
+                        icon_spec.color_rgb,
                     );
-                    crate::core::icon_packs::paint_icon(ui, self.icon_pack, pglyph, picon_rect, paccent);
+                    crate::core::icon_packs::paint_icon(
+                        ui,
+                        self.icon_pack,
+                        pglyph,
+                        picon_rect,
+                        paccent,
+                    );
                     ui.add_space(8.0);
                     ui.vertical(|ui| {
                         ui.label(
@@ -5152,10 +5402,9 @@ fn log_result<T, E: std::fmt::Display>(what: &str, path: &Path, res: Result<T, E
 }
 
 /// Payload carried while files are dragged inside the explorer (Explorer
-/// parity: drag to move, Ctrl-drag to copy). Intra-app only — cross-app drag
-/// OUT of the window needs an OLE `DoDragDrop` source and is a documented
-/// roadmap deferral; until then the OS clipboard (CF_HDROP) path covers
-/// cross-app transfer via copy/paste.
+/// parity: drag to move, Ctrl-drag to copy). When such a drag leaves the
+/// window bounds, the render loop hands it to the native drag mechanism
+/// (Windows OLE / Linux file clipboard) via `begin_file_drag_out`.
 #[derive(Clone)]
 pub struct FileDragPayload {
     pub paths: Vec<PathBuf>,
@@ -5179,13 +5428,8 @@ fn drop_highlight_id(dir: &Path) -> u64 {
     h.finish()
 }
 
-
 /// Small square icon button used for inline controls (filter clear etc.).
-fn nav_icon_button(
-    ui: &mut Ui,
-    glyph: IconGlyph,
-    px: f32,
-) -> egui::Response {
+fn nav_icon_button(ui: &mut Ui, glyph: IconGlyph, px: f32) -> egui::Response {
     let inactive = ui.style().visuals.widgets.inactive;
     let tint = inactive.fg_stroke.color;
     let tint = [tint.r(), tint.g(), tint.b()];
@@ -5473,8 +5717,19 @@ fn item_kind(extension: &str) -> ItemKind {
     ItemKind {
         is_media: matches!(
             ext.as_str(),
-            "MP3" | "FLAC" | "WAV" | "AAC" | "M4A" | "OGG" | "OPUS" | "MP4" | "MKV" | "MOV"
-                | "WEBM" | "AVI" | "M4V"
+            "MP3"
+                | "FLAC"
+                | "WAV"
+                | "AAC"
+                | "M4A"
+                | "OGG"
+                | "OPUS"
+                | "MP4"
+                | "MKV"
+                | "MOV"
+                | "WEBM"
+                | "AVI"
+                | "M4V"
         ),
         is_printable: matches!(
             ext.as_str(),
@@ -5482,7 +5737,16 @@ fn item_kind(extension: &str) -> ItemKind {
         ),
         is_image: matches!(
             ext.as_str(),
-            "JPG" | "JPEG" | "PNG" | "WEBP" | "GIF" | "AVIF" | "BMP" | "ICO" | "TIFF" | "HEIC"
+            "JPG"
+                | "JPEG"
+                | "PNG"
+                | "WEBP"
+                | "GIF"
+                | "AVIF"
+                | "BMP"
+                | "ICO"
+                | "TIFF"
+                | "HEIC"
                 | "PSD"
         ),
         is_archive: matches!(
@@ -5523,6 +5787,15 @@ fn menu_row_glyph(
 }
 
 impl ExplorerView {
+    /// Records a transient user-visible status note (auto-fades in render).
+    pub fn show_status_note(&mut self, note: Result<String, String>) {
+        let text = match note {
+            Ok(message) => message,
+            Err(error) => format!("Drag-out failed: {}", error),
+        };
+        self.status_note = Some((text, Instant::now()));
+    }
+
     /// Paste everything currently staged in Mossambi's inner clipboard into
     /// the current directory (fresh-name resolution, cut ⇒ move).
     /// Commits a completed drag: move or copy `paths` into `dest_dir`.
@@ -5535,20 +5808,28 @@ impl ExplorerView {
         // Explorer rule: dropping a dir into itself, its subtree, or directly
         // into its parent does nothing (plate already holds it there).
         let illegal = paths.iter().any(|p| {
-            same_or_within(&dest_dir, p)
-                || p.parent().map(|q| q == dest_dir).unwrap_or(false)
+            same_or_within(&dest_dir, p) || p.parent().map(|q| q == dest_dir).unwrap_or(false)
         });
         if illegal {
-            log::debug!("Drop rejected: destination {} holds/contains source", dest_dir.display());
+            log::debug!(
+                "Drop rejected: destination {} holds/contains source",
+                dest_dir.display()
+            );
             return;
         }
         let mut moved = false;
         for src in paths {
-            let Some(name) = src.file_name() else { continue };
+            let Some(name) = src.file_name() else {
+                continue;
+            };
             let dest = dest_dir.join(name);
             if copy {
                 let unique = resolve_unique_paste_path(&dest);
-                log_result("Drag copy", src, copy_entry_recursive(src, &unique).map(|_| ()));
+                log_result(
+                    "Drag copy",
+                    src,
+                    copy_entry_recursive(src, &unique).map(|_| ()),
+                );
             } else {
                 log_result("Drag move", src, move_entry(src, &dest));
                 self.selected_paths.remove(src);
@@ -5642,7 +5923,11 @@ impl ExplorerView {
             for path in paths {
                 if let Some(parent) = path.parent() {
                     let parent = parent.to_path_buf();
-                    log_result("Extract", &path, crate::archive::unpack_archive(&path, &parent));
+                    log_result(
+                        "Extract",
+                        &path,
+                        crate::archive::unpack_archive(&path, &parent),
+                    );
                 }
             }
             self.navigate_to(self.current_dir.clone());
@@ -5678,7 +5963,10 @@ impl ExplorerView {
             self.clipboard_paths = paths.clone();
             self.clipboard_is_cut = false;
             if !cm::set_clipboard_files_with_effect(&paths, false) {
-                log::warn!("OS clipboard (copy) sync failed for {} item(s)", paths.len());
+                log::warn!(
+                    "OS clipboard (copy) sync failed for {} item(s)",
+                    paths.len()
+                );
             }
         }
         if let Some(paths) = intent.duplicate {
@@ -5691,13 +5979,19 @@ impl ExplorerView {
                 let copy_name = match src.extension() {
                     Some(ext) => format!(
                         "{} copy.{}",
-                        src.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default(),
+                        src.file_stem()
+                            .map(|s| s.to_string_lossy())
+                            .unwrap_or_default(),
                         ext.to_string_lossy()
                     ),
                     None => format!("{name} copy"),
                 };
                 let target = resolve_unique_paste_path(&parent.join(copy_name));
-                log_result("Duplicate", src, crate::core::fs_utils::copy_entry_recursive(src, &target).map(|_| ()));
+                log_result(
+                    "Duplicate",
+                    src,
+                    crate::core::fs_utils::copy_entry_recursive(src, &target).map(|_| ()),
+                );
             }
             self.navigate_to(self.current_dir.clone());
         }
@@ -5811,8 +6105,16 @@ impl ExplorerView {
             intent.refresh = true;
             menu_ui.close_menu();
         }
-        if menu_row_glyph(menu_ui, true, pack, IconGlyph::ActionUp, "Go to Parent Folder", style, tint)
-            .clicked()
+        if menu_row_glyph(
+            menu_ui,
+            true,
+            pack,
+            IconGlyph::ActionUp,
+            "Go to Parent Folder",
+            style,
+            tint,
+        )
+        .clicked()
         {
             intent.go_up = true;
             menu_ui.close_menu();
@@ -5830,7 +6132,11 @@ impl ExplorerView {
                 (SortColumn::Permissions, "Permissions"),
             ] {
                 let mark = if current_sort == col {
-                    if sort_desc { " ↓" } else { " ↑" }
+                    if sort_desc {
+                        " ↓"
+                    } else {
+                        " ↑"
+                    }
                 } else {
                     ""
                 };
@@ -5863,7 +6169,16 @@ impl ExplorerView {
         });
 
         menu_ui.separator();
-        if menu_row(menu_ui, has_entries, pack, fm::MenuAction::SelectAll, style, tint).clicked() {
+        if menu_row(
+            menu_ui,
+            has_entries,
+            pack,
+            fm::MenuAction::SelectAll,
+            style,
+            tint,
+        )
+        .clicked()
+        {
             intent.select_all = true;
             menu_ui.close_menu();
         }
@@ -5881,13 +6196,30 @@ impl ExplorerView {
             intent.invert_selection = true;
             menu_ui.close_menu();
         }
-        if menu_row_glyph(menu_ui, true, pack, IconGlyph::ActionClose, "Clear Selection", style, tint)
-            .clicked()
+        if menu_row_glyph(
+            menu_ui,
+            true,
+            pack,
+            IconGlyph::ActionClose,
+            "Clear Selection",
+            style,
+            tint,
+        )
+        .clicked()
         {
             intent.clear_selection = true;
             menu_ui.close_menu();
         }
-        if menu_row(menu_ui, has_clipboard, pack, fm::MenuAction::Paste, style, tint).clicked() {
+        if menu_row(
+            menu_ui,
+            has_clipboard,
+            pack,
+            fm::MenuAction::Paste,
+            style,
+            tint,
+        )
+        .clicked()
+        {
             intent.paste = Some(Vec::new()); // caller reads clipboard_paths itself
             menu_ui.close_menu();
         }
@@ -5929,8 +6261,7 @@ impl ExplorerView {
 
         // Multi-select bookkeeping (Explorer rule).
         let multi = targets.len() > 1;
-        let file_targets: Vec<PathBuf> =
-            targets.iter().filter(|p| p.is_file()).cloned().collect();
+        let file_targets: Vec<PathBuf> = targets.iter().filter(|p| p.is_file()).cloned().collect();
         let archive_targets: Vec<PathBuf> = targets
             .iter()
             .filter(|p| {
@@ -5972,9 +6303,7 @@ impl ExplorerView {
                 menu_ui.close_menu();
             }
             if !file_targets.is_empty()
-                && file_targets
-                    .iter()
-                    .any(|p| item_kind_ext(p).is_printable)
+                && file_targets.iter().any(|p| item_kind_ext(p).is_printable)
                 && menu_row(menu_ui, true, pack, fm::MenuAction::Print, style, tint).clicked()
             {
                 intent.print = Some(
@@ -5986,7 +6315,16 @@ impl ExplorerView {
                 );
                 menu_ui.close_menu();
             }
-            if menu_row(menu_ui, !multi, pack, fm::MenuAction::QuickLook, style, tint).clicked() {
+            if menu_row(
+                menu_ui,
+                !multi,
+                pack,
+                fm::MenuAction::QuickLook,
+                style,
+                tint,
+            )
+            .clicked()
+            {
                 intent.peek = Some(item.clone());
                 menu_ui.close_menu();
             }
@@ -6013,8 +6351,7 @@ impl ExplorerView {
             // uses (UniversalRegistry::get_sectors_for_file): every converter
             // the Studio's left column offers, scoped to this file's type, so
             // irrelevant formats never appear.
-            let sectors =
-                crate::core::registry::UniversalRegistry::get_sectors_for_file(&path);
+            let sectors = crate::core::registry::UniversalRegistry::get_sectors_for_file(&path);
             let in_ext = item.extension.to_ascii_uppercase();
             menu_ui.menu_button("Convert", |sub_ui| {
                 sub_ui.set_min_width(210.0);
@@ -6041,8 +6378,7 @@ impl ExplorerView {
                             )
                             .clicked()
                             {
-                                intent.transcode =
-                                    Some((targets.to_vec(), label.to_string()));
+                                intent.transcode = Some((targets.to_vec(), label.to_string()));
                                 sub_ui.close_menu();
                             }
                         }
@@ -6100,11 +6436,17 @@ impl ExplorerView {
             menu_ui.menu_button(fm::MenuAction::SendTo.label(style), |sub_ui| {
                 sub_ui.set_min_width(170.0);
                 for (label, dest) in send_dests.iter().take(12) {
-                    if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionShortcut, label, style, tint)
-                        .clicked()
+                    if fm::menu_item_glyph(
+                        sub_ui,
+                        pack,
+                        IconGlyph::ActionShortcut,
+                        label,
+                        style,
+                        tint,
+                    )
+                    .clicked()
                     {
-                        intent.send_to =
-                            Some((targets.to_vec(), dest.clone(), label.clone()));
+                        intent.send_to = Some((targets.to_vec(), dest.clone(), label.clone()));
                         sub_ui.close_menu();
                     }
                 }
@@ -6123,7 +6465,8 @@ impl ExplorerView {
                 (CopyPathKind::ForwardSlashes, "Forward slashes (/)"),
                 (CopyPathKind::Parent, "Containing folder"),
             ] {
-                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionPath, label, style, tint).clicked()
+                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionPath, label, style, tint)
+                    .clicked()
                 {
                     intent.copy_path = Some((path.clone(), kind));
                     sub_ui.close_menu();
@@ -6181,7 +6524,16 @@ impl ExplorerView {
         }
 
         menu_ui.separator();
-        if menu_row(menu_ui, !multi, pack, fm::MenuAction::Properties, style, tint).clicked() {
+        if menu_row(
+            menu_ui,
+            !multi,
+            pack,
+            fm::MenuAction::Properties,
+            style,
+            tint,
+        )
+        .clicked()
+        {
             intent.properties = Some(item.clone());
             menu_ui.close_menu();
         }
@@ -6198,14 +6550,19 @@ impl ExplorerView {
     ) {
         let alpha = alpha.clamp(0.0, 1.0);
         let rounding = Rounding::same(4.5);
-        let stroke_col = if checked { palette.accent } else { palette.text_muted };
+        let stroke_col = if checked {
+            palette.accent
+        } else {
+            palette.text_muted
+        };
         let stroke_col = Color32::from_rgba_premultiplied(
             (stroke_col.r() as f32 * alpha) as u8,
             (stroke_col.g() as f32 * alpha) as u8,
             (stroke_col.b() as f32 * alpha) as u8,
             (stroke_col.a() as f32 * alpha) as u8,
         );
-        ui.painter().rect_stroke(rect, rounding, Stroke::new(1.4_f32, stroke_col));
+        ui.painter()
+            .rect_stroke(rect, rounding, Stroke::new(1.4_f32, stroke_col));
         if checked {
             let fill = Color32::from_rgba_premultiplied(
                 (palette.accent.r() as f32 * alpha) as u8,

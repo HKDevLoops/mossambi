@@ -61,7 +61,8 @@ impl Spring {
         let h = dt / steps as f32;
         for _ in 0..steps {
             let delta = self.value - self.target;
-            let accel = -self.stiffness * delta - 2.0 * self.damping * self.stiffness.sqrt() * self.velocity;
+            let accel = -self.stiffness * delta
+                - 2.0 * self.damping * self.stiffness.sqrt() * self.velocity;
             self.velocity += accel * h;
             self.value += self.velocity * h;
         }

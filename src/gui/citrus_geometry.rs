@@ -331,11 +331,7 @@ impl CitrusGeometry {
                 pal.text_dark
             };
 
-            let display_text = if is_all {
-                "ALL"
-            } else {
-                fmt_name
-            };
+            let display_text = if is_all { "ALL" } else { fmt_name };
 
             painter.text(
                 text_pos,

@@ -1,13 +1,19 @@
-﻿//! Pure-Rust peek/preview engine for the Mossambi explorer.
+//! Pure-Rust peek/preview engine for the Mossambi explorer.
 
 use std::fs;
 use std::io::Read;
 use std::path::Path;
 
 pub fn preview_kind(path: &Path) -> &'static str {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     match ext.as_str() {
-        "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "ico" | "tiff" | "tif" | "avif" => "image",
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "ico" | "tiff" | "tif" | "avif" => {
+            "image"
+        }
         "pdf" => "pdf",
         "doc" | "docx" | "odt" | "rtf" => "document",
         "xls" | "xlsx" | "ods" | "csv" | "tsv" => "spreadsheet",
@@ -20,14 +26,20 @@ pub fn preview_kind(path: &Path) -> &'static str {
 }
 
 pub fn extract_preview_text(path: &Path) -> anyhow::Result<String> {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_uppercase();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_uppercase();
     match ext.as_str() {
         "PDF" => extract_pdf(path),
         "DOCX" | "ODT" => extract_docx(path),
         "XLSX" | "XLS" | "ODS" | "CSV" | "TSV" => extract_spreadsheet(path, &ext),
         "PPTX" | "ODP" => extract_pptx(path),
         "RTF" => extract_rtf(path),
-        "PNG" | "JPG" | "JPEG" | "WEBP" | "GIF" | "BMP" | "ICO" | "TIFF" | "TIF" => extract_image_meta(path),
+        "PNG" | "JPG" | "JPEG" | "WEBP" | "GIF" | "BMP" | "ICO" | "TIFF" | "TIF" => {
+            extract_image_meta(path)
+        }
         "ZIP" | "TAR" | "GZ" | "XZ" | "ZST" | "BZ2" | "7Z" | "RAR" => extract_archive(path),
         _ => extract_text_lossy(path),
     }
@@ -44,7 +56,9 @@ fn extract_docx(path: &Path) -> anyhow::Result<String> {
     let file = fs::File::open(path)?;
     let mut zip = zip::ZipArchive::new(file)?;
     let mut doc_xml = String::new();
-    zip.by_name("word/document.xml")?.take(50 * 1024 * 1024).read_to_string(&mut doc_xml)?;
+    zip.by_name("word/document.xml")?
+        .take(50 * 1024 * 1024)
+        .read_to_string(&mut doc_xml)?;
     let p_re = regex::Regex::new(r"</w:p>").unwrap();
     let t_re = regex::Regex::new(r"<w:t[^>]*>(.*?)</w:t>").unwrap();
     let mut result = String::new();
@@ -52,7 +66,14 @@ fn extract_docx(path: &Path) -> anyhow::Result<String> {
         let mut para_text = String::new();
         for cap in t_re.captures_iter(para) {
             if let Some(m) = cap.get(1) {
-                para_text.push_str(&m.as_str().replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'"));
+                para_text.push_str(
+                    &m.as_str()
+                        .replace("&amp;", "&")
+                        .replace("&lt;", "<")
+                        .replace("&gt;", ">")
+                        .replace("&quot;", "\"")
+                        .replace("&apos;", "'"),
+                );
             }
         }
         if !para_text.is_empty() {
@@ -87,7 +108,10 @@ fn extract_spreadsheet(path: &Path, ext: &str) -> anyhow::Result<String> {
 fn extract_pptx(path: &Path) -> anyhow::Result<String> {
     let file = fs::File::open(path)?;
     let mut zip = zip::ZipArchive::new(file)?;
-    let mut slide_names: Vec<String> = (0..zip.len()).filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string())).filter(|n| n.starts_with("ppt/slides/slide") && n.ends_with(".xml")).collect();
+    let mut slide_names: Vec<String> = (0..zip.len())
+        .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+        .filter(|n| n.starts_with("ppt/slides/slide") && n.ends_with(".xml"))
+        .collect();
     slide_names.sort();
     let t_re = regex::Regex::new(r"<a:t[^>]*>(.*?)</a:t>").unwrap();
     let mut out = String::new();
@@ -114,9 +138,23 @@ fn extract_rtf(path: &Path) -> anyhow::Result<String> {
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '\\' {
-            while let Some(&n) = chars.peek() { if n.is_alphabetic() { chars.next(); } else { break; } }
-            while let Some(&n) = chars.peek() { if n.is_ascii_digit() || n == '-' { chars.next(); } else { break; } }
-            if let Some(&' ') = chars.peek() { chars.next(); }
+            while let Some(&n) = chars.peek() {
+                if n.is_alphabetic() {
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            while let Some(&n) = chars.peek() {
+                if n.is_ascii_digit() || n == '-' {
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            if let Some(&' ') = chars.peek() {
+                chars.next();
+            }
         } else if c == '{' || c == '}' {
         } else {
             out.push(c);
@@ -128,11 +166,21 @@ fn extract_rtf(path: &Path) -> anyhow::Result<String> {
 fn extract_image_meta(path: &Path) -> anyhow::Result<String> {
     let img = image::open(path)?;
     let (w, h) = (img.width(), img.height());
-    Ok(format!("Image: {}x{} pixels\nFormat: {}\nFile size: {} bytes", w, h, path.extension().and_then(|e| e.to_str()).unwrap_or(""), fs::metadata(path).map(|m| m.len()).unwrap_or(0)))
+    Ok(format!(
+        "Image: {}x{} pixels\nFormat: {}\nFile size: {} bytes",
+        w,
+        h,
+        path.extension().and_then(|e| e.to_str()).unwrap_or(""),
+        fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+    ))
 }
 
 fn extract_archive(path: &Path) -> anyhow::Result<String> {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if ext == "zip" {
         let file = fs::File::open(path)?;
         let mut zip = zip::ZipArchive::new(file)?;
@@ -157,5 +205,9 @@ fn extract_text_lossy(path: &Path) -> anyhow::Result<String> {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max { s.to_string() } else { format!("{}...", &s[..max]) }
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max])
+    }
 }

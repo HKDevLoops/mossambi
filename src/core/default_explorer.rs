@@ -35,8 +35,7 @@ mod reg {
     use super::HKEY_CURRENT_USER;
     use windows_sys::Win32::System::Registry::{
         RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegDeleteValueW, RegQueryValueExW,
-        RegSetValueExW, HKEY, KEY_READ, KEY_SET_VALUE, KEY_WRITE, REG_OPTION_NON_VOLATILE,
-        REG_SZ,
+        RegSetValueExW, HKEY, KEY_READ, KEY_SET_VALUE, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ,
     };
 
     pub const ERROR_SUCCESS: u32 = 0;
@@ -234,7 +233,9 @@ pub fn take_over() -> Result<()> {
                 log::info!("xdg-mime default set: mossambi.desktop for inode/directory");
                 Ok(())
             }
-            _ => Err(anyhow::anyhow!("xdg-mime default failed (xdg-utils installed?)")),
+            _ => Err(anyhow::anyhow!(
+                "xdg-mime default failed (xdg-utils installed?)"
+            )),
         }
     }
     #[cfg(target_os = "macos")]
@@ -272,7 +273,11 @@ pub fn restore() -> Result<()> {
     #[cfg(target_os = "linux")]
     {
         // Best-effort restore: prefer Nautilus/Dolphin/Thunar if installed.
-        for candidate in ["org.gnome.Nautilus.desktop", "dolphin.desktop", "thunar.desktop"] {
+        for candidate in [
+            "org.gnome.Nautilus.desktop",
+            "dolphin.desktop",
+            "thunar.desktop",
+        ] {
             let res = std::process::Command::new("xdg-mime")
                 .args(["default", candidate, "inode/directory"])
                 .status();

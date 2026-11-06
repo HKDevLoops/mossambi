@@ -192,70 +192,66 @@ impl MossambiApp {
                 files.len(),
                 target
             );
-            self.status_message = "⏳ A conversion is already running — please wait."
-                .to_string();
+            self.status_message = "A conversion is already running — please wait.".to_string();
             return;
         }
 
         self.is_converting = true;
-        self.status_message = format!(
-            "Converting {} file(s) -> {}...",
-            files.len(),
-            target
-        );
+        self.status_message = format!("Converting {} file(s) -> {}...", files.len(), target);
         log::info!("conversion batch: {} file(s) -> {}", files.len(), target);
 
         let sender = self.result_sender.clone();
         let target_str = target.to_string();
         let settings = self.quick_settings.clone();
 
-        self.worker_pool.spawn_task("StudioConversion", move |cancel, tx, task_id| {
-            let total = files.len();
-            let mut outputs: Vec<PathBuf> = Vec::new();
-            let mut first_error: Option<String> = None;
+        self.worker_pool
+            .spawn_task("StudioConversion", move |cancel, tx, task_id| {
+                let total = files.len();
+                let mut outputs: Vec<PathBuf> = Vec::new();
+                let mut first_error: Option<String> = None;
 
-            for (idx, file) in files.iter().enumerate() {
-                // Cooperative stop between files (the codec engine itself has
-                // no cancellation hook yet).
-                if cancel.load(Ordering::Relaxed) {
-                    break;
-                }
-                match execute_conversion(file, &target_str, &settings) {
-                    ConversionResult::Success(mut outs) => outputs.append(&mut outs),
-                    ConversionResult::Failure(err) => {
-                        if first_error.is_none() {
-                            first_error = Some(format!("{}: {}", file.display(), err));
+                for (idx, file) in files.iter().enumerate() {
+                    // Cooperative stop between files (the codec engine itself has
+                    // no cancellation hook yet).
+                    if cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    match execute_conversion(file, &target_str, &settings) {
+                        ConversionResult::Success(mut outs) => outputs.append(&mut outs),
+                        ConversionResult::Failure(err) => {
+                            if first_error.is_none() {
+                                first_error = Some(format!("{}: {}", file.display(), err));
+                            }
                         }
                     }
+                    let _ = tx.send(TaskUpdate::Progress {
+                        id: task_id,
+                        fraction: (idx + 1) as f32 / total.max(1) as f32,
+                        status: format!("Converted {}/{} file(s)", idx + 1, total),
+                    });
                 }
-                let _ = tx.send(TaskUpdate::Progress {
-                    id: task_id,
-                    fraction: (idx + 1) as f32 / total.max(1) as f32,
-                    status: format!("Converted {}/{} file(s)", idx + 1, total),
-                });
-            }
 
-            let result = match first_error {
-                Some(err) => ConversionResult::Failure(err),
-                None => ConversionResult::Success(outputs),
-            };
-            match &result {
-                ConversionResult::Success(outs) => {
-                    let _ = tx.send(TaskUpdate::Completed {
-                        id: task_id,
-                        output: outs.first().cloned(),
-                        message: format!("Converted {} file(s) to {}", outs.len(), target_str),
-                    });
+                let result = match first_error {
+                    Some(err) => ConversionResult::Failure(err),
+                    None => ConversionResult::Success(outputs),
+                };
+                match &result {
+                    ConversionResult::Success(outs) => {
+                        let _ = tx.send(TaskUpdate::Completed {
+                            id: task_id,
+                            output: outs.first().cloned(),
+                            message: format!("Converted {} file(s) to {}", outs.len(), target_str),
+                        });
+                    }
+                    ConversionResult::Failure(err) => {
+                        let _ = tx.send(TaskUpdate::Failed {
+                            id: task_id,
+                            error: err.clone(),
+                        });
+                    }
                 }
-                ConversionResult::Failure(err) => {
-                    let _ = tx.send(TaskUpdate::Failed {
-                        id: task_id,
-                        error: err.clone(),
-                    });
-                }
-            }
-            let _ = sender.send(result);
-        });
+                let _ = sender.send(result);
+            });
     }
 
     /// AUTO-triggered conversion hook (reserved for programmatic converters).
@@ -280,7 +276,10 @@ impl MossambiApp {
 
     pub fn launch_radial_widget_at(&self, pos: Option<(f32, f32)>, file: Option<&Path>) {
         let exe = std::env::current_exe().ok();
-        let mut cmd = std::process::Command::new(exe.as_deref().unwrap_or_else(|| std::path::Path::new("mossambi.exe")));
+        let mut cmd = std::process::Command::new(
+            exe.as_deref()
+                .unwrap_or_else(|| std::path::Path::new("mossambi.exe")),
+        );
         cmd.arg("widget");
 
         if let Some((x, y)) = pos {
@@ -436,30 +435,30 @@ impl eframe::App for MossambiApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // ── Ctrl + Mouse Wheel ───────────────────────────────────────────────
-        // Plain Ctrl+wheel    → Explorer content zoom levels (0..=4, persisted)
-        // Ctrl+0              → reset explorer zoom to the default level 2
-        // Ctrl+Shift+wheel    → whole-UI pixel scale (Finder/Explorer parity)
-        // Ctrl+Shift+0        → reset UI scale to native
-        let (ui_zoom_scroll, ui_zoom_reset, explorer_scroll, explorer_reset) =
-            ctx.input(|i| {
-                let ctrl = i.modifiers.ctrl || i.modifiers.command;
-                let shift = i.modifiers.shift;
-                let scroll = if ctrl { i.raw_scroll_delta.y } else { 0.0 };
-                let num0 = i.key_pressed(egui::Key::Num0);
-                (
-                    if ctrl && shift { scroll } else { 0.0 },
-                    ctrl && shift && num0,
-                    if ctrl && !shift { scroll } else { 0.0 },
-                    ctrl && !shift && num0,
-                )
-            });
+        // -- Ctrl + Mouse Wheel ----------------------------------------
+        // Plain Ctrl+wheel    -> Explorer content zoom levels (0..=4, persisted)
+        // Ctrl+0              -> reset explorer zoom to the default level 2
+        // Ctrl+Shift+wheel    -> whole-UI pixel scale (Finder/Explorer parity)
+        // Ctrl+Shift+0        -> reset UI scale to native
+        let (ui_zoom_scroll, ui_zoom_reset, explorer_scroll, explorer_reset) = ctx.input(|i| {
+            let ctrl = i.modifiers.ctrl || i.modifiers.command;
+            let shift = i.modifiers.shift;
+            let scroll = if ctrl { i.raw_scroll_delta.y } else { 0.0 };
+            let num0 = i.key_pressed(egui::Key::Num0);
+            (
+                if ctrl && shift { scroll } else { 0.0 },
+                ctrl && shift && num0,
+                if ctrl && !shift { scroll } else { 0.0 },
+                ctrl && !shift && num0,
+            )
+        });
         if explorer_reset {
             self.studio_view.explorer_view.explorer_zoom = 2;
             log::debug!("explorer zoom reset to level 2 (Ctrl+0)");
         } else if explorer_scroll != 0.0 {
             let step = if explorer_scroll > 0.0 { 1 } else { -1 };
-            let next = (self.studio_view.explorer_view.explorer_zoom as i32 + step).clamp(0, 4) as u8;
+            let next =
+                (self.studio_view.explorer_view.explorer_zoom as i32 + step).clamp(0, 4) as u8;
             if next != self.studio_view.explorer_view.explorer_zoom {
                 log::debug!(
                     "explorer zoom level: {} -> {}",
@@ -474,14 +473,18 @@ impl eframe::App for MossambiApp {
             ctx.set_pixels_per_point(native);
             self.last_applied_theme = None;
         } else if ui_zoom_scroll != 0.0 {
-            let step = if ui_zoom_scroll > 0.0 { 1.08_f32 } else { 1.0_f32 / 1.08 };
+            let step = if ui_zoom_scroll > 0.0 {
+                1.08_f32
+            } else {
+                1.0_f32 / 1.08
+            };
             self.ui_zoom = (self.ui_zoom * step).clamp(0.6, 2.5);
             let native = ctx.native_pixels_per_point().unwrap_or(1.0).max(0.5);
             ctx.set_pixels_per_point(native * self.ui_zoom);
             self.last_applied_theme = None;
         }
 
-        // ── Mouse history navigation (thumb buttons / middle-drag swipe) ────
+        // -- Mouse history navigation (thumb buttons / middle-drag swipe) ---
         while let Some(evt) = self.mouse_nav.try_recv() {
             let explorer = &mut self.studio_view.explorer_view;
             match evt {
@@ -504,7 +507,8 @@ impl eframe::App for MossambiApp {
         self.frame_count = self.frame_count.saturating_add(1);
         let cfg = crate::core::MossambiConfig::load();
         // Sync icon pack from config (live)
-        self.studio_view.explorer_view.icon_pack = crate::core::icon_packs::IconPack::from_config_id(&cfg.icon_pack);
+        self.studio_view.explorer_view.icon_pack =
+            crate::core::icon_packs::IconPack::from_config_id(&cfg.icon_pack);
         let current_glass = cfg.glass_effect;
         if self.frame_count <= 10
             || self.last_applied_theme != Some(self.theme)
@@ -538,7 +542,9 @@ impl eframe::App for MossambiApp {
                     fraction, status, ..
                 } => log::debug!("worker progress {:.0}%: {}", fraction * 100.0, status),
                 TaskUpdate::Completed { message, .. } => log::info!("worker finished: {}", message),
-                TaskUpdate::Failed { error, .. } => log::error!("worker reported failure: {}", error),
+                TaskUpdate::Failed { error, .. } => {
+                    log::error!("worker reported failure: {}", error)
+                }
             }
         }
 
@@ -602,11 +608,11 @@ impl eframe::App for MossambiApp {
                         self.last_completed_output = Some(first.clone());
                     }
                     self.status_message =
-                        format!("✨ Successfully converted {} file(s)!", files.len());
+                        format!("Successfully converted {} file(s)!", files.len());
                 }
                 ConversionResult::Failure(err) => {
                     log::error!("Studio conversion failed: {}", err);
-                    self.status_message = format!("❌ {}", err);
+                    self.status_message = format!("Conversion failed: {}", err);
                 }
             }
         }
@@ -629,8 +635,17 @@ impl eframe::App for MossambiApp {
             }
 
             if !i.raw.dropped_files.is_empty() {
-                if let Some(drop) = i.raw.dropped_files.first() {
-                    let dropped_path = drop.path.clone().or_else(|| {
+                // First resolvable path wins, so one malformed entry no
+                // longer swallows the whole drop; the Windows rescue (active
+                // shell window under the cursor) only runs when the drop
+                // carried no resolvable path at all.
+                let dropped_path = i
+                    .raw
+                    .dropped_files
+                    .iter()
+                    .filter_map(|drop| drop.path.clone())
+                    .next()
+                    .or_else(|| {
                         #[cfg(target_os = "windows")]
                         {
                             use windows_sys::Win32::Foundation::POINT;
@@ -643,9 +658,8 @@ impl eframe::App for MossambiApp {
                         None
                     });
 
-                    if let Some(path) = dropped_path {
-                        self.select_file(path);
-                    }
+                if let Some(path) = dropped_path {
+                    self.select_file(path);
                 }
             }
         });
@@ -792,11 +806,15 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
     // Honor the Max-FPS knob: when enabled, uncap the frame driver by
     // disabling vsync (repaint pacing is handled per-frame in update()).
     let max_fps = crate::core::MossambiConfig::load().max_fps;
-    let options = eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         viewport: builder,
         vsync: !max_fps,
         ..Default::default()
     };
+    // Under Wayland-with-XWayland, force the X11 windowing backend so
+    // external file drag & drop can reach us (XDND receive only exists in
+    // winit's X11 backend). See core/dnd_backend.rs for the policy matrix.
+    crate::core::dnd_backend::apply_backend_policy(&mut options);
 
     eframe::run_native(
         "Mossambi — Universal File Conversion Studio",

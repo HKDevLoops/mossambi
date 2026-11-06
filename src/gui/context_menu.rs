@@ -20,7 +20,11 @@ pub fn shell_verb(path: &Path, verb: &str) -> bool {
         use windows_sys::Win32::UI::Shell::ShellExecuteW;
         use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
         let action: Vec<u16> = OsStr::new(verb)
             .encode_wide()
             .chain(std::iter::once(0))
@@ -102,13 +106,13 @@ pub fn set_clipboard_files(paths: &[std::path::PathBuf]) -> bool {
 pub fn set_clipboard_files_with_effect(paths: &[std::path::PathBuf], cut: bool) -> bool {
     #[cfg(target_os = "windows")]
     unsafe {
-        use std::os::windows::ffi::OsStrExt;
         use std::mem::size_of;
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::HANDLE;
         use windows_sys::Win32::System::DataExchange::{
             CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
         };
         use windows_sys::Win32::UI::Shell::DROPFILES;
-        use windows_sys::Win32::Foundation::HANDLE;
 
         const CF_HDROP: u32 = 15;
 
@@ -171,9 +175,17 @@ pub fn set_clipboard_files_with_effect(paths: &[std::path::PathBuf], cut: bool) 
         // FileNameW + PreferredDropEffect: tell Explorer whether to Move or Copy
         const DROPEFFECT_COPY: u32 = 1;
         const DROPEFFECT_MOVE: u32 = 2;
-        let effect = if cut { DROPEFFECT_MOVE } else { DROPEFFECT_COPY };
-        let pref_name: Vec<u16> = "Preferred DropEffect".encode_utf16().chain(std::iter::once(0)).collect();
-        let pref_id = windows_sys::Win32::System::DataExchange::RegisterClipboardFormatW(pref_name.as_ptr());
+        let effect = if cut {
+            DROPEFFECT_MOVE
+        } else {
+            DROPEFFECT_COPY
+        };
+        let pref_name: Vec<u16> = "Preferred DropEffect"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let pref_id =
+            windows_sys::Win32::System::DataExchange::RegisterClipboardFormatW(pref_name.as_ptr());
 
         let pref_mem = windows_sys::Win32::System::Memory::GlobalAlloc(
             windows_sys::Win32::System::Memory::GMEM_MOVEABLE,
@@ -210,7 +222,11 @@ pub fn set_desktop_wallpaper(path: &Path) -> bool {
         };
 
         const SPI_SETDESKWALLPAPER: u32 = 0x0014;
-        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
         let res = SystemParametersInfoW(
             SPI_SETDESKWALLPAPER,
             0,
@@ -305,8 +321,8 @@ pub fn delete_to_trash(paths: &[std::path::PathBuf]) -> bool {
     unsafe {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::UI::Shell::{
-            SHFileOperationW, SHFILEOPSTRUCTW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT,
-            FO_DELETE,
+            SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FO_DELETE,
+            SHFILEOPSTRUCTW,
         };
 
         // One double-NUL-terminated UTF-16 list for the whole batch.
@@ -370,7 +386,10 @@ pub fn send_to_targets() -> Vec<(String, std::path::PathBuf)> {
         for entry in rd.flatten() {
             let p = entry.path();
             if !matches!(
-                p.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase()).as_deref(),
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .map(|s| s.to_ascii_lowercase())
+                    .as_deref(),
                 Some("lnk"),
             ) {
                 continue;
@@ -412,9 +431,14 @@ pub fn send_to(paths: &[std::path::PathBuf], destination: &std::path::Path) -> b
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        let params: Vec<u16> = OsStr::new(&joined).encode_wide().chain(std::iter::once(0)).collect();
-        let verb_open: Vec<u16> =
-            OsStr::new("open").encode_wide().chain(std::iter::once(0)).collect();
+        let params: Vec<u16> = OsStr::new(&joined)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let verb_open: Vec<u16> = OsStr::new("open")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
         let res = ShellExecuteW(
             std::ptr::null_mut(),
             verb_open.as_ptr(),

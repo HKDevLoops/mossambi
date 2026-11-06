@@ -145,8 +145,7 @@ pub fn transcode_file(
             convert_presentation_native(input, &work_path, &in_ext, &target_upper)
         }
         FileCategory::Archive => {
-            let arch_type =
-                ArchiveType::from_extension(&target_upper).unwrap_or(ArchiveType::Zip);
+            let arch_type = ArchiveType::from_extension(&target_upper).unwrap_or(ArchiveType::Zip);
             pack_archive(&[input.to_path_buf()], &work_path, arch_type)
         }
         FileCategory::Audio => convert_audio_zero_loss(input, &work_path, &target_upper, mode),
@@ -275,7 +274,11 @@ pub(crate) fn part_path_for(final_out: &Path) -> PathBuf {
 fn discard_part(part_path: &Path) {
     if let Err(e) = fs::remove_file(part_path) {
         if e.kind() != std::io::ErrorKind::NotFound {
-            log::warn!("Could not remove scratch file {}: {}", part_path.display(), e);
+            log::warn!(
+                "Could not remove scratch file {}: {}",
+                part_path.display(),
+                e
+            );
         }
     }
 }
@@ -1089,7 +1092,10 @@ fn convert_video_zero_loss(
 
         match run_ffmpeg(remux_cmd, "stream-copy remux") {
             Ok(()) if output.exists() => {
-                if fs::metadata(output).map(|m| m.len() > 1024).unwrap_or(false) {
+                if fs::metadata(output)
+                    .map(|m| m.len() > 1024)
+                    .unwrap_or(false)
+                {
                     return Ok(());
                 }
                 log::warn!(

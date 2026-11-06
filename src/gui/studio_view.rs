@@ -1049,10 +1049,7 @@ impl StudioView {
                         .on_hover_text("Generate output in all supported formats simultaneously")
                         .clicked()
                     {
-                        on_convert_batch(
-                            current_file.iter().cloned().collect(),
-                            "ALL".to_string(),
-                        );
+                        on_convert_batch(current_file.iter().cloned().collect(), "ALL".to_string());
                     }
                 });
             });
@@ -1130,9 +1127,9 @@ impl StudioView {
                         );
                         if convert_btn.clicked() {
                             on_convert_batch(
-                            current_file.iter().cloned().collect(),
-                            settings.active_format.clone(),
-                        );
+                                current_file.iter().cloned().collect(),
+                                settings.active_format.clone(),
+                            );
                         }
                     });
                 });
@@ -1768,28 +1765,19 @@ impl StudioView {
                     .button(egui::RichText::new("📦 Pack to ZIP").size(20.0))
                     .clicked()
                 {
-                    on_convert_batch(
-                            current_file.iter().cloned().collect(),
-                            "ZIP".to_string(),
-                        );
+                    on_convert_batch(current_file.iter().cloned().collect(), "ZIP".to_string());
                 }
                 if ui
                     .button(egui::RichText::new("📦 Pack to TAR.GZ").size(20.0))
                     .clicked()
                 {
-                    on_convert_batch(
-                            current_file.iter().cloned().collect(),
-                            "TAR.GZ".to_string(),
-                        );
+                    on_convert_batch(current_file.iter().cloned().collect(), "TAR.GZ".to_string());
                 }
                 if ui
                     .button(egui::RichText::new("📦 Pack to 7Z").size(20.0))
                     .clicked()
                 {
-                    on_convert_batch(
-                            current_file.iter().cloned().collect(),
-                            "7Z".to_string(),
-                        );
+                    on_convert_batch(current_file.iter().cloned().collect(), "7Z".to_string());
                 }
                 if ui
                     .button(
@@ -1800,9 +1788,9 @@ impl StudioView {
                     .clicked()
                 {
                     on_convert_batch(
-                            current_file.iter().cloned().collect(),
-                            "EXTRACT".to_string(),
-                        );
+                        current_file.iter().cloned().collect(),
+                        "EXTRACT".to_string(),
+                    );
                 }
             });
         } else {

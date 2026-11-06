@@ -541,15 +541,13 @@ pub fn render_text_to_pdf(text: &str, output_path: &Path, cfg: &TextPdfSettings)
     })();
 
     match write_result {
-        Ok(()) => {
-            fs::rename(&scratch_path, output_path).with_context(|| {
-                format!(
-                    "Failed to finalize PDF output {} (scratch: {})",
-                    output_path.display(),
-                    scratch_path.display()
-                )
-            })
-        }
+        Ok(()) => fs::rename(&scratch_path, output_path).with_context(|| {
+            format!(
+                "Failed to finalize PDF output {} (scratch: {})",
+                output_path.display(),
+                scratch_path.display()
+            )
+        }),
         Err(e) => {
             let _ = fs::remove_file(&scratch_path);
             Err(e)

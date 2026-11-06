@@ -33,7 +33,7 @@ pub struct MossambiWidgetApp {
     pub success_time: Option<Instant>,
     pub last_output: Option<PathBuf>,
     /// Last conversion failure, surfaced in the hub status area (previously
-    /// the widget discarded errors entirely  the user saw nothing).
+    /// the widget discarded errors entirely, so the user saw nothing).
     pub last_error: Option<String>,
     pub error_time: Option<Instant>,
 
@@ -41,6 +41,9 @@ pub struct MossambiWidgetApp {
     pub show_context_menu: bool,
     pub context_menu_pos: Pos2,
     pub frame_count: u32,
+    /// Latched while a native drag hand-off is in flight for the current
+    /// press; reset when the primary button is released.
+    pub drag_out_in_flight: bool,
 
     // Worker Channels
     pub result_rx: Receiver<WidgetResult>,
@@ -72,6 +75,7 @@ impl Default for MossambiWidgetApp {
             show_context_menu: false,
             context_menu_pos: Pos2::ZERO,
             frame_count: 0,
+            drag_out_in_flight: false,
 
             result_rx: rx,
             result_tx: tx,
@@ -91,7 +95,7 @@ impl MossambiWidgetApp {
     pub fn start_conversion(&mut self, target_format: &str) {
         if self.is_converting {
             log::warn!(
-                "Widget conversion already in progress  ignoring request for {}",
+                "Widget conversion already in progress; ignoring request for {}",
                 target_format
             );
             return;
@@ -108,33 +112,34 @@ impl MossambiWidgetApp {
         let sender = self.result_tx.clone();
         let target = target_format.to_string();
 
-        self.worker_pool.spawn_task("WidgetConvert", move |cancel, tx, task_id| {
-            let res = if cancel.load(Ordering::Relaxed) {
-                WidgetResult::Failure("cancelled before it could start".to_string())
-            } else {
-                match transcode_file(&input, &target, LosslessMode::StrictBitExact, None) {
-                    Ok(out) => WidgetResult::Success(vec![out]),
-                    Err(e) => WidgetResult::Failure(e.to_string()),
-                }
-            };
+        self.worker_pool
+            .spawn_task("WidgetConvert", move |cancel, tx, task_id| {
+                let res = if cancel.load(Ordering::Relaxed) {
+                    WidgetResult::Failure("cancelled before it could start".to_string())
+                } else {
+                    match transcode_file(&input, &target, LosslessMode::StrictBitExact, None) {
+                        Ok(out) => WidgetResult::Success(vec![out]),
+                        Err(e) => WidgetResult::Failure(e.to_string()),
+                    }
+                };
 
-            match &res {
-                WidgetResult::Success(files) => {
-                    let _ = tx.send(TaskUpdate::Completed {
-                        id: task_id,
-                        output: files.first().cloned(),
-                        message: format!("Widget converted file to {}", target),
-                    });
+                match &res {
+                    WidgetResult::Success(files) => {
+                        let _ = tx.send(TaskUpdate::Completed {
+                            id: task_id,
+                            output: files.first().cloned(),
+                            message: format!("Widget converted file to {}", target),
+                        });
+                    }
+                    WidgetResult::Failure(err) => {
+                        let _ = tx.send(TaskUpdate::Failed {
+                            id: task_id,
+                            error: err.clone(),
+                        });
+                    }
                 }
-                WidgetResult::Failure(err) => {
-                    let _ = tx.send(TaskUpdate::Failed {
-                        id: task_id,
-                        error: err.clone(),
-                    });
-                }
-            }
-            let _ = sender.send(res);
-        });
+                let _ = sender.send(res);
+            });
     }
 }
 
@@ -303,8 +308,14 @@ impl eframe::App for MossambiWidgetApp {
                 TaskUpdate::Started { name, .. } => log::debug!("widget worker started: {}", name),
                 TaskUpdate::Progress {
                     fraction, status, ..
-                } => log::debug!("widget worker progress {:.0}%: {}", fraction * 100.0, status),
-                TaskUpdate::Completed { message, .. } => log::info!("widget worker finished: {}", message),
+                } => log::debug!(
+                    "widget worker progress {:.0}%: {}",
+                    fraction * 100.0,
+                    status
+                ),
+                TaskUpdate::Completed { message, .. } => {
+                    log::info!("widget worker finished: {}", message)
+                }
                 TaskUpdate::Failed { error, .. } => log::error!("widget worker failed: {}", error),
             }
         }
@@ -417,9 +428,31 @@ impl eframe::App for MossambiWidgetApp {
                 if response.dragged() {
                     if let Some(pos) = hover_pos {
                         if self.geometry.hit_test_hub(pos) && !self.is_converting {
-                            ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                            // Hub drag semantics: with a file loaded and a
+                            // real drag motion, hand the file to the OS drag
+                            // mechanism (Windows OLE; Linux file clipboard).
+                            // Without a file, move the widget window.
+                            let decided = ui.ctx().input(|i| i.pointer.is_decidedly_dragging());
+                            if self.current_file.is_some() {
+                                if decided && !self.drag_out_in_flight {
+                                    self.drag_out_in_flight = true;
+                                    if let Some(path) = self.current_file.clone() {
+                                        if let Err(err) = crate::core::begin_file_drag_out(
+                                            std::slice::from_ref(&path),
+                                        ) {
+                                            self.last_error = Some(err);
+                                        }
+                                    }
+                                }
+                            } else {
+                                ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                            }
                         }
                     }
+                }
+                // Reset the per-press drag-out latch once the button is up.
+                if !ui.ctx().input(|i| i.pointer.any_down()) {
+                    self.drag_out_in_flight = false;
                 }
 
                 if response.clicked() {
@@ -467,10 +500,7 @@ impl eframe::App for MossambiWidgetApp {
 
                 // Hub status area: surface the last conversion failure where
                 // success feedback appears (previously swallowed entirely).
-                if !self.is_converting
-                    && self.success_time.is_none()
-                    && self.last_error.is_some()
-                {
+                if !self.is_converting && self.success_time.is_none() && self.last_error.is_some() {
                     let err = self.last_error.clone().unwrap_or_default();
                     // Tail of the message: ffmpeg errors carry their verdict last.
                     let tail: String = err
@@ -484,7 +514,7 @@ impl eframe::App for MossambiWidgetApp {
                     painter.text(
                         rect.center() + egui::vec2(0.0, 46.0),
                         egui::Align2::CENTER_CENTER,
-                        format!(" {}", tail),
+                        tail,
                         egui::FontId::proportional(15.5),
                         Color32::from_rgb(214, 69, 57),
                     );
@@ -647,11 +677,15 @@ pub fn run_widget_with_args(
     // Honor the Max-FPS knob: when enabled, uncap the frame driver by
     // disabling vsync (repaint pacing is handled per-frame in update()).
     let max_fps = crate::core::MossambiConfig::load().max_fps;
-    let options = eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         viewport: builder,
         vsync: !max_fps,
         ..Default::default()
     };
+    // Under Wayland-with-XWayland, force the X11 windowing backend so
+    // external file drag & drop can reach us (XDND receive only exists in
+    // winit's X11 backend). See core/dnd_backend.rs for the policy matrix.
+    crate::core::dnd_backend::apply_backend_policy(&mut options);
 
     eframe::run_native(
         "Mossambi Radial Widget",

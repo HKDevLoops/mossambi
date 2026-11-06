@@ -9,8 +9,7 @@ use std::io::{self, Write};
 
 /// Copy of the daemon tray icon's NOTIFYICONDATAW so companion services
 /// (drop overlay balloons) can post notifications through it.
-pub static TRAY_NID: std::sync::Mutex<Option<isize>> =
-    std::sync::Mutex::new(None);
+pub static TRAY_NID: std::sync::Mutex<Option<isize>> = std::sync::Mutex::new(None);
 
 /// Snapshot of the daemon tray icon descriptor (None when not running).
 pub fn shared_tray_nid() -> Option<isize> {
@@ -60,8 +59,12 @@ pub fn handle_daemon_command(action: &str) -> Result<()> {
             use crate::core::default_explorer::TakeoverState;
             match crate::core::default_explorer::status() {
                 TakeoverState::Active => println!("Default file manager: MOSSAMBI (active)"),
-                TakeoverState::NotActive => println!("Default file manager: OS default (Mossambi not active)"),
-                TakeoverState::Unknown => println!("Default file manager: unknown on this platform"),
+                TakeoverState::NotActive => {
+                    println!("Default file manager: OS default (Mossambi not active)")
+                }
+                TakeoverState::Unknown => {
+                    println!("Default file manager: unknown on this platform")
+                }
             }
         }
         "install" => {
@@ -370,8 +373,9 @@ pub fn run_daemon_loop() -> Result<()> {
 
     // Global Drop Overlay: files dragged from ANY app (Explorer, browsers,
     // editors, other managers) onto the lime puck convert automatically.
-    let mut drop_overlay =
-        Some(crate::gui::drop_overlay::DropOverlayHandle::start(cfg.drop_target_default.clone()));
+    let mut drop_overlay = Some(crate::gui::drop_overlay::DropOverlayHandle::start(
+        cfg.drop_target_default.clone(),
+    ));
 
     let mut msg: MSG = unsafe { std::mem::zeroed() };
     loop {

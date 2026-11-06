@@ -33,7 +33,8 @@ impl Default for MouseNavListener {
 
 impl Drop for MouseNavListener {
     fn drop(&mut self) {
-        self.shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -75,9 +76,7 @@ static GLOBAL_CTX: std::sync::Mutex<Option<HookContext>> = std::sync::Mutex::new
 
 #[cfg(target_os = "windows")]
 fn is_mossambi_foreground() -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowTextW,
-    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
 
     let hwnd = unsafe { GetForegroundWindow() };
     if hwnd.is_null() {
@@ -93,15 +92,11 @@ fn is_mossambi_foreground() -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn run_mouse_hook(
-    sender: Sender<MouseNavEvent>,
-    shutdown: Arc<AtomicBool>,
-) {
+fn run_mouse_hook(sender: Sender<MouseNavEvent>, shutdown: Arc<AtomicBool>) {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx,
-        WH_MOUSE_LL,
+        CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL,
     };
     const WM_QUIT_MSG: u32 = 0x0012;
 
@@ -115,11 +110,7 @@ fn run_mouse_hook(
         last_nav: Instant::now() - Duration::from_secs(1),
     });
 
-    unsafe extern "system" fn mouse_proc(
-        n_code: i32,
-        w_param: WPARAM,
-        l_param: LPARAM,
-    ) -> LRESULT {
+    unsafe extern "system" fn mouse_proc(n_code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             MSLLHOOKSTRUCT, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_XBUTTONDOWN,
         };

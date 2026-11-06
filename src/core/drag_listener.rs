@@ -189,9 +189,9 @@ fn run_listener_loop(
                             files = query_active_explorer_files(pt);
                         }
                         if files.is_empty() {
-                            if let Some(pp) = crate::gui::active_file::get_active_file_under_cursor(
-                                pt.x, pt.y,
-                            ) {
+                            if let Some(pp) =
+                                crate::gui::active_file::get_active_file_under_cursor(pt.x, pt.y)
+                            {
                                 files.push(pp);
                             }
                         }

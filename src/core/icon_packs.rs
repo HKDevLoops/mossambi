@@ -274,7 +274,8 @@ impl IconGlyph {
             IconGlyph::PageSlide
         } else if is_image {
             IconGlyph::PageImage
-        } else if is_media && matches!(ext.as_str(), "MP4" | "MKV" | "MOV" | "AVI" | "WEBM" | "M4V") {
+        } else if is_media && matches!(ext.as_str(), "MP4" | "MKV" | "MOV" | "AVI" | "WEBM" | "M4V")
+        {
             IconGlyph::PageVideo
         } else if is_media {
             IconGlyph::PageAudio
@@ -284,7 +285,12 @@ impl IconGlyph {
             IconGlyph::PageExe
         } else if matches!(ext.as_str(), "DLL" | "SO" | "DYLIB" | "LIB" | "PYD" | "OCX") {
             IconGlyph::PageLibrary
-        } else if is_code && matches!(ext.as_str(), "JSON" | "TOML" | "YAML" | "YML" | "XML" | "INI") {
+        } else if is_code
+            && matches!(
+                ext.as_str(),
+                "JSON" | "TOML" | "YAML" | "YML" | "XML" | "INI"
+            )
+        {
             IconGlyph::PageConfig
         } else if is_code {
             IconGlyph::PageCode
@@ -572,7 +578,10 @@ fn emblem_for(glyph: IconGlyph, fg: &str, fg_soft: &str) -> Option<String> {
 fn folder_shapes(st: &PackStyle) -> String {
     let r = st.radius;
     let out = match st.outline {
-        Some(c) => format!(" stroke='{}' stroke-width='2.2' paint-order='stroke fill'", c),
+        Some(c) => format!(
+            " stroke='{}' stroke-width='2.2' paint-order='stroke fill'",
+            c
+        ),
         None => String::new(),
     };
     let (back, front, tab) = (st.back, st.front, st.tab);
@@ -743,8 +752,12 @@ fn page_emblem(glyph: IconGlyph, st: &PackStyle, accent: &str) -> Option<String>
 /// Full 100×100 SVG for a glyph in the requested pack
 pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String {
     let st = pack.style();
-    let accent = format!("#{:02X}{:02X}{:02X}", accent_rgb[0], accent_rgb[1], accent_rgb[2]);
-    let head = "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'>\n";
+    let accent = format!(
+        "#{:02X}{:02X}{:02X}",
+        accent_rgb[0], accent_rgb[1], accent_rgb[2]
+    );
+    let head =
+        "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'>\n";
     match glyph {
         // ── Folders ──
         IconGlyph::Folder | IconGlyph::FolderDesktop | IconGlyph::FolderDownloads
@@ -1188,8 +1201,7 @@ fn rasterize(
     _pack: IconPack,
 ) -> Result<TextureHandle, String> {
     let opt = resvg::usvg::Options::default();
-    let tree =
-        resvg::usvg::Tree::from_str(svg, &opt).map_err(|e| format!("svg parse: {e:?}"))?;
+    let tree = resvg::usvg::Tree::from_str(svg, &opt).map_err(|e| format!("svg parse: {e:?}"))?;
     let size = tree.size();
     let scale = (phys_px as f32).max(1.0) / size.width().max(1.0);
     let scaled_w = (size.width() * scale) as u32;

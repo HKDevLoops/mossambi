@@ -211,7 +211,7 @@ impl ThemeStyle {
                     }
                 } else {
                     let card_hover_r = surf_r.saturating_sub(10);
-                    let card_hover_g = surf_r.saturating_sub(10);
+                    let card_hover_g = surf_g.saturating_sub(10);
                     let card_hover_b = surf_b.saturating_sub(10);
                     ThemePalette {
                         window_bg: Color32::from_rgb(bg_r, bg_g, bg_b),
@@ -631,7 +631,7 @@ pub fn render_fluent_window_controls(
         }
 
         // Maximize / Restore Button
-        let max_glyph = if is_max { "R" } else { "M" };
+        let max_glyph = if is_max { "❐" } else { "□" };
         let max_btn = egui::Button::new(
             egui::RichText::new(max_glyph)
                 .size(18.5)

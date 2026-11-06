@@ -124,9 +124,14 @@ unsafe extern "system" fn dt_drag_leave(_this: *mut std::ffi::c_void) -> HResult
 
 /// Reads the file list out of an OLE IDataObject's CF_HDROP medium.
 unsafe fn files_from_data_object(data: *mut std::ffi::c_void) -> Vec<std::path::PathBuf> {
-    
-
-    extern "C" { fn DragQueryFileW(hdrop: *mut std::ffi::c_void, ifile: u32, lpszfile: *mut u16, cch: u32) -> u32; }
+    extern "C" {
+        fn DragQueryFileW(
+            hdrop: *mut std::ffi::c_void,
+            ifile: u32,
+            lpszfile: *mut u16,
+            cch: u32,
+        ) -> u32;
+    }
     let mut out = Vec::new();
     if data.is_null() {
         return out;
@@ -179,7 +184,12 @@ unsafe fn files_from_data_object(data: *mut std::ffi::c_void) -> Vec<std::path::
     }
     // Release the HGLOBAL medium ourselves when nothing owns it.
     if medium.unk_for_release.is_null() {
-        unsafe { extern "C" { fn GlobalFree(hmem: *mut std::ffi::c_void) -> *mut std::ffi::c_void; } GlobalFree(medium.h_global); }
+        unsafe {
+            extern "C" {
+                fn GlobalFree(hmem: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
+            }
+            GlobalFree(medium.h_global);
+        }
     }
     out
 }
@@ -239,7 +249,7 @@ static OVERLAY_TARGET: Mutex<String> = Mutex::new(String::new());
 /// Tray balloon announcing the drop conversion result (best-effort).
 unsafe fn show_completion_balloon(count: usize) {
     use windows_sys::Win32::UI::Shell::{
-        Shell_NotifyIconW, NOTIFYICONDATAW, NIF_INFO, NIM_MODIFY, NIF_MESSAGE, NIF_ICON, NIF_TIP,
+        Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIM_MODIFY, NOTIFYICONDATAW,
     };
     let Some(hwnd) = crate::daemon::shared_tray_nid() else {
         return;
@@ -250,11 +260,9 @@ unsafe fn show_completion_balloon(count: usize) {
     nid.uID = 1001;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_INFO;
     let title: Vec<u16> = "Mossambi ".encode_utf16().collect();
-    let text: Vec<u16> = format!(
-        "{count} file(s) converted - output saved next to the source "
-    )
-    .encode_utf16()
-    .collect();
+    let text: Vec<u16> = format!("{count} file(s) converted - output saved next to the source ")
+        .encode_utf16()
+        .collect();
     for (i, c) in title.iter().take(63).enumerate() {
         nid.szInfoTitle[i] = *c;
     }
@@ -266,13 +274,29 @@ unsafe fn show_completion_balloon(count: usize) {
 
 #[repr(C)]
 struct DropTargetVtbl {
-    query_interface: unsafe extern "system" fn(*mut std::ffi::c_void, *const std::ffi::c_void, *mut *mut std::ffi::c_void) -> HResult,
+    query_interface: unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        *const std::ffi::c_void,
+        *mut *mut std::ffi::c_void,
+    ) -> HResult,
     add_ref: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
     release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32,
-    drag_enter: unsafe extern "system" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, u32, PointL, *mut u32) -> HResult,
+    drag_enter: unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        *mut std::ffi::c_void,
+        u32,
+        PointL,
+        *mut u32,
+    ) -> HResult,
     drag_over: unsafe extern "system" fn(*mut std::ffi::c_void, u32, PointL, *mut u32) -> HResult,
     drag_leave: unsafe extern "system" fn(*mut std::ffi::c_void) -> HResult,
-    drop: unsafe extern "system" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, u32, PointL, *mut u32) -> HResult,
+    drop: unsafe extern "system" fn(
+        *mut std::ffi::c_void,
+        *mut std::ffi::c_void,
+        u32,
+        PointL,
+        *mut u32,
+    ) -> HResult,
 }
 
 static DROP_VTBL: DropTargetVtbl = DropTargetVtbl {
@@ -343,10 +367,11 @@ impl DropOverlayHandle {
 unsafe fn run_overlay_thread(shutdown: Arc<AtomicBool>, hwnd_out: Arc<Mutex<isize>>) {
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
-        BeginPaint, CreateSolidBrush, DeleteObject, Ellipse, EndPaint, SelectObject,
-        PAINTSTRUCT,
+        BeginPaint, CreateSolidBrush, DeleteObject, Ellipse, EndPaint, SelectObject, PAINTSTRUCT,
     };
-    use windows_sys::Win32::System::Ole::{OleInitialize, OleUninitialize, RegisterDragDrop, RevokeDragDrop};
+    use windows_sys::Win32::System::Ole::{
+        OleInitialize, OleUninitialize, RegisterDragDrop, RevokeDragDrop,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
         GetSystemMetrics, RegisterClassExW, SetLayeredWindowAttributes, SetWindowPos,
@@ -407,12 +432,13 @@ unsafe fn run_overlay_thread(shutdown: Arc<AtomicBool>, hwnd_out: Arc<Mutex<isiz
         return;
     }
 
-    let ex =
-        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+    let ex = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     let screen_w = GetSystemMetrics(0); // SM_CXSCREEN
     let x = screen_w - PUCK_SIZE - PUCK_MARGIN;
     let y = PUCK_MARGIN;
-    let title: Vec<u16> = "Mossambi — Drop files to convert\0".encode_utf16().collect();
+    let title: Vec<u16> = "Mossambi — Drop files to convert\0"
+        .encode_utf16()
+        .collect();
     let hwnd = CreateWindowExW(
         ex,
         class_name.as_ptr(),

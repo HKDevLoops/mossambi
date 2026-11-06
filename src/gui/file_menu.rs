@@ -319,7 +319,12 @@ pub fn menu_item_glyph(
 /// labeled part of a menu is the context header — groups are separated by
 /// hairlines, not captions).
 pub fn menu_header(ui: &mut Ui, name: &str, tint: Color32) {
-    ui.label(eframe::egui::RichText::new(name).strong().size(13.5).color(tint));
+    ui.label(
+        eframe::egui::RichText::new(name)
+            .strong()
+            .size(13.5)
+            .color(tint),
+    );
     ui.add_space(1.0);
 }
 

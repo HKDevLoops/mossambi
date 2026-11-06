@@ -4,14 +4,19 @@
 pub mod async_worker;
 pub mod config;
 pub mod default_explorer;
+pub mod dnd_backend;
 pub mod drag_listener;
+pub mod drag_out;
 pub mod file_icons;
 pub mod fs_utils;
 pub mod fuzzy;
 pub mod gesture;
 pub mod icon_packs;
+pub mod linux_clipboard_files;
 pub mod linux_dna;
 pub mod mouse_nav;
+#[cfg(target_os = "windows")]
+pub mod ole_drag_out;
 pub mod pantone;
 pub mod preview;
 pub mod registry;
@@ -21,6 +26,7 @@ pub use config::{GlassEffect, MossambiConfig, OutputMode, ThemeMode};
 #[cfg(target_os = "windows")]
 pub use drag_listener::query_active_explorer_files;
 pub use drag_listener::{extract_clipboard_files, DragGestureEvent, DragGestureListener};
+pub use drag_out::begin_file_drag_out;
 pub use file_icons::{resolve_file_icon, FileIconSpec};
 pub use fs_utils::{
     copy_entry_recursive, format_file_size, get_system_drives, list_directory_sync, move_entry,
@@ -29,10 +35,10 @@ pub use fs_utils::{
 };
 pub use fuzzy::{fuzzy_match, sort_by_fuzzy_match};
 pub use gesture::{GestureKind, GesturePoint, KinematicGestureTracker};
-pub use mouse_nav::MouseNavListener;
 pub use linux_dna::{
     discover_linux_mounts, install_linux_desktop_integration, send_linux_notification,
 };
+pub use mouse_nav::MouseNavListener;
 pub use pantone::{
     all_pantone_themes, get_pantone_theme, CitrusShade, PantoneColor, PantonePalette, PantoneTheme,
     DARK_THEMES, LIGHT_THEMES,
