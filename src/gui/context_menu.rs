@@ -43,6 +43,9 @@ pub fn shell_verb(path: &Path, verb: &str) -> bool {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        // xdg-open covers the "open" verb only; other verbs (print, play,
+        // everything custom) intentionally report unsupported on Linux.
+        let _ = verb;
         use std::process::Command;
         Command::new("xdg-open").arg(path).spawn().is_ok()
     }
@@ -83,6 +86,8 @@ pub fn open_with_choose(path: &Path) -> bool {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        // No openas picker through xdg on Linux yet: report unsupported.
+        let _ = path;
         false
     }
 }
@@ -208,6 +213,9 @@ pub fn set_clipboard_files_with_effect(paths: &[std::path::PathBuf], cut: bool) 
     }
     #[cfg(not(target_os = "windows"))]
     {
+        // CF_HDROP is a Windows construct; Linux receivers take uri-lists
+        // via `linux_clipboard_files` instead. Report unsupported.
+        let _ = (paths, cut);
         false
     }
 }
@@ -237,6 +245,8 @@ pub fn set_desktop_wallpaper(path: &Path) -> bool {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        // No SystemParametersInfoW equivalent on Linux in scope here.
+        let _ = path;
         false
     }
 }
@@ -266,6 +276,8 @@ pub fn create_shortcut(target: &Path) -> bool {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        // .lnk shortcuts are Windows-only; report unsupported elsewhere.
+        let _ = target;
         false
     }
 }
@@ -291,6 +303,8 @@ pub fn scan_with_defender(path: &Path) -> bool {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        // Defender is Windows-only; report unsupported elsewhere.
+        let _ = path;
         false
     }
 }

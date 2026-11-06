@@ -9,9 +9,14 @@
 //!   • Mouse thumb Fwd   → go_forward()
 //!   • Long horizontal middle-drag (mouse swipe) → Back / Forward
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::atomic::AtomicBool;
+#[cfg(target_os = "windows")]
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::{channel, Receiver};
+#[cfg(target_os = "windows")]
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
+#[cfg(target_os = "windows")]
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,6 +53,10 @@ impl MouseNavListener {
             let shutdown_clone = shutdown.clone();
             let _ = std::thread::spawn(move || run_mouse_hook(sender, shutdown_clone));
         }
+        // Non-Windows backend is a fiber-friendly poll stub: it never
+        // spawns the hook thread, so its channel half stays unused.
+        #[cfg(not(target_os = "windows"))]
+        drop(sender);
 
         Self { receiver, shutdown }
     }

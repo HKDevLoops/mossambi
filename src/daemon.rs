@@ -538,6 +538,8 @@ pub fn run_daemon_loop() -> Result<()> {
     }
 }
 
+/// Summon the radial widget at a point (used by the Windows daemon loop).
+#[cfg(target_os = "windows")]
 fn spawn_widget_at(x: i32, y: i32) {
     spawn_widget_at_with_files(x, y, &[], false);
 }
@@ -595,6 +597,8 @@ fn spawn_widget_at_with_files(x: i32, y: i32, files: &[std::path::PathBuf], acti
     let _ = cmd.spawn();
 }
 
+/// Open the Studio GUI (used by the Windows daemon loop hotkeys/menu).
+#[cfg(target_os = "windows")]
 fn spawn_gui_studio() {
     let mut cmd = if let Ok(exe) = std::env::current_exe() {
         let mut c = std::process::Command::new(exe);

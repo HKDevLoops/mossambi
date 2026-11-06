@@ -151,7 +151,7 @@ pub mod linux {
             );
         }
 
-        match helper.as_str() {
+        match helper {
             "wl-copy" => {
                 // wl-copy forks; keep stdin open until payload handed over.
                 let mut wr = Command::new(&bin)

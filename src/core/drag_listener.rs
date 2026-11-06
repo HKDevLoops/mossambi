@@ -4,12 +4,17 @@
 //! Strictly gates gesture processing to when the user is actively dragging
 //! files or folders from Windows Explorer, Desktop, or Linux File Managers.
 
-use crate::core::gesture::{GestureKind, KinematicGestureTracker};
+use crate::core::gesture::GestureKind;
+#[cfg(target_os = "windows")]
+use crate::core::gesture::KinematicGestureTracker;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+#[cfg(target_os = "windows")]
+use std::sync::Mutex;
+use std::sync::Arc;
 use std::thread::{Builder, JoinHandle};
+#[cfg(target_os = "windows")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Event dispatched when an intentional mouse gesture occurs while holding files
@@ -74,6 +79,7 @@ impl Drop for DragGestureListener {
     }
 }
 
+#[cfg(target_os = "windows")]
 fn current_timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

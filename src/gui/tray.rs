@@ -6,13 +6,18 @@
 //! 4. Native Windows System Tray icon with complete popup menu for Themes,
 //!    Indian Exam Presets, Studio / Radial Widget toggles, and Zero-Loss settings.
 
+#[cfg(target_os = "windows")]
 use crate::gui::active_file::get_active_file_under_cursor;
 use crate::gui::macos_theme::ThemeStyle;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
+#[cfg(target_os = "windows")]
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
+#[cfg(target_os = "windows")]
 use std::thread;
+#[cfg(target_os = "windows")]
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +83,10 @@ impl ActivationManager {
                 run_win32_tray_and_activation_loop(tx_loop, shutdown_clone);
             });
         }
+        // Non-Windows has no tray loop yet: its half of the channel is
+        // intentionally unused (events are delivered by other integrations).
+        #[cfg(not(target_os = "windows"))]
+        drop(tx);
 
         Self {
             receiver: rx,

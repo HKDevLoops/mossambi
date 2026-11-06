@@ -158,6 +158,7 @@ mod reg {
 }
 
 /// Verb subkey name used for all our registrations.
+#[cfg(target_os = "windows")]
 const VERB: &str = "Mossambi";
 
 #[cfg(target_os = "windows")]

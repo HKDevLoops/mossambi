@@ -639,26 +639,36 @@ impl eframe::App for MossambiApp {
                 // longer swallows the whole drop; the Windows rescue (active
                 // shell window under the cursor) only runs when the drop
                 // carried no resolvable path at all.
-                let dropped_path = i
-                    .raw
-                    .dropped_files
-                    .iter()
-                    .filter_map(|drop| drop.path.clone())
-                    .next()
-                    .or_else(|| {
-                        #[cfg(target_os = "windows")]
-                        {
-                            use windows_sys::Win32::Foundation::POINT;
-                            use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-                            let mut pt = POINT { x: 0, y: 0 };
-                            unsafe { GetCursorPos(&mut pt) };
+                let cursor_rescue: Option<PathBuf>;
+                #[cfg(target_os = "windows")]
+                {
+                    use windows_sys::Win32::Foundation::POINT;
+                    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+                    let mut pt = POINT { x: 0, y: 0 };
+                    unsafe { GetCursorPos(&mut pt) };
+                    cursor_rescue = i
+                        .raw
+                        .dropped_files
+                        .iter()
+                        .filter_map(|drop| drop.path.clone())
+                        .next()
+                        .or_else(|| {
                             crate::gui::active_file::get_active_file_under_cursor(pt.x, pt.y)
-                        }
-                        #[cfg(not(target_os = "windows"))]
-                        None
-                    });
+                        });
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    // The platform-provided dropped path is the source of
+                    // truth; there is no shell-rescue equivalent here.
+                    cursor_rescue = i
+                        .raw
+                        .dropped_files
+                        .iter()
+                        .filter_map(|drop| drop.path.clone())
+                        .next();
+                }
 
-                if let Some(path) = dropped_path {
+                if let Some(path) = cursor_rescue {
                     self.select_file(path);
                 }
             }

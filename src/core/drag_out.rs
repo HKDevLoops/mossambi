@@ -46,11 +46,11 @@ pub fn begin_file_drag_out(paths: &[PathBuf]) -> Result<String, String> {
                 paths,
                 crate::core::linux_clipboard_files::linux::ClipboardOp::Copy,
             )?;
-            return Ok(format!(
+            Ok(format!(
                 "{} file(s) copied to the file clipboard via {} - paste into the target app",
                 paths.len(),
                 outcome.via
-            ));
+            ))
         }
         #[cfg(not(target_os = "linux"))]
         {
