@@ -141,10 +141,7 @@ mod imp {
     }
 
     /// Register the OLE drop target for a native window handle.
-    pub fn register_drop_target(
-        hwnd_raw: usize,
-        tx: Sender<OleDropEvent>,
-    ) -> Result<(), String> {
+    pub fn register_drop_target(hwnd_raw: usize, tx: Sender<OleDropEvent>) -> Result<(), String> {
         let target: IDropTarget = DesktopDropTarget::new(tx).into();
         unsafe {
             RegisterDragDrop(HWND(hwnd_raw as *mut _), &target)
@@ -165,10 +162,7 @@ mod imp {
 pub use imp::*;
 
 #[cfg(not(windows))]
-pub fn register_drop_target(
-    _hwnd_raw: usize,
-    _tx: Sender<OleDropEvent>,
-) -> Result<(), String> {
+pub fn register_drop_target(_hwnd_raw: usize, _tx: Sender<OleDropEvent>) -> Result<(), String> {
     Ok(())
 }
 

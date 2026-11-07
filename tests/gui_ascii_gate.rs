@@ -8,7 +8,9 @@ use std::path::Path;
 
 #[test]
 fn test_gui_source_files_are_pure_ascii() {
-    let gui_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("gui");
+    let gui_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("gui");
     assert!(gui_dir.exists(), "src/gui directory must exist");
 
     let mut violations = Vec::new();
@@ -25,7 +27,9 @@ fn test_gui_source_files_are_pure_ascii() {
                     if !ch.is_ascii() {
                         violations.push(format!(
                             "{}:{}:{} -> non-ASCII character '{}' (U+{:04X})",
-                            path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap_or(path).display(),
+                            path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                                .unwrap_or(path)
+                                .display(),
                             line_idx + 1,
                             col_idx + 1,
                             ch,

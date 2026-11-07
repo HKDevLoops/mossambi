@@ -195,3 +195,32 @@ says otherwise. Ordered by the phase that must satisfy it.
   untracked, no scratch artifacts staged.
 - The user expects long autonomous runs with no hand-holding, and will not interrupt once the
   interview questions are answered.
+
+### E. Phase 16 & Beyond Architectural Mandates (From 20-Question Audit 2026-11-07)
+
+1. **Windows Explorer Shell Hijacking & Safe Rollback:**
+   - Full explorer replacement option (hijacking Win+E and default folder double-clicks).
+   - When enabled, automatically generates `mossambi_shell_restore.reg` and provides a single-click "Restore Windows Explorer Defaults" button in Preferences.
+   - Uninstaller must cleanly release all file associations, registry hooks, and shell defaults across all OS platforms.
+2. **Sweet Lime Resident Radial Widget (USP & Activation):**
+   - Triple trigger surface: Global hotkeys (`Win+Shift+C`, `Win+Ctrl+Space`), screen corner hover puck, AND mouse gestures (shake / circle gesture).
+   - Gesture activation blooms the radial widget centered immediately at the cursor coordinates with elastic spring physics.
+3. **Local AI Engine & Recommended Models Catalog:**
+   - Configurable in Settings: API endpoint (`http://localhost:11434` for Ollama, `http://localhost:1234` for LM Studio), model name, and temperature/effort.
+   - Recommended Local Models Catalog (updated per version):
+     - **OCR & Document Scan Cleanup:** `Qwen2.5-VL-7B-Instruct` or `Llama-3.2-11B-Vision-Instruct`.
+     - **Scripting & Workflow Automation:** `Qwen2.5-Coder-7B-Instruct` or `DeepSeek-R1-Distill-Qwen-7B`.
+   - Hybrid acceleration: DirectML GPU/NPU shader processing with CPU SIMD fallback when local AI server is absent.
+4. **Installer / Uninstaller Suite & Multi-Platform Packaging:**
+   - Native interactive Installer TUI and Uninstaller TUI for terminal users.
+   - Platform installer packages: Windows `.msi` (with Winget/Scoop manifests), macOS `.dmg` (with Homebrew formula), Linux `.deb` / `.rpm` / Flatpak.
+   - Background silent update notifications wired to GitHub Releases with rendered changelog display.
+5. **Universal Conformer & Global Visa Library:**
+   - Beyond Indian government exams (UPSC/SSC/IBPS/GATE/RRB), bundle international visa & passport envelopes (US Visa 2x2, Schengen Visa, UK, Canada PR, Indian Passport).
+   - Persistent custom tags engine with Pantone Citrus color picker, dual-written to SQLite and OS extended attributes.
+6. **Dual Keybinding Profiles:**
+   - Switchable in Preferences: macOS Finder Mode (`Enter` to rename, `Cmd+Down` to open, `Space` for Quick Look) vs Windows Explorer Mode (`F2` to rename, `Enter` to open).
+7. **Fast Hybrid Search:**
+   - Instant directory filter + SQLite FTS5 index + background USN Journal crawl on Windows / Spotlight `mdfind` on macOS.
+8. **Finder-Style Batch Renamer:**
+   - Multi-file modal supporting Text Replacement, Prefix/Suffix, Numbering Sequences (`001`, `002`), and Date stamping.

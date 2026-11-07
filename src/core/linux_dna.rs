@@ -232,8 +232,7 @@ pub fn move_to_linux_trash(path: &Path) -> Result<()> {
     }
 
     // 3. Fallback: Stage deletion in .mossambi/Trash
-    crate::core::action_journal::stage_delete(&[path.to_path_buf()])
-        .map_err(|e| anyhow::anyhow!(e))
+    crate::core::action_journal::stage_delete(&[path.to_path_buf()]).map_err(|e| anyhow::anyhow!(e))
 }
 
 /// Opens a URI or file using the system default handler (`xdg-open` or `gio open`).
@@ -243,6 +242,8 @@ pub fn open_linux_uri(uri: &str) -> Result<()> {
             return Ok(());
         }
     }
-    let _ = std::process::Command::new("gio").args(["open", uri]).status();
+    let _ = std::process::Command::new("gio")
+        .args(["open", uri])
+        .status();
     Ok(())
 }

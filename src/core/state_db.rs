@@ -150,8 +150,11 @@ pub fn set_file_tags(path: &Path, tags: &[String]) -> Result<(), String> {
     let p_str = path.to_string_lossy().to_string();
 
     if tags.is_empty() {
-        conn.execute("DELETE FROM file_tags WHERE path = ?1", rusqlite::params![p_str])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM file_tags WHERE path = ?1",
+            rusqlite::params![p_str],
+        )
+        .map_err(|e| e.to_string())?;
     } else {
         let joined = tags.join(",");
         let now = now_secs();
@@ -218,9 +221,9 @@ pub fn load_recent_actions(limit: usize) -> Vec<(String, String)> {
         Err(_) => return Vec::new(),
     };
 
-    let mut stmt = match conn.prepare(
-        "SELECT action_kind, payload_json FROM action_journal ORDER BY id DESC LIMIT ?1",
-    ) {
+    let mut stmt = match conn
+        .prepare("SELECT action_kind, payload_json FROM action_journal ORDER BY id DESC LIMIT ?1")
+    {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
@@ -349,8 +352,11 @@ pub fn load_presets() -> Vec<CustomPresetRecord> {
 /// Delete a custom preset by name.
 pub fn delete_preset(name: &str) -> Result<(), String> {
     let conn = open_connection()?;
-    conn.execute("DELETE FROM custom_presets WHERE name = ?1", rusqlite::params![name])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM custom_presets WHERE name = ?1",
+        rusqlite::params![name],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -367,7 +373,14 @@ pub fn save_command(cmd: &CustomCommandRecord) -> Result<(), String> {
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(id) DO UPDATE SET
             title = ?2, script_lang = ?3, script_body = ?4, shortcut = ?5",
-        rusqlite::params![cmd.id, cmd.title, cmd.script_lang, cmd.script_body, cmd.shortcut, now],
+        rusqlite::params![
+            cmd.id,
+            cmd.title,
+            cmd.script_lang,
+            cmd.script_body,
+            cmd.shortcut,
+            now
+        ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -409,8 +422,11 @@ pub fn load_commands() -> Vec<CustomCommandRecord> {
 /// Delete a custom script command by ID.
 pub fn delete_command(id: &str) -> Result<(), String> {
     let conn = open_connection()?;
-    conn.execute("DELETE FROM custom_commands WHERE id = ?1", rusqlite::params![id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM custom_commands WHERE id = ?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 

@@ -271,11 +271,7 @@ pub fn execute_script_async(
     on_done: impl FnOnce(ScriptExecutionOutcome) + Send + 'static,
 ) {
     std::thread::spawn(move || {
-        let outcome = execute_script_sync(
-            &script_source,
-            current_file.as_deref(),
-            &selected_files,
-        );
+        let outcome = execute_script_sync(&script_source, current_file.as_deref(), &selected_files);
         on_done(outcome);
     });
 }
@@ -316,7 +312,10 @@ mod tests {
 
     #[test]
     fn test_file_primitives() {
-        let temp_dir = std::env::temp_dir().join(format!("mossambi_script_{}", std::time::SystemTime::now().elapsed().unwrap().as_nanos()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "mossambi_script_{}",
+            std::time::SystemTime::now().elapsed().unwrap().as_nanos()
+        ));
         let _ = fs::create_dir_all(&temp_dir);
         let test_file = temp_dir.join("test.txt");
         let _ = fs::write(&test_file, b"rhai test content");

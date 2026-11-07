@@ -476,7 +476,8 @@ impl ExplorerView {
             return;
         }
         if self.secondary_history.get(self.secondary_history_idx) != Some(&dir) {
-            self.secondary_history.truncate(self.secondary_history_idx + 1);
+            self.secondary_history
+                .truncate(self.secondary_history_idx + 1);
             self.secondary_history.push(dir.clone());
             self.secondary_history_idx = self.secondary_history.len() - 1;
         }
@@ -1221,7 +1222,10 @@ impl ExplorerView {
                         )
                     } else {
                         (
-                            self.secondary_selected_paths.iter().cloned().collect::<Vec<_>>(),
+                            self.secondary_selected_paths
+                                .iter()
+                                .cloned()
+                                .collect::<Vec<_>>(),
                             self.current_dir.clone(),
                         )
                     };
@@ -1248,7 +1252,10 @@ impl ExplorerView {
                     )
                 } else {
                     (
-                        self.secondary_selected_paths.iter().cloned().collect::<Vec<_>>(),
+                        self.secondary_selected_paths
+                            .iter()
+                            .cloned()
+                            .collect::<Vec<_>>(),
                         self.current_dir.clone(),
                     )
                 };
@@ -1978,7 +1985,8 @@ impl ExplorerView {
                 }
 
                 // Child folder dropdown popover
-                let pop_id = ui.make_persistent_id(format!("bc_pop_{}_{}", i, seg.target_path.display()));
+                let pop_id =
+                    ui.make_persistent_id(format!("bc_pop_{}_{}", i, seg.target_path.display()));
                 let ch_resp = ui.add(
                     egui::Button::new(egui::RichText::new("v").size(8.5).color(palette.text_muted))
                         .fill(Color32::TRANSPARENT)
@@ -2236,12 +2244,24 @@ impl ExplorerView {
                 let split_btn = egui::Button::new(
                     egui::RichText::new("Dual (F3)")
                         .size(11.5)
-                        .color(if split_active { Color32::WHITE } else { palette.text_secondary })
+                        .color(if split_active {
+                            Color32::WHITE
+                        } else {
+                            palette.text_secondary
+                        })
                         .strong(),
                 )
-                .fill(if split_active { palette.accent } else { palette.card_bg })
+                .fill(if split_active {
+                    palette.accent
+                } else {
+                    palette.card_bg
+                })
                 .rounding(Rounding::same(6.0));
-                if ui.add(split_btn).on_hover_text("Toggle Dual-Pane Split View (F3)").clicked() {
+                if ui
+                    .add(split_btn)
+                    .on_hover_text("Toggle Dual-Pane Split View (F3)")
+                    .clicked()
+                {
                     self.toggle_split_view();
                 }
 
@@ -2249,12 +2269,24 @@ impl ExplorerView {
                 let prev_btn = egui::Button::new(
                     egui::RichText::new("Preview")
                         .size(11.5)
-                        .color(if prev_active { Color32::WHITE } else { palette.text_secondary })
+                        .color(if prev_active {
+                            Color32::WHITE
+                        } else {
+                            palette.text_secondary
+                        })
                         .strong(),
                 )
-                .fill(if prev_active { palette.accent } else { palette.card_bg })
+                .fill(if prev_active {
+                    palette.accent
+                } else {
+                    palette.card_bg
+                })
                 .rounding(Rounding::same(6.0));
-                if ui.add(prev_btn).on_hover_text("Toggle Inspector Preview Pane (Ctrl+Shift+P)").clicked() {
+                if ui
+                    .add(prev_btn)
+                    .on_hover_text("Toggle Inspector Preview Pane (Ctrl+Shift+P)")
+                    .clicked()
+                {
                     self.toggle_inspector_pane();
                 }
 
@@ -2443,28 +2475,26 @@ impl ExplorerView {
                 ui.allocate_ui_with_layout(
                     Vec2::new(main_w, avail_h),
                     egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        match self.view_mode {
-                            ViewMode::Details => self.render_details_table(
-                                ui,
-                                palette,
-                                on_stage_file,
-                                on_transcode_target,
-                                on_exam_conform,
-                                on_pack_archive,
-                                on_inspect_file,
-                            ),
-                            ViewMode::Grid => self.render_grid_view(
-                                ui,
-                                palette,
-                                on_stage_file,
-                                on_transcode_target,
-                                on_exam_conform,
-                                on_pack_archive,
-                                on_inspect_file,
-                            ),
-                            ViewMode::Columns => unreachable!(),
-                        }
+                    |ui| match self.view_mode {
+                        ViewMode::Details => self.render_details_table(
+                            ui,
+                            palette,
+                            on_stage_file,
+                            on_transcode_target,
+                            on_exam_conform,
+                            on_pack_archive,
+                            on_inspect_file,
+                        ),
+                        ViewMode::Grid => self.render_grid_view(
+                            ui,
+                            palette,
+                            on_stage_file,
+                            on_transcode_target,
+                            on_exam_conform,
+                            on_pack_archive,
+                            on_inspect_file,
+                        ),
+                        ViewMode::Columns => unreachable!(),
                     },
                 );
 
@@ -5188,9 +5218,9 @@ impl ExplorerView {
             .show(ui, |ui| {
                 ui.set_width(inspector_w);
                 ui.set_height(col_h);
-                egui::ScrollArea::vertical().auto_shrink([false; 2]).show(
-                    ui,
-                    |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
                         let icon_spec = resolve_file_icon(
                             &item_clone.name,
                             &item_clone.extension,
@@ -5223,7 +5253,12 @@ impl ExplorerView {
                                     );
                                 });
                             } else {
-                                self.paint_inspector_icon_header(ui, palette, &item_clone, &icon_spec);
+                                self.paint_inspector_icon_header(
+                                    ui,
+                                    palette,
+                                    &item_clone,
+                                    &icon_spec,
+                                );
                             }
                         } else if icon_spec.is_media {
                             self.paint_inspector_icon_header(ui, palette, &item_clone, &icon_spec);
@@ -5248,7 +5283,9 @@ impl ExplorerView {
                                         );
                                     });
                                     let mut scrub = 0.25_f32;
-                                    ui.add(egui::Slider::new(&mut scrub, 0.0..=1.0).show_value(false));
+                                    ui.add(
+                                        egui::Slider::new(&mut scrub, 0.0..=1.0).show_value(false),
+                                    );
                                     ui.label(
                                         egui::RichText::new(format!(
                                             "Codec / Format: {}",
@@ -5278,10 +5315,13 @@ impl ExplorerView {
                                             for (idx, line) in snippet.iter().enumerate() {
                                                 ui.horizontal(|ui| {
                                                     ui.label(
-                                                        egui::RichText::new(format!("{:2} |", idx + 1))
-                                                            .size(10.5)
-                                                            .monospace()
-                                                            .color(palette.text_muted),
+                                                        egui::RichText::new(format!(
+                                                            "{:2} |",
+                                                            idx + 1
+                                                        ))
+                                                        .size(10.5)
+                                                        .monospace()
+                                                        .color(palette.text_muted),
                                                     );
                                                     ui.label(
                                                         egui::RichText::new(*line)
@@ -5307,7 +5347,11 @@ impl ExplorerView {
                             .num_columns(2)
                             .spacing([12.0, 5.0])
                             .show(ui, |ui| {
-                                ui.label(egui::RichText::new("Kind:").size(12.0).color(palette.text_muted));
+                                ui.label(
+                                    egui::RichText::new("Kind:")
+                                        .size(12.0)
+                                        .color(palette.text_muted),
+                                );
                                 ui.label(
                                     egui::RichText::new(if item_clone.is_dir {
                                         "Folder"
@@ -5320,7 +5364,11 @@ impl ExplorerView {
                                 );
                                 ui.end_row();
 
-                                ui.label(egui::RichText::new("Size:").size(12.0).color(palette.text_muted));
+                                ui.label(
+                                    egui::RichText::new("Size:")
+                                        .size(12.0)
+                                        .color(palette.text_muted),
+                                );
                                 ui.label(
                                     egui::RichText::new(item_clone.formatted_size())
                                         .size(12.0)
@@ -5328,7 +5376,11 @@ impl ExplorerView {
                                 );
                                 ui.end_row();
 
-                                ui.label(egui::RichText::new("Modified:").size(12.0).color(palette.text_muted));
+                                ui.label(
+                                    egui::RichText::new("Modified:")
+                                        .size(12.0)
+                                        .color(palette.text_muted),
+                                );
                                 ui.label(
                                     egui::RichText::new(item_clone.formatted_date())
                                         .size(12.0)
@@ -5336,7 +5388,11 @@ impl ExplorerView {
                                 );
                                 ui.end_row();
 
-                                ui.label(egui::RichText::new("Permissions:").size(12.0).color(palette.text_muted));
+                                ui.label(
+                                    egui::RichText::new("Permissions:")
+                                        .size(12.0)
+                                        .color(palette.text_muted),
+                                );
                                 ui.label(
                                     egui::RichText::new(format!(
                                         "{} ({})",
@@ -5350,7 +5406,11 @@ impl ExplorerView {
                                 ui.end_row();
 
                                 if item_clone.is_symlink {
-                                    ui.label(egui::RichText::new("Symlink:").size(12.0).color(palette.text_muted));
+                                    ui.label(
+                                        egui::RichText::new("Symlink:")
+                                            .size(12.0)
+                                            .color(palette.text_muted),
+                                    );
                                     let target_str = item_clone
                                         .symlink_target
                                         .as_ref()
@@ -5364,16 +5424,28 @@ impl ExplorerView {
                                     ui.end_row();
                                 }
 
-                                ui.label(egui::RichText::new("Hidden:").size(12.0).color(palette.text_muted));
                                 ui.label(
-                                    egui::RichText::new(if item_clone.is_hidden { "Yes" } else { "No" })
+                                    egui::RichText::new("Hidden:")
                                         .size(12.0)
-                                        .color(palette.text_secondary),
+                                        .color(palette.text_muted),
+                                );
+                                ui.label(
+                                    egui::RichText::new(if item_clone.is_hidden {
+                                        "Yes"
+                                    } else {
+                                        "No"
+                                    })
+                                    .size(12.0)
+                                    .color(palette.text_secondary),
                                 );
                                 ui.end_row();
 
                                 // SHA-256 Checksum calculation
-                                ui.label(egui::RichText::new("SHA-256:").size(12.0).color(palette.text_muted));
+                                ui.label(
+                                    egui::RichText::new("SHA-256:")
+                                        .size(12.0)
+                                        .color(palette.text_muted),
+                                );
                                 if let Some((cached_p, hash)) = &self.peek_hash_cache {
                                     if cached_p == &item_clone.path {
                                         let short_hash = if hash.len() > 16 {
@@ -5387,12 +5459,18 @@ impl ExplorerView {
                                                 .monospace()
                                                 .color(palette.accent),
                                         );
-                                    } else if ui.button(egui::RichText::new("Compute").size(10.5)).clicked() {
+                                    } else if ui
+                                        .button(egui::RichText::new("Compute").size(10.5))
+                                        .clicked()
+                                    {
                                         let h = crate::codec::calculate_sha256(&item_clone.path)
                                             .unwrap_or_else(|_| "Error".into());
                                         self.peek_hash_cache = Some((item_clone.path.clone(), h));
                                     }
-                                } else if ui.button(egui::RichText::new("Compute").size(10.5)).clicked() {
+                                } else if ui
+                                    .button(egui::RichText::new("Compute").size(10.5))
+                                    .clicked()
+                                {
                                     let h = crate::codec::calculate_sha256(&item_clone.path)
                                         .unwrap_or_else(|_| "Error".into());
                                     self.peek_hash_cache = Some((item_clone.path.clone(), h));
@@ -5441,8 +5519,7 @@ impl ExplorerView {
                                 open_terminal_in_dir(dir_target);
                             }
                         });
-                    },
-                );
+                    });
             });
     }
 
@@ -5738,7 +5815,10 @@ impl ExplorerView {
                 )
             } else {
                 (
-                    self.secondary_selected_paths.iter().cloned().collect::<Vec<_>>(),
+                    self.secondary_selected_paths
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>(),
                     self.current_dir.clone(),
                 )
             };
@@ -5761,7 +5841,10 @@ impl ExplorerView {
                 )
             } else {
                 (
-                    self.secondary_selected_paths.iter().cloned().collect::<Vec<_>>(),
+                    self.secondary_selected_paths
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>(),
                     self.current_dir.clone(),
                 )
             };

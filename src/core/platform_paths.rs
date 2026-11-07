@@ -14,8 +14,8 @@ use windows::core::GUID;
 use windows::Win32::System::Com::CoTaskMemFree;
 #[cfg(windows)]
 use windows::Win32::UI::Shell::{
-    SHGetKnownFolderPath, FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads,
-    FOLDERID_Music, FOLDERID_Pictures, FOLDERID_Videos, KF_FLAG_DEFAULT,
+    FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Music, FOLDERID_Pictures,
+    FOLDERID_Videos, SHGetKnownFolderPath, KF_FLAG_DEFAULT,
 };
 
 #[cfg(windows)]

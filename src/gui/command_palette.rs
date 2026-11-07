@@ -36,10 +36,7 @@ pub enum PaletteAction {
     ConvertTarget(&'static str),
     ExamConform,
     PackZip,
-    RunUserScript {
-        title: String,
-        body: String,
-    },
+    RunUserScript { title: String, body: String },
 }
 
 #[derive(Debug, Clone)]

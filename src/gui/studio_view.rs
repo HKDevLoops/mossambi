@@ -1894,8 +1894,7 @@ impl StudioView {
                         }
                         if ui
                             .selectable_label(
-                                self.conformer_preset_selector
-                                    == "ID Document Scan (A4 / 300 DPI)",
+                                self.conformer_preset_selector == "ID Document Scan (A4 / 300 DPI)",
                                 "ID Document Scan (A4 / 300 DPI)",
                             )
                             .clicked()
@@ -1978,13 +1977,22 @@ impl StudioView {
                 );
                 ui.separator();
                 ui.label("Units:");
-                if ui.selectable_label(self.conformer_unit == 0, "px").clicked() {
+                if ui
+                    .selectable_label(self.conformer_unit == 0, "px")
+                    .clicked()
+                {
                     self.conformer_unit = 0;
                 }
-                if ui.selectable_label(self.conformer_unit == 1, "cm").clicked() {
+                if ui
+                    .selectable_label(self.conformer_unit == 1, "cm")
+                    .clicked()
+                {
                     self.conformer_unit = 1;
                 }
-                if ui.selectable_label(self.conformer_unit == 2, "mm").clicked() {
+                if ui
+                    .selectable_label(self.conformer_unit == 2, "mm")
+                    .clicked()
+                {
                     self.conformer_unit = 2;
                 }
                 if self.conformer_unit == 1 {
@@ -2102,7 +2110,11 @@ impl StudioView {
                 let file_len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
                 let in_kb = file_len as f64 / 1024.0;
                 let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-                let ext = path.extension().unwrap_or_default().to_string_lossy().to_uppercase();
+                let ext = path
+                    .extension()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_uppercase();
 
                 egui::Frame::none()
                     .fill(palette.sidebar_bg)
@@ -2119,17 +2131,39 @@ impl StudioView {
                         ui.add_space(6.0);
                         ui.columns(2, |cols| {
                             cols[0].vertical(|ui| {
-                                ui.label(egui::RichText::new("[Input Source File]").strong().size(12.0));
+                                ui.label(
+                                    egui::RichText::new("[Input Source File]")
+                                        .strong()
+                                        .size(12.0),
+                                );
                                 ui.label(format!("File: {}", file_name));
                                 ui.label(format!("Current Size: {:.1} KB", in_kb));
                                 ui.label(format!("Format: {}", ext));
                             });
                             cols[1].vertical(|ui| {
-                                ui.label(egui::RichText::new("[Conformed Target]").strong().size(12.0).color(palette.accent));
+                                ui.label(
+                                    egui::RichText::new("[Conformed Target]")
+                                        .strong()
+                                        .size(12.0)
+                                        .color(palette.accent),
+                                );
                                 ui.label(format!("Preset: {}", settings.exam_preset_name));
-                                ui.label(format!("Dimensions: {} x {} px @ {} DPI", settings.exam_width, settings.exam_height, settings.exam_dpi));
-                                ui.label(format!("Target Budget: {} - {} KB", settings.exam_min_kb, settings.exam_max_kb));
-                                ui.label(format!("Whitening: {}", if settings.exam_whiten { "Enabled (Clean White BG)" } else { "Disabled (Raw Image)" }));
+                                ui.label(format!(
+                                    "Dimensions: {} x {} px @ {} DPI",
+                                    settings.exam_width, settings.exam_height, settings.exam_dpi
+                                ));
+                                ui.label(format!(
+                                    "Target Budget: {} - {} KB",
+                                    settings.exam_min_kb, settings.exam_max_kb
+                                ));
+                                ui.label(format!(
+                                    "Whitening: {}",
+                                    if settings.exam_whiten {
+                                        "Enabled (Clean White BG)"
+                                    } else {
+                                        "Disabled (Raw Image)"
+                                    }
+                                ));
                             });
                         });
                     });
