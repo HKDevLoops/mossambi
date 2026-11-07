@@ -1925,6 +1925,54 @@ impl StudioView {
                             settings.exam_max_kb = 100;
                             settings.exam_whiten = false;
                         }
+                        if ui
+                            .selectable_label(
+                                self.conformer_preset_selector == "US Visa Photo (2x2 in / 600x600 px)",
+                                "US Visa Photo (2x2 in / 600x600 px)",
+                            )
+                            .clicked()
+                        {
+                            self.conformer_preset_selector = "US Visa Photo (2x2 in / 600x600 px)".into();
+                            settings.exam_preset_name = "US Visa".into();
+                            settings.exam_width = 600;
+                            settings.exam_height = 600;
+                            settings.exam_dpi = 300;
+                            settings.exam_min_kb = 20;
+                            settings.exam_max_kb = 240;
+                            settings.exam_whiten = true;
+                        }
+                        if ui
+                            .selectable_label(
+                                self.conformer_preset_selector == "Schengen Visa (35x45 mm)",
+                                "Schengen Visa (35x45 mm)",
+                            )
+                            .clicked()
+                        {
+                            self.conformer_preset_selector = "Schengen Visa (35x45 mm)".into();
+                            settings.exam_preset_name = "Schengen Visa".into();
+                            settings.exam_width = 413;
+                            settings.exam_height = 531;
+                            settings.exam_dpi = 300;
+                            settings.exam_min_kb = 30;
+                            settings.exam_max_kb = 150;
+                            settings.exam_whiten = true;
+                        }
+                        if ui
+                            .selectable_label(
+                                self.conformer_preset_selector == "Canada PR / Visa (50x70 mm)",
+                                "Canada PR / Visa (50x70 mm)",
+                            )
+                            .clicked()
+                        {
+                            self.conformer_preset_selector = "Canada PR / Visa (50x70 mm)".into();
+                            settings.exam_preset_name = "Canada PR".into();
+                            settings.exam_width = 590;
+                            settings.exam_height = 826;
+                            settings.exam_dpi = 300;
+                            settings.exam_min_kb = 100;
+                            settings.exam_max_kb = 500;
+                            settings.exam_whiten = true;
+                        }
                         for p in &presets {
                             let label =
                                 format!("Custom: {} ({}x{} px)", p.name, p.width_px, p.height_px);

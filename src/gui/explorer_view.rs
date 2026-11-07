@@ -329,6 +329,38 @@ pub struct ExplorerView {
 
     // Shift+Delete Permanent Deletion Confirmation
     pub permanent_delete_prompt: Option<Vec<PathBuf>>,
+
+    // Finder-Style Multi-Item Batch Renamer
+    pub batch_rename: BatchRenameState,
+}
+
+#[derive(Debug, Clone)]
+pub struct BatchRenameState {
+    pub is_open: bool,
+    pub mode: usize,
+    pub find_text: String,
+    pub replace_text: String,
+    pub prefix_text: String,
+    pub suffix_text: String,
+    pub base_name: String,
+    pub start_index: usize,
+    pub target_paths: Vec<PathBuf>,
+}
+
+impl Default for BatchRenameState {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            mode: 0,
+            find_text: String::new(),
+            replace_text: String::new(),
+            prefix_text: String::new(),
+            suffix_text: String::new(),
+            base_name: "Item".to_string(),
+            start_index: 1,
+            target_paths: Vec::new(),
+        }
+    }
 }
 
 impl Default for ExplorerView {
@@ -429,6 +461,7 @@ impl Default for ExplorerView {
             secondary_history_idx: 0,
             show_inspector_pane: false,
             permanent_delete_prompt: None,
+            batch_rename: BatchRenameState::default(),
         };
 
         view.navigate_to(current_dir);
@@ -657,6 +690,14 @@ impl ExplorerView {
         let mut paths: Vec<PathBuf> = self.selected_paths.iter().cloned().collect();
         paths.sort();
         paths
+    }
+
+    pub fn open_batch_rename(&mut self) {
+        let targets = self.selected_paths();
+        if !targets.is_empty() {
+            self.batch_rename.target_paths = targets;
+            self.batch_rename.is_open = true;
+        }
     }
 
     pub fn refresh(&mut self) {
@@ -1584,6 +1625,257 @@ impl ExplorerView {
                 self.renaming_path = None;
             } else {
                 self.renaming_path = Some((old_path, new_name));
+            }
+        }
+
+        // 4b. Finder-Style Multi-Item Batch Renamer Modal Dialog
+        if self.batch_rename.is_open {
+            let mut close_dialog = false;
+            let mut do_execute = false;
+            let count = self.batch_rename.target_paths.len();
+
+            egui::Window::new(format!("Batch Rename ({} items)", count))
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .frame(
+                    egui::Frame::window(&ui.ctx().style())
+                        .fill(palette.card_bg)
+                        .stroke(Stroke::new(1.0_f32, palette.border))
+                        .rounding(Rounding::same(10.0))
+                        .inner_margin(egui::Margin::same(16.0)),
+                )
+                .show(ui.ctx(), |ui| {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(self.batch_rename.mode == 0, "Replace Text")
+                            .clicked()
+                        {
+                            self.batch_rename.mode = 0;
+                        }
+                        if ui
+                            .selectable_label(self.batch_rename.mode == 1, "Add Prefix/Suffix")
+                            .clicked()
+                        {
+                            self.batch_rename.mode = 1;
+                        }
+                        if ui
+                            .selectable_label(self.batch_rename.mode == 2, "Format with Numbers")
+                            .clicked()
+                        {
+                            self.batch_rename.mode = 2;
+                        }
+                    });
+
+                    ui.add_space(10.0);
+                    ui.separator();
+                    ui.add_space(10.0);
+
+                    if self.batch_rename.mode == 0 {
+                        ui.horizontal(|ui| {
+                            ui.label("Find:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.batch_rename.find_text)
+                                    .desired_width(180.0),
+                            );
+                        });
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label("Replace with:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.batch_rename.replace_text)
+                                    .desired_width(180.0),
+                            );
+                        });
+                    } else if self.batch_rename.mode == 1 {
+                        ui.horizontal(|ui| {
+                            ui.label("Prefix:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.batch_rename.prefix_text)
+                                    .desired_width(180.0),
+                            );
+                        });
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label("Suffix:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.batch_rename.suffix_text)
+                                    .desired_width(180.0),
+                            );
+                        });
+                    } else {
+                        ui.horizontal(|ui| {
+                            ui.label("Base Name:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.batch_rename.base_name)
+                                    .desired_width(160.0),
+                            );
+                        });
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label("Start Index:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.batch_rename.start_index)
+                                    .range(1..=9999),
+                            );
+                        });
+                    }
+
+                    ui.add_space(12.0);
+                    ui.label(
+                        egui::RichText::new("Preview:")
+                            .strong()
+                            .size(12.0)
+                            .color(palette.accent),
+                    );
+                    let preview_count = count.min(3);
+                    for i in 0..preview_count {
+                        if let Some(path) = self.batch_rename.target_paths.get(i) {
+                            let old_name = path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string();
+                            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                            let stem =
+                                path.file_stem().and_then(|s| s.to_str()).unwrap_or(&old_name);
+
+                            let new_name = match self.batch_rename.mode {
+                                0 => {
+                                    if !self.batch_rename.find_text.is_empty() {
+                                        old_name.replace(
+                                            &self.batch_rename.find_text,
+                                            &self.batch_rename.replace_text,
+                                        )
+                                    } else {
+                                        old_name.clone()
+                                    }
+                                }
+                                1 => {
+                                    if ext.is_empty() {
+                                        format!(
+                                            "{}{}{}",
+                                            self.batch_rename.prefix_text,
+                                            stem,
+                                            self.batch_rename.suffix_text
+                                        )
+                                    } else {
+                                        format!(
+                                            "{}{}{}.{}",
+                                            self.batch_rename.prefix_text,
+                                            stem,
+                                            self.batch_rename.suffix_text,
+                                            ext
+                                        )
+                                    }
+                                }
+                                _ => {
+                                    let num = self.batch_rename.start_index + i;
+                                    if ext.is_empty() {
+                                        format!("{}_{:03}", self.batch_rename.base_name, num)
+                                    } else {
+                                        format!(
+                                            "{}_{:03}.{}",
+                                            self.batch_rename.base_name, num, ext
+                                        )
+                                    }
+                                }
+                            };
+                            ui.label(
+                                egui::RichText::new(format!("{} -> {}", old_name, new_name))
+                                    .size(11.0)
+                                    .color(palette.text_secondary),
+                            );
+                        }
+                    }
+
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        let btn = ui.add(
+                            egui::Button::new(
+                                egui::RichText::new(format!("Rename {} Files", count))
+                                    .color(Color32::WHITE)
+                                    .strong(),
+                            )
+                            .fill(palette.accent),
+                        );
+                        if btn.clicked() {
+                            do_execute = true;
+                            close_dialog = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close_dialog = true;
+                        }
+                    });
+                });
+
+            if do_execute {
+                for (i, old_path) in self.batch_rename.target_paths.iter().enumerate() {
+                    let old_name = old_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    let ext = old_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    let stem = old_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(&old_name);
+
+                    let new_name = match self.batch_rename.mode {
+                        0 => {
+                            if !self.batch_rename.find_text.is_empty() {
+                                old_name.replace(
+                                    &self.batch_rename.find_text,
+                                    &self.batch_rename.replace_text,
+                                )
+                            } else {
+                                old_name.clone()
+                            }
+                        }
+                        1 => {
+                            if ext.is_empty() {
+                                format!(
+                                    "{}{}{}",
+                                    self.batch_rename.prefix_text,
+                                    stem,
+                                    self.batch_rename.suffix_text
+                                )
+                            } else {
+                                format!(
+                                    "{}{}{}.{}",
+                                    self.batch_rename.prefix_text,
+                                    stem,
+                                    self.batch_rename.suffix_text,
+                                    ext
+                                )
+                            }
+                        }
+                        _ => {
+                            let num = self.batch_rename.start_index + i;
+                            if ext.is_empty() {
+                                format!("{}_{:03}", self.batch_rename.base_name, num)
+                            } else {
+                                format!("{}_{:03}.{}", self.batch_rename.base_name, num, ext)
+                            }
+                        }
+                    };
+
+                    if new_name != old_name {
+                        let new_path = old_path.with_file_name(&new_name);
+                        crate::core::action_journal::record_rename(
+                            old_path.clone(),
+                            new_path.clone(),
+                        );
+                        let _ = std::fs::rename(old_path, &new_path);
+                    }
+                }
+                self.refresh();
+                self.batch_rename.is_open = false;
+            }
+
+            if close_dialog {
+                self.batch_rename.is_open = false;
             }
         }
 
@@ -6856,6 +7148,7 @@ pub struct ItemMenuIntents {
     pub inspect: Option<Vec<PathBuf>>,
     pub extract: Option<Vec<PathBuf>>,
     pub rename: Option<(PathBuf, String)>,
+    pub batch_rename: Option<Vec<PathBuf>>,
     pub properties: Option<FileItem>,
     pub deleted: Option<Vec<PathBuf>>,
     pub cut: Option<Vec<PathBuf>>,
@@ -7118,6 +7411,10 @@ impl ExplorerView {
         }
         if let Some((path, name)) = intent.rename {
             self.renaming_path = Some((path, name));
+        }
+        if let Some(targets) = intent.batch_rename {
+            self.batch_rename.target_paths = targets;
+            self.batch_rename.is_open = true;
         }
         if let Some(item) = intent.properties {
             self.properties_item = Some(item);
@@ -7803,7 +8100,15 @@ impl ExplorerView {
 
         // -- Danger group --
         menu_ui.separator();
-        if menu_row(menu_ui, !multi, pack, fm::MenuAction::Rename, style, tint).clicked() {
+        if multi {
+            if menu_ui
+                .button(format!("Batch Rename ({} items)...", targets.len()))
+                .clicked()
+            {
+                intent.batch_rename = Some(targets.to_vec());
+                menu_ui.close_menu();
+            }
+        } else if menu_row(menu_ui, true, pack, fm::MenuAction::Rename, style, tint).clicked() {
             if let Some(name) = path.file_name() {
                 intent.rename = Some((path.clone(), name.to_string_lossy().to_string()));
             }

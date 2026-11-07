@@ -251,6 +251,81 @@ impl ExamConstraint {
         }
     }
 
+    pub fn preset_us_visa_photo() -> Self {
+        Self {
+            name: "US Visa Photo (2x2 in / 600x600 px)".into(),
+            target_format: "JPG".into(),
+            width_px: 600,
+            height_px: 600,
+            dpi: 300,
+            min_bytes: 20 * 1024,
+            max_bytes: 240 * 1024,
+            normalize_white_balance: true,
+            positioning: PositioningMode::CenterCrop,
+            background_color: [255, 255, 255],
+        }
+    }
+
+    pub fn preset_schengen_visa_photo() -> Self {
+        Self {
+            name: "Schengen Visa Photo (35x45 mm)".into(),
+            target_format: "JPG".into(),
+            width_px: 413,
+            height_px: 531,
+            dpi: 300,
+            min_bytes: 30 * 1024,
+            max_bytes: 150 * 1024,
+            normalize_white_balance: true,
+            positioning: PositioningMode::CenterCrop,
+            background_color: [240, 240, 240],
+        }
+    }
+
+    pub fn preset_uk_passport_photo() -> Self {
+        Self {
+            name: "UK Passport Photo (35x45 mm)".into(),
+            target_format: "JPG".into(),
+            width_px: 413,
+            height_px: 531,
+            dpi: 300,
+            min_bytes: 50 * 1024,
+            max_bytes: 200 * 1024,
+            normalize_white_balance: true,
+            positioning: PositioningMode::CenterCrop,
+            background_color: [245, 245, 245],
+        }
+    }
+
+    pub fn preset_canada_pr_photo() -> Self {
+        Self {
+            name: "Canada PR / Visa Photo (50x70 mm)".into(),
+            target_format: "JPG".into(),
+            width_px: 590,
+            height_px: 826,
+            dpi: 300,
+            min_bytes: 100 * 1024,
+            max_bytes: 500 * 1024,
+            normalize_white_balance: true,
+            positioning: PositioningMode::CenterCrop,
+            background_color: [255, 255, 255],
+        }
+    }
+
+    pub fn preset_indian_passport_photo() -> Self {
+        Self {
+            name: "Indian Passport Photo (35x35 mm)".into(),
+            target_format: "JPG".into(),
+            width_px: 413,
+            height_px: 413,
+            dpi: 300,
+            min_bytes: 20 * 1024,
+            max_bytes: 100 * 1024,
+            normalize_white_balance: true,
+            positioning: PositioningMode::CenterCrop,
+            background_color: [255, 255, 255],
+        }
+    }
+
     pub fn to_preset_record(&self, category: &str) -> crate::core::state_db::CustomPresetRecord {
         crate::core::state_db::CustomPresetRecord {
             name: self.name.clone(),

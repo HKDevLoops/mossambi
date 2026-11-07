@@ -429,6 +429,44 @@ pub struct MossambiConfig {
     /// `show_custom_pinned` is on.
     #[serde(default)]
     pub pinned_custom: Vec<String>,
+    /// Keybinding profile: 0 = macOS Finder, 1 = Windows Explorer
+    #[serde(default = "default_keybinding_profile")]
+    pub keybinding_profile: u8,
+    /// Enable local AI acceleration (Ollama / LM Studio)
+    #[serde(default)]
+    pub local_ai_enabled: bool,
+    /// Local AI HTTP API endpoint (e.g. http://localhost:11434/api or http://localhost:1234/v1)
+    #[serde(default = "default_local_ai_endpoint")]
+    pub local_ai_endpoint: String,
+    /// Local AI model name (e.g. qwen2.5-vl:7b, llama3.2-vision)
+    #[serde(default = "default_local_ai_model")]
+    pub local_ai_model: String,
+    /// Local AI temperature / effort
+    #[serde(default = "default_local_ai_temperature")]
+    pub local_ai_temperature: f32,
+    /// Retention period in days for staged deletion batches (.mossambi/Trash)
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u32,
+}
+
+fn default_keybinding_profile() -> u8 {
+    0
+}
+
+fn default_local_ai_endpoint() -> String {
+    "http://localhost:11434/api".into()
+}
+
+fn default_local_ai_model() -> String {
+    "qwen2.5-vl:7b".into()
+}
+
+fn default_local_ai_temperature() -> f32 {
+    0.2
+}
+
+fn default_retention_days() -> u32 {
+    7
 }
 
 fn default_background_work() -> bool {
@@ -534,6 +572,12 @@ impl Default for MossambiConfig {
             show_tags_section: false,
             show_custom_pinned: false,
             pinned_custom: Vec::new(),
+            keybinding_profile: default_keybinding_profile(),
+            local_ai_enabled: false,
+            local_ai_endpoint: default_local_ai_endpoint(),
+            local_ai_model: default_local_ai_model(),
+            local_ai_temperature: default_local_ai_temperature(),
+            retention_days: default_retention_days(),
         }
     }
 }

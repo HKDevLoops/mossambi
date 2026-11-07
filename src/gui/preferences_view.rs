@@ -1003,6 +1003,46 @@ impl PreferencesView {
                 }
             },
         );
+
+        let status = crate::core::default_explorer::status();
+        let status_lbl = match status {
+            crate::core::default_explorer::TakeoverState::Active => "Active (Mossambi is Default)",
+            crate::core::default_explorer::TakeoverState::NotActive => "Not Active (Windows Explorer)",
+            crate::core::default_explorer::TakeoverState::Unknown => "Unknown",
+        };
+        setting_row(
+            ui,
+            palette,
+            "Default file manager",
+            status_lbl,
+            dirty,
+            |ui, _dirty| {
+                ui.horizontal(|ui| {
+                    if ui.button("Take Over Win+E").clicked() {
+                        let _ = crate::core::default_explorer::take_over();
+                    }
+                    if ui.button("Restore Explorer").clicked() {
+                        let _ = crate::core::default_explorer::restore();
+                    }
+                });
+            },
+        );
+
+        let ret = self.cfg.retention_days;
+        let ret_lbl = format!("{} days", ret);
+        let ret_mut = &mut self.cfg.retention_days;
+        setting_row(
+            ui,
+            palette,
+            "Trash retention",
+            &ret_lbl,
+            dirty,
+            |ui, dirty| {
+                if ui.add(egui::Slider::new(ret_mut, 1..=365).suffix(" d")).changed() {
+                    *dirty = true;
+                }
+            },
+        );
     }
 
     fn render_input(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
@@ -1166,6 +1206,27 @@ impl PreferencesView {
                 }
             },
         );
+
+        let kp = self.cfg.keybinding_profile;
+        let kp_lbl = if kp == 0 { "macOS Finder" } else { "Windows Explorer" };
+        let kp_mut = &mut self.cfg.keybinding_profile;
+        setting_row(
+            ui,
+            palette,
+            "Keybinding profile",
+            kp_lbl,
+            dirty,
+            |ui, dirty| {
+                if ui.selectable_label(*kp_mut == 0, "macOS Finder").clicked() {
+                    *kp_mut = 0;
+                    *dirty = true;
+                }
+                if ui.selectable_label(*kp_mut == 1, "Windows Explorer").clicked() {
+                    *kp_mut = 1;
+                    *dirty = true;
+                }
+            },
+        );
     }
 
     fn render_performance(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
@@ -1215,6 +1276,52 @@ impl PreferencesView {
             dirty,
             |ui, dirty| {
                 if ui.checkbox(bgw_mut, "").changed() {
+                    *dirty = true;
+                }
+            },
+        );
+
+        let ai = self.cfg.local_ai_enabled;
+        let ai_lbl = on_off(ai).to_string();
+        let ai_mut = &mut self.cfg.local_ai_enabled;
+        setting_row(
+            ui,
+            palette,
+            "Local AI (Ollama/LM Studio)",
+            &ai_lbl,
+            dirty,
+            |ui, dirty| {
+                if ui.checkbox(ai_mut, "").changed() {
+                    *dirty = true;
+                }
+            },
+        );
+
+        let ep_lbl = self.cfg.local_ai_endpoint.clone();
+        let ep_mut = &mut self.cfg.local_ai_endpoint;
+        setting_row(
+            ui,
+            palette,
+            "Local AI endpoint",
+            &ep_lbl,
+            dirty,
+            |ui, dirty| {
+                if ui.add(TextEdit::singleline(ep_mut).desired_width(180.0)).changed() {
+                    *dirty = true;
+                }
+            },
+        );
+
+        let mdl_lbl = self.cfg.local_ai_model.clone();
+        let mdl_mut = &mut self.cfg.local_ai_model;
+        setting_row(
+            ui,
+            palette,
+            "Local AI model",
+            &mdl_lbl,
+            dirty,
+            |ui, dirty| {
+                if ui.add(TextEdit::singleline(mdl_mut).desired_width(140.0)).changed() {
                     *dirty = true;
                 }
             },
