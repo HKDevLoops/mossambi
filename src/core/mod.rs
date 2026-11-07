@@ -19,6 +19,7 @@ pub mod mouse_nav;
 #[cfg(target_os = "windows")]
 pub mod ole_drag_out;
 pub mod pantone;
+pub mod platform_paths;
 pub mod preview;
 pub mod registry;
 pub mod tags;

@@ -515,7 +515,7 @@ impl eframe::App for MossambiWidgetApp {
                         rect.center() + egui::vec2(0.0, 46.0),
                         egui::Align2::CENTER_CENTER,
                         tail,
-                        egui::FontId::proportional(15.5),
+                        egui::FontId::proportional(12.0),
                         Color32::from_rgb(214, 69, 57),
                     );
                 }
@@ -607,7 +607,7 @@ impl eframe::App for MossambiWidgetApp {
                                         egui::RichText::new(
                                             "Win+Shift+C: Wheel\nWin+Ctrl+C: Studio",
                                         )
-                                        .size(17.5)
+                                        .size(11.0)
                                         .color(Color32::from_rgb(130, 136, 148)),
                                     );
 

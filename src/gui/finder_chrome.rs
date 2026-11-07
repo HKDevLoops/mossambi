@@ -13,7 +13,7 @@
 use crate::core::icon_packs::{IconGlyph, IconPack};
 use crate::gui::design::{self, layout, radius, space, type_scale};
 use crate::gui::macos_theme::ThemePalette;
-use eframe::egui::{self, Color32, FontId, Rounding, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2};
 
 // ---------------------------------------------------------------------------
 // Traffic lights
@@ -378,12 +378,43 @@ pub fn render_filter_popover(
 pub fn render_sidebar_section_header(ui: &mut Ui, palette: &ThemePalette, label: &str) {
     ui.add_space(space::MD);
     ui.label(
-        egui::RichText::new(label.to_uppercase())
+        egui::RichText::new(label.to_ascii_uppercase())
             .size(type_scale::CAPTION)
             .strong()
             .color(palette.text_muted),
     );
     ui.add_space(space::XXS);
+}
+
+/// A collapsible sidebar section header with ASCII chevron and hover feedback.
+pub fn render_sidebar_collapsible_header(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    label: &str,
+    expanded: bool,
+) -> bool {
+    ui.add_space(space::SM);
+    let row_h = 20.0;
+    let (rect, resp) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::click());
+    let painter = ui.painter_at(rect);
+    let chevron = if expanded { "v" } else { ">" };
+    let text = format!("{} {}", chevron, label.to_ascii_uppercase());
+    let is_hovered = resp.hovered();
+    let col = if is_hovered {
+        palette.text_primary
+    } else {
+        palette.text_muted
+    };
+    painter.text(
+        Pos2::new(rect.min.x + 2.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        FontId::proportional(type_scale::CAPTION),
+        col,
+    );
+    ui.add_space(space::XXS);
+    resp.clicked()
 }
 
 /// Everything a sidebar row needs to draw itself.
@@ -412,52 +443,96 @@ pub struct SidebarRowSpec<'a> {
 /// The label elides to the available width instead of overflowing into the
 /// next column, which is the "Custom Conforme" truncation bug fixed at source.
 pub fn render_sidebar_row(ui: &mut Ui, palette: &ThemePalette, spec: &SidebarRowSpec<'_>) -> bool {
-    let font_id = FontId::proportional(type_scale::BODY);
-    let avail = ui.available_width();
-    let icon_side = 16.0;
-    let pin_side = 14.0;
-    let text_w = (avail - icon_side - space::MD * 2.0 - if spec.show_pin { pin_side } else { 0.0 })
-        .max(space::LG);
+    let row_h = 26.0;
+    let desired_size = Vec2::new(ui.available_width(), row_h);
+    let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
+    let is_hovered = response.hovered();
+    let painter = ui.painter_at(rect);
+
+    let bg_color = if spec.selected {
+        Color32::from_rgba_premultiplied(
+            palette.accent.r(),
+            palette.accent.g(),
+            palette.accent.b(),
+            if palette.is_dark { 45 } else { 26 },
+        )
+    } else if is_hovered {
+        palette.card_hover
+    } else {
+        Color32::TRANSPARENT
+    };
+
+    if bg_color != Color32::TRANSPARENT {
+        painter.rect_filled(rect, Rounding::same(radius::SM), bg_color);
+    }
 
     if spec.selected {
-        let rect = ui.available_rect_before_wrap();
-        ui.painter().rect_filled(
-            rect,
-            Rounding::same(radius::SM),
-            Color32::from_rgba_premultiplied(
-                palette.accent.r(),
-                palette.accent.g(),
-                palette.accent.b(),
-                40,
-            ),
+        let bar_rect = Rect::from_min_size(
+            rect.min + Vec2::new(2.0, 4.0),
+            Vec2::new(3.0, (row_h - 8.0).max(4.0)),
+        );
+        painter.rect_filled(bar_rect, Rounding::same(1.5), palette.accent);
+    }
+
+    let icon_side = 16.0;
+    let pin_side = if spec.show_pin { 14.0 } else { 0.0 };
+    let icon_rect = Rect::from_center_size(
+        Pos2::new(rect.min.x + 10.0 + icon_side / 2.0, rect.center().y),
+        Vec2::splat(icon_side),
+    );
+    crate::core::icon_packs::paint_icon(ui, spec.pack, spec.glyph, icon_rect, spec.accent_rgb);
+
+    let label_x = rect.min.x + 10.0 + icon_side + space::MD;
+    let label_max_w = (rect.max.x - label_x - pin_side - space::SM).max(space::LG);
+    let font_id = FontId::proportional(type_scale::BODY_SM);
+    let display_label = design::elide_end(ui, spec.label, &font_id, label_max_w);
+    let text_color = if spec.selected {
+        if palette.is_dark {
+            palette.accent
+        } else {
+            palette.text_primary
+        }
+    } else if is_hovered {
+        palette.text_primary
+    } else {
+        palette.text_secondary
+    };
+
+    painter.text(
+        Pos2::new(label_x, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        display_label,
+        font_id,
+        text_color,
+    );
+
+    if spec.show_pin {
+        let pin_rect = Rect::from_center_size(
+            Pos2::new(rect.max.x - 12.0, rect.center().y),
+            Vec2::splat(pin_side),
+        );
+        crate::core::icon_packs::paint_icon(
+            ui,
+            spec.pack,
+            IconGlyph::ActionPin,
+            pin_rect,
+            if is_hovered {
+                [
+                    palette.text_secondary.r(),
+                    palette.text_secondary.g(),
+                    palette.text_secondary.b(),
+                ]
+            } else {
+                [
+                    palette.text_muted.r(),
+                    palette.text_muted.g(),
+                    palette.text_muted.b(),
+                ]
+            },
         );
     }
-    let mut clicked = false;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(space::MD, 0.0);
-        let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(icon_side), Sense::hover());
-        crate::core::icon_packs::paint_icon(ui, spec.pack, spec.glyph, icon_rect, spec.accent_rgb);
-        let text = design::elide_end(ui, spec.label, &font_id, text_w);
-        ui.label(
-            egui::RichText::new(text)
-                .size(type_scale::BODY)
-                .color(palette.text_primary),
-        );
-        if spec.show_pin {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let (pin_rect, _) = ui.allocate_exact_size(Vec2::splat(pin_side), Sense::hover());
-                crate::core::icon_packs::paint_icon(
-                    ui,
-                    spec.pack,
-                    IconGlyph::ActionPin,
-                    pin_rect,
-                    [150, 150, 155],
-                );
-            });
-        }
-        clicked = ui.response().clicked();
-    });
-    clicked
+
+    response.clicked()
 }
 
 #[cfg(test)]

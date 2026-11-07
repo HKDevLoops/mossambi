@@ -446,7 +446,7 @@ pub fn render_sidebar_item_with_pin(
     is_selected: bool,
     show_pin: bool,
 ) -> bool {
-    let desired_size = Vec2::new(ui.available_width(), 30.0);
+    let desired_size = Vec2::new(ui.available_width(), 26.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
     let painter = ui.painter_at(rect);
 
@@ -469,7 +469,7 @@ pub fn render_sidebar_item_with_pin(
 
     if is_selected {
         // Active vertical indicator bar in accent color
-        let bar_rect = Rect::from_min_size(rect.min + Vec2::new(2.0, 6.0), Vec2::new(3.0, 18.0));
+        let bar_rect = Rect::from_min_size(rect.min + Vec2::new(2.0, 5.0), Vec2::new(3.0, 16.0));
         painter.rect_filled(bar_rect, Rounding::same(1.5), theme.accent);
     }
 
@@ -491,20 +491,15 @@ pub fn render_sidebar_item_with_pin(
         icon_pos,
         egui::Align2::LEFT_CENTER,
         icon,
-        FontId::proportional(21.5),
+        FontId::proportional(14.0),
         text_color,
     );
 
     // Render Label
-    //
-    // The label is elided to the space that is actually free. Painting the
-    // raw string let long entries ("Custom Conformer") bleed past the
-    // sidebar edge and collide with the next column - the "Custom Conforme"
-    // truncation the user reported.
     let pin_w = if show_pin { 18.0 } else { 0.0 };
     let label_x = rect.min.x + 36.0;
     let label_max_w = (rect.max.x - label_x - pin_w - 8.0).max(24.0);
-    let label_font = FontId::proportional(19.5);
+    let label_font = FontId::proportional(13.0);
     let display_label = crate::gui::design::elide_end(ui, label, &label_font, label_max_w);
     let label_pos = Pos2::new(label_x, rect.center().y);
     painter.text(
@@ -560,8 +555,8 @@ pub fn render_fluent_window_controls(
 
         // Minimize Button
         let min_btn = egui::Button::new(
-            egui::RichText::new("")
-                .size(18.5)
+            egui::RichText::new("-")
+                .size(13.0)
                 .color(theme.text_secondary),
         )
         .min_size(Vec2::new(42.0, 28.0))
@@ -572,10 +567,10 @@ pub fn render_fluent_window_controls(
         }
 
         // Maximize / Restore Button
-        let max_glyph = if is_max { "❐" } else { "□" };
+        let max_glyph = if is_max { "[=]" } else { "[]" };
         let max_btn = egui::Button::new(
             egui::RichText::new(max_glyph)
-                .size(18.5)
+                .size(11.5)
                 .color(theme.text_secondary),
         )
         .min_size(Vec2::new(42.0, 28.0))
@@ -591,8 +586,8 @@ pub fn render_fluent_window_controls(
 
         // Close Button
         let close_btn = egui::Button::new(
-            egui::RichText::new("")
-                .size(19.0)
+            egui::RichText::new("x")
+                .size(12.0)
                 .color(theme.text_secondary),
         )
         .min_size(Vec2::new(44.0, 28.0))
@@ -605,8 +600,8 @@ pub fn render_fluent_window_controls(
             ui.painter().text(
                 resp.rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "",
-                egui::FontId::proportional(19.0),
+                "x",
+                egui::FontId::proportional(12.0),
                 Color32::WHITE,
             );
         }
