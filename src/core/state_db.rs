@@ -406,6 +406,14 @@ pub fn load_commands() -> Vec<CustomCommandRecord> {
     list
 }
 
+/// Delete a custom script command by ID.
+pub fn delete_command(id: &str) -> Result<(), String> {
+    let conn = open_connection()?;
+    conn.execute("DELETE FROM custom_commands WHERE id = ?1", rusqlite::params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

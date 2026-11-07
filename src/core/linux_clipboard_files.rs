@@ -90,7 +90,7 @@ fn percent_encode_component(input: &str) -> String {
 /// POSIX path -> `file:///abs/path` with UTF-8 percent encoding.
 pub fn path_to_file_uri(path: &Path) -> String {
     let text = path.to_string_lossy();
-    "file://".to_string() + &percent_encode_component(&text)
+    format!("file://{}", percent_encode_component(&text))
 }
 
 #[cfg(target_os = "linux")]

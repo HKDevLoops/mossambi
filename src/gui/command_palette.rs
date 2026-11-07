@@ -8,7 +8,7 @@ use crate::gui::design::{radius, space, type_scale};
 use crate::gui::macos_theme::ThemePalette;
 use eframe::egui::{self, Color32, FontId, Key, Pos2, Rect, Rounding, Sense, Stroke, Vec2};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaletteAction {
     NavigateHome,
     NavigateDesktop,
@@ -36,6 +36,10 @@ pub enum PaletteAction {
     ConvertTarget(&'static str),
     ExamConform,
     PackZip,
+    RunUserScript {
+        title: String,
+        body: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -264,6 +268,15 @@ pub const ALL_COMMANDS: &[CommandEntry] = &[
     },
 ];
 
+#[derive(Debug, Clone)]
+pub struct DynamicCommand {
+    pub title: String,
+    pub category: String,
+    pub shortcut: String,
+    pub glyph: IconGlyph,
+    pub action: PaletteAction,
+}
+
 #[derive(Debug, Default)]
 pub struct CommandPalette {
     pub is_open: bool,
@@ -272,6 +285,34 @@ pub struct CommandPalette {
 }
 
 impl CommandPalette {
+    pub fn get_combined_commands() -> Vec<DynamicCommand> {
+        let mut list: Vec<DynamicCommand> = ALL_COMMANDS
+            .iter()
+            .map(|c| DynamicCommand {
+                title: c.title.to_string(),
+                category: c.category.to_string(),
+                shortcut: c.shortcut.to_string(),
+                glyph: c.glyph,
+                action: c.action.clone(),
+            })
+            .collect();
+
+        for script in crate::core::scripting::load_all_user_scripts() {
+            list.push(DynamicCommand {
+                title: format!("Run: {}", script.title),
+                category: "Scripts".to_string(),
+                shortcut: script.shortcut.unwrap_or_default(),
+                glyph: IconGlyph::PageCode,
+                action: PaletteAction::RunUserScript {
+                    title: script.title,
+                    body: script.body,
+                },
+            });
+        }
+
+        list
+    }
+
     pub fn toggle(&mut self) {
         self.is_open = !self.is_open;
         if self.is_open {
@@ -363,8 +404,9 @@ impl CommandPalette {
                         ui.add_space(space::XS);
 
                         // Filter matching commands
+                        let all_cmds = Self::get_combined_commands();
                         let q = self.query.trim().to_lowercase();
-                        let matches: Vec<&CommandEntry> = ALL_COMMANDS
+                        let matches: Vec<&DynamicCommand> = all_cmds
                             .iter()
                             .filter(|cmd| {
                                 if q.is_empty() {
@@ -407,7 +449,7 @@ impl CommandPalette {
                         // Enter execution
                         if ui.input(|i| i.key_pressed(Key::Enter)) {
                             if let Some(cmd) = matches.get(self.selected_index) {
-                                executed_action = Some(cmd.action);
+                                executed_action = Some(cmd.action.clone());
                                 self.is_open = false;
                             }
                         }
@@ -483,7 +525,7 @@ impl CommandPalette {
                                     painter.text(
                                         Pos2::new(rrect.left() + 32.0, rrect.center().y),
                                         egui::Align2::LEFT_CENTER,
-                                        cmd.title,
+                                        &cmd.title,
                                         FontId::proportional(type_scale::BODY_SM),
                                         text_color,
                                     );
@@ -492,7 +534,7 @@ impl CommandPalette {
                                     let meta_label = if !cmd.shortcut.is_empty() {
                                         format!("{}  {}", cmd.category, cmd.shortcut)
                                     } else {
-                                        cmd.category.to_string()
+                                        cmd.category.clone()
                                     };
                                     painter.text(
                                         Pos2::new(rrect.right() - space::MD, rrect.center().y),
@@ -503,7 +545,7 @@ impl CommandPalette {
                                     );
 
                                     if rresp.clicked() {
-                                        executed_action = Some(cmd.action);
+                                        executed_action = Some(cmd.action.clone());
                                         self.is_open = false;
                                     }
                                 }

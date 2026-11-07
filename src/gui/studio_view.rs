@@ -1157,6 +1157,26 @@ impl StudioView {
                 }
                 self.current_tab = StudioTab::ArchiveSuite;
             }
+            PaletteAction::RunUserScript { title, body } => {
+                let current_file = self.explorer_view.selected_paths().first().cloned();
+                let selected = self.explorer_view.selected_paths();
+                let title_log = title.clone();
+                crate::core::scripting::execute_script_async(
+                    body,
+                    current_file,
+                    selected,
+                    move |outcome| {
+                        if outcome.success {
+                            println!(
+                                "[Script] '{}' finished successfully. Output: {}",
+                                title_log, outcome.return_value
+                            );
+                        } else {
+                            eprintln!("[Script] '{}' failed: {:?}", title_log, outcome.error);
+                        }
+                    },
+                );
+            }
         }
     }
 
