@@ -2613,6 +2613,7 @@ dependencies = [
  "windows-core 0.59.0",
  "windows-sys 0.59.0",
  "winit",
+ "xattr",
  "xz2",
  "zip 2.6.1",
  "zstd",

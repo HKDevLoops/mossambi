@@ -67,11 +67,6 @@ fn read_raw(path: &Path) -> Vec<String> {
     crate::core::state_db::get_file_tags(path)
 }
 
-#[cfg(not(target_os = "windows"))]
-fn read_raw(path: &Path) -> Vec<String> {
-    crate::core::state_db::get_file_tags(path)
-}
-
 /// Write/overwrite the tag payload. Empty list removes the stream and DB entry.
 #[cfg(target_os = "windows")]
 fn write_raw(path: &Path, payload: &str) -> Result<(), String> {
@@ -90,7 +85,43 @@ fn write_raw(path: &Path, payload: &str) -> Result<(), String> {
         .map_err(|e| format!("could not write tags stream: {e}"))
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+const XATTR_TAG_KEY: &str = "com.apple.metadata:_kMDItemUserTags";
+
+#[cfg(all(unix, not(target_os = "macos")))]
+const XATTR_TAG_KEY: &str = "user.xdg.tags";
+
+#[cfg(unix)]
+fn read_raw(path: &Path) -> Vec<String> {
+    if let Ok(Some(bytes)) = xattr::get(path, XATTR_TAG_KEY) {
+        let text = String::from_utf8_lossy(&bytes);
+        let list = parse_tags(&text);
+        if !list.is_empty() {
+            return list;
+        }
+    }
+    crate::core::state_db::get_file_tags(path)
+}
+
+#[cfg(unix)]
+fn write_raw(path: &Path, payload: &str) -> Result<(), String> {
+    let tag_list = parse_tags(payload);
+    let _ = crate::core::state_db::set_file_tags(path, &tag_list);
+
+    if payload.is_empty() {
+        let _ = xattr::remove(path, XATTR_TAG_KEY);
+        return Ok(());
+    }
+    xattr::set(path, XATTR_TAG_KEY, payload.as_bytes())
+        .map_err(|e| format!("could not write xattr: {e}"))
+}
+
+#[cfg(not(any(target_os = "windows", unix)))]
+fn read_raw(path: &Path) -> Vec<String> {
+    crate::core::state_db::get_file_tags(path)
+}
+
+#[cfg(not(any(target_os = "windows", unix)))]
 fn write_raw(path: &Path, payload: &str) -> Result<(), String> {
     let tag_list = parse_tags(payload);
     crate::core::state_db::set_file_tags(path, &tag_list)

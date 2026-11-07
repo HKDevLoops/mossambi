@@ -207,3 +207,42 @@ pub fn send_linux_notification(title: &str, body: &str, icon: &str) -> Result<()
 
     Ok(())
 }
+
+/// Sends a file or directory to the FreeDesktop Trash via `gio trash` or DBus portal.
+pub fn move_to_linux_trash(path: &Path) -> Result<()> {
+    // 1. Try `gio trash <path>`
+    if let Ok(status) = std::process::Command::new("gio")
+        .arg("trash")
+        .arg(path)
+        .status()
+    {
+        if status.success() {
+            return Ok(());
+        }
+    }
+
+    // 2. Try `kioclient5 move <path> trash:/`
+    if let Ok(status) = std::process::Command::new("kioclient5")
+        .args(["move", &path.to_string_lossy(), "trash:/"])
+        .status()
+    {
+        if status.success() {
+            return Ok(());
+        }
+    }
+
+    // 3. Fallback: Stage deletion in .mossambi/Trash
+    crate::core::action_journal::stage_delete(&[path.to_path_buf()])
+        .map_err(|e| anyhow::anyhow!(e))
+}
+
+/// Opens a URI or file using the system default handler (`xdg-open` or `gio open`).
+pub fn open_linux_uri(uri: &str) -> Result<()> {
+    if let Ok(status) = std::process::Command::new("xdg-open").arg(uri).status() {
+        if status.success() {
+            return Ok(());
+        }
+    }
+    let _ = std::process::Command::new("gio").args(["open", uri]).status();
+    Ok(())
+}
