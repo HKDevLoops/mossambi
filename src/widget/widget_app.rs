@@ -68,11 +68,12 @@ pub struct MossambiWidgetApp {
 impl Default for MossambiWidgetApp {
     fn default() -> Self {
         let (tx, rx) = channel();
+        let cfg = crate::core::MossambiConfig::load();
         // Default petals matching Image reference.png: JPG, WEBP, HEIC, TIFF, AVIF, BMP, PDF, DOCX
         let default_sectors = vec!["JPG", "WEBP", "HEIC", "TIFF", "AVIF", "BMP", "PDF", "DOCX"];
 
         Self {
-            geometry: RadialWidgetGeometry::new(Pos2::new(200.0, 200.0), 400.0),
+            geometry: RadialWidgetGeometry::new(Pos2::new(200.0, 200.0), cfg.donut.appearance.size),
             sectors: default_sectors,
             face: DonutFace::PrimaryFormats,
             flip_start: None,
@@ -118,8 +119,21 @@ impl MossambiWidgetApp {
     }
 
     pub fn select_file(&mut self, path: PathBuf) {
-        let (cat, _ext) = UniversalRegistry::classify_file(&path);
+        let (cat, ext) = UniversalRegistry::classify_file(&path);
         self.current_category = cat;
+        let cfg = crate::core::MossambiConfig::load();
+        if let Some(prof) = cfg.donut.find_profile_for_extension(&ext) {
+            let front_names: Vec<&'static str> = prof
+                .front_slices
+                .iter()
+                .map(|s| Box::leak(s.name.clone().into_boxed_str()) as &'static str)
+                .collect();
+            if !front_names.is_empty() {
+                self.sectors = front_names;
+                self.current_file = Some(path);
+                return;
+            }
+        }
         self.sectors = UniversalRegistry::get_widget_sectors_for_category(cat);
         self.current_file = Some(path);
     }

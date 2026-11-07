@@ -261,3 +261,39 @@ says otherwise. Ordered by the phase that must satisfy it.
    - cargo audit & cargo deny (0 vulnerabilities standard: lopdf >= 0.47, rust_xlsxwriter >= 0.102, zip >= 9.4, calamine >= 0.38, quick-xml >= 0.42, zstd >= 0.13.4)
    - open-computer-use desktop interactive verification with screenshots
    - Knowledge graph sync via /gsd-graphify.
+
+### G. Phase 18 Master Architecture: Donut Toolbar Customizer, Pure-Rust Engine Suite, and Unified Settings Parity (2026-11-08)
+
+1. **Donut Toolbar 3-Column Interactive Customizer (Apple HIG & Filee Parity):**
+   - Column 1 (Choose a Profile): 19 domain profiles (`Images 6-8`, `PDF 7-8`, `Documents 7-4`, `Spreadsheets 6-5`, `Presentations 7-4`, `HWP/HWPX 7-4`, `Text & Markdown 6-5`, `E-books 6-3`, `Video 6-8`, `Audio 5-5`, `Subtitles 2-1`, `Vector graphics 5-5`, `Archives 4`, `CAD drawings 5-3`, `Fonts 4-1`, `Data 5-4`, `3D models 5-1`, `Geospatial 5-1`, `Mixed files 5-2`). Dynamic search input, `+ New profile` creator, keyboard reordering (`Alt+Up` / `Alt+Down`).
+   - Column 2 (Arrange Presets & Appearance):
+     - Interactive Vector Donut Canvas Preview with Front/Back toggle pills, Columella center hub hint (`Images 6/12`), interactive petal wedges with hover highlights and preset tooltips.
+     - Profile metadata: Profile Name, "Use for mixed selections (files of different types)" toggle.
+     - Extensions Tag Cloud: Removable tag badges (`.png x`, `.jpg x`, etc.) with inline `+ Add an extension` text box.
+     - Profile action buttons: `Reset to default` and `Delete profile`.
+     - Appearance Sliders: Size (`320..540px`), Hole (`30..80px`), Opacity (`0.20..1.00`).
+   - Column 3 (Available Presets Catalog):
+     - Action buttons: `+ New preset`, `New group`, `Copy to folder`.
+     - Search input with category filter pills: `All`, `Image`, `Document`, `Video & audio`, `Edit`, `3D & CAD`.
+     - Categorized preset cards and grouped action cards (`Edit Group of 6`, `Pages per sheet Group of 5`, `Flip Group of 2`, `Crop video Group of 6`, `JPG 70%`, `TIFF 300dpi`, `Merge PDF`, `Long image PNG`, `Split PDF`, `Compress PDF`, `Searchable PDF`, etc.).
+2. **Pure-Rust Conversion Engine Suite (Anti-Download Doctrine):**
+   - Filee's runtime forces 1.1GB+ downloads (LibreOffice 422MB, Calibre 240MB, FFmpeg 99MB, Ghostscript 19MB, Pandoc 42MB, JRE 49MB).
+   - Mossambi implements pure-Rust engines in a single standalone binary:
+     - `src/codec/cad.rs`: ASCII DXF parser (LINE, CIRCLE, ARC, POLYLINE, LWPOLYLINE) and vector renderer to SVG, PDF, and PNG via `resvg`.
+     - `src/codec/data_exchange.rs`: Cross-conversion between JSON, CSV, JSON Lines, XML, vCard 3.0 (`.vcf`), and iCalendar RFC 5545 (`.ics`).
+     - `src/codec/email.rs`: RFC 822 MIME parser for EML, MSG, and MHTML extracting clean HTML/TXT and packaging attachments into ZIP.
+     - `src/codec/fonts.rs`: OpenType/TrueType SFNT parser and packager with WOFF 1.0 compression via `flate2` zlib.
+     - `src/codec/geo.rs`: Geospatial vector engine for GeoJSON, KML, KMZ, GPX, and CSV (lat/lon) with WGS 84 normalization and automated ZIP packaging.
+     - `src/codec/models_3d.rs`: 3D mesh engine for STL (ASCII/binary), Wavefront OBJ, PLY, and glTF/GLB, plus "Pictures to 3D relief" heightmap luminance generator with solid base.
+     - `src/codec/pdf_tables.rs`: Vector PDF line grid and word position detector exporting tables to native Excel workbooks (`rust_xlsxwriter`) and CSV (`csv`).
+     - `src/codec/subtitles.rs`: Bidirectional subtitle parser/renderer for SRT, WebVTT, ASS/SSA, LRC, and plain text with timestamp math and CP949 / EUC-KR encoding handling.
+3. **Unified Settings Surfaces (Preferences Views):**
+   - General Settings: Language selector, start with OS sign-in, close-window behavior, Explorer context menu hook, default save location ("Same folder as the source"), "Keep the original file dates for every conversion", "Save every geospatial result as a ZIP", browser drag staging directory & "Save only the converted file" radio, conversion history limit & clear history.
+   - Shortcuts & Gestures Settings: Modifier + drag files (`Ctrl + Left`), keyboard shortcut (`Ctrl + Alt + Space`), Flip key (`Tab`), Mouse wheel flip toggle, app exclusion list ("Never trigger in these apps"), plus gesture physics & sensitivity controls.
+   - Fields Settings: 12 toggleable domains (CAD, Fonts, 3D models, Maps/Geospatial, Games, Design & print, Science & medical, Developer, Technical writing, Video production, Pro audio, Old formats) with sub-format descriptions and "Always shown" footer note.
+4. **Ascii Discipline & Zero-Defect Standard:**
+   - 100% pure ASCII across all newly authored and edited source files (`gui_ascii_gate`).
+   - 0 clippy warnings (`cargo clippy --all-targets -- -D warnings`).
+   - 0 test failures, 0 ignored tests (`cargo test`).
+   - 0 security vulnerabilities (`cargo audit`).
+

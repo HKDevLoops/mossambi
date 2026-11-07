@@ -3,23 +3,39 @@
 //! vector document/text PDF generation, spreadsheet table transforms, and multi-format batch pipelines.
 
 pub mod bench;
+pub mod cad;
 pub mod checker;
+pub mod data_exchange;
 pub mod dpi_meta;
+pub mod email;
+pub mod fonts;
+pub mod geo;
+pub mod models_3d;
+pub mod pdf_tables;
 pub mod pdf_vector;
 pub mod remux;
+pub mod subtitles;
 
 pub use bench::{BenchmarkEngine, BenchmarkReport, ComparisonBaseline};
+pub use cad::transcode_cad;
 pub use checker::{
     CompatibilityReport, FileQualityChecker, FileQualityReport, IntegrityReport,
     ParseabilityReport, QualityMetricReport, QualityVerdict,
 };
+pub use data_exchange::transcode_data_exchange;
 pub use dpi_meta::{inject_jfif_dpi, inject_png_dpi};
+pub use email::transcode_email;
+pub use fonts::transcode_font;
+pub use geo::transcode_geo;
+pub use models_3d::transcode_3d_model;
+pub use pdf_tables::transcode_pdf_tables;
 pub use pdf_vector::{
     convert_image_to_pdf_vector, convert_text_to_pdf_vector, render_text_to_pdf, TextPdfSettings,
 };
 pub use remux::{
     calculate_sha256, verify_conversion_fidelity, MathematicalQualityReport, MathematicalRemuxType,
 };
+pub use subtitles::transcode_subtitles;
 
 use crate::archive::{pack_archive, unpack_archive, ArchiveType};
 use crate::core::{resolve_clean_sibling_output_path, FileCategory, UniversalRegistry};
@@ -131,12 +147,23 @@ pub fn transcode_file(
         FileCategory::Image => {
             if target_upper == "PDF" {
                 convert_image_to_pdf_vector(input, &work_path, None)
+            } else if matches!(
+                target_upper.as_str(),
+                "STL" | "OBJ" | "PLY" | "GLTF" | "GLB"
+            ) {
+                models_3d::transcode_3d_model(input, &work_path)
             } else {
                 convert_image_zero_loss(input, &work_path, &target_upper, mode)
             }
         }
         FileCategory::Document => {
-            convert_document_native(input, &work_path, &in_ext, &target_upper)
+            if in_ext == "PDF" && matches!(target_upper.as_str(), "XLSX" | "CSV") {
+                pdf_tables::transcode_pdf_tables(input, &work_path)
+            } else if matches!(in_ext.as_str(), "EML" | "MSG" | "MHTML") {
+                email::transcode_email(input, &work_path)
+            } else {
+                convert_document_native(input, &work_path, &in_ext, &target_upper)
+            }
         }
         FileCategory::Spreadsheet => {
             convert_spreadsheet_native(input, &work_path, &in_ext, &target_upper)
@@ -150,13 +177,42 @@ pub fn transcode_file(
         }
         FileCategory::Audio => convert_audio_zero_loss(input, &work_path, &target_upper, mode),
         FileCategory::Video => convert_video_zero_loss(input, &work_path, &target_upper, mode),
-        FileCategory::Subtitle => convert_subtitles(input, &work_path, &target_upper),
+        FileCategory::Subtitle => subtitles::transcode_subtitles(input, &work_path),
         FileCategory::Unknown => {
-            // Check if input is text-like
-            if is_text_file(input) {
+            if matches!(in_ext.as_str(), "GEOJSON" | "KML" | "KMZ" | "GPX")
+                || matches!(target_upper.as_str(), "GEOJSON" | "KML" | "KMZ" | "GPX")
+            {
+                geo::transcode_geo(input, &work_path, false)
+            } else if matches!(in_ext.as_str(), "JSON" | "JSONL" | "XML" | "VCF" | "ICS")
+                || matches!(
+                    target_upper.as_str(),
+                    "JSON" | "JSONL" | "XML" | "VCF" | "ICS"
+                )
+            {
+                data_exchange::transcode_data_exchange(input, &work_path)
+            } else if matches!(in_ext.as_str(), "DWG" | "DXF")
+                || matches!(target_upper.as_str(), "DXF")
+            {
+                cad::transcode_cad(input, &work_path)
+            } else if matches!(in_ext.as_str(), "STL" | "OBJ" | "PLY" | "GLTF" | "GLB")
+                || matches!(
+                    target_upper.as_str(),
+                    "STL" | "OBJ" | "PLY" | "GLTF" | "GLB"
+                )
+            {
+                models_3d::transcode_3d_model(input, &work_path)
+            } else if matches!(in_ext.as_str(), "TTF" | "OTF" | "WOFF" | "WOFF2" | "EOT")
+                || matches!(
+                    target_upper.as_str(),
+                    "TTF" | "OTF" | "WOFF" | "WOFF2" | "EOT"
+                )
+            {
+                fonts::transcode_font(input, &work_path)
+            } else if matches!(in_ext.as_str(), "EML" | "MSG" | "MHTML") {
+                email::transcode_email(input, &work_path)
+            } else if is_text_file(input) {
                 convert_document_native(input, &work_path, &in_ext, &target_upper)
             } else {
-                // Try image transcoding
                 convert_image_zero_loss(input, &work_path, &target_upper, mode)
             }
         }
@@ -1225,86 +1281,6 @@ fn convert_video_zero_loss(
     cmd.arg(output);
 
     run_ffmpeg(cmd, "video conversion")?;
-    Ok(())
-}
-
-fn convert_subtitles(input: &Path, output: &Path, target_ext: &str) -> Result<()> {
-    let meta = fs::metadata(input)?;
-    const MAX_SUBTITLE_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
-    if meta.len() > MAX_SUBTITLE_BYTES {
-        bail!(
-            "Subtitle file exceeds maximum permitted size of 50 MB: {}",
-            input.display()
-        );
-    }
-
-    let raw = fs::read_to_string(input)?;
-    let in_ext = input
-        .extension()
-        .map(|e| e.to_string_lossy())
-        .unwrap_or_default()
-        .to_uppercase();
-
-    static SRT_TO_VTT_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    static VTT_TO_SRT_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    static TXT_CLEANUP_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-
-    let converted = match (in_ext.as_str(), target_ext) {
-        ("SRT", "VTT") => {
-            let re = SRT_TO_VTT_RE.get_or_init(|| {
-                regex::Regex::new(r"(\d{2}:\d{2}:\d{2}),(\d{3})").unwrap_or_else(|err| {
-                    log::error!(
-                        "SRT→VTT timestamp regex failed to compile ({}); \
-                         falling back to a pass-through (timestamps keep commas)",
-                        err
-                    );
-                    // Statically valid pattern that never matches: graceful
-                    // no-op instead of a panic.
-                    regex::Regex::new(r"\A\x00mossambi-noop\x00\z")
-                        .expect("static no-op regex is valid by construction")
-                })
-            });
-            format!("WEBVTT\n\n{}", re.replace_all(&raw, "$1.$2"))
-        }
-        ("VTT", "SRT") => {
-            let body = raw.trim_start_matches("WEBVTT").trim();
-            let re = VTT_TO_SRT_RE.get_or_init(|| {
-                regex::Regex::new(r"(\d{2}:\d{2}:\d{2})\.(\d{3})").unwrap_or_else(|err| {
-                    log::error!(
-                        "VTT→SRT timestamp regex failed to compile ({}); \
-                         falling back to a pass-through (timestamps keep dots)",
-                        err
-                    );
-                    regex::Regex::new(r"\A\x00mossambi-noop\x00\z")
-                        .expect("static no-op regex is valid by construction")
-                })
-            });
-            re.replace_all(body, "$1,$2").to_string()
-        }
-        (_, "TXT") => {
-            let re = TXT_CLEANUP_RE.get_or_init(|| {
-                regex::Regex::new(r"(?m)^\d+\r?$|^\d{2}:\d{2}:\d{2}[,\.]\d{3}.*|^WEBVTT.*")
-                    .unwrap_or_else(|err| {
-                        log::error!(
-                            "Subtitle cleanup regex failed to compile ({}); \
-                             falling back to line trimming only",
-                            err
-                        );
-                        regex::Regex::new(r"\A\x00mossambi-noop\x00\z")
-                            .expect("static no-op regex is valid by construction")
-                    })
-            });
-            re.replace_all(&raw, "")
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
-        _ => raw,
-    };
-
-    fs::write(output, converted)?;
     Ok(())
 }
 

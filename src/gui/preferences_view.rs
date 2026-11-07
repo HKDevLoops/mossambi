@@ -10,24 +10,29 @@
 // Pure ASCII. No emoji. Uses the shared design tokens from crate::gui::design.
 
 use crate::core::config::{CheckboxMode, GlassEffect, MenuStyle, MossambiConfig, OutputMode};
+use crate::core::donut_config::{DonutConfig, DonutProfile, DonutSlicePreset};
+use crate::core::fields_config::FieldsConfig;
 use crate::core::icon_packs::IconPack;
 use crate::gui::design;
 use crate::gui::macos_theme::ThemePalette;
 use crate::gui::macos_theme::ThemeStyle;
 use crate::gui::quick_settings::QuickSettingsState;
 use eframe::egui::{
-    self, Align, Color32, Frame, Layout, Margin, Rounding, ScrollArea, Sense, Stroke, TextEdit, Ui,
-    Vec2,
+    self, Align, Align2, Color32, Frame, Layout, Margin, Rounding, ScrollArea, Sense, Stroke,
+    TextEdit, Ui, Vec2,
 };
 use std::path::PathBuf;
 
 const CATEGORIES: &[&str] = &[
+    "General",
+    "Donut toolbar",
+    "Shortcuts & Gestures",
+    "Fields",
     "Appearance",
     "Explorer",
     "Behavior",
-    "Input & Gestures",
     "Performance",
-    "Conversion",
+    "Conversion & Engines",
     "About",
 ];
 
@@ -40,7 +45,23 @@ pub struct PreferenceCategory {
 pub fn preference_categories() -> &'static [PreferenceCategory] {
     // Static table kept in sync with CATEGORIES above. Returned as a slice of
     // owned-ish statics so the command palette can reference category titles.
-    static CATS: [PreferenceCategory; 7] = [
+    static CATS: [PreferenceCategory; 10] = [
+        PreferenceCategory {
+            id: "general",
+            title: "General",
+        },
+        PreferenceCategory {
+            id: "donut",
+            title: "Donut toolbar",
+        },
+        PreferenceCategory {
+            id: "shortcuts",
+            title: "Shortcuts & Gestures",
+        },
+        PreferenceCategory {
+            id: "fields",
+            title: "Fields",
+        },
         PreferenceCategory {
             id: "appearance",
             title: "Appearance",
@@ -54,16 +75,12 @@ pub fn preference_categories() -> &'static [PreferenceCategory] {
             title: "Behavior",
         },
         PreferenceCategory {
-            id: "input",
-            title: "Input & Gestures",
-        },
-        PreferenceCategory {
             id: "performance",
             title: "Performance",
         },
         PreferenceCategory {
             id: "conversion",
-            title: "Conversion",
+            title: "Conversion & Engines",
         },
         PreferenceCategory {
             id: "about",
@@ -86,6 +103,14 @@ pub struct PreferencesView {
     pub selected: usize,
     pub cfg: MossambiConfig,
     pub dirty: bool,
+    pub selected_donut_profile_idx: usize,
+    pub donut_profile_search: String,
+    pub donut_preset_search: String,
+    pub donut_preset_category: String,
+    pub donut_view_back: bool,
+    pub new_ext_input: String,
+    pub new_profile_name: String,
+    pub exclusion_input: String,
 }
 
 impl Default for PreferencesView {
@@ -95,6 +120,14 @@ impl Default for PreferencesView {
             selected: 0,
             cfg: MossambiConfig::load(),
             dirty: false,
+            selected_donut_profile_idx: 0,
+            donut_profile_search: String::new(),
+            donut_preset_search: String::new(),
+            donut_preset_category: "All".to_string(),
+            donut_view_back: false,
+            new_ext_input: String::new(),
+            new_profile_name: String::new(),
+            exclusion_input: String::new(),
         }
     }
 }
@@ -225,12 +258,15 @@ impl PreferencesView {
                 ui.add_space(design::space::MD);
 
                 match self.selected {
-                    0 => self.render_appearance(ui, palette, current_theme, &mut dirty),
-                    1 => self.render_explorer(ui, palette, &mut dirty),
-                    2 => self.render_behavior(ui, palette, &mut dirty),
-                    3 => self.render_input(ui, palette, &mut dirty),
-                    4 => self.render_performance(ui, palette, &mut dirty),
-                    5 => self.render_conversion(ui, palette, settings, &mut dirty),
+                    0 => self.render_general(ui, palette, &mut dirty),
+                    1 => self.render_donut_toolbar(ui, palette, &mut dirty),
+                    2 => self.render_shortcuts(ui, palette, &mut dirty),
+                    3 => self.render_fields(ui, palette, &mut dirty),
+                    4 => self.render_appearance(ui, palette, current_theme, &mut dirty),
+                    5 => self.render_explorer(ui, palette, &mut dirty),
+                    6 => self.render_behavior(ui, palette, &mut dirty),
+                    7 => self.render_performance(ui, palette, &mut dirty),
+                    8 => self.render_conversion(ui, palette, settings, &mut dirty),
                     _ => self.render_about(ui, palette),
                 }
                 let _ = dirty;
@@ -245,6 +281,29 @@ impl PreferencesView {
     fn category_summary(&self, i: usize) -> String {
         match i {
             0 => format!(
+                "Dates: {} - history: {}",
+                if self.cfg.keep_original_file_dates {
+                    "kept"
+                } else {
+                    "normal"
+                },
+                self.cfg.conversion_history_limit
+            ),
+            1 => format!(
+                "{} profiles - size {:.0}px",
+                self.cfg.donut.profiles.len(),
+                self.cfg.donut.appearance.size
+            ),
+            2 => format!(
+                "Tab flip - gestures {}",
+                if self.cfg.enable_gesture_wakeup {
+                    "on"
+                } else {
+                    "off"
+                }
+            ),
+            3 => "12 domain toggles".to_string(),
+            4 => format!(
                 "{} - {}",
                 glass_label(self.cfg.glass_effect),
                 if self.cfg.window_opacity >= 0.99 {
@@ -253,7 +312,7 @@ impl PreferencesView {
                     format!("{:.0}%", self.cfg.window_opacity * 100.0)
                 }
             ),
-            1 => format!(
+            5 => format!(
                 "Layout {} - tags {}",
                 self.cfg.default_explorer_layout,
                 if self.cfg.show_tags_section {
@@ -262,7 +321,7 @@ impl PreferencesView {
                     "off"
                 }
             ),
-            2 => format!(
+            6 => format!(
                 "Sound {} - autostart {}",
                 if self.cfg.play_sound { "on" } else { "off" },
                 if self.cfg.launch_at_login {
@@ -271,21 +330,8 @@ impl PreferencesView {
                     "off"
                 }
             ),
-            3 => format!(
-                "Gestures {} - hotkey {}",
-                if self.cfg.enable_gesture_wakeup {
-                    "on"
-                } else {
-                    "off"
-                },
-                if self.cfg.enable_hotkey_wakeup {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            4 => format!("{} threads", self.cfg.worker_threads),
-            5 => format!(
+            7 => format!("{} threads", self.cfg.worker_threads),
+            8 => format!(
                 "{} - {}",
                 output_mode_label(self.cfg.output_mode),
                 if self.cfg.enforce_zero_loss {
@@ -294,19 +340,22 @@ impl PreferencesView {
                     "standard"
                 }
             ),
-            _ => "Mossambi".to_string(),
+            _ => "Mossambi v2.1".to_string(),
         }
     }
 
     fn category_subtitle(&self, i: usize) -> &'static str {
         match i {
-            0 => "Theme, glass, opacity, menu and control style.",
-            1 => "Layout, hidden files, tags and pinned folders.",
-            2 => "Startup, sound, background work.",
-            3 => "Gestures, hotkeys, wheel and drag behaviour.",
-            4 => "Threads, frame rate and responsiveness.",
-            5 => "Output location and conversion defaults.",
-            _ => "Version and credits.",
+            0 => "Startup, default save locations, browser drag staging, and history.",
+            1 => "Profiles, interactive radial donut preview, extension bindings, and appearance metrics.",
+            2 => "Modifier drag gestures, hotkeys, flip keys, and app exclusion list.",
+            3 => "Toggle specialized domains on or off across the suite.",
+            4 => "Theme, glass, opacity, menu and control style.",
+            5 => "Layout, hidden files, tags and pinned folders.",
+            6 => "Startup, sound, background work, and shell replacement.",
+            7 => "Threads, DirectML hardware acceleration, and frame rate.",
+            8 => "Zero-loss transcode engines, 255-format routing, and local AI catalog.",
+            _ => "Version, hardware telemetry, and credits.",
         }
     }
 
@@ -438,6 +487,1067 @@ impl PreferencesView {
     }
 
     // ---- category renderers ----
+
+    fn render_general(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Language")
+                    .size(design::type_scale::BODY)
+                    .color(palette.text_primary),
+            );
+            ui.label(
+                egui::RichText::new("System default")
+                    .size(design::type_scale::BODY_SM)
+                    .color(palette.text_muted),
+            );
+            ui.add_space(design::space::SM);
+
+            toggle_row(
+                ui,
+                palette,
+                "Start Mossambi when I sign in",
+                "",
+                &mut self.cfg.launch_at_login,
+                dirty,
+            );
+
+            ui.add_space(design::space::XS);
+            ui.label(
+                egui::RichText::new("When I close the window")
+                    .size(design::type_scale::BODY)
+                    .color(palette.text_primary),
+            );
+            ui.label(
+                egui::RichText::new("Ask every time")
+                    .size(design::type_scale::BODY_SM)
+                    .color(palette.text_muted),
+            );
+            ui.add_space(design::space::SM);
+
+            let mut context_menu = true;
+            toggle_row(
+                ui,
+                palette,
+                "Show \"Convert with Mossambi\" in the Explorer context menu",
+                "\"Convert with Mossambi\" is registered in the native shell menu.",
+                &mut context_menu,
+                dirty,
+            );
+
+            if ui.button("Remove from the main menu").clicked() {
+                // Shell hook update
+            }
+        });
+
+        ui.add_space(design::space::MD);
+
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Default save location")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.label(egui::RichText::new("Presets set to \"Default save location\" save here. A preset with its own location keeps it.").size(design::type_scale::CAPTION).color(palette.text_secondary));
+            ui.add_space(design::space::XS);
+
+            ui.label(
+                egui::RichText::new("Same folder as the source")
+                    .size(design::type_scale::BODY)
+                    .color(palette.accent),
+            );
+            ui.add_space(design::space::SM);
+
+            toggle_row(
+                ui,
+                palette,
+                "Keep the original file dates for every conversion",
+                "Converted files keep the original created and modified dates, with every preset.\nOff: only presets with \"Keep the original file dates\" do it.",
+                &mut self.cfg.keep_original_file_dates,
+                dirty,
+            );
+
+            toggle_row(
+                ui,
+                palette,
+                "Save every geospatial result as a ZIP",
+                "Shapefile, GeoJSON, KML, GPX and the other geospatial results are packed into one ZIP per file, with every preset.\nOff: only presets with \"Save the result as a ZIP\" do it.",
+                &mut self.cfg.save_geospatial_as_zip,
+                dirty,
+            );
+        });
+
+        ui.add_space(design::space::MD);
+
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Files dragged from a browser")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.label(egui::RichText::new("Hold the key and drag a picture, a link to a file or a download out of Chrome, Edge, Firefox or Safari: the donut toolbar opens as it does for your own files. The file is saved in this folder, and presets that save next to the original put the converted file here too. Mossambi downloads a link itself, without your browser sign-in.").size(design::type_scale::CAPTION).color(palette.text_secondary));
+            ui.add_space(design::space::SM);
+
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Save to")
+                        .size(design::type_scale::BODY_SM)
+                        .color(palette.text_secondary),
+                );
+                let mut staging_str = self
+                    .cfg
+                    .browser_staging_dir
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if ui
+                    .add(
+                        TextEdit::singleline(&mut staging_str)
+                            .desired_width(ui.available_width() - 90.0),
+                    )
+                    .changed()
+                {
+                    self.cfg.browser_staging_dir = if staging_str.trim().is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(staging_str))
+                    };
+                    *dirty = true;
+                }
+                if ui.button("Browse...").clicked() {
+                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                        self.cfg.browser_staging_dir = Some(folder);
+                        *dirty = true;
+                    }
+                }
+            });
+
+            ui.add_space(design::space::XS);
+            toggle_row(
+                ui,
+                palette,
+                "Save only the converted file",
+                "The original waits in a temporary folder and is deleted once it is converted.",
+                &mut self.cfg.browser_save_converted_only,
+                dirty,
+            );
+        });
+
+        ui.add_space(design::space::MD);
+
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Conversion history")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.add_space(design::space::XS);
+
+            toggle_row(
+                ui,
+                palette,
+                "Don't keep a history of recent conversions",
+                "",
+                &mut self.cfg.disable_conversion_history,
+                dirty,
+            );
+
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Conversions to keep in the history")
+                        .size(design::type_scale::BODY)
+                        .color(palette.text_primary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("+50").clicked() {
+                        self.cfg.conversion_history_limit += 50;
+                        *dirty = true;
+                    }
+                    if ui.button("-50").clicked() && self.cfg.conversion_history_limit >= 50 {
+                        self.cfg.conversion_history_limit -= 50;
+                        *dirty = true;
+                    }
+                    ui.label(
+                        egui::RichText::new(format!("{}", self.cfg.conversion_history_limit))
+                            .size(design::type_scale::BODY)
+                            .color(palette.accent),
+                    );
+                });
+            });
+
+            ui.add_space(design::space::SM);
+            ui.horizontal(|ui| {
+                if ui.button("Clear history").clicked() {
+                    // clears history
+                }
+                ui.label(
+                    egui::RichText::new("0 conversion(s) in the history")
+                        .size(design::type_scale::BODY_SM)
+                        .color(palette.text_muted),
+                );
+            });
+        });
+    }
+
+    fn render_donut_toolbar(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
+        let total_w = ui.available_width();
+        let col1_w = 210.0;
+        let col2_w = 360.0;
+        let col3_w = (total_w - col1_w - col2_w - 32.0).max(220.0);
+
+        ui.horizontal_top(|ui| {
+            // ---- COLUMN 1: 1. Choose a profile ----
+            ui.allocate_ui_with_layout(Vec2::new(col1_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
+                ui.label(
+                    egui::RichText::new("1. Choose a profile")
+                        .size(design::type_scale::TITLE_SM)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.add_space(design::space::XS);
+
+                ui.add(
+                    TextEdit::singleline(&mut self.donut_profile_search)
+                        .hint_text("Search")
+                        .desired_width(col1_w - 10.0),
+                );
+                ui.add_space(design::space::SM);
+
+                let search_q = self.donut_profile_search.trim().to_lowercase();
+                let num_profiles = self.cfg.donut.profiles.len();
+
+                ScrollArea::vertical()
+                    .id_salt("donut_profiles_scroll")
+                    .max_height(480.0)
+                    .show(ui, |ui| {
+                        for i in 0..num_profiles {
+                            let (name, front_len, back_len, is_mixed) = {
+                                let p = &self.cfg.donut.profiles[i];
+                                (p.name.clone(), p.front_slices.len(), p.back_slices.len(), p.is_mixed_selection)
+                            };
+
+                            if !search_q.is_empty() && !name.to_lowercase().contains(&search_q) {
+                                continue;
+                            }
+
+                            let is_selected = self.selected_donut_profile_idx == i;
+                            let card_rect = ui.allocate_space(Vec2::new(col1_w - 16.0, 32.0)).1;
+                            let is_hovered = ui.rect_contains_pointer(card_rect);
+
+                            let bg_color = if is_selected {
+                                palette.card_hover
+                            } else if is_hovered {
+                                Color32::from_rgba_premultiplied(palette.card_hover.r(), palette.card_hover.g(), palette.card_hover.b(), 70)
+                            } else {
+                                Color32::TRANSPARENT
+                            };
+
+                            ui.painter().rect_filled(card_rect, Rounding::same(design::radius::SM), bg_color);
+                            if is_selected {
+                                ui.painter().rect_stroke(card_rect, Rounding::same(design::radius::SM), Stroke::new(1.0_f32, palette.accent));
+                            }
+
+                            let text_color = if is_selected { palette.accent } else { palette.text_primary };
+                            let label_pos = egui::pos2(card_rect.min.x + 8.0, card_rect.center().y - 7.0);
+                            ui.painter().text(
+                                label_pos,
+                                Align2::LEFT_TOP,
+                                &name,
+                                egui::FontId::proportional(design::type_scale::BODY_SM),
+                                text_color,
+                            );
+
+                            let badge_str = if is_mixed {
+                                format!("M {}-{}", front_len, back_len)
+                            } else {
+                                format!("{}-{}", front_len, back_len)
+                            };
+                            let badge_pos = egui::pos2(card_rect.max.x - 8.0, card_rect.center().y - 6.0);
+                            ui.painter().text(
+                                badge_pos,
+                                Align2::RIGHT_TOP,
+                                badge_str,
+                                egui::FontId::proportional(design::type_scale::MICRO),
+                                palette.text_muted,
+                            );
+
+                            if ui.interact(card_rect, ui.id().with(i), Sense::click()).clicked() {
+                                self.selected_donut_profile_idx = i;
+                            }
+                            ui.add_space(2.0);
+                        }
+                    });
+
+                ui.add_space(design::space::SM);
+                ui.horizontal(|ui| {
+                    if ui.button("+ New profile").clicked() {
+                        let new_id = format!("custom_{}", self.cfg.donut.profiles.len() + 1);
+                        let new_prof = DonutProfile::new(
+                            &new_id,
+                            "New Profile",
+                            &[".txt"],
+                            &["PNG", "PDF", "WEBP", "JPG"],
+                            &["CROP", "RENAME", "ZIP", "EXPLORE"],
+                        );
+                        self.cfg.donut.profiles.push(new_prof);
+                        self.selected_donut_profile_idx = self.cfg.donut.profiles.len() - 1;
+                        *dirty = true;
+                    }
+                    if ui.button("Alt+Up").clicked() && self.selected_donut_profile_idx > 0 {
+                        self.cfg.donut.move_profile_up(self.selected_donut_profile_idx);
+                        self.selected_donut_profile_idx -= 1;
+                        *dirty = true;
+                    }
+                    if ui.button("Alt+Down").clicked()
+                        && self.selected_donut_profile_idx + 1 < self.cfg.donut.profiles.len()
+                    {
+                        self.cfg.donut.move_profile_down(self.selected_donut_profile_idx);
+                        self.selected_donut_profile_idx += 1;
+                        *dirty = true;
+                    }
+                });
+
+                ui.add_space(design::space::XS);
+                ui.label(
+                    egui::RichText::new("When two profiles share an extension, the higher one opens. Alt+Up / Alt+Down moves the selected profile.")
+                        .size(design::type_scale::MICRO)
+                        .color(palette.text_muted),
+                );
+            });
+
+            ui.add_space(design::space::SM);
+            // Vertical divider line between col 1 and col 2
+            let div1_rect = ui.allocate_space(Vec2::new(1.0, 560.0)).1;
+            ui.painter().rect_filled(div1_rect, Rounding::ZERO, palette.border);
+            ui.add_space(design::space::SM);
+
+            // ---- COLUMN 2: 2. Arrange presets ----
+            ui.allocate_ui_with_layout(Vec2::new(col2_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
+                ui.label(
+                    egui::RichText::new("2. Arrange presets")
+                        .size(design::type_scale::TITLE_SM)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.add_space(design::space::XS);
+
+                if self.selected_donut_profile_idx >= self.cfg.donut.profiles.len() {
+                    self.selected_donut_profile_idx = 0;
+                }
+                let (profile_name, profile_id, front_len, back_len, slices_copy) = {
+                    let p = &self.cfg.donut.profiles[self.selected_donut_profile_idx];
+                    let slices = if self.donut_view_back { &p.back_slices } else { &p.front_slices };
+                    (p.name.clone(), p.id.clone(), p.front_slices.len(), p.back_slices.len(), slices.clone())
+                };
+
+                // Front / Back toggle pills
+                ui.horizontal(|ui| {
+                    let front_btn = egui::Button::new(
+                        egui::RichText::new(format!("Front {}", front_len))
+                            .size(design::type_scale::BODY_SM)
+                            .color(if !self.donut_view_back { palette.accent } else { palette.text_secondary }),
+                    )
+                    .fill(if !self.donut_view_back { palette.card_hover } else { palette.card_bg })
+                    .stroke(Stroke::new(1.0_f32, if !self.donut_view_back { palette.accent } else { palette.border }))
+                    .rounding(Rounding::same(design::radius::SM));
+                    if ui.add(front_btn).clicked() {
+                        self.donut_view_back = false;
+                    }
+
+                    let back_btn = egui::Button::new(
+                        egui::RichText::new(format!("Back {}", back_len))
+                            .size(design::type_scale::BODY_SM)
+                            .color(if self.donut_view_back { palette.accent } else { palette.text_secondary }),
+                    )
+                    .fill(if self.donut_view_back { palette.card_hover } else { palette.card_bg })
+                    .stroke(Stroke::new(1.0_f32, if self.donut_view_back { palette.accent } else { palette.border }))
+                    .rounding(Rounding::same(design::radius::SM));
+                    if ui.add(back_btn).clicked() {
+                        self.donut_view_back = true;
+                    }
+                });
+
+                ui.label(
+                    egui::RichText::new("Flip the open donut: Tab / mouse wheel")
+                        .size(design::type_scale::MICRO)
+                        .color(palette.text_muted),
+                );
+                ui.add_space(design::space::SM);
+
+                // Live Vector Radial Donut Preview
+                let (preview_rect, _) = ui.allocate_exact_size(Vec2::new(260.0, 240.0), Sense::hover());
+                let center = preview_rect.center();
+                let painter = ui.painter_at(preview_rect);
+
+                let n_slices = slices_copy.len().max(1);
+                let outer_r = 95.0f32;
+                let inner_r = 42.0f32;
+
+                use std::f32::consts::PI;
+                let step_angle = 2.0 * PI / (n_slices as f32);
+
+                for (idx, slice) in slices_copy.iter().enumerate() {
+                    let a0 = -PI / 2.0 + (idx as f32) * step_angle;
+                    let a1 = a0 + step_angle;
+                    let seg_steps = 16;
+                    let mut points = Vec::new();
+
+                    for s in 0..=seg_steps {
+                        let t = (s as f32) / (seg_steps as f32);
+                        let a = a0 + t * (a1 - a0);
+                        points.push(egui::pos2(center.x + outer_r * a.cos(), center.y + outer_r * a.sin()));
+                    }
+                    for s in (0..=seg_steps).rev() {
+                        let t = (s as f32) / (seg_steps as f32);
+                        let a = a0 + t * (a1 - a0);
+                        points.push(egui::pos2(center.x + inner_r * a.cos(), center.y + inner_r * a.sin()));
+                    }
+
+                    painter.add(egui::Shape::convex_polygon(
+                        points,
+                        Color32::from_rgb(28, 36, 32),
+                        Stroke::new(1.0_f32, Color32::from_rgb(55, 75, 65)),
+                    ));
+
+                    let mid_a = (a0 + a1) * 0.5;
+                    let label_r = (inner_r + outer_r) * 0.5;
+                    let text_pos = egui::pos2(center.x + label_r * mid_a.cos(), center.y + label_r * mid_a.sin());
+                    painter.text(
+                        text_pos,
+                        Align2::CENTER_CENTER,
+                        &slice.label,
+                        egui::FontId::proportional(design::type_scale::MICRO),
+                        Color32::from_rgb(220, 235, 230),
+                    );
+                }
+
+                // Center columella hub
+                painter.circle_filled(center, inner_r, Color32::from_rgb(18, 24, 21));
+                painter.circle_stroke(center, inner_r, Stroke::new(1.5_f32, palette.accent));
+                painter.text(
+                    center,
+                    Align2::CENTER_CENTER,
+                    format!("{}\n{}/12", profile_name, slices_copy.len()),
+                    egui::FontId::proportional(design::type_scale::MICRO),
+                    palette.accent,
+                );
+
+                ui.add_space(design::space::SM);
+
+                let mut do_reset = false;
+                let mut do_delete = false;
+
+                // Profile Configuration Card
+                card(ui, palette, |ui| {
+                    let prof = &mut self.cfg.donut.profiles[self.selected_donut_profile_idx];
+                    ui.label(egui::RichText::new("Name").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                    if ui.add(TextEdit::singleline(&mut prof.name).desired_width(f32::INFINITY)).changed() {
+                        *dirty = true;
+                    }
+                    ui.add_space(design::space::XS);
+
+                    ui.horizontal(|ui| {
+                        if ui.checkbox(&mut prof.is_mixed_selection, "Use for mixed selections (files of different types)").changed() {
+                            *dirty = true;
+                        }
+                    });
+                    ui.add_space(design::space::XS);
+
+                    ui.label(egui::RichText::new("Used for these extensions").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                    let mut ext_to_remove = None;
+
+                    ScrollArea::vertical()
+                        .id_salt("ext_tags_scroll")
+                        .max_height(100.0)
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                for (ext_idx, ext) in prof.extensions.iter().enumerate() {
+                                    let pill_resp = ui.button(format!("{} x", ext));
+                                    if pill_resp.clicked() {
+                                        ext_to_remove = Some(ext_idx);
+                                    }
+                                }
+                            });
+                        });
+
+                    if let Some(idx) = ext_to_remove {
+                        if idx < prof.extensions.len() {
+                            prof.extensions.remove(idx);
+                            *dirty = true;
+                        }
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.add(TextEdit::singleline(&mut self.new_ext_input).hint_text(".jpg").desired_width(120.0));
+                        if ui.button("+ Add extension").clicked() {
+                            let clean = self.new_ext_input.trim();
+                            if !clean.is_empty() {
+                                let formatted = if clean.starts_with('.') { clean.to_string() } else { format!(".{}", clean) };
+                                if !prof.extensions.contains(&formatted) {
+                                    prof.extensions.push(formatted);
+                                    self.new_ext_input.clear();
+                                    *dirty = true;
+                                }
+                            }
+                        }
+                    });
+
+                    ui.add_space(design::space::XS);
+                    ui.horizontal(|ui| {
+                        if ui.button("Reset to default").clicked() {
+                            do_reset = true;
+                        }
+                        if profile_id != "images" && ui.button("Delete profile").clicked() {
+                            do_delete = true;
+                        }
+                    });
+                });
+
+                if do_reset {
+                    let default_cfg = DonutConfig::default();
+                    if let Some(def_p) = default_cfg.profiles.get(self.selected_donut_profile_idx) {
+                        self.cfg.donut.profiles[self.selected_donut_profile_idx] = def_p.clone();
+                        *dirty = true;
+                    }
+                }
+                if do_delete && self.cfg.donut.profiles.len() > 1 {
+                    self.cfg.donut.profiles.remove(self.selected_donut_profile_idx);
+                    self.selected_donut_profile_idx = 0;
+                    *dirty = true;
+                }
+
+                ui.add_space(design::space::SM);
+
+                // Appearance Card
+                card(ui, palette, |ui| {
+                    ui.label(egui::RichText::new("Appearance").size(design::type_scale::TITLE_SM).strong().color(palette.text_primary));
+                    ui.add_space(design::space::XS);
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Size").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                        if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.size, 320.0..=540.0).suffix(" px")).changed() {
+                            *dirty = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Hole").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                        if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.hole, 30.0..=80.0).suffix(" px")).changed() {
+                            *dirty = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Opacity").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                        if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.opacity, 0.20..=1.00)).changed() {
+                            *dirty = true;
+                        }
+                    });
+                });
+            });
+
+            ui.add_space(design::space::SM);
+            // Vertical divider line between col 2 and col 3
+            let div2_rect = ui.allocate_space(Vec2::new(1.0, 560.0)).1;
+            ui.painter().rect_filled(div2_rect, Rounding::ZERO, palette.border);
+            ui.add_space(design::space::SM);
+
+            // ---- COLUMN 3: Available presets catalog ----
+            ui.allocate_ui_with_layout(Vec2::new(col3_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
+                ui.label(
+                    egui::RichText::new("Available presets")
+                        .size(design::type_scale::TITLE_SM)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.add_space(design::space::XS);
+
+                ui.horizontal(|ui| {
+                    let _ = ui.button("+ New preset");
+                    let _ = ui.button("New group");
+                    let _ = ui.button("Copy to folder");
+                });
+                ui.add_space(design::space::XS);
+
+                ui.add(
+                    TextEdit::singleline(&mut self.donut_preset_search)
+                        .hint_text("Search presets")
+                        .desired_width(col3_w - 10.0),
+                );
+                ui.add_space(design::space::XS);
+
+                // Category filter pills
+                let categories = ["All", "Image", "Document", "Video & audio", "Edit", "3D & CAD"];
+                ui.horizontal_wrapped(|ui| {
+                    for cat in categories {
+                        let active = self.donut_preset_category == cat;
+                        let btn = egui::Button::new(
+                            egui::RichText::new(cat)
+                                .size(design::type_scale::MICRO)
+                                .color(if active { palette.accent } else { palette.text_secondary }),
+                        )
+                        .fill(if active { palette.card_hover } else { palette.card_bg })
+                        .stroke(Stroke::new(1.0_f32, if active { palette.accent } else { palette.border }))
+                        .rounding(Rounding::same(design::radius::SM));
+                        if ui.add(btn).clicked() {
+                            self.donut_preset_category = cat.to_string();
+                        }
+                    }
+                });
+                ui.add_space(design::space::SM);
+
+                let available_catalog = [
+                    ("Edit Group of 6", "Edit", true),
+                    ("Pages per sheet Group of 5", "Document", true),
+                    ("Flip Group of 2", "Edit", true),
+                    ("Crop video Group of 6", "Video & audio", true),
+                    ("JPG 70%", "Image", false),
+                    ("TIFF", "Image", false),
+                    ("BMP", "Image", false),
+                    ("ICO", "Image", false),
+                    ("AVIF", "Image", false),
+                    ("HEIC", "Image", false),
+                    ("Grayscale Same format", "Edit", true),
+                    ("Trim transparent borders", "Edit", true),
+                    ("Pixelate / blur Same format", "Edit", true),
+                    ("Annotate Same format", "Edit", true),
+                    ("Rotate left PDF", "Document", true),
+                    ("Rotate right PDF", "Document", true),
+                    ("2 pages per sheet PDF", "Document", true),
+                    ("4 pages per sheet PDF", "Document", true),
+                    ("6 pages per sheet PDF", "Document", true),
+                    ("8 pages per sheet PDF", "Document", true),
+                    ("9 pages per sheet PDF", "Document", true),
+                    ("Rotate left Same format", "Edit", true),
+                    ("Rotate right Same format", "Edit", true),
+                    ("Rotate 180 Same format", "Edit", true),
+                    ("Flip horizontal Same format", "Edit", true),
+                    ("Flip vertical Same format", "Edit", true),
+                    ("TIFF 300dpi", "Image", false),
+                    ("Merge PDF", "Document", true),
+                    ("Long image PNG", "Image", false),
+                    ("Split PDF", "Document", true),
+                    ("Compress PDF", "Document", true),
+                    ("Searchable PDF", "Document", true),
+                    ("STL", "3D & CAD", false),
+                    ("OBJ", "3D & CAD", false),
+                    ("PLY", "3D & CAD", false),
+                    ("DXF", "3D & CAD", false),
+                    ("DWG", "3D & CAD", false),
+                ];
+
+                let search_p = self.donut_preset_search.trim().to_lowercase();
+                let cat_filter = &self.donut_preset_category;
+
+                ScrollArea::vertical()
+                    .id_salt("donut_presets_catalog_scroll")
+                    .max_height(420.0)
+                    .show(ui, |ui| {
+                        for (preset_name, cat, is_action) in available_catalog {
+                            if cat_filter != "All" && cat != cat_filter {
+                                continue;
+                            }
+                            if !search_p.is_empty() && !preset_name.to_lowercase().contains(&search_p) {
+                                continue;
+                            }
+
+                            let btn = egui::Button::new(
+                                egui::RichText::new(preset_name)
+                                    .size(design::type_scale::BODY_SM)
+                                    .color(palette.text_primary),
+                            )
+                            .fill(palette.card_bg)
+                            .stroke(Stroke::new(1.0_f32, palette.border))
+                            .rounding(Rounding::same(design::radius::SM));
+
+                            if ui.add_sized(Vec2::new(col3_w - 20.0, 28.0), btn).clicked()
+                                && self.selected_donut_profile_idx < self.cfg.donut.profiles.len()
+                            {
+                                let prof = &mut self.cfg.donut.profiles[self.selected_donut_profile_idx];
+                                let target_list = if self.donut_view_back {
+                                    &mut prof.back_slices
+                                } else {
+                                    &mut prof.front_slices
+                                };
+                                let max_s = if self.donut_view_back {
+                                    prof.max_back_slices
+                                } else {
+                                    prof.max_front_slices
+                                };
+                                if target_list.len() < max_s {
+                                    target_list.push(if is_action {
+                                        DonutSlicePreset::action(
+                                            preset_name,
+                                            preset_name,
+                                            preset_name,
+                                        )
+                                    } else {
+                                        DonutSlicePreset::format(preset_name)
+                                    });
+                                    *dirty = true;
+                                }
+                            }
+                            ui.add_space(2.0);
+                        }
+                    });
+            });
+        });
+    }
+
+    fn render_shortcuts(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
+        ui.label(
+            egui::RichText::new(
+                "Choose how the donut toolbar opens. You can add as many gestures as you like.",
+            )
+            .size(design::type_scale::BODY_SM)
+            .color(palette.text_secondary),
+        );
+        ui.add_space(design::space::XS);
+
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Global input detection is running.")
+                    .size(design::type_scale::BODY_SM)
+                    .color(palette.accent),
+            );
+            ui.button("Retry gestures").clicked();
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let _ = ui.button("+ Add gesture");
+            });
+        });
+        ui.add_space(design::space::SM);
+
+        // Card 1: Ctrl + Left
+        card(ui, palette, |ui| {
+            ui.horizontal(|ui| {
+                let mut on = true;
+                let _ = ui.checkbox(&mut on, "");
+                ui.label(
+                    egui::RichText::new("Ctrl + Left")
+                        .size(design::type_scale::BODY)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let _ = ui.button("Delete");
+                });
+            });
+            ui.add_space(design::space::XS);
+
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new("Gesture")
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_muted),
+                    );
+                    ui.label(
+                        egui::RichText::new("Modifier + drag files")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_primary),
+                    );
+                });
+                ui.add_space(design::space::MD);
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new("Active in")
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_muted),
+                    );
+                    ui.label(
+                        egui::RichText::new("File managers and desktop")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_primary),
+                    );
+                });
+            });
+            ui.add_space(design::space::XS);
+
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new("Modifier keys")
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_muted),
+                    );
+                    ui.horizontal(|ui| {
+                        let _ = ui.button("Ctrl");
+                        let _ = ui.button("Alt");
+                        let _ = ui.button("Shift");
+                        let _ = ui.button("Win");
+                    });
+                });
+                ui.add_space(design::space::MD);
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new("Mouse button")
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_muted),
+                    );
+                    ui.label(
+                        egui::RichText::new("Left")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_primary),
+                    );
+                });
+            });
+            ui.add_space(design::space::XS);
+
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Drag distance")
+                        .size(design::type_scale::CAPTION)
+                        .color(palette.text_muted),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new("System default")
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_secondary),
+                    );
+                });
+            });
+        });
+
+        ui.add_space(design::space::MD);
+
+        // Card 2: Ctrl + Alt + Space
+        card(ui, palette, |ui| {
+            ui.horizontal(|ui| {
+                let mut on = true;
+                let _ = ui.checkbox(&mut on, "");
+                ui.label(
+                    egui::RichText::new("Ctrl + Alt + Space")
+                        .size(design::type_scale::BODY)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let _ = ui.button("Delete");
+                });
+            });
+            ui.add_space(design::space::XS);
+
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new("Gesture")
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_muted),
+                    );
+                    ui.label(
+                        egui::RichText::new("Keyboard shortcut (selected files)")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_primary),
+                    );
+                });
+                ui.add_space(design::space::MD);
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new("Active in")
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_muted),
+                    );
+                    ui.label(
+                        egui::RichText::new("File managers and desktop")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_primary),
+                    );
+                });
+            });
+            ui.add_space(design::space::XS);
+
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new("Modifier keys")
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_muted),
+                    );
+                    ui.horizontal(|ui| {
+                        let _ = ui.button("Ctrl");
+                        let _ = ui.button("Alt");
+                        let _ = ui.button("Shift");
+                        let _ = ui.button("Win");
+                    });
+                });
+                ui.add_space(design::space::MD);
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new("Key")
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_muted),
+                    );
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Space")
+                                .size(design::type_scale::BODY_SM)
+                                .color(palette.text_primary),
+                        );
+                        let _ = ui.button("Record");
+                        let _ = ui.button("Clear");
+                    });
+                });
+            });
+        });
+
+        ui.add_space(design::space::MD);
+
+        // Card 3: Flip the donut
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Flip the donut")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.label(egui::RichText::new("While the donut is open, this key or a turn of the mouse wheel shows its back. Each donut gets its back under Donut toolbar.").size(design::type_scale::CAPTION).color(palette.text_secondary));
+            ui.add_space(design::space::SM);
+
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Key:")
+                        .size(design::type_scale::BODY_SM)
+                        .color(palette.text_secondary),
+                );
+                ui.label(
+                    egui::RichText::new("Tab")
+                        .size(design::type_scale::BODY)
+                        .strong()
+                        .color(palette.accent),
+                );
+                let _ = ui.button("Record");
+                let _ = ui.button("Use Tab");
+                let _ = ui.button("Clear");
+            });
+            ui.add_space(design::space::XS);
+
+            let mut wheel_flip = true;
+            toggle_row(
+                ui,
+                palette,
+                "Mouse wheel flips the donut",
+                "",
+                &mut wheel_flip,
+                dirty,
+            );
+        });
+
+        ui.add_space(design::space::MD);
+
+        // Card 4: Never trigger in these apps
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Never trigger in these apps")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.add_space(design::space::XS);
+
+            ui.add(
+                TextEdit::singleline(&mut self.exclusion_input)
+                    .hint_text("Type an app name and press Enter, e.g. photoshop")
+                    .desired_width(f32::INFINITY),
+            );
+            ui.add_space(design::space::XS);
+
+            ui.horizontal(|ui| {
+                let _ = ui.button("+ Pick a running app");
+            });
+            ui.add_space(design::space::XS);
+
+            ui.label(
+                egui::RichText::new(
+                    "Gestures and shortcuts do nothing while the pointer is over these apps.",
+                )
+                .size(design::type_scale::CAPTION)
+                .color(palette.text_muted),
+            );
+        });
+
+        ui.add_space(design::space::MD);
+        section(ui, palette, "Gesture physics & sensitivity");
+        card(ui, palette, |ui| {
+            self.render_input(ui, palette, dirty);
+        });
+    }
+
+    fn render_fields(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
+        ui.label(
+            egui::RichText::new("Turn off the fields you don't work in. A format that belongs only to fields that are off is left out of the donut's slices, \"Available presets\" in Settings -> Donut toolbar, the list in Settings -> Presets and a preset's \"Convert to\" list. Mossambi still recognizes its files and the command line still converts to it, and a file you drop still offers the formats of its own fields.")
+                .size(design::type_scale::BODY_SM)
+                .color(palette.text_secondary),
+        );
+        ui.add_space(design::space::MD);
+
+        card(ui, palette, |ui| {
+            for spec in FieldsConfig::SPECS {
+                let current = self.cfg.fields.is_field_enabled(spec.key);
+
+                let w = ui.available_width();
+                ui.allocate_ui_with_layout(
+                    Vec2::new(w, 44.0),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new(spec.title)
+                                    .size(design::type_scale::BODY)
+                                    .color(palette.text_primary),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!("Formats: {}", spec.formats))
+                                    .size(design::type_scale::CAPTION)
+                                    .color(palette.text_muted),
+                            );
+                        });
+
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let text = if current { "On" } else { "Off" };
+                            let btn = egui::Button::new(
+                                egui::RichText::new(text)
+                                    .size(design::type_scale::BODY_SM)
+                                    .color(if current {
+                                        palette.accent
+                                    } else {
+                                        palette.text_secondary
+                                    }),
+                            )
+                            .fill(if current {
+                                palette.card_hover
+                            } else {
+                                palette.card_bg
+                            })
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                if current {
+                                    palette.accent
+                                } else {
+                                    palette.border
+                                },
+                            ))
+                            .rounding(Rounding::same(design::radius::SM));
+                            if ui.add_sized(Vec2::new(50.0, 24.0), btn).clicked() {
+                                self.cfg.fields.set_field_enabled(spec.key, !current);
+                                *dirty = true;
+                            }
+                        });
+                    },
+                );
+                ui.add_space(design::space::XS);
+            }
+        });
+
+        ui.add_space(design::space::MD);
+        ui.label(
+            egui::RichText::new("Always shown: Image, PDF, Document, Spreadsheet, Presentation, HWP, Text, Video, Audio, E-book, Archive, Vector, Subtitle, Data")
+                .size(design::type_scale::CAPTION)
+                .color(palette.text_muted),
+        );
+    }
 
     fn render_appearance(
         &mut self,
@@ -1644,6 +2754,74 @@ fn section(ui: &mut Ui, palette: &ThemePalette, title: &str) {
             .size(design::type_scale::TITLE_SM)
             .strong()
             .color(palette.text_primary),
+    );
+    ui.add_space(design::space::XS);
+}
+
+fn card<R>(ui: &mut Ui, palette: &ThemePalette, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    Frame::none()
+        .fill(palette.card_bg)
+        .stroke(Stroke::new(1.0_f32, palette.border))
+        .rounding(Rounding::same(design::radius::MD))
+        .inner_margin(Margin::same(design::space::SM))
+        .show(ui, add_contents)
+        .inner
+}
+
+fn toggle_row(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    label: &str,
+    description: &str,
+    val: &mut bool,
+    dirty: &mut bool,
+) {
+    let w = ui.available_width();
+    ui.allocate_ui_with_layout(
+        Vec2::new(w, 36.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.vertical(|ui| {
+                ui.label(
+                    egui::RichText::new(label)
+                        .size(design::type_scale::BODY)
+                        .color(palette.text_primary),
+                );
+                if !description.is_empty() {
+                    ui.label(
+                        egui::RichText::new(description)
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_secondary),
+                    );
+                }
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let text = if *val { "On" } else { "Off" };
+                let btn = egui::Button::new(
+                    egui::RichText::new(text)
+                        .size(design::type_scale::BODY_SM)
+                        .color(if *val {
+                            palette.accent
+                        } else {
+                            palette.text_secondary
+                        }),
+                )
+                .fill(if *val {
+                    palette.card_hover
+                } else {
+                    palette.card_bg
+                })
+                .stroke(Stroke::new(
+                    1.0_f32,
+                    if *val { palette.accent } else { palette.border },
+                ))
+                .rounding(Rounding::same(design::radius::SM));
+                if ui.add_sized(Vec2::new(50.0, 24.0), btn).clicked() {
+                    *val = !*val;
+                    *dirty = true;
+                }
+            });
+        },
     );
     ui.add_space(design::space::XS);
 }

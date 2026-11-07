@@ -6,8 +6,10 @@ pub mod async_worker;
 pub mod config;
 pub mod default_explorer;
 pub mod dnd_backend;
+pub mod donut_config;
 pub mod drag_listener;
 pub mod drag_out;
+pub mod fields_config;
 pub mod file_icons;
 pub mod fs_utils;
 pub mod fuzzy;
@@ -35,10 +37,12 @@ pub use action_journal::{
 };
 pub use async_worker::{AsyncWorkerPool, TaskUpdate};
 pub use config::{GlassEffect, MossambiConfig, OutputMode, ThemeMode};
+pub use donut_config::{DonutAppearance, DonutConfig, DonutProfile, DonutSlicePreset};
 #[cfg(target_os = "windows")]
 pub use drag_listener::query_active_explorer_files;
 pub use drag_listener::{extract_clipboard_files, DragGestureEvent, DragGestureListener};
 pub use drag_out::begin_file_drag_out;
+pub use fields_config::{FieldItemSpec, FieldsConfig};
 pub use file_icons::{resolve_file_icon, FileIconSpec};
 pub use fs_utils::{
     copy_entry_recursive, format_file_size, get_system_drives, is_library_folder_name,

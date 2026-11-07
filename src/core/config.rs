@@ -447,6 +447,30 @@ pub struct MossambiConfig {
     /// Retention period in days for staged deletion batches (.mossambi/Trash)
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
+    /// Donut toolbar profiles and appearance controls (Filee parity)
+    #[serde(default)]
+    pub donut: crate::core::donut_config::DonutConfig,
+    /// 12 Toggleable domain fields matching Filee Fields architecture
+    #[serde(default)]
+    pub fields: crate::core::fields_config::FieldsConfig,
+    /// Keep the original file creation/modification dates for every conversion
+    #[serde(default)]
+    pub keep_original_file_dates: bool,
+    /// Save every geospatial conversion result as a packaged ZIP
+    #[serde(default)]
+    pub save_geospatial_as_zip: bool,
+    /// Target download staging directory for browser drag-out
+    #[serde(default)]
+    pub browser_staging_dir: Option<PathBuf>,
+    /// Save only converted file and clean up downloaded browser temp artifact
+    #[serde(default = "default_true")]
+    pub browser_save_converted_only: bool,
+    /// Whether to disable recording recent conversions history
+    #[serde(default)]
+    pub disable_conversion_history: bool,
+    /// Maximum count of recent conversions kept in history
+    #[serde(default = "default_conversion_history_limit")]
+    pub conversion_history_limit: usize,
 }
 
 fn default_keybinding_profile() -> u8 {
@@ -467,6 +491,14 @@ fn default_local_ai_temperature() -> f32 {
 
 fn default_retention_days() -> u32 {
     7
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_conversion_history_limit() -> usize {
+    200
 }
 
 fn default_background_work() -> bool {
@@ -578,6 +610,14 @@ impl Default for MossambiConfig {
             local_ai_model: default_local_ai_model(),
             local_ai_temperature: default_local_ai_temperature(),
             retention_days: default_retention_days(),
+            donut: crate::core::donut_config::DonutConfig::default(),
+            fields: crate::core::fields_config::FieldsConfig::default(),
+            keep_original_file_dates: false,
+            save_geospatial_as_zip: false,
+            browser_staging_dir: None,
+            browser_save_converted_only: true,
+            disable_conversion_history: false,
+            conversion_history_limit: default_conversion_history_limit(),
         }
     }
 }
