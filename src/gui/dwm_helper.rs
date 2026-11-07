@@ -108,6 +108,16 @@ mod win32_dwm {
                     &backdrop_val as *const i32 as *const c_void,
                     4,
                 );
+
+                // 4. Windows 11 Rounded Corners (DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2)
+                const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+                let corner_pref: i32 = 2; // DWMWCP_ROUND
+                let _ = DwmSetWindowAttribute(
+                    hwnd,
+                    DWMWA_WINDOW_CORNER_PREFERENCE,
+                    &corner_pref as *const i32 as *const c_void,
+                    4,
+                );
             }
         }
         1

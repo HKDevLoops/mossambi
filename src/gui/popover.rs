@@ -76,14 +76,14 @@ impl PetalPopover {
 
         child_ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new(format!("⚙ Quick Settings • {}", format_name))
+                egui::RichText::new(format!("[*] Quick Settings * {}", format_name))
                     .size(15.5)
                     .strong()
                     .color(PANTONE_FLAVEDO),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
-                    .button(egui::RichText::new("✕").size(14.0).color(MAC_TEXT_MUTED))
+                    .button(egui::RichText::new("x").size(14.0).color(MAC_TEXT_MUTED))
                     .clicked()
                 {
                     on_close();
@@ -218,13 +218,13 @@ impl PetalPopover {
                 );
             });
             child_ui.label(
-                egui::RichText::new("✓ Zip-Slip Protection Active")
+                egui::RichText::new("[v] Zip-Slip Protection Active")
                     .size(13.5)
                     .color(PANTONE_FLAVEDO),
             );
         } else if fmt == "ALL" {
             child_ui.label(
-                egui::RichText::new("⭐ Batch ALL Transcoding")
+                egui::RichText::new("[*] Batch ALL Transcoding")
                     .size(14.5)
                     .strong()
                     .color(PANTONE_GOLD),
@@ -239,7 +239,7 @@ impl PetalPopover {
         child_ui.add_space(4.0);
         child_ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new("Tap to convert • Hold for options")
+                egui::RichText::new("Tap to convert * Hold for options")
                     .size(13.0)
                     .color(MAC_TEXT_MUTED),
             );

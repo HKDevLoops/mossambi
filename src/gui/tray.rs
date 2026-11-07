@@ -228,7 +228,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
     nid.uCallbackMessage = WM_TRAYICON;
     nid.hIcon = unsafe { LoadIconW(null_mut(), IDI_APPLICATION) };
 
-    let tip = "Mossambi — Sweet Lime Transcoder & Indian Exam Studio\0";
+    let tip = "Mossambi - Sweet Lime Transcoder & Indian Exam Studio\0";
     for (i, ch) in tip.encode_utf16().enumerate().take(127) {
         nid.szTip[i] = ch;
     }
@@ -349,7 +349,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                             hmenu,
                             MF_STRING,
                             CMD_OPEN_STUDIO as usize,
-                            to_u16("🖥️ Open Mossambi Studio").as_ptr(),
+                            to_u16("[Display] Open Mossambi Studio").as_ptr(),
                         );
                         AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
                         let is_autostart = crate::core::MossambiConfig::is_autostart_configured();
@@ -362,14 +362,14 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                                     MF_UNCHECKED
                                 },
                             CMD_TOGGLE_AUTOSTART as usize,
-                            to_u16("🚀 Run in Background at Startup").as_ptr(),
+                            to_u16("[Launch] Run in Background at Startup").as_ptr(),
                         );
                         AppendMenuW(hmenu, MF_SEPARATOR, 0, null_mut());
                         AppendMenuW(
                             hmenu,
                             MF_POPUP,
                             hmenu_themes as usize,
-                            to_u16("🎨 Themes (Liquid & Frosted Glass)").as_ptr(),
+                            to_u16("[Palette] Themes (Liquid & Frosted Glass)").as_ptr(),
                         );
                         AppendMenuW(
                             hmenu,
@@ -387,7 +387,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                             hmenu,
                             MF_STRING,
                             CMD_QUIT as usize,
-                            to_u16("❌ Quit Mossambi").as_ptr(),
+                            to_u16("[x] Quit Mossambi").as_ptr(),
                         );
 
                         let cmd = TrackPopupMenu(

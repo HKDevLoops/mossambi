@@ -2,9 +2,9 @@
 //!
 //! A single logical action is rendered with three different vocabularies:
 //!
-//! * [`MenuStyle::Windows`] — Windows 11 Explorer shell wording and order.
-//! * [`MenuStyle::Finder`]   — macOS Finder wording and order.
-//! * [`MenuStyle::Linux`]    — GNOME Nautilus wording and order.
+//! * [`MenuStyle::Windows`] - Windows 11 Explorer shell wording and order.
+//! * [`MenuStyle::Finder`]   - macOS Finder wording and order.
+//! * [`MenuStyle::Linux`]    - GNOME Nautilus wording and order.
 //!
 //! Every entry is prefixed with a vector glyph from the active icon pack, so
 //! the menu never falls back to emoji typography.
@@ -145,7 +145,7 @@ impl MenuAction {
 
             (SendTo, Windows) => "Send to",
             (SendTo, Finder) => "Send To",
-            (SendTo, Linux) => "Send To…",
+            (SendTo, Linux) => "Send To...",
 
             (Cut, Windows) => "Cut",
             (Cut, Finder) => "Cut",
@@ -261,7 +261,7 @@ pub fn menu_item(
 
 /// Render a menu entry with an explicit override label (e.g. "Transcode to JPG").
 ///
-/// Apple HIG (Finder style): menus are text-only — no icon chips, 15 px type,
+/// Apple HIG (Finder style): menus are text-only - no icon chips, 15 px type,
 /// generous row padding. Windows/Linux keep the glyph + label layout.
 pub fn menu_item_labeled(
     ui: &mut Ui,
@@ -294,8 +294,8 @@ pub fn menu_item_labeled(
     .response
 }
 
-/// Render a menu entry with an arbitrary glyph and explicit label — used by
-/// entries that are not plain [`MenuAction`] verbs (counters, plugs, app IDs…).
+/// Render a menu entry with an arbitrary glyph and explicit label - used by
+/// entries that are not plain [`MenuAction`] verbs (counters, plugs, app IDs...).
 pub fn menu_item_glyph(
     ui: &mut Ui,
     pack: IconPack,
@@ -328,7 +328,7 @@ pub fn menu_item_glyph(
 }
 
 /// Bold header line for the selected item's name (Apple principle: the only
-/// labeled part of a menu is the context header — groups are separated by
+/// labeled part of a menu is the context header - groups are separated by
 /// hairlines, not captions).
 pub fn menu_header(ui: &mut Ui, name: &str, tint: Color32) {
     ui.label(

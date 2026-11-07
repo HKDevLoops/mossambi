@@ -168,7 +168,7 @@ impl MossambiApp {
     }
 
     /// Starts a conversion for the currently staged file (explicit user action).
-    /// Delegates to [`start_conversion_batch`] — `studio_view.rs` calls this.
+    /// Delegates to [`start_conversion_batch`] - `studio_view.rs` calls this.
     pub fn start_conversion(&mut self, target_format: &str) {
         let files: Vec<PathBuf> = self.current_file.clone().into_iter().collect();
         self.start_conversion_batch(files, target_format);
@@ -176,7 +176,7 @@ impl MossambiApp {
 
     /// Converts a batch of files through the worker pool, reporting one final
     /// `ConversionResult` per batch on the result channel. Explicit user
-    /// action — always allowed, even when `background_work` is disabled
+    /// action - always allowed, even when `background_work` is disabled
     /// (that knob only gates AUTO-triggered conversions).
     pub fn start_conversion_batch(&mut self, files: Vec<PathBuf>, target: &str) {
         if files.is_empty() {
@@ -188,11 +188,11 @@ impl MossambiApp {
         // clobbering the same output names.
         if self.is_converting {
             log::warn!(
-                "Conversion already in progress — ignoring start request for {} file(s) -> {}",
+                "Conversion already in progress - ignoring start request for {} file(s) -> {}",
                 files.len(),
                 target
             );
-            self.status_message = "A conversion is already running — please wait.".to_string();
+            self.status_message = "A conversion is already running - please wait.".to_string();
             return;
         }
 
@@ -261,7 +261,7 @@ impl MossambiApp {
         let cfg = crate::core::MossambiConfig::load();
         if !cfg.background_work {
             log::info!(
-                "background work disabled — skipping AUTO conversion of {} ({})",
+                "background work disabled - skipping AUTO conversion of {} ({})",
                 file.display(),
                 target
             );
@@ -597,7 +597,7 @@ impl eframe::App for MossambiApp {
             }
         }
 
-        // 2. Poll for background conversion results (drain the WHOLE queue —
+        // 2. Poll for background conversion results (drain the WHOLE queue -
         // batch conversions may stack several results between frames)
         while let Ok(res) = self.result_receiver.try_recv() {
             self.is_converting = false;
@@ -716,7 +716,7 @@ impl eframe::App for MossambiApp {
 
         // 6. Persist any explorer preference mutations from this frame
         // (icon pack, zoom level, checkboxes, menu style, animations) into the
-        // config — same save pattern as the theme-change handlers above.
+        // config - same save pattern as the theme-change handlers above.
         self.sync_explorer_prefs();
     }
 }
@@ -753,7 +753,7 @@ impl MossambiApp {
 
         if dirty {
             log::debug!(
-                "explorer prefs changed — saving config (zoom={}, pack={})",
+                "explorer prefs changed - saving config (zoom={}, pack={})",
                 cfg.explorer_zoom,
                 cfg.icon_pack
             );
@@ -802,7 +802,7 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
     let _ = env_logger::try_init();
 
     let mut builder = ViewportBuilder::default()
-        .with_title("Mossambi — Universal File Conversion Studio")
+        .with_title("Mossambi - Universal File Conversion Studio")
         .with_inner_size([1120.0, 720.0])
         .with_min_inner_size([920.0, 580.0])
         .with_decorations(false) // Undecorated: eliminate duplicate OS titlebar!
@@ -826,8 +826,19 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
     // winit's X11 backend). See core/dnd_backend.rs for the policy matrix.
     crate::core::dnd_backend::apply_backend_policy(&mut options);
 
+    // Set Windows Per-Monitor V2 DPI awareness before creating the native window
+    #[cfg(target_os = "windows")]
+    unsafe {
+        #[link(name = "user32")]
+        extern "system" {
+            fn SetProcessDpiAwarenessContext(value: isize) -> i32;
+        }
+        const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: isize = -4;
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+
     eframe::run_native(
-        "Mossambi — Universal File Conversion Studio",
+        "Mossambi - Universal File Conversion Studio",
         options,
         Box::new(move |cc| Ok(Box::new(MossambiApp::new_with_path(cc, initial_path)))),
     )

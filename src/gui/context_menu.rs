@@ -1,8 +1,8 @@
 //! Windows 11 Explorer-parity context menu verbs.
 //!
 //! These wrap native Windows shell actions (verbs, clipboard, wallpaper,
-//! Defender scan…) so Mossambi's right-click flyouts match what Explorer shows.
-//! No external crates required — only Win32 via windows-sys.
+//! Defender scan...) so Mossambi's right-click flyouts match what Explorer shows.
+//! No external crates required - only Win32 via windows-sys.
 
 use std::path::Path;
 
@@ -309,7 +309,7 @@ pub fn scan_with_defender(path: &Path) -> bool {
     }
 }
 
-/// Rotate an image by 90° without touching EXIF orientation flags
+/// Rotate an image by 90 deg without touching EXIF orientation flags
 pub fn rotate_image_90(path: &Path) -> bool {
     if let Some(parent) = path.parent() {
         let _ = parent;

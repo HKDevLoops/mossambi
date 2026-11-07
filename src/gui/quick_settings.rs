@@ -115,7 +115,7 @@ impl QuickSettingsState {
             // Title Bar
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("⚙ Quick Settings")
+                    egui::RichText::new("[*] Quick Settings")
                         .size(17.0)
                         .strong()
                         .color(Color32::from_rgb(120, 190, 32)),
@@ -253,12 +253,12 @@ impl QuickSettingsState {
                     ui.selectable_value(&mut self.archive_compression, "Normal".to_string(), "Normal");
                     ui.selectable_value(&mut self.archive_compression, "Ultra".to_string(), "Ultra");
                 });
-                ui.label(egui::RichText::new("✓ Zip-Slip Traversal Protection Active").size(14.0).color(Color32::from_rgb(120, 190, 32)));
+                ui.label(egui::RichText::new("[v] Zip-Slip Traversal Protection Active").size(14.0).color(Color32::from_rgb(120, 190, 32)));
             }
             // 6. ALL Sector
             else if fmt == "ALL" {
                 ui.label(
-                    egui::RichText::new("⭐ Batch ALL Transcoding Mode")
+                    egui::RichText::new("[*] Batch ALL Transcoding Mode")
                         .size(15.0)
                         .strong()
                         .color(Color32::from_rgb(255, 184, 28)),
@@ -275,7 +275,7 @@ impl QuickSettingsState {
 
             // Custom Specification & Form Conformer Parameters
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.exam_mode_enabled, "🎯 Custom Parameter Envelope");
+                ui.checkbox(&mut self.exam_mode_enabled, "[target] Custom Parameter Envelope");
             });
 
             if self.exam_mode_enabled {

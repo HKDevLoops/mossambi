@@ -1,8 +1,8 @@
-//! Global Drop Overlay — convert files dropped from ANY application.
+//! Global Drop Overlay - convert files dropped from ANY application.
 //!
 //! A small always-on-top "drop puck" window (top-right of the primary
 //! monitor) registered as an OLE `IDropTarget`. Explorer, browsers, archive
-//! tools, editors — every app that drags files with the shell OLE protocol —
+//! tools, editors - every app that drags files with the shell OLE protocol -
 //! can drop onto it. Dropped files convert via the zero-loss codec pipeline
 //! with a type-aware default target (`AUTO` per category, or the configured
 //! `drop_target_default`).
@@ -43,9 +43,9 @@ fn auto_target(path: &std::path::Path) -> &'static str {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// COM plumbing (hand-rolled IDropTarget — windows-sys exposes raw bindings)
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
+// COM plumbing (hand-rolled IDropTarget - windows-sys exposes raw bindings)
+// ----------------------------------------------------------------------------
 
 #[repr(C)]
 struct PointL {
@@ -259,8 +259,8 @@ unsafe fn show_completion_balloon(count: usize) {
     nid.hWnd = hwnd as _;
     nid.uID = 1001;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_INFO;
-    let title: Vec<u16> = "Mossambi ".encode_utf16().collect();
-    let text: Vec<u16> = format!("{count} file(s) converted - output saved next to the source ")
+    let title: Vec<u16> = "Mossambi".encode_utf16().collect();
+    let text: Vec<u16> = format!("{count} file(s) converted - output saved next to the source")
         .encode_utf16()
         .collect();
     for (i, c) in title.iter().take(63).enumerate() {
@@ -309,9 +309,9 @@ static DROP_VTBL: DropTargetVtbl = DropTargetVtbl {
     drop: dt_drop,
 };
 
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 // Overlay window lifecycle
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 
 pub struct DropOverlayHandle {
     shutdown: Arc<AtomicBool>,
@@ -387,7 +387,7 @@ unsafe fn run_overlay_thread(shutdown: Arc<AtomicBool>, hwnd_out: Arc<Mutex<isiz
     // 1. OLE STA (required by RegisterDragDrop).
     let ole_hr = OleInitialize(std::ptr::null_mut());
     if ole_hr < 0 {
-        log::error!("Drop overlay: OleInitialize failed ({ole_hr:#x}) — puck disabled");
+        log::error!("Drop overlay: OleInitialize failed ({ole_hr:#x}) - puck disabled");
         return;
     }
 
@@ -428,7 +428,7 @@ unsafe fn run_overlay_thread(shutdown: Arc<AtomicBool>, hwnd_out: Arc<Mutex<isiz
         ..std::mem::zeroed()
     };
     if RegisterClassExW(&wc) == 0 {
-        log::warn!("Drop overlay: RegisterClassExW failed — puck disabled");
+        log::warn!("Drop overlay: RegisterClassExW failed - puck disabled");
         return;
     }
 
@@ -436,7 +436,7 @@ unsafe fn run_overlay_thread(shutdown: Arc<AtomicBool>, hwnd_out: Arc<Mutex<isiz
     let screen_w = GetSystemMetrics(0); // SM_CXSCREEN
     let x = screen_w - PUCK_SIZE - PUCK_MARGIN;
     let y = PUCK_MARGIN;
-    let title: Vec<u16> = "Mossambi — Drop files to convert\0"
+    let title: Vec<u16> = "Mossambi - Drop files to convert\0"
         .encode_utf16()
         .collect();
     let hwnd = CreateWindowExW(
@@ -454,7 +454,7 @@ unsafe fn run_overlay_thread(shutdown: Arc<AtomicBool>, hwnd_out: Arc<Mutex<isiz
         std::ptr::null_mut(),
     );
     if hwnd.is_null() {
-        log::warn!("Drop overlay: CreateWindowExW failed — puck disabled");
+        log::warn!("Drop overlay: CreateWindowExW failed - puck disabled");
         return;
     }
     SetLayeredWindowAttributes(hwnd, COLORKEY, 0, LWA_COLORKEY);
@@ -465,7 +465,7 @@ unsafe fn run_overlay_thread(shutdown: Arc<AtomicBool>, hwnd_out: Arc<Mutex<isiz
     let itf = &DROP_VTBL as *const DropTargetVtbl as *mut std::ffi::c_void;
     let hr = RegisterDragDrop(hwnd, itf);
     if hr != 0 {
-        log::error!("Drop overlay: RegisterDragDrop failed ({hr:#x}) — puck disabled");
+        log::error!("Drop overlay: RegisterDragDrop failed ({hr:#x}) - puck disabled");
         DestroyWindow(hwnd);
         return;
     }

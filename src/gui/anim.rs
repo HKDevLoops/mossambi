@@ -85,10 +85,10 @@ pub fn frame_dt(ctx: &egui::Context) -> f32 {
 
 /// Advance a spring according to the user-selected motion style.
 ///
-/// * [`AnimStyle::Spring`] – damped spring.
-/// * [`AnimStyle::Snappy`] – fast exponential ease-out.
-/// * [`AnimStyle::Fade`]   – linear ramp.
-/// * [`AnimStyle::None`]   – instant snap.
+/// * [`AnimStyle::Spring`] - damped spring.
+/// * [`AnimStyle::Snappy`] - fast exponential ease-out.
+/// * [`AnimStyle::Fade`]   - linear ramp.
+/// * [`AnimStyle::None`]   - instant snap.
 pub fn advance(spring: &mut Spring, target: f32, style: AnimStyle, dt: f32) -> f32 {
     spring.target = target;
     match style {
