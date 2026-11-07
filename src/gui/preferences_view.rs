@@ -907,8 +907,8 @@ impl PreferencesView {
 
                     painter.add(egui::Shape::convex_polygon(
                         points,
-                        Color32::from_rgb(28, 36, 32),
-                        Stroke::new(1.0_f32, Color32::from_rgb(55, 75, 65)),
+                        palette.card_bg,
+                        Stroke::new(1.0_f32, palette.border),
                     ));
 
                     let mid_a = (a0 + a1) * 0.5;
@@ -918,19 +918,19 @@ impl PreferencesView {
                         text_pos,
                         Align2::CENTER_CENTER,
                         &slice.label,
-                        egui::FontId::proportional(design::type_scale::MICRO),
-                        Color32::from_rgb(220, 235, 230),
+                        egui::FontId::proportional(design::type_scale::BODY_SM),
+                        palette.text_primary,
                     );
                 }
 
                 // Center columella hub
-                painter.circle_filled(center, inner_r, Color32::from_rgb(18, 24, 21));
+                painter.circle_filled(center, inner_r, palette.card_hover);
                 painter.circle_stroke(center, inner_r, Stroke::new(1.5_f32, palette.accent));
                 painter.text(
                     center,
                     Align2::CENTER_CENTER,
                     format!("{}\n{}/12", profile_name, slices_copy.len()),
-                    egui::FontId::proportional(design::type_scale::MICRO),
+                    egui::FontId::proportional(design::type_scale::BODY_SM),
                     palette.accent,
                 );
 
@@ -2796,30 +2796,38 @@ fn toggle_row(
                 }
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // Authentic Apple HIG Pill Toggle Switch (38x22 px)
+                let track_size = Vec2::new(38.0, 22.0);
+                let (rect, resp) = ui.allocate_exact_size(track_size, Sense::click());
+                if resp.clicked() {
+                    *val = !*val;
+                    *dirty = true;
+                }
+                let track_radius = 11.0;
+                let track_color = if *val { palette.accent } else { palette.border };
+                ui.painter()
+                    .rect_filled(rect, Rounding::same(track_radius), track_color);
+
+                // Sliding thumb circle (radius 8.5)
+                let thumb_x = if *val {
+                    rect.max.x - 11.0
+                } else {
+                    rect.min.x + 11.0
+                };
+                let thumb_center = egui::pos2(thumb_x, rect.center().y);
+                ui.painter()
+                    .circle_filled(thumb_center, 8.5, Color32::from_rgb(255, 255, 255));
+
                 let text = if *val { "On" } else { "Off" };
-                let btn = egui::Button::new(
+                ui.label(
                     egui::RichText::new(text)
                         .size(design::type_scale::BODY_SM)
                         .color(if *val {
                             palette.accent
                         } else {
-                            palette.text_secondary
+                            palette.text_muted
                         }),
-                )
-                .fill(if *val {
-                    palette.card_hover
-                } else {
-                    palette.card_bg
-                })
-                .stroke(Stroke::new(
-                    1.0_f32,
-                    if *val { palette.accent } else { palette.border },
-                ))
-                .rounding(Rounding::same(design::radius::SM));
-                if ui.add_sized(Vec2::new(50.0, 24.0), btn).clicked() {
-                    *val = !*val;
-                    *dirty = true;
-                }
+                );
             });
         },
     );
