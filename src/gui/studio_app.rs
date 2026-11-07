@@ -807,7 +807,8 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
         .with_min_inner_size([920.0, 580.0])
         .with_decorations(true)
         .with_transparent(false)
-        .with_resizable(true);
+        .with_resizable(true)
+        .with_visible(true);
 
     if let Some(icon) = load_app_icon() {
         builder = builder.with_icon(icon);

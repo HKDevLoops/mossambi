@@ -812,7 +812,8 @@ pub fn run_widget_with_args(
         .with_minimize_button(false)
         .with_maximize_button(false)
         .with_close_button(false)
-        .with_always_on_top();
+        .with_always_on_top()
+        .with_visible(true);
 
     if let Some(icon) = load_app_icon() {
         builder = builder.with_icon(icon);
