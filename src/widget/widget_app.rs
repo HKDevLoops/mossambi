@@ -498,6 +498,21 @@ impl eframe::App for MossambiWidgetApp {
                 self.geometry
                     .render(&painter, &self.sectors, current_state, self.hovered_carpel);
 
+                if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
+                    let pulse = (self.frame_count as f32 * 0.1).sin().abs();
+                    let stroke_color = Color32::from_rgba_premultiplied(
+                        (180.0 + pulse * 75.0) as u8,
+                        (220.0 + pulse * 35.0) as u8,
+                        50,
+                        (140.0 + pulse * 100.0) as u8,
+                    );
+                    painter.rect_stroke(
+                        rect.shrink(6.0),
+                        egui::Rounding::same(24.0),
+                        Stroke::new(2.5_f32, stroke_color),
+                    );
+                }
+
                 // Hub status area: surface the last conversion failure where
                 // success feedback appears (previously swallowed entirely).
                 if !self.is_converting && self.success_time.is_none() && self.last_error.is_some() {
