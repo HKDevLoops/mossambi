@@ -57,20 +57,27 @@ fn tags_stream_path(path: &Path) -> PathBuf {
 #[cfg(target_os = "windows")]
 fn read_raw(path: &Path) -> Vec<String> {
     let p = tags_stream_path(path);
-    match std::fs::read(&p) {
+    let ads_tags = match std::fs::read(&p) {
         Ok(bytes) => parse_tags(&String::from_utf8_lossy(&bytes)),
-        Err(_) => Vec::new(), // no stream yet = untagged (never an error in UI)
+        Err(_) => Vec::new(),
+    };
+    if !ads_tags.is_empty() {
+        return ads_tags;
     }
+    crate::core::state_db::get_file_tags(path)
 }
 
 #[cfg(not(target_os = "windows"))]
-fn read_raw(_path: &Path) -> Vec<String> {
-    Vec::new()
+fn read_raw(path: &Path) -> Vec<String> {
+    crate::core::state_db::get_file_tags(path)
 }
 
-/// Write/overwrite the tag payload. Empty list removes the stream.
+/// Write/overwrite the tag payload. Empty list removes the stream and DB entry.
 #[cfg(target_os = "windows")]
 fn write_raw(path: &Path, payload: &str) -> Result<(), String> {
+    let tag_list = parse_tags(payload);
+    let _ = crate::core::state_db::set_file_tags(path, &tag_list);
+
     if payload.is_empty() {
         match std::fs::remove_file(tags_stream_path(path)) {
             Ok(()) => return Ok(()),
@@ -84,8 +91,9 @@ fn write_raw(path: &Path, payload: &str) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn write_raw(_path: &Path, _payload: &str) -> Result<(), String> {
-    Ok(())
+fn write_raw(path: &Path, payload: &str) -> Result<(), String> {
+    let tag_list = parse_tags(payload);
+    crate::core::state_db::set_file_tags(path, &tag_list)
 }
 
 /// Tag list for `path` (empty when untagged or the platform cannot store ADS).

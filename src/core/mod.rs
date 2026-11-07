@@ -22,6 +22,7 @@ pub mod pantone;
 pub mod platform_paths;
 pub mod preview;
 pub mod registry;
+pub mod state_db;
 pub mod tags;
 
 pub use action_journal::{

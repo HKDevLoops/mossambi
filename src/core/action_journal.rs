@@ -74,10 +74,7 @@ fn now_ms() -> u64 {
 
 /// Where the log lives: `~/.mossambi/journal.ndjson`.
 fn log_path() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(&home)
+    crate::core::platform_paths::home_dir()
         .join(".mossambi")
         .join("journal.ndjson")
 }
@@ -112,14 +109,24 @@ fn append_line(line: &str) {
 
 fn push_action(action: RecordedAction) {
     let line = serde_json::to_string(&action).ok();
+    let action_kind = match &action {
+        RecordedAction::Rename { .. } => "rename",
+        RecordedAction::Move { .. } => "move",
+        RecordedAction::Copy { .. } => "copy",
+        RecordedAction::Delete { .. } => "delete",
+        RecordedAction::CreateDir { .. } => "create_dir",
+        RecordedAction::TagSet { .. } => "tag_set",
+        RecordedAction::Undo { .. } => "undo",
+    };
     if let Ok(mut j) = JOURNAL.lock() {
         j.actions.push_back(action);
         while j.actions.len() > ACTION_RING_CAP {
             j.actions.pop_front();
         }
     }
-    if let Some(line) = line {
-        append_line(&format!("{{\"at_ms\":{},\"entry\":{}}}", now_ms(), line));
+    if let Some(ref l) = line {
+        append_line(&format!("{{\"at_ms\":{},\"entry\":{}}}", now_ms(), l));
+        let _ = crate::core::state_db::record_action(action_kind, l);
     }
 }
 
@@ -143,6 +150,7 @@ pub fn record_keystroke(context: &str, key: &str, modifiers: &str) {
             j.keys.pop_front();
         }
     }
+    let _ = crate::core::state_db::record_keystroke(context, key, modifiers);
     if let Some(line) = line {
         append_line(&format!("{{\"at_ms\":{},\"entry\":{}}}", now_ms(), line));
     }

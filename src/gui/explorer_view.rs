@@ -326,6 +326,9 @@ pub struct ExplorerView {
 
     // Right-Side Preview Inspector (Finder-style inspector pane)
     pub show_inspector_pane: bool,
+
+    // Shift+Delete Permanent Deletion Confirmation
+    pub permanent_delete_prompt: Option<Vec<PathBuf>>,
 }
 
 impl Default for ExplorerView {
@@ -425,6 +428,7 @@ impl Default for ExplorerView {
             secondary_history: vec![current_dir.clone()],
             secondary_history_idx: 0,
             show_inspector_pane: false,
+            permanent_delete_prompt: None,
         };
 
         view.navigate_to(current_dir);
@@ -1370,27 +1374,24 @@ impl ExplorerView {
                 }
             }
             if i.key_pressed(egui::Key::Delete) {
-                let mut deleted = false;
-                if self.selected_paths.is_empty() {
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        log_result(
-                            "Delete",
-                            &item.path,
-                            crate::core::action_journal::stage_delete(std::slice::from_ref(
-                                &item.path,
-                            )),
-                        );
-                        deleted = true;
-                    }
+                let paths_to_delete: Vec<PathBuf> = if self.selected_paths.is_empty() {
+                    nav_entries
+                        .get(self.focused_row)
+                        .map(|item| vec![item.path.clone()])
+                        .unwrap_or_default()
                 } else {
-                    for path in &self.selected_paths {
-                        log_result("Delete", path, remove_entry_recursive(path));
-                        deleted = true;
+                    self.selected_paths.iter().cloned().collect()
+                };
+
+                if !paths_to_delete.is_empty() {
+                    if i.modifiers.shift {
+                        self.permanent_delete_prompt = Some(paths_to_delete);
+                    } else {
+                        let r = crate::core::action_journal::stage_delete(&paths_to_delete);
+                        log_result("Delete (Recycle Bin)", &paths_to_delete[0], r);
+                        self.selected_paths.clear();
+                        self.navigate_to(self.current_dir.clone());
                     }
-                    self.selected_paths.clear();
-                }
-                if deleted {
-                    self.navigate_to(self.current_dir.clone());
                 }
             }
         });
@@ -1448,6 +1449,74 @@ impl ExplorerView {
                 self.new_folder_buffer = "New Folder".to_string();
             } else if close_dialog {
                 self.show_new_folder_dialog = false;
+            }
+        }
+
+        // 3b. Shift+Delete Permanent Deletion Confirmation Modal
+        if let Some(ref targets) = self.permanent_delete_prompt.clone() {
+            let mut close_dialog = false;
+            let mut do_permanent_delete = false;
+
+            egui::Window::new("Permanent Deletion Confirmation")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .frame(
+                    egui::Frame::window(&ui.ctx().style())
+                        .fill(palette.card_bg)
+                        .stroke(Stroke::new(1.0_f32, palette.border))
+                        .rounding(Rounding::same(12.0))
+                        .inner_margin(egui::Margin::same(16.0)),
+                )
+                .show(ui.ctx(), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Are you sure you want to permanently delete {} item(s)?",
+                            targets.len()
+                        ))
+                        .size(14.0)
+                        .strong()
+                        .color(palette.text_primary),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "This action cannot be undone. Files will bypass the Recycle Bin.",
+                        )
+                        .size(12.0)
+                        .color(Color32::from_rgb(255, 90, 90)),
+                    );
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Permanently Delete")
+                                        .color(Color32::WHITE)
+                                        .strong(),
+                                )
+                                .fill(Color32::from_rgb(210, 45, 45)),
+                            )
+                            .clicked()
+                        {
+                            do_permanent_delete = true;
+                            close_dialog = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close_dialog = true;
+                        }
+                    });
+                });
+
+            if do_permanent_delete {
+                for path in targets {
+                    log_result("Permanent Delete", path, remove_entry_recursive(path));
+                }
+                self.selected_paths.clear();
+                self.navigate_to(self.current_dir.clone());
+            }
+            if close_dialog {
+                self.permanent_delete_prompt = None;
             }
         }
 
