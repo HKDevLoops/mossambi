@@ -62,6 +62,10 @@ pub struct StudioView {
 
     // Finder-style Command Palette (Ctrl+P / Cmd+K)
     pub command_palette: CommandPalette,
+
+    // Universal Media Conformer Studio State
+    pub conformer_unit: usize,
+    pub conformer_preset_selector: String,
 }
 
 impl Default for StudioView {
@@ -86,6 +90,9 @@ impl Default for StudioView {
 
             prefs_view: crate::gui::preferences_view::PreferencesView::default(),
             command_palette: CommandPalette::default(),
+
+            conformer_unit: 0,
+            conformer_preset_selector: "Passport Photo (35x45mm / 300 DPI)".to_string(),
         }
     }
 }
@@ -1822,14 +1829,159 @@ impl StudioView {
 
             ui.add_space(10.0);
 
-            // Row 1: Specification Name
+            // Row 0: Preset Selector with SQLite backing
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Preset:").strong().size(13.0));
+                let presets = crate::core::state_db::load_presets();
+                egui::ComboBox::from_id_salt("conformer_preset_combo")
+                    .selected_text(&self.conformer_preset_selector)
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_label(
+                                self.conformer_preset_selector
+                                    == "Passport Photo (35x45mm / 300 DPI)",
+                                "Passport Photo (35x45mm / 300 DPI)",
+                            )
+                            .clicked()
+                        {
+                            self.conformer_preset_selector =
+                                "Passport Photo (35x45mm / 300 DPI)".into();
+                            settings.exam_preset_name = "Passport Photo".into();
+                            settings.exam_width = 413;
+                            settings.exam_height = 531;
+                            settings.exam_dpi = 300;
+                            settings.exam_min_kb = 20;
+                            settings.exam_max_kb = 50;
+                            settings.exam_whiten = true;
+                        }
+                        if ui
+                            .selectable_label(
+                                self.conformer_preset_selector
+                                    == "Application Signature (2:1 / 300 DPI)",
+                                "Application Signature (2:1 / 300 DPI)",
+                            )
+                            .clicked()
+                        {
+                            self.conformer_preset_selector =
+                                "Application Signature (2:1 / 300 DPI)".into();
+                            settings.exam_preset_name = "Signature".into();
+                            settings.exam_width = 400;
+                            settings.exam_height = 200;
+                            settings.exam_dpi = 300;
+                            settings.exam_min_kb = 10;
+                            settings.exam_max_kb = 20;
+                            settings.exam_whiten = true;
+                        }
+                        if ui
+                            .selectable_label(
+                                self.conformer_preset_selector
+                                    == "ID Document Scan (A4 / 300 DPI)",
+                                "ID Document Scan (A4 / 300 DPI)",
+                            )
+                            .clicked()
+                        {
+                            self.conformer_preset_selector =
+                                "ID Document Scan (A4 / 300 DPI)".into();
+                            settings.exam_preset_name = "ID Document".into();
+                            settings.exam_width = 2480;
+                            settings.exam_height = 3508;
+                            settings.exam_dpi = 300;
+                            settings.exam_min_kb = 100;
+                            settings.exam_max_kb = 500;
+                            settings.exam_whiten = true;
+                        }
+                        if ui
+                            .selectable_label(
+                                self.conformer_preset_selector == "Square Avatar (600x600 px)",
+                                "Square Avatar (600x600 px)",
+                            )
+                            .clicked()
+                        {
+                            self.conformer_preset_selector = "Square Avatar (600x600 px)".into();
+                            settings.exam_preset_name = "Square Avatar".into();
+                            settings.exam_width = 600;
+                            settings.exam_height = 600;
+                            settings.exam_dpi = 300;
+                            settings.exam_min_kb = 30;
+                            settings.exam_max_kb = 100;
+                            settings.exam_whiten = false;
+                        }
+                        for p in &presets {
+                            let label =
+                                format!("Custom: {} ({}x{} px)", p.name, p.width_px, p.height_px);
+                            if ui
+                                .selectable_label(self.conformer_preset_selector == p.name, &label)
+                                .clicked()
+                            {
+                                self.conformer_preset_selector = p.name.clone();
+                                settings.exam_preset_name = p.name.clone();
+                                settings.exam_width = p.width_px;
+                                settings.exam_height = p.height_px;
+                                settings.exam_dpi = p.dpi;
+                                settings.exam_min_kb = p.min_bytes / 1024;
+                                settings.exam_max_kb = p.max_bytes / 1024;
+                                settings.exam_whiten = p.normalize_white_balance;
+                            }
+                        }
+                    });
+
+                if ui.button("Save Preset").clicked() {
+                    let record = crate::core::state_db::CustomPresetRecord {
+                        name: settings.exam_preset_name.clone(),
+                        category: "Custom".into(),
+                        target_format: "JPG".into(),
+                        width_px: settings.exam_width,
+                        height_px: settings.exam_height,
+                        dpi: settings.exam_dpi,
+                        min_bytes: settings.exam_min_kb * 1024,
+                        max_bytes: settings.exam_max_kb * 1024,
+                        normalize_white_balance: settings.exam_whiten,
+                        background_rgb: [255, 255, 255],
+                    };
+                    let _ = crate::core::state_db::save_preset(&record);
+                }
+
+                if ui.button("Delete").clicked() {
+                    let _ = crate::core::state_db::delete_preset(&settings.exam_preset_name);
+                }
+            });
+
+            ui.add_space(8.0);
+
+            // Row 1: Specification Name & Units
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("Specification Name:").size(13.0));
                 ui.add(
                     egui::TextEdit::singleline(&mut settings.exam_preset_name)
-                        .desired_width(220.0)
+                        .desired_width(180.0)
                         .hint_text("e.g. Application Photo, Signature"),
                 );
+                ui.separator();
+                ui.label("Units:");
+                if ui.selectable_label(self.conformer_unit == 0, "px").clicked() {
+                    self.conformer_unit = 0;
+                }
+                if ui.selectable_label(self.conformer_unit == 1, "cm").clicked() {
+                    self.conformer_unit = 1;
+                }
+                if ui.selectable_label(self.conformer_unit == 2, "mm").clicked() {
+                    self.conformer_unit = 2;
+                }
+                if self.conformer_unit == 1 {
+                    let w_cm = (settings.exam_width as f32 / settings.exam_dpi as f32) * 2.54;
+                    let h_cm = (settings.exam_height as f32 / settings.exam_dpi as f32) * 2.54;
+                    ui.label(
+                        egui::RichText::new(format!("({:.2} x {:.2} cm)", w_cm, h_cm))
+                            .color(palette.accent),
+                    );
+                } else if self.conformer_unit == 2 {
+                    let w_mm = (settings.exam_width as f32 / settings.exam_dpi as f32) * 25.4;
+                    let h_mm = (settings.exam_height as f32 / settings.exam_dpi as f32) * 25.4;
+                    ui.label(
+                        egui::RichText::new(format!("({:.1} x {:.1} mm)", w_mm, h_mm))
+                            .color(palette.accent),
+                    );
+                }
             });
 
             ui.add_space(8.0);
@@ -1924,6 +2076,46 @@ impl StudioView {
             ui.add_space(14.0);
             ui.separator();
             ui.add_space(8.0);
+
+            // Pre-Scan Comparison Card (Input vs Target Spec)
+            if let Some(ref path) = current_file {
+                let file_len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                let in_kb = file_len as f64 / 1024.0;
+                let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+                let ext = path.extension().unwrap_or_default().to_string_lossy().to_uppercase();
+
+                egui::Frame::none()
+                    .fill(palette.sidebar_bg)
+                    .stroke(Stroke::new(1.0_f32, palette.border))
+                    .rounding(Rounding::same(8.0))
+                    .inner_margin(12.0)
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new("Pre-Scan Conformer Analysis")
+                                .strong()
+                                .size(13.0)
+                                .color(palette.accent),
+                        );
+                        ui.add_space(6.0);
+                        ui.columns(2, |cols| {
+                            cols[0].vertical(|ui| {
+                                ui.label(egui::RichText::new("[Input Source File]").strong().size(12.0));
+                                ui.label(format!("File: {}", file_name));
+                                ui.label(format!("Current Size: {:.1} KB", in_kb));
+                                ui.label(format!("Format: {}", ext));
+                            });
+                            cols[1].vertical(|ui| {
+                                ui.label(egui::RichText::new("[Conformed Target]").strong().size(12.0).color(palette.accent));
+                                ui.label(format!("Preset: {}", settings.exam_preset_name));
+                                ui.label(format!("Dimensions: {} x {} px @ {} DPI", settings.exam_width, settings.exam_height, settings.exam_dpi));
+                                ui.label(format!("Target Budget: {} - {} KB", settings.exam_min_kb, settings.exam_max_kb));
+                                ui.label(format!("Whitening: {}", if settings.exam_whiten { "Enabled (Clean White BG)" } else { "Disabled (Raw Image)" }));
+                            });
+                        });
+                    });
+
+                ui.add_space(10.0);
+            }
 
             // Execute Custom Form Optimization
             ui.horizontal(|ui| {

@@ -250,6 +250,38 @@ impl ExamConstraint {
             background_color: [255, 255, 255],
         }
     }
+
+    pub fn to_preset_record(&self, category: &str) -> crate::core::state_db::CustomPresetRecord {
+        crate::core::state_db::CustomPresetRecord {
+            name: self.name.clone(),
+            category: category.to_string(),
+            target_format: self.target_format.clone(),
+            width_px: self.width_px,
+            height_px: self.height_px,
+            dpi: self.dpi,
+            min_bytes: self.min_bytes,
+            max_bytes: self.max_bytes,
+            normalize_white_balance: self.normalize_white_balance,
+            background_rgb: self.background_color,
+        }
+    }
+}
+
+impl From<&crate::core::state_db::CustomPresetRecord> for ExamConstraint {
+    fn from(r: &crate::core::state_db::CustomPresetRecord) -> Self {
+        Self {
+            name: r.name.clone(),
+            target_format: r.target_format.clone(),
+            width_px: r.width_px,
+            height_px: r.height_px,
+            dpi: r.dpi,
+            min_bytes: r.min_bytes,
+            max_bytes: r.max_bytes,
+            normalize_white_balance: r.normalize_white_balance,
+            positioning: PositioningMode::CenterCrop,
+            background_color: r.background_rgb,
+        }
+    }
 }
 
 /// Convenience alias for ExamOptimizer::optimize_file
