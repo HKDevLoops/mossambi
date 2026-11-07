@@ -1030,78 +1030,43 @@ impl StudioView {
             }
             PaletteAction::NavigateDesktop => {
                 self.current_tab = StudioTab::FileExplorer;
-                let home_opt = std::env::var("USERPROFILE")
-                    .or_else(|_| std::env::var("HOME"))
-                    .ok();
-                if let Some(h) = home_opt {
-                    self.explorer_view
-                        .navigate_to(PathBuf::from(h).join("Desktop"));
-                    self.explorer_view.is_home_view = false;
-                }
+                let target = crate::core::platform_paths::desktop_dir();
+                self.explorer_view.navigate_to(target);
+                self.explorer_view.is_home_view = false;
             }
             PaletteAction::NavigateDownloads => {
                 self.current_tab = StudioTab::FileExplorer;
-                let home_opt = std::env::var("USERPROFILE")
-                    .or_else(|_| std::env::var("HOME"))
-                    .ok();
-                if let Some(h) = home_opt {
-                    self.explorer_view
-                        .navigate_to(PathBuf::from(h).join("Downloads"));
-                    self.explorer_view.is_home_view = false;
-                }
+                let target = crate::core::platform_paths::downloads_dir();
+                self.explorer_view.navigate_to(target);
+                self.explorer_view.is_home_view = false;
             }
             PaletteAction::NavigateDocuments => {
                 self.current_tab = StudioTab::FileExplorer;
-                let home_opt = std::env::var("USERPROFILE")
-                    .or_else(|_| std::env::var("HOME"))
-                    .ok();
-                if let Some(h) = home_opt {
-                    self.explorer_view
-                        .navigate_to(PathBuf::from(h).join("Documents"));
-                    self.explorer_view.is_home_view = false;
-                }
+                let target = crate::core::platform_paths::documents_dir();
+                self.explorer_view.navigate_to(target);
+                self.explorer_view.is_home_view = false;
             }
             PaletteAction::NavigatePictures => {
                 self.current_tab = StudioTab::FileExplorer;
-                let home_opt = std::env::var("USERPROFILE")
-                    .or_else(|_| std::env::var("HOME"))
-                    .ok();
-                if let Some(h) = home_opt {
-                    self.explorer_view
-                        .navigate_to(PathBuf::from(h).join("Pictures"));
-                    self.explorer_view.is_home_view = false;
-                }
+                let target = crate::core::platform_paths::pictures_dir();
+                self.explorer_view.navigate_to(target);
+                self.explorer_view.is_home_view = false;
             }
             PaletteAction::NavigateVideos => {
                 self.current_tab = StudioTab::FileExplorer;
-                let home_opt = std::env::var("USERPROFILE")
-                    .or_else(|_| std::env::var("HOME"))
-                    .ok();
-                if let Some(h) = home_opt {
-                    self.explorer_view
-                        .navigate_to(PathBuf::from(h).join("Videos"));
-                    self.explorer_view.is_home_view = false;
-                }
+                let target = crate::core::platform_paths::videos_dir();
+                self.explorer_view.navigate_to(target);
+                self.explorer_view.is_home_view = false;
             }
             PaletteAction::NavigateMusic => {
                 self.current_tab = StudioTab::FileExplorer;
-                let home_opt = std::env::var("USERPROFILE")
-                    .or_else(|_| std::env::var("HOME"))
-                    .ok();
-                if let Some(h) = home_opt {
-                    self.explorer_view
-                        .navigate_to(PathBuf::from(h).join("Music"));
-                    self.explorer_view.is_home_view = false;
-                }
+                let target = crate::core::platform_paths::music_dir();
+                self.explorer_view.navigate_to(target);
+                self.explorer_view.is_home_view = false;
             }
             PaletteAction::NavigateRecycleBin => {
                 self.current_tab = StudioTab::FileExplorer;
-                let home_opt = std::env::var("USERPROFILE")
-                    .or_else(|_| std::env::var("HOME"))
-                    .ok();
-                let base = home_opt
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from("."));
+                let base = crate::core::platform_paths::home_dir();
                 let recycle_target = self
                     .explorer_view
                     .drives
@@ -1121,6 +1086,14 @@ impl StudioView {
             }
             PaletteAction::ViewColumns => {
                 self.explorer_view.view_mode = crate::gui::explorer_view::ViewMode::Columns;
+            }
+            PaletteAction::ToggleSplitView => {
+                self.current_tab = StudioTab::FileExplorer;
+                self.explorer_view.toggle_split_view();
+            }
+            PaletteAction::ToggleInspectorPane => {
+                self.current_tab = StudioTab::FileExplorer;
+                self.explorer_view.toggle_inspector_pane();
             }
             PaletteAction::TabTranscoder => {
                 self.current_tab = StudioTab::Transcoder;

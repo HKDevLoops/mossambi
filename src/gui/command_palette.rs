@@ -21,6 +21,8 @@ pub enum PaletteAction {
     ViewDetails,
     ViewGrid,
     ViewColumns,
+    ToggleSplitView,
+    ToggleInspectorPane,
     TabTranscoder,
     TabExamStudio,
     TabQualityInspector,
@@ -124,6 +126,20 @@ pub const ALL_COMMANDS: &[CommandEntry] = &[
         shortcut: "Ctrl+3",
         glyph: IconGlyph::ActionColumns,
         action: PaletteAction::ViewColumns,
+    },
+    CommandEntry {
+        title: "Toggle Dual-Pane Split View",
+        category: "View",
+        shortcut: "F3",
+        glyph: IconGlyph::ActionColumns,
+        action: PaletteAction::ToggleSplitView,
+    },
+    CommandEntry {
+        title: "Toggle Inspector Preview Pane",
+        category: "View",
+        shortcut: "Ctrl+Shift+P",
+        glyph: IconGlyph::Search,
+        action: PaletteAction::ToggleInspectorPane,
     },
     // Tools & Converters
     CommandEntry {
