@@ -109,7 +109,11 @@ fn extract_pptx(path: &Path) -> anyhow::Result<String> {
     let file = fs::File::open(path)?;
     let mut zip = zip::ZipArchive::new(file)?;
     let mut slide_names: Vec<String> = (0..zip.len())
-        .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+        .filter_map(|i| {
+            zip.by_index(i)
+                .ok()
+                .and_then(|e| e.name().ok().map(|n| n.to_string()))
+        })
         .filter(|n| n.starts_with("ppt/slides/slide") && n.ends_with(".xml"))
         .collect();
     slide_names.sort();
@@ -187,8 +191,10 @@ fn extract_archive(path: &Path) -> anyhow::Result<String> {
         let mut out = String::new();
         for i in 0..zip.len() {
             if let Ok(e) = zip.by_index(i) {
-                out.push_str(e.name());
-                out.push('\n');
+                if let Ok(name) = e.name() {
+                    out.push_str(&name);
+                    out.push('\n');
+                }
             }
         }
         return Ok(truncate(&out, 16384));

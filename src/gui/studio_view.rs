@@ -1927,12 +1927,14 @@ impl StudioView {
                         }
                         if ui
                             .selectable_label(
-                                self.conformer_preset_selector == "US Visa Photo (2x2 in / 600x600 px)",
+                                self.conformer_preset_selector
+                                    == "US Visa Photo (2x2 in / 600x600 px)",
                                 "US Visa Photo (2x2 in / 600x600 px)",
                             )
                             .clicked()
                         {
-                            self.conformer_preset_selector = "US Visa Photo (2x2 in / 600x600 px)".into();
+                            self.conformer_preset_selector =
+                                "US Visa Photo (2x2 in / 600x600 px)".into();
                             settings.exam_preset_name = "US Visa".into();
                             settings.exam_width = 600;
                             settings.exam_height = 600;
@@ -2396,6 +2398,9 @@ impl StudioView {
         );
         ui.add_space(14.0);
 
+        let specs = crate::hwaccel::detect_system_specs();
+        let suggestions = crate::hwaccel::get_system_auto_suggestions(&specs);
+
         let card_frame = egui::Frame::none()
             .fill(palette.card_bg)
             .stroke(Stroke::new(1.0_f32, palette.border))
@@ -2405,14 +2410,27 @@ impl StudioView {
         card_frame.show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("GPU Transcoder:")
+                    egui::RichText::new("Primary GPU:")
                         .size(13.5)
                         .strong()
                         .color(PANTONE_FLAVEDO),
                 );
                 ui.label(format!(
-                    "{:?} (H.264: {} | HEVC: {})",
-                    hw.vendor, hw.h264_encoder, hw.hevc_encoder
+                    "{} (H.264: {} | HEVC: {})",
+                    specs.gpu_name, hw.h264_encoder, hw.hevc_encoder
+                ));
+            });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Physical Memory:")
+                        .size(13.5)
+                        .strong()
+                        .color(PANTONE_FLAVEDO),
+                );
+                ui.label(format!(
+                    "{:.1} GB Installed Physical RAM",
+                    specs.total_ram_gb
                 ));
             });
             ui.add_space(6.0);
@@ -2434,8 +2452,8 @@ impl StudioView {
                         .color(PANTONE_FLAVEDO),
                 );
                 ui.label(format!(
-                    "{} Concurrent Rayon Worker Threads",
-                    hw.optimal_thread_count
+                    "{} Logical Cores (Optimal Concurrency: {} threads)",
+                    specs.cpu_cores, specs.recommended_concurrency
                 ));
             });
             ui.add_space(6.0);
@@ -2461,6 +2479,68 @@ impl StudioView {
                 ));
             });
         });
+
+        ui.add_space(16.0);
+        ui.label(
+            egui::RichText::new("Auto-Aware System Optimization & Recommendations")
+                .size(14.0)
+                .strong()
+                .color(palette.text_primary),
+        );
+        ui.label(
+            egui::RichText::new(
+                "Derived automatically from physical CPU cores, GPU silicon, and RAM buffer",
+            )
+            .size(12.5)
+            .color(palette.text_secondary),
+        );
+        ui.add_space(8.0);
+
+        for item in suggestions {
+            let item_frame = egui::Frame::none()
+                .fill(palette.sidebar_bg)
+                .stroke(Stroke::new(1.0_f32, palette.border))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(egui::Margin::symmetric(14.0, 10.0));
+
+            item_frame.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("[{}]", item.badge))
+                            .size(11.0)
+                            .strong()
+                            .color(PANTONE_FLAVEDO),
+                    );
+                    ui.label(
+                        egui::RichText::new(item.title)
+                            .size(13.0)
+                            .strong()
+                            .color(palette.text_primary),
+                    );
+                });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("-> Recommendation:")
+                            .size(12.0)
+                            .color(palette.accent),
+                    );
+                    ui.label(
+                        egui::RichText::new(&item.recommendation)
+                            .size(12.5)
+                            .strong()
+                            .color(palette.text_primary),
+                    );
+                });
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new(&item.rationale)
+                        .size(11.5)
+                        .color(palette.text_muted),
+                );
+            });
+            ui.add_space(6.0);
+        }
     }
 
     /// Tab 5: Preferences & Certified Pantone Swatches & Themes

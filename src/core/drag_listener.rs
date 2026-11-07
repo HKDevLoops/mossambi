@@ -737,33 +737,35 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg_attr(
-        target_os = "windows",
-        ignore = "Global WH_MOUSE_LL hook requires dedicated single-thread execution"
-    )]
     fn test_drag_listener_lifecycle() {
-        let mut listener = DragGestureListener::start(true, true, 25.0);
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        assert!(listener.try_recv().is_none());
-        listener.stop();
+        let handle = std::thread::spawn(|| {
+            let mut listener = DragGestureListener::start(true, true, 25.0);
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            assert!(listener.try_recv().is_none());
+            listener.stop();
+        });
+        handle
+            .join()
+            .expect("Listener lifecycle test should exit cleanly");
     }
 
     #[test]
-    #[cfg_attr(
-        target_os = "windows",
-        ignore = "Requires STA single-threaded apartment"
-    )]
     fn test_query_active_explorer_files_safe() {
-        #[cfg(target_os = "windows")]
-        {
-            use windows_sys::Win32::Foundation::POINT;
-            let pt = POINT {
-                x: -10000,
-                y: -10000,
-            };
-            // Should safely return empty list or non-panicking results
-            let files = query_active_explorer_files(pt);
-            assert!(files.is_empty() || !files.is_empty());
-        }
+        let handle = std::thread::spawn(|| {
+            #[cfg(target_os = "windows")]
+            {
+                use windows_sys::Win32::Foundation::POINT;
+                let pt = POINT {
+                    x: -10000,
+                    y: -10000,
+                };
+                // Should safely return empty list or non-panicking results without crashing
+                let files = query_active_explorer_files(pt);
+                assert!(files.is_empty() || !files.is_empty());
+            }
+        });
+        handle
+            .join()
+            .expect("Explorer query test should join cleanly");
     }
 }

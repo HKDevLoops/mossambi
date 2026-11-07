@@ -1007,7 +1007,9 @@ impl PreferencesView {
         let status = crate::core::default_explorer::status();
         let status_lbl = match status {
             crate::core::default_explorer::TakeoverState::Active => "Active (Mossambi is Default)",
-            crate::core::default_explorer::TakeoverState::NotActive => "Not Active (Windows Explorer)",
+            crate::core::default_explorer::TakeoverState::NotActive => {
+                "Not Active (Windows Explorer)"
+            }
             crate::core::default_explorer::TakeoverState::Unknown => "Unknown",
         };
         setting_row(
@@ -1038,7 +1040,10 @@ impl PreferencesView {
             &ret_lbl,
             dirty,
             |ui, dirty| {
-                if ui.add(egui::Slider::new(ret_mut, 1..=365).suffix(" d")).changed() {
+                if ui
+                    .add(egui::Slider::new(ret_mut, 1..=365).suffix(" d"))
+                    .changed()
+                {
                     *dirty = true;
                 }
             },
@@ -1208,7 +1213,11 @@ impl PreferencesView {
         );
 
         let kp = self.cfg.keybinding_profile;
-        let kp_lbl = if kp == 0 { "macOS Finder" } else { "Windows Explorer" };
+        let kp_lbl = if kp == 0 {
+            "macOS Finder"
+        } else {
+            "Windows Explorer"
+        };
         let kp_mut = &mut self.cfg.keybinding_profile;
         setting_row(
             ui,
@@ -1221,7 +1230,10 @@ impl PreferencesView {
                     *kp_mut = 0;
                     *dirty = true;
                 }
-                if ui.selectable_label(*kp_mut == 1, "Windows Explorer").clicked() {
+                if ui
+                    .selectable_label(*kp_mut == 1, "Windows Explorer")
+                    .clicked()
+                {
                     *kp_mut = 1;
                     *dirty = true;
                 }
@@ -1306,7 +1318,10 @@ impl PreferencesView {
             &ep_lbl,
             dirty,
             |ui, dirty| {
-                if ui.add(TextEdit::singleline(ep_mut).desired_width(180.0)).changed() {
+                if ui
+                    .add(TextEdit::singleline(ep_mut).desired_width(180.0))
+                    .changed()
+                {
                     *dirty = true;
                 }
             },
@@ -1321,7 +1336,10 @@ impl PreferencesView {
             &mdl_lbl,
             dirty,
             |ui, dirty| {
-                if ui.add(TextEdit::singleline(mdl_mut).desired_width(140.0)).changed() {
+                if ui
+                    .add(TextEdit::singleline(mdl_mut).desired_width(140.0))
+                    .changed()
+                {
                     *dirty = true;
                 }
             },

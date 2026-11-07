@@ -618,7 +618,7 @@ impl FileQualityChecker {
             }
             FileCategory::Document => {
                 if ext == "PDF" {
-                    parser_used = "lopdf v0.34 (Pure-Rust PDF Document Tree Parser)";
+                    parser_used = "lopdf v0.47 (Pure-Rust PDF Document Tree Parser)";
                     match lopdf::Document::load(path) {
                         Ok(doc) => {
                             can_parse = true;

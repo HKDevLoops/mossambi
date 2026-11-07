@@ -247,3 +247,71 @@ pub fn open_linux_uri(uri: &str) -> Result<()> {
         .status();
     Ok(())
 }
+
+/// Reads global pointer coordinates from GNOME Shell Unix domain socket bridge
+/// (`$XDG_RUNTIME_DIR/mossambi-gnome/pointer.sock`) under native Wayland sessions.
+pub fn query_gnome_pointer_socket() -> Option<(i32, i32)> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::Read;
+        use std::os::unix::net::UnixStream;
+
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").ok()?;
+        let sock_path = PathBuf::from(runtime_dir)
+            .join("mossambi-gnome")
+            .join("pointer.sock");
+
+        if !sock_path.exists() {
+            return None;
+        }
+
+        let mut stream = UnixStream::connect(&sock_path).ok()?;
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_millis(20)))
+            .ok()?;
+
+        let mut buf = [0u8; 128];
+        let bytes_read = stream.read(&mut buf).ok()?;
+        if bytes_read == 0 {
+            return None;
+        }
+
+        let s = std::str::from_utf8(&buf[..bytes_read]).ok()?;
+        let v: serde_json::Value = serde_json::from_str(s.trim()).ok()?;
+        let x = v.get("x")?.as_i64()? as i32;
+        let y = v.get("y")?.as_i64()? as i32;
+        Some((x, y))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// Generates Hyprland compositor window rules for the radial donut widget.
+pub fn generate_hyprland_window_rules() -> String {
+    r#"# Mossambi Radial Fruit Widget Hyprland Rules
+windowrulev2 = float, class:^(mossambi)$, title:^(Mossambi Widget)$
+windowrulev2 = noborder, class:^(mossambi)$, title:^(Mossambi Widget)$
+windowrulev2 = nodim, class:^(mossambi)$, title:^(Mossambi Widget)$
+windowrulev2 = noshadow, class:^(mossambi)$, title:^(Mossambi Widget)$
+windowrulev2 = pin, class:^(mossambi)$, title:^(Mossambi Widget)$
+windowrulev2 = stayfocused, class:^(mossambi)$, title:^(Mossambi Widget)$
+"#
+    .to_string()
+}
+
+/// Generates KDE Plasma KWin JavaScript rule to keep the widget centered and frameless.
+pub fn generate_kwin_script() -> String {
+    r#"// Mossambi Sweet Lime Widget KWin Placement Script
+workspace.windowAdded.connect(function(client) {
+    if (client.resourceClass == "mossambi" && client.caption == "Mossambi Widget") {
+        client.noBorder = true;
+        client.skipTaskbar = true;
+        client.skipPager = true;
+        client.keepAbove = true;
+    }
+});
+"#
+    .to_string()
+}

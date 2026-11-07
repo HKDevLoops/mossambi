@@ -93,15 +93,45 @@ mod imp {
             };
 
             unsafe {
+                let mut paths = Vec::new();
+
                 if let Ok(medium) = data_obj.GetData(&format) {
                     let hglobal = medium.u.hGlobal;
-                    let paths = extract_paths_from_hdrop(hglobal);
-                    if !paths.is_empty() {
-                        let _ = self.tx.send(OleDropEvent {
-                            paths,
-                            screen_pos: (pt.x, pt.y),
-                        });
+                    paths = extract_paths_from_hdrop(hglobal);
+                }
+
+                // Browser Fallback: CF_UNICODETEXT (13) for text/uri-list, web URLs, and data URLs
+                if paths.is_empty() {
+                    let format_text = FORMATETC {
+                        cfFormat: 13, // CF_UNICODETEXT
+                        ptd: std::ptr::null_mut(),
+                        dwAspect: 1,
+                        lindex: -1,
+                        tymed: TYMED_HGLOBAL.0 as u32,
+                    };
+                    if let Ok(medium) = data_obj.GetData(&format_text) {
+                        let text = extract_string_from_hglobal(medium.u.hGlobal);
+                        let uris = crate::core::web_drop::parse_uri_list(&text);
+                        for u in uris {
+                            if let Ok(staged) = crate::core::web_drop::stage_url_or_data(&u) {
+                                paths.push(staged);
+                            }
+                        }
+                        if paths.is_empty() {
+                            if let Some(src) = crate::core::web_drop::parse_html_image_src(&text) {
+                                if let Ok(staged) = crate::core::web_drop::stage_url_or_data(&src) {
+                                    paths.push(staged);
+                                }
+                            }
+                        }
                     }
+                }
+
+                if !paths.is_empty() {
+                    let _ = self.tx.send(OleDropEvent {
+                        paths,
+                        screen_pos: (pt.x, pt.y),
+                    });
                     if !pdweffect.is_null() {
                         *pdweffect = DROPEFFECT_COPY;
                     }
@@ -138,6 +168,22 @@ mod imp {
         }
         let _ = GlobalUnlock(hglobal);
         paths
+    }
+
+    unsafe fn extract_string_from_hglobal(hglobal: HGLOBAL) -> String {
+        let ptr = GlobalLock(hglobal);
+        if ptr.is_null() {
+            return String::new();
+        }
+        let wide_ptr = ptr as *const u16;
+        let mut len = 0;
+        while *wide_ptr.add(len) != 0 {
+            len += 1;
+        }
+        let slice = std::slice::from_raw_parts(wide_ptr, len);
+        let s = String::from_utf16_lossy(slice);
+        let _ = GlobalUnlock(hglobal);
+        s
     }
 
     /// Register the OLE drop target for a native window handle.

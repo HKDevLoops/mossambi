@@ -1634,7 +1634,7 @@ impl ExplorerView {
             let mut do_execute = false;
             let count = self.batch_rename.target_paths.len();
 
-            egui::Window::new(format!("Batch Rename ({} items)", count))
+            egui::Window::new(format!("Batch Rename ({})", pluralize_items(count)))
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -1737,8 +1737,10 @@ impl ExplorerView {
                                 .to_string_lossy()
                                 .to_string();
                             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                            let stem =
-                                path.file_stem().and_then(|s| s.to_str()).unwrap_or(&old_name);
+                            let stem = path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or(&old_name);
 
                             let new_name = match self.batch_rename.mode {
                                 0 => {
@@ -4134,6 +4136,7 @@ impl ExplorerView {
                     }
 
                     if has_sel {
+                        ui.add_space(10.0);
                         let bytes: u64 = entries
                             .iter()
                             .filter(|e| self.selected_paths.contains(&e.path) && !e.is_dir)
@@ -5526,9 +5529,18 @@ impl ExplorerView {
                             if let Some(tex) = thumb_tex {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(6.0);
+                                    let tex_size = tex.size_vec2();
+                                    let aspect = (tex_size.x / tex_size.y.max(1.0)).clamp(0.2, 5.0);
+                                    let max_w = inspector_w - 24.0;
+                                    let max_h = 160.0;
+                                    let (draw_w, draw_h) = if aspect >= (max_w / max_h) {
+                                        (max_w, (max_w / aspect).round())
+                                    } else {
+                                        ((max_h * aspect).round(), max_h)
+                                    };
                                     ui.add(
                                         egui::Image::new(&tex)
-                                            .max_size(Vec2::new(inspector_w - 24.0, 160.0))
+                                            .fit_to_exact_size(Vec2::new(draw_w, draw_h))
                                             .rounding(Rounding::same(8.0)),
                                     );
                                     ui.add_space(4.0);
@@ -5961,7 +5973,7 @@ impl ExplorerView {
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
-                                egui::RichText::new(format!("{} items", self.entries.len()))
+                                egui::RichText::new(pluralize_items(self.entries.len()))
                                     .size(11.0)
                                     .color(palette.text_muted),
                             );
@@ -6054,12 +6066,9 @@ impl ExplorerView {
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
-                                egui::RichText::new(format!(
-                                    "{} items",
-                                    self.secondary_entries.len()
-                                ))
-                                .size(11.0)
-                                .color(palette.text_muted),
+                                egui::RichText::new(pluralize_items(self.secondary_entries.len()))
+                                    .size(11.0)
+                                    .color(palette.text_muted),
                             );
                         });
                     });
@@ -8102,7 +8111,10 @@ impl ExplorerView {
         menu_ui.separator();
         if multi {
             if menu_ui
-                .button(format!("Batch Rename ({} items)...", targets.len()))
+                .button(format!(
+                    "Batch Rename ({})...",
+                    pluralize_items(targets.len())
+                ))
                 .clicked()
             {
                 intent.batch_rename = Some(targets.to_vec());

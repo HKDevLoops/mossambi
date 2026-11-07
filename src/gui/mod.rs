@@ -3,6 +3,7 @@ pub mod anim;
 pub mod citrus_geometry;
 pub mod command_palette;
 pub mod context_menu;
+pub mod crop_canvas;
 pub mod custom_widgets;
 pub mod design;
 pub mod drop_overlay;

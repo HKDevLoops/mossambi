@@ -805,8 +805,8 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
         .with_title("Mossambi - Universal File Conversion Studio")
         .with_inner_size([1120.0, 720.0])
         .with_min_inner_size([920.0, 580.0])
-        .with_decorations(false) // Undecorated: eliminate duplicate OS titlebar!
-        .with_transparent(true)
+        .with_decorations(true)
+        .with_transparent(false)
         .with_resizable(true);
 
     if let Some(icon) = load_app_icon() {

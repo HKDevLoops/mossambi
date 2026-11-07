@@ -108,6 +108,17 @@ impl RadialWidgetGeometry {
         state: WidgetState,
         drag_hover_target: Option<usize>,
     ) {
+        self.render_with_hint(painter, sectors, state, drag_hover_target, None);
+    }
+
+    pub fn render_with_hint(
+        &self,
+        painter: &Painter,
+        sectors: &[&str],
+        state: WidgetState,
+        drag_hover_target: Option<usize>,
+        hub_hint: Option<&str>,
+    ) {
         let sector_span = (2.0 * PI) / 8.0;
         // Aesthetic radial gap between petals (~3.0 degrees)
         let gap = 0.052;
@@ -164,7 +175,7 @@ impl RadialWidgetGeometry {
         }
 
         // 2. Render Central Hub matching Image reference.png States 1, 4, 5, 6
-        self.render_hub(painter, state);
+        self.render_hub(painter, state, hub_hint);
     }
 
     /// Render an individual petal with pill-rounded corners, soft drop shadow, icon, and label.
@@ -602,6 +613,119 @@ impl RadialWidgetGeometry {
                     Stroke::NONE,
                 ));
             }
+            "CROP" => {
+                // Pre-conversion crop box with corner boundary tick marks
+                let box_w = 14.0;
+                let box_h = 14.0;
+                let rect = Rect::from_center_size(pos, Vec2::new(box_w, box_h));
+                painter.rect_stroke(rect, 1.5, stroke);
+                painter.line_segment(
+                    [pos + Vec2::new(-9.0, -7.0), pos + Vec2::new(-7.0, -7.0)],
+                    stroke,
+                );
+                painter.line_segment(
+                    [pos + Vec2::new(7.0, -7.0), pos + Vec2::new(9.0, -7.0)],
+                    stroke,
+                );
+                painter.line_segment(
+                    [pos + Vec2::new(-9.0, 7.0), pos + Vec2::new(-7.0, 7.0)],
+                    stroke,
+                );
+                painter.line_segment(
+                    [pos + Vec2::new(7.0, 7.0), pos + Vec2::new(9.0, 7.0)],
+                    stroke,
+                );
+            }
+            "EXAM" => {
+                // Graduation mortarboard cap & diploma envelope
+                let p_top = pos + Vec2::new(0.0, -6.5);
+                let p_right = pos + Vec2::new(7.5, -2.5);
+                let p_bottom = pos + Vec2::new(0.0, 1.5);
+                let p_left = pos + Vec2::new(-7.5, -2.5);
+                painter.add(PathShape::closed_line(
+                    vec![p_top, p_right, p_bottom, p_left],
+                    stroke,
+                ));
+                let cap_base = vec![
+                    pos + Vec2::new(-5.0, -0.5),
+                    pos + Vec2::new(-5.0, 4.0),
+                    pos + Vec2::new(0.0, 6.5),
+                    pos + Vec2::new(5.0, 4.0),
+                    pos + Vec2::new(5.0, -0.5),
+                ];
+                painter.add(PathShape::line(cap_base, stroke));
+                painter.line_segment(
+                    [p_right, pos + Vec2::new(8.0, 5.0)],
+                    Stroke::new(1.2_f32, color),
+                );
+            }
+            "META" => {
+                // Information circular badge with 'i' glyph
+                painter.circle_stroke(pos, 7.0, stroke);
+                painter.circle_filled(pos - Vec2::new(0.0, 3.0), 1.2, color);
+                painter.line_segment(
+                    [pos - Vec2::new(0.0, 0.5), pos + Vec2::new(0.0, 4.0)],
+                    stroke,
+                );
+            }
+            "RENAME" => {
+                // Pencil angled cursor
+                let p_tip = pos + Vec2::new(-6.0, 6.0);
+                let p_back = pos + Vec2::new(6.0, -6.0);
+                painter.line_segment([p_tip, p_back], stroke);
+                painter.line_segment([p_tip, p_tip + Vec2::new(3.0, 0.0)], stroke);
+                painter.line_segment([p_tip, p_tip + Vec2::new(0.0, -3.0)], stroke);
+            }
+            "AI OCR" => {
+                // 4-Point AI Sparkle Star
+                let p_top = pos + Vec2::new(0.0, -7.5);
+                let p_bottom = pos + Vec2::new(0.0, 7.5);
+                let p_left = pos + Vec2::new(-7.5, 0.0);
+                let p_right = pos + Vec2::new(7.5, 0.0);
+                painter.line_segment([p_top, p_bottom], stroke);
+                painter.line_segment([p_left, p_right], stroke);
+                let d_top = pos + Vec2::new(0.0, -3.0);
+                let d_right = pos + Vec2::new(3.0, 0.0);
+                let d_bottom = pos + Vec2::new(0.0, 3.0);
+                let d_left = pos + Vec2::new(-3.0, 0.0);
+                painter.add(PathShape::closed_line(
+                    vec![d_top, d_right, d_bottom, d_left],
+                    stroke,
+                ));
+            }
+            "ZIP" => {
+                // Archive box with horizontal zipper teeth
+                let box_w = 15.0;
+                let box_h = 14.0;
+                let box_rect = Rect::from_center_size(pos, Vec2::new(box_w, box_h));
+                painter.rect_stroke(box_rect, 2.0, stroke);
+                painter.line_segment(
+                    [pos + Vec2::new(-2.0, -4.0), pos + Vec2::new(2.0, -4.0)],
+                    stroke,
+                );
+                painter.line_segment(
+                    [pos + Vec2::new(-2.0, 0.0), pos + Vec2::new(2.0, 0.0)],
+                    stroke,
+                );
+                painter.line_segment(
+                    [pos + Vec2::new(-2.0, 4.0), pos + Vec2::new(2.0, 4.0)],
+                    stroke,
+                );
+            }
+            "EXPLORE" => {
+                // macOS Finder / Universal Explorer Dual Pane Window
+                let win_w = 16.0;
+                let win_h = 13.0;
+                let win_rect = Rect::from_center_size(pos, Vec2::new(win_w, win_h));
+                painter.rect_stroke(win_rect, 2.0, stroke);
+                painter.line_segment(
+                    [
+                        Pos2::new(win_rect.left() + 5.0, win_rect.top()),
+                        Pos2::new(win_rect.left() + 5.0, win_rect.bottom()),
+                    ],
+                    Stroke::new(1.2_f32, color),
+                );
+            }
             _ => {
                 // Generic circular badge
                 painter.circle_stroke(pos, 4.5, stroke);
@@ -610,7 +734,7 @@ impl RadialWidgetGeometry {
     }
 
     /// Renders Central Hub matching Image reference.png States 1, 4, 5, 6.
-    fn render_hub(&self, painter: &Painter, state: WidgetState) {
+    fn render_hub(&self, painter: &Painter, state: WidgetState, hub_hint: Option<&str>) {
         let is_dark = self.theme == WidgetTheme::Dark;
 
         match state {
@@ -792,6 +916,31 @@ impl RadialWidgetGeometry {
                     FontId::proportional(12.0),
                     text_color,
                 );
+
+                if let Some(hint) = hub_hint {
+                    let pill_rect = Rect::from_center_size(
+                        self.center + Vec2::new(0.0, 40.0),
+                        Vec2::new(96.0, 15.0),
+                    );
+                    let pill_fill = if is_dark {
+                        Color32::from_rgba_premultiplied(35, 42, 58, 210)
+                    } else {
+                        Color32::from_rgba_premultiplied(220, 226, 238, 220)
+                    };
+                    let pill_text_col = if is_dark {
+                        Color32::from_rgb(180, 200, 225)
+                    } else {
+                        Color32::from_rgb(60, 72, 95)
+                    };
+                    painter.rect_filled(pill_rect, 4.0, pill_fill);
+                    painter.text(
+                        pill_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        hint,
+                        FontId::proportional(9.5),
+                        pill_text_col,
+                    );
+                }
             }
         }
     }

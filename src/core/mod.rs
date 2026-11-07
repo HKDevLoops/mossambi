@@ -23,9 +23,11 @@ pub mod pantone;
 pub mod platform_paths;
 pub mod preview;
 pub mod registry;
+pub mod route_planner;
 pub mod scripting;
 pub mod state_db;
 pub mod tags;
+pub mod web_drop;
 
 pub use action_journal::{
     record_copy, record_create_dir, record_move, record_rename, record_tag_set, stage_delete,

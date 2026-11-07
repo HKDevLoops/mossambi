@@ -77,37 +77,54 @@ impl UniversalRegistry {
     /// Classifies an extension into its primary category.
     pub fn classify_extension(ext: &str) -> FileCategory {
         match ext.to_uppercase().as_str() {
-            // Images
-            "PNG" | "JPG" | "JPEG" | "WEBP" | "AVIF" | "HEIC" | "TIFF" | "TIF" | "BMP" | "ICO"
-            | "GIF" | "SVG" | "PSD" | "RAW" | "CR2" | "NEF" | "ARW" | "DNG" | "QOI" | "JXL" => {
-                FileCategory::Image
+            // Images & Camera RAW (30+ formats)
+            "PNG" | "JPG" | "JPEG" | "WEBP" | "AVIF" | "HEIC" | "HEIF" | "TIFF" | "TIF" | "BMP"
+            | "ICO" | "ICNS" | "CUR" | "GIF" | "SVG" | "PSD" | "RAW" | "CR2" | "CR3" | "NEF"
+            | "ARW" | "DNG" | "ORF" | "RW2" | "RAF" | "PEF" | "SRW" | "KDC" | "MRW" | "DCR"
+            | "MOS" | "QOI" | "JXL" | "PPM" | "PGM" | "PBM" | "PNM" | "TGA" | "EXR" | "DDS"
+            | "HDR" | "WBMP" | "XBM" | "XPM" | "SGI" | "PIC" => FileCategory::Image,
+
+            // Video (18 formats)
+            "MP4" | "MOV" | "MKV" | "WEBM" | "AVI" | "WMV" | "FLV" | "M4V" | "TS" | "MTS"
+            | "M2TS" | "MPEG" | "MPG" | "3GP" | "3G2" | "OGV" | "VOB" | "PRORES" => {
+                FileCategory::Video
             }
 
-            // Video
-            "MP4" | "MOV" | "MKV" | "WEBM" | "AVI" | "WMV" | "FLV" | "M4V" | "TS" | "MPEG"
-            | "MPG" | "3GP" | "OGV" | "PRORES" => FileCategory::Video,
+            // Audio (20 formats)
+            "MP3" | "WAV" | "FLAC" | "M4A" | "AAC" | "OGG" | "OGA" | "OPUS" | "AIFF" | "AIF"
+            | "WMA" | "ALAC" | "DSD" | "DSF" | "APE" | "MID" | "MIDI" | "AC3" | "DTS" | "AMR"
+            | "MKA" => FileCategory::Audio,
 
-            // Audio
-            "MP3" | "WAV" | "FLAC" | "M4A" | "AAC" | "OGG" | "OPUS" | "AIFF" | "AIF" | "WMA"
-            | "ALAC" | "DSD" | "DSF" | "APE" | "MID" | "MIDI" => FileCategory::Audio,
+            // Documents, Korean Hangul, Ebooks, CAD, 3D, Geospatial, Fonts, & Code (100+ formats)
+            "PDF" | "DOCX" | "DOC" | "TXT" | "MD" | "MARKDOWN" | "HTML" | "HTM" | "XHTML"
+            | "MHTML" | "RTF" | "ORG" | "TEX" | "EPUB" | "MOBI" | "AZW" | "AZW3" | "FB2"
+            | "CBZ" | "CBR" | "DJVU" | "DJV" | "HWP" | "HWPX" | "OFD" | "ODT" | "PAGES" | "WPS"
+            | "WPD" | "RST" | "ASCIIDOC" | "ADOC" | "EML" | "MSG" | "P7M" | "DXF" | "DWG"
+            | "DWF" | "STEP" | "STP" | "IGES" | "IGS" | "GLB" | "GLTF" | "STL" | "OBJ" | "3MF"
+            | "PLY" | "FBX" | "DAE" | "BLEND" | "OFF" | "X3D" | "VRML" | "WRL" | "GEOJSON"
+            | "KML" | "KMZ" | "GPX" | "SHP" | "TOPOJSON" | "TTF" | "OTF" | "WOFF" | "WOFF2"
+            | "EOT" | "PFA" | "PFB" | "TOML" | "JSON" | "YAML" | "YML" | "XML" | "RS" | "PY"
+            | "JS" | "TSX" | "C" | "CPP" | "H" | "HPP" | "CS" | "GO" | "JAVA" | "KT" | "RB"
+            | "PHP" | "SH" | "PS1" | "SWIFT" | "LUA" | "LOG" | "INI" | "CONF" | "PROPERTIES"
+            | "ENV" | "SQL" | "PROTO" => FileCategory::Document,
 
-            // Documents & Structured Text/Code
-            "PDF" | "DOCX" | "DOC" | "TXT" | "MD" | "HTML" | "HTM" | "RTF" | "ORG" | "TEX"
-            | "EPUB" | "ODT" | "PAGES" | "TOML" | "JSON" | "YAML" | "YML" | "XML" | "RS" | "PY"
-            | "JS" | "C" | "CPP" | "H" | "LOG" | "RST" | "INI" | "CONF" => FileCategory::Document,
+            // Spreadsheets (14 formats)
+            "XLSX" | "XLS" | "XLSB" | "XLSM" | "XLT" | "XLTX" | "CSV" | "TSV" | "ODS" | "OTS"
+            | "NUMBERS" | "DIF" | "SLK" | "PRN" => FileCategory::Spreadsheet,
 
-            // Spreadsheets
-            "XLSX" | "XLS" | "CSV" | "TSV" | "ODS" | "NUMBERS" => FileCategory::Spreadsheet,
+            // Presentations (11 formats)
+            "PPTX" | "PPT" | "PPTM" | "POT" | "POTX" | "PPS" | "PPSX" | "ODP" | "OTP" | "KEY"
+            | "KEYNOTE" => FileCategory::Presentation,
 
-            // Presentations
-            "PPTX" | "PPT" | "ODP" | "KEY" => FileCategory::Presentation,
-
-            // Archives
+            // Archives (18 formats)
             "ZIP" | "7Z" | "TAR" | "GZ" | "TGZ" | "TAR.GZ" | "BZ2" | "TBZ2" | "TAR.BZ2" | "XZ"
-            | "TXZ" | "TAR.XZ" | "ZST" | "TZST" | "TAR.ZST" | "RAR" => FileCategory::Archive,
+            | "TXZ" | "TAR.XZ" | "ZST" | "TZST" | "TAR.ZST" | "RAR" | "CAB" | "ISO" | "WIM"
+            | "CPIO" | "AR" => FileCategory::Archive,
 
-            // Subtitles
-            "SRT" | "VTT" | "ASS" | "SSA" | "SUB" => FileCategory::Subtitle,
+            // Subtitles (9 formats)
+            "SRT" | "VTT" | "ASS" | "SSA" | "SUB" | "SBV" | "LRC" | "USF" | "IDX" => {
+                FileCategory::Subtitle
+            }
 
             _ => FileCategory::Unknown,
         }

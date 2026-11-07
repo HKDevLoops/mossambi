@@ -1,0 +1,263 @@
+# Mossambi Agent Instructions
+
+Status: clippy clean (all targets), 12 lib tests + all integration suites pass, release build succeeds.
+
+## Environment rules
+
+- **Windows gates run through PowerShell (`pwsh`), never bash.** No bash on this host; every
+  environment/status check uses the `shell` tool with pwsh syntax (e.g. `$env:X`, `Get-ChildItem`,
+  `Select-String`). Linux-side checks go through WSL at `/mnt/z/Projects/mossambi` (no sudo;
+  WSLg provides Wayland + XWayland).
+- **Temp direction:** prefer `C:\Users\haris\AppData\Local\Temp\opencode` for scratch files.
+
+## ASCII discipline (mandatory)
+
+- All NEW file content must be **pure ASCII**. After every authored file/edits, re-verify with a
+  `[^\\x00-\\x7F]` regex sweep (write findings to a UTF-8 file when the console codepage mangles
+  output - the pwsh console renders Unicode as `??` soup).
+- **No emoji in GUI strings.** Emoji are removed from any string the user sees.
+- Pre-existing glyphs are explicitly OFF-LIST (leave alone, do not fix, do not reformat):
+  em dash / en dash, ellipsis, symlink arrow (feather-arrow), breadcrumb angle-quote (single
+  guillemet), right/left/up/down arrows, plus-sign copy badge, check mark, cross mark, times sign,
+  bullet, sort column triangles, horizontal rule and double-line rule box-drawing comment banners,
+  vertical/box-drawing tree chars in daemon banner, window-control glyphs (restore/minimize
+  squares), sort-direction..drawer glyphs (plus, minus-over-dot, info sign, degree sign,
+  micro sign, implies-arrow, check, two-line arrow), and the pre-existing emoji tab/category/
+  button labels that the UI overhaul replaces wholesale (home, folder, globe, image, music,
+  clapper, page, package, laptop, magnifier, folder-open, monitor, download, waste basket,
+  target, microscope, clipboard, floppy, plus, pencil nib, gear, warning, sun, cloud, hamburger,
+  trigram, crossed swords, star, heavy check, heavy cross, right-pointing arrow, VS16 selector).
+
+## Drag & drop status (Windows + Linux, est. 2026-11-06) - milestone CLOSED
+
+Commits `b65ceed` (real OS drag-out, drop-in polish, platform policy) and `7452250` (cross-platform
+gates clean). See git history for the full matrix; key contracts preserved:
+
+- Windows OLE in `src/core/ole_drag_out.rs` (windows 0.59 `<Interface>_Impl` outer-type contract;
+  pass data object BY REFERENCE to `DoDragDrop`; `&mut effect` coerces to a raw effect pointer).
+- Linux hand-off in `src/core/linux_clipboard_files.rs`: OS-neutral payload builder at file root
+  (testable on every platform), Linux-gated single-target `text/uri-list` write (wl-copy on
+  Wayland, xclip on X11; one helper = one MIME type, wl-clipboard issue #71).
+- `src/core/drag_out.rs::begin_file_drag_out` dispatches per-OS; dual-signal viewport-exit
+  detection hands drags to the OS from Explorer and the hub.
+- `dnd_backend.rs::apply_backend_policy` forces X11 on Wayland at both GUI entry points.
+- winit `ViewportCommand::StartDrag` is a window drag only, never a file drag.
+
+## Gates before any commit
+
+1. `cargo fmt`
+2. `cargo clippy --all-targets -- -D warnings`
+3. `cargo test`
+4. `cargo build --release`
+5. ASCII sweep of every file touched.
+6. open-computer-use QA pass on Windows for GUI work.
+7. Keep `graphify-out/` untracked. Do not stage scratch artifacts (screenshots, test dirs).
+
+## ACTIVE USER INSTRUCTIONS - UI OVERHAUL PHASE (est. 2026-11-06)
+
+The user opened the UI overhaul. Target design language: **macOS Finder**, not Windows-style
+chrome. Windows-only QA until the wave closes (Linux round parked on user request). Instructions
+passed so far, verbatim-in-intent - follow all of them:
+
+1. **Remove the file-type filter chips row** (All/Images/Audio/Video/Docs/Archives/Code with
+   counts) from the top of the file area and replace it. Filtering may survive only inside a
+   compact popover. The top chrome must be **clean and neat, Finder-style** (not the Windows-style
+   navigation bar currently there).
+2. **Window title buttons are badly designed** (Fluent dots plus a stray maximize glyph). Redesign
+   minimize/maximize/close properly - Finder traffic lights with real hover glyphs, positioned
+   like Finder (left), wired to Minimized/Maximized/Close viewport commands.
+3. **Sidebar: remove custom pinned folders** (between_pcs, wallpapers are hard-coded today).
+   Show ONLY standard folders (Desktop, Downloads, Documents, Pictures, Music, Videos, Recycle
+   Bin). Provide a Preferences option to show custom pinned folders, plus the ability to
+   pin custom folders (context menu on a folder row) and to create desktop shortcuts.
+4. **Remove the Tags sidebar section** (hard-coded Home/Work/Photos/Important dots). It becomes
+   an optional Preferences setting, and **tags must actually be implemented in the explorer**:
+   assign tags via the right-click menu, show tag dots on file rows in all views, and honor the
+   tag smart-list when the section is enabled.
+5. **Miller columns view is unacceptable** (giant blurry blown-up folder preview, clipped vertical
+   "Quick" label hanging over the separator, and clicking a folder does not expand column 2).
+   Check it personally, then rebuild it Finder-like: proper column stack, chevron expansion,
+   selection sync, no oversized preview card, clean meta panel for files only.
+6. **The right-click menu is incomplete.** Complete it: Open, Open With, Peek, Rename, Delete,
+   Cut/Copy/Paste, Copy Path, Tags submenu, Properties for items; New Folder and Paste Allowed
+   on blank canvas; Pin/Unpin (folders); consistent with the existing file_menu actions.
+7. **Implement an action journal for undo:** log all recent in-app actions (rename, move, copy,
+   delete, create folder, tag changes) AND user keystrokes (context-tagged) so an undo method can
+   be built on them. Undo must be able to reverse at least rename/move/copy/create/delete/tag.
+8. **Fix found bugs while in there:**
+   - Toolbar text collision ("N items enabled" overlaps "Select All" - two labels drawn on
+     each other).
+   - "1 items" grammar (pluralize correctly).
+   - Wrong Date Modified: app showed 2026-11-24 for a folder created 2026-11-06. Find the
+     broken conversion/formatting and fix.
+   - Home "Quick access" dumps raw user-profile contents including hidden NT junctions
+     (NetHood, PrintHood, SendTo, Start Menu, Recent, Templates, Local Settings). Only real
+     library folders belong there.
+   - Tile labels collide in the Home grid (row 2 renders "apple-music-tApplication D...").
+   - The window background is so translucent other windows bleed through - reads as dirty.
+   - "Custom Conforme" truncation in the sidebar (no ellipsis discipline).
+   - Stale selection ring on Home ("temp") persisted across restarts.
+   - Drive captions rendered as underlined links - off-style for Finder design.
+9. **QA method note:** the OpenCode terminal window keeps grabbing foreground, so OCU screenshots
+   of a covered Mossambi fail or capture the wrong window. Verify visuals with a pwsh
+   PrintWindow snapshot helper (PW_RENDERFULLCONTENT) that captures Mossambi's window even when
+   occluded; drive input with OCU app_post clicks (work even when covered).
+10. DnD residue policy stands: delete `Desktop\\qa_dnd_scratch` when QA closes.
+
+## Known intentional pre-existing glyphs
+
+`studio_app.rs` and other legacy files keep their em dashes; `explorer_view.rs` keeps its category
+emoji labels until this overhaul swaps them out. Any string the overhaul touches must end up
+pure ASCII.
+
+## FULL USER INSTRUCTION LEDGER (compiled from Big_session.md + this session)
+
+Every line below is a user instruction, not an agent suggestion. All of it stands until the user
+says otherwise. Ordered by the phase that must satisfy it.
+
+### A. Product identity and focus
+
+- The app began as a file CONVERTER plus radial widget, then became a FILE EXPLORER project.
+  The explorer is now the primary surface; the widget is equally important and must stay
+  visually and behaviorally unified with the explorer.
+- The target is a macOS Finder CLONE in design language, carrying the FEATURES of Windows File
+  Explorer, Linux file managers (Nautilus, Thunar, GNOME Files), and FilePilot. Apple design,
+  everyone else's feature set.
+- Home dashboard is mandatory. It must open as a clean first surface (standard folders only, no
+  NT junctions, no colliding tile labels), not be removed.
+- Windows first. Linux verification round is parked until the Windows wave closes.
+- The converter engine must be integrated into the GUI (right-click Convert, batch actions,
+  progress, quality gates), not left as a separate CLI-only product.
+
+### B. Design direction (the governing brief)
+
+- STRICT macOS Finder chrome: traffic lights on the LEFT with real hover glyphs, ONE merged
+  toolbar, path bar at the BOTTOM, sheet-style popovers, sheet-style preferences.
+- Pixel-perfect alignment, padding, margins, border presence, and padding around text. Wrapping
+  must be correct (no label collisions, no overlap, no overflow into the next column).
+- Responsive like a Tailwind-built app: a real spacing/type scale and consistent tokens, not
+  ad-hoc pixel values scattered through 6500 lines of explorer code.
+- The Settings/Preferences page is currently clutter and clumsy; it must be rebuilt for clarity
+  of every setting LABEL and every property VALUE, with clear grouping and hierarchy.
+- No emoji as icons anywhere in the GUI. Real vector icons from the embedded icon packs, each
+  file type mapped to a proper icon.
+- The user has called the current UI "clumsy and dirty", the column headers "shit", and the
+  Miller column view "shit". Do not ship anything in that class.
+- No default background highlight bands behind file/folder icons. Selection reads through the
+  checkbox (existing checkbox-mode contract: Always / Hover / Off).
+- Motion everywhere: zappy, snappy, smooth scrolling and movement across the whole program.
+- Icons roughly twice the current size; app default font +4px (existing contract).
+- Max-FPS support, highly responsive, multi-threaded heavy work, no algorithmic complexity above
+  O(log n) in hot paths.
+
+### C. Feature parity checklist
+
+- Clicking a file must launch/open it (Finder parity). Ctrl+wheel zooms in/out; zoom down snaps
+  to the list form, zoom up grows icons and their labels (Windows Explorer behavior).
+- Preview/Peek for images, folders, PDF, Word, Excel, PPT, text and code files. Long hover shows
+  the inside of a folder.
+- Right-click menu must be COMPLETE and copied properly from the real thing: Open, Open With,
+  Peek, Rename, Delete, Cut, Copy, Paste, Copy Path variants, Tags submenu, Properties, New
+  Folder, Paste Allowed, Pin/Unpin, Convert submenu (type-aware, registry-driven), Duplicate,
+  Send To, Sort By, View, Invert Selection.
+- Tools and converters are reachable from the top of the file area, above the Name/Kind/Size/
+  Date columns, not buried in a wall of text.
+- Tags: real implementation in the explorer (assign from the context menu, tag dots on rows in
+  every view, smart-list filtering). The Tags sidebar section is OFF by default and becomes a
+  Preferences setting.
+- Sidebar shows ONLY standard folders by default (Desktop, Downloads, Documents, Pictures,
+  Music, Videos, Recycle Bin). Custom pins and desktop shortcuts are opt-in via Preferences and
+  a "Pin to Sidebar" context-menu action.
+- The file-type filter chip row (All/Images/Audio/Video/Docs/Archives/Code with counts) is
+  removed from the top; filtering survives only inside a compact popover.
+- Action and keystroke journal: log recent in-app actions (rename, move, copy, delete, create
+  folder, tag change) AND context-tagged keystrokes so undo can be implemented on top of it.
+- Bugs to fix: "N items enabled" overlapping "Select All"; "1 items" grammar; wrong Date
+  Modified (2026-11-24 shown for a 2026-11-06 folder); Home Quick-access dumping NT junctions;
+  colliding Home tile labels; see-through window background; truncated "Custom Conforme";
+  stale selection ring persisting across restarts; underlined drive captions; broken Miller
+  column expansion; vertical clipped "Quic" label in the column view.
+
+### D. Workflow the user demands (repeat every session)
+
+- Mantra: RESEARCH -> deep research (how it integrates with THIS project and its current
+  state) -> PLAN (what, where, how, and which prerequisites to prepare) -> PLAN WITH GSD
+  (gsd-plan-phase / gsd-autonomous) -> IMPLEMENT THOROUGHLY -> FORMAT, LINT, DEBUG, OPTIMIZE
+  -> VERIFY with computer use as four roles (developer, real user, pessimistic tester, noob
+  computer user), screenshotting at HOVER and at CLICK for every interaction -> VERIFIER AGENT
+  checks code quality, integrity, and ticks the todo list. If the verifier did not do that, the
+  task is not complete.
+- Use the skills and MCP servers that fit: impeccable for design, gsd-* for planning, computer
+  use / OS-level control to drive the real app, and professional sub-agents for parallel work.
+- Keep every instruction in this file updated; the user treats it as the memory of record.
+- Gates before landing: cargo fmt, cargo clippy --all-targets -- -D warnings, cargo test,
+  cargo build --release, ASCII sweep of touched files, computer-use QA pass, graphify-out/
+  untracked, no scratch artifacts staged.
+- The user expects long autonomous runs with no hand-holding, and will not interrupt once the
+  interview questions are answered.
+
+### E. Phase 16 & Beyond Architectural Mandates (From 20-Question Audit 2026-11-07)
+
+1. **Windows Explorer Shell Hijacking & Safe Rollback:**
+   - Full explorer replacement option (hijacking Win+E and default folder double-clicks).
+   - When enabled, automatically generates `mossambi_shell_restore.reg` and provides a single-click "Restore Windows Explorer Defaults" button in Preferences.
+   - Uninstaller must cleanly release all file associations, registry hooks, and shell defaults across all OS platforms.
+2. **Sweet Lime Resident Radial Widget (USP & Activation):**
+   - Triple trigger surface: Global hotkeys (`Win+Shift+C`, `Win+Ctrl+Space`), screen corner hover puck, AND mouse gestures (shake / circle gesture).
+   - Gesture activation blooms the radial widget centered immediately at the cursor coordinates with elastic spring physics.
+3. **Local AI Engine & Recommended Models Catalog:**
+   - Configurable in Settings: API endpoint (`http://localhost:11434` for Ollama, `http://localhost:1234` for LM Studio), model name, and temperature/effort.
+   - Recommended Local Models Catalog (updated per version):
+     - **OCR & Document Scan Cleanup:** `Qwen2.5-VL-7B-Instruct` or `Llama-3.2-11B-Vision-Instruct`.
+     - **Scripting & Workflow Automation:** `Qwen2.5-Coder-7B-Instruct` or `DeepSeek-R1-Distill-Qwen-7B`.
+   - Hybrid acceleration: DirectML GPU/NPU shader processing with CPU SIMD fallback when local AI server is absent.
+4. **Installer / Uninstaller Suite & Multi-Platform Packaging:**
+   - Native interactive Installer TUI and Uninstaller TUI for terminal users.
+   - Platform installer packages: Windows `.msi` (with Winget/Scoop manifests), macOS `.dmg` (with Homebrew formula), Linux `.deb` / `.rpm` / Flatpak.
+   - Background silent update notifications wired to GitHub Releases with rendered changelog display.
+5. **Universal Conformer & Global Visa Library:**
+   - Beyond Indian government exams (UPSC/SSC/IBPS/GATE/RRB), bundle international visa & passport envelopes (US Visa 2x2, Schengen Visa, UK, Canada PR, Indian Passport).
+   - Persistent custom tags engine with Pantone Citrus color picker, dual-written to SQLite and OS extended attributes.
+6. **Dual Keybinding Profiles:**
+   - Switchable in Preferences: macOS Finder Mode (`Enter` to rename, `Cmd+Down` to open, `Space` for Quick Look) vs Windows Explorer Mode (`F2` to rename, `Enter` to open).
+7. **Fast Hybrid Search:**
+   - Instant directory filter + SQLite FTS5 index + background USN Journal crawl on Windows / Spotlight `mdfind` on macOS.
+8. **Finder-Style Batch Renamer:**
+   - Multi-file modal supporting Text Replacement, Prefix/Suffix, Numbering Sequences (`001`, `002`), and Date stamping.
+
+### F. Phase 17 Architectural Mandates: Filee Parity, 255 Formats, Pure Rust Embedding, and Apple HIG
+
+1. **Pure Rust Single-Binary Embedding (Anti-Download Doctrine):**
+   - Filee (`KnifeLemon/Filee`) forces runtime downloads of 1.1GB+ external binaries (FFmpeg 100MB, LibreOffice 373MB, Calibre 240MB, Ghostscript 19MB, Pandoc 43MB, JRE 49MB).
+   - In Mossambi, all conversion capabilities must be embedded directly in pure Rust in one single unified, optimized binary without requiring separate external runtime downloads.
+   - Pure Rust image codecs (`image`, `resvg`, `ravif`), document engines (`calamine`, `rust_xlsxwriter`, `lopdf`, `csv`, `quick-xml`), archive engines (`zip`, `tar`, `flate2`, `zstd`, `bzip2`, `xz2`), and native OS GPU shaders (Direct3D11 / NVENC / DirectML / AVX2 SIMD / VideoToolbox / VA-API).
+2. **255-Format Catalog Expansion & Multi-Hop Route Planning:**
+   - Full format parity across all 18 categories from `https://filee.sh/formats/`: Camera RAW, CAD (DWG, DXF), Korean Hangul (HWP, HWPX), E-Books (EPUB, MOBI, AZW, AZW3, CBZ, CBR), 3D Models (GLB, glTF, STL, OBJ, 3MF, PLY), Geospatial Vector Data (GeoJSON, KML, KMZ, GPX), Fonts (TTF, OTF, WOFF, WOFF2, EOT), Audio, Video, Subtitles, Spreadsheets, and Documents.
+   - Dijkstra weighted shortest-path route planner up to 3 hops (e.g. `HWP -> HWPX -> PDF -> PNG` or `SVG -> PDF -> PNG`).
+3. **Two-Sided Sweet Lime Radial Donut Widget:**
+   - Tab or mouse-wheel turns the radial menu over between Face 1 (Primary Formats: JPG, PNG, WEBP, PDF, MP4, MP3) and Face 2 (Studio Power Tools: CROP, EXAM, META, RENAME, AI OCR, PDF, ZIP, EXPLORE).
+   - 0.20s stagger-fold 3D cosine flip animation (cos(pi * t) wedge width scaling).
+   - Columella center hub hint: "Tab: Power Tools" / "Tab: Formats".
+4. **Interactive Pre-Conversion Crop Canvas:**
+   - Normalized crop box [0.0, 1.0], 8 draggable handles, rule-of-thirds grid lines during active dragging, aspect ratio presets (Free, 1:1, 4:3, 16:9, 3:2, 5:4), live target resolution pill badge, piped directly into imageops::crop_imm.
+5. **Browser Drag-Out & WebDrop (text/uri-list, Virtual Files):**
+   - Register and handle CF_HDROP, UniformResourceLocatorW, text/uri-list, and virtual files from Chromium, Edge, Firefox, and Safari.
+   - Asynchronous download staging into downloads_dir()/.mossambi_staging/ with instant routing into radial widget and studio batch pipeline.
+6. **Linux X11 and Wayland Desktop Suite:**
+   - Force X11 backend binding when XWayland is available under Wayland to prevent silent XDND file drop drops.
+   - GNOME Shell Unix socket pointer bridge ($XDG_RUNTIME_DIR/mossambi-gnome/pointer.sock).
+   - KDE Plasma KWin script and Hyprland IPC window positioning rules for centered radial donut spawn.
+7. **Apple Human Interface Guidelines (Apple HIG) Visual Standards:**
+   - Strict 8pt spatial grid, SF Pro / Agave typographic scale with generous negative space, authentic traffic lights on the left with hover glyphs, clean acrylic/mica translucency without dirty pixel bleed.
+   - Eliminate all label collisions and grammar defects: strictly "1 item" (never "1 items"), clean spacing between "N items enabled" and "Select All", crisp unblurred Miller column previews.
+8. **Auto-Aware System Optimization & Hardware Telemetry:**
+   - Auto-detection of CPU cores, physical RAM, GPU vendor (NVIDIA/AMD/Intel/Apple), and NPU engine (DirectML/CoreML).
+   - Dynamic auto-suggestions displayed in mossambi hw CLI and Studio GUI Tab 4 ("Hardware & AI Telemetry") recommending concurrency, hardware encoder offload, SIMD image convolution, and local AI model sizing.
+9. **Zero-Defect Quality Gates:**
+   - cargo fmt
+   - cargo clippy --all-targets -- -D warnings
+   - cargo test (0 ignored, all pass)
+   - cargo test --test gui_ascii_gate (100% pure ASCII verified)
+   - cargo audit & cargo deny (0 vulnerabilities standard: lopdf >= 0.47, rust_xlsxwriter >= 0.102, zip >= 9.4, calamine >= 0.38, quick-xml >= 0.42, zstd >= 0.13.4)
+   - open-computer-use desktop interactive verification with screenshots
+   - Knowledge graph sync via /gsd-graphify.

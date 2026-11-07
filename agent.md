@@ -224,3 +224,40 @@ says otherwise. Ordered by the phase that must satisfy it.
    - Instant directory filter + SQLite FTS5 index + background USN Journal crawl on Windows / Spotlight `mdfind` on macOS.
 8. **Finder-Style Batch Renamer:**
    - Multi-file modal supporting Text Replacement, Prefix/Suffix, Numbering Sequences (`001`, `002`), and Date stamping.
+
+### F. Phase 17 Architectural Mandates: Filee Parity, 255 Formats, Pure Rust Embedding, and Apple HIG
+
+1. **Pure Rust Single-Binary Embedding (Anti-Download Doctrine):**
+   - Filee (`KnifeLemon/Filee`) forces runtime downloads of 1.1GB+ external binaries (FFmpeg 100MB, LibreOffice 373MB, Calibre 240MB, Ghostscript 19MB, Pandoc 43MB, JRE 49MB).
+   - In Mossambi, all conversion capabilities must be embedded directly in pure Rust in one single unified, optimized binary without requiring separate external runtime downloads.
+   - Pure Rust image codecs (`image`, `resvg`, `ravif`), document engines (`calamine`, `rust_xlsxwriter`, `lopdf`, `csv`, `quick-xml`), archive engines (`zip`, `tar`, `flate2`, `zstd`, `bzip2`, `xz2`), and native OS GPU shaders (Direct3D11 / NVENC / DirectML / AVX2 SIMD / VideoToolbox / VA-API).
+2. **255-Format Catalog Expansion & Multi-Hop Route Planning:**
+   - Full format parity across all 18 categories from `https://filee.sh/formats/`: Camera RAW, CAD (DWG, DXF), Korean Hangul (HWP, HWPX), E-Books (EPUB, MOBI, AZW, AZW3, CBZ, CBR), 3D Models (GLB, glTF, STL, OBJ, 3MF, PLY), Geospatial Vector Data (GeoJSON, KML, KMZ, GPX), Fonts (TTF, OTF, WOFF, WOFF2, EOT), Audio, Video, Subtitles, Spreadsheets, and Documents.
+   - Dijkstra weighted shortest-path route planner up to 3 hops (e.g. `HWP -> HWPX -> PDF -> PNG` or `SVG -> PDF -> PNG`).
+3. **Two-Sided Sweet Lime Radial Donut Widget:**
+   - Tab or mouse-wheel turns the radial menu over between Face 1 (Primary Formats: JPG, PNG, WEBP, PDF, MP4, MP3) and Face 2 (Studio Power Tools: CROP, EXAM, META, RENAME, AI OCR, PDF, ZIP, EXPLORE).
+   - 0.20s stagger-fold 3D cosine flip animation (cos(pi * t) wedge width scaling).
+   - Columella center hub hint: "Tab: Power Tools" / "Tab: Formats".
+4. **Interactive Pre-Conversion Crop Canvas:**
+   - Normalized crop box [0.0, 1.0], 8 draggable handles, rule-of-thirds grid lines during active dragging, aspect ratio presets (Free, 1:1, 4:3, 16:9, 3:2, 5:4), live target resolution pill badge, piped directly into imageops::crop_imm.
+5. **Browser Drag-Out & WebDrop (text/uri-list, Virtual Files):**
+   - Register and handle CF_HDROP, UniformResourceLocatorW, text/uri-list, and virtual files from Chromium, Edge, Firefox, and Safari.
+   - Asynchronous download staging into downloads_dir()/.mossambi_staging/ with instant routing into radial widget and studio batch pipeline.
+6. **Linux X11 and Wayland Desktop Suite:**
+   - Force X11 backend binding when XWayland is available under Wayland to prevent silent XDND file drop drops.
+   - GNOME Shell Unix socket pointer bridge ($XDG_RUNTIME_DIR/mossambi-gnome/pointer.sock).
+   - KDE Plasma KWin script and Hyprland IPC window positioning rules for centered radial donut spawn.
+7. **Apple Human Interface Guidelines (Apple HIG) Visual Standards:**
+   - Strict 8pt spatial grid, SF Pro / Agave typographic scale with generous negative space, authentic traffic lights on the left with hover glyphs, clean acrylic/mica translucency without dirty pixel bleed.
+   - Eliminate all label collisions and grammar defects: strictly "1 item" (never "1 items"), clean spacing between "N items enabled" and "Select All", crisp unblurred Miller column previews.
+8. **Auto-Aware System Optimization & Hardware Telemetry:**
+   - Auto-detection of CPU cores, physical RAM, GPU vendor (NVIDIA/AMD/Intel/Apple), and NPU engine (DirectML/CoreML).
+   - Dynamic auto-suggestions displayed in mossambi hw CLI and Studio GUI Tab 4 ("Hardware & AI Telemetry") recommending concurrency, hardware encoder offload, SIMD image convolution, and local AI model sizing.
+9. **Zero-Defect Quality Gates:**
+   - cargo fmt
+   - cargo clippy --all-targets -- -D warnings
+   - cargo test (0 ignored, all pass)
+   - cargo test --test gui_ascii_gate (100% pure ASCII verified)
+   - cargo audit & cargo deny (0 vulnerabilities standard: lopdf >= 0.47, rust_xlsxwriter >= 0.102, zip >= 9.4, calamine >= 0.38, quick-xml >= 0.42, zstd >= 0.13.4)
+   - open-computer-use desktop interactive verification with screenshots
+   - Knowledge graph sync via /gsd-graphify.

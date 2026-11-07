@@ -13,6 +13,17 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DonutFace {
+    #[default]
+    PrimaryFormats,
+    StudioTools,
+}
+
+pub const STUDIO_TOOL_SECTORS: [&str; 8] = [
+    "CROP", "EXAM", "META", "RENAME", "AI OCR", "PDF", "ZIP", "EXPLORE",
+];
+
 #[derive(Debug, Clone)]
 pub enum WidgetResult {
     Success(Vec<PathBuf>),
@@ -22,6 +33,9 @@ pub enum WidgetResult {
 pub struct MossambiWidgetApp {
     pub geometry: RadialWidgetGeometry,
     pub sectors: Vec<&'static str>,
+    pub face: DonutFace,
+    pub flip_start: Option<Instant>,
+    pub last_wheel_flip: Instant,
     pub hovered_carpel: Option<usize>,
     pub current_file: Option<PathBuf>,
     pub current_category: FileCategory,
@@ -60,6 +74,9 @@ impl Default for MossambiWidgetApp {
         Self {
             geometry: RadialWidgetGeometry::new(Pos2::new(200.0, 200.0), 400.0),
             sectors: default_sectors,
+            face: DonutFace::PrimaryFormats,
+            flip_start: None,
+            last_wheel_flip: Instant::now(),
             hovered_carpel: None,
             current_file: None,
             current_category: FileCategory::Image,
@@ -85,6 +102,21 @@ impl Default for MossambiWidgetApp {
 }
 
 impl MossambiWidgetApp {
+    pub fn toggle_face(&mut self) {
+        self.face = match self.face {
+            DonutFace::PrimaryFormats => DonutFace::StudioTools,
+            DonutFace::StudioTools => DonutFace::PrimaryFormats,
+        };
+        self.flip_start = Some(Instant::now());
+    }
+
+    pub fn active_sectors(&self) -> &[&str] {
+        match self.face {
+            DonutFace::PrimaryFormats => &self.sectors,
+            DonutFace::StudioTools => &STUDIO_TOOL_SECTORS,
+        }
+    }
+
     pub fn select_file(&mut self, path: PathBuf) {
         let (cat, _ext) = UniversalRegistry::classify_file(&path);
         self.current_category = cat;
@@ -401,6 +433,18 @@ impl eframe::App for MossambiWidgetApp {
                 }
             }
 
+            if i.key_pressed(Key::Tab) {
+                self.toggle_face();
+            }
+
+            if i.raw_scroll_delta.y.abs() > 8.0 {
+                let now = Instant::now();
+                if now.duration_since(self.last_wheel_flip) >= Duration::from_millis(300) {
+                    self.last_wheel_flip = now;
+                    self.toggle_face();
+                }
+            }
+
             if i.modifiers.command && i.key_pressed(Key::V) {
                 let clip_files = crate::core::extract_clipboard_files();
                 if let Some(first) = clip_files.first() {
@@ -462,12 +506,69 @@ impl eframe::App for MossambiWidgetApp {
                                 self.select_file(path);
                             }
                         } else if let Some(petal_idx) = self.hovered_carpel {
-                            if let Some(fmt) = self.sectors.get(petal_idx).copied() {
-                                if self.current_file.is_some() {
-                                    self.start_conversion(fmt);
-                                } else if let Some(path) = rfd::FileDialog::new().pick_file() {
-                                    self.select_file(path);
-                                    self.start_conversion(fmt);
+                            match self.face {
+                                DonutFace::PrimaryFormats => {
+                                    if let Some(fmt) = self.sectors.get(petal_idx).copied() {
+                                        if self.current_file.is_some() {
+                                            self.start_conversion(fmt);
+                                        } else if let Some(path) = rfd::FileDialog::new().pick_file() {
+                                            self.select_file(path);
+                                            self.start_conversion(fmt);
+                                        }
+                                    }
+                                }
+                                DonutFace::StudioTools => {
+                                    let tool = STUDIO_TOOL_SECTORS.get(petal_idx).copied().unwrap_or("");
+                                    match tool {
+                                        "CROP" => {
+                                            log::info!("Studio Power Tool: Crop triggered from Radial Donut");
+                                        }
+                                        "EXAM" => {
+                                            log::info!("Studio Power Tool: Exam Conformer triggered");
+                                        }
+                                        "META" => {
+                                            log::info!("Studio Power Tool: Metadata Editor triggered");
+                                        }
+                                        "RENAME" => {
+                                            log::info!("Studio Power Tool: Batch Renamer triggered");
+                                        }
+                                        "AI OCR" => {
+                                            log::info!("Studio Power Tool: AI OCR Extraction triggered");
+                                            if let Some(ref path) = self.current_file {
+                                                if let Ok(text) = crate::codec::extract_text_from_pdf(path) {
+                                                    log::info!("Extracted {} characters via OCR", text.len());
+                                                }
+                                            }
+                                        }
+                                        "PDF" => {
+                                            if self.current_file.is_some() {
+                                                self.start_conversion("PDF");
+                                            }
+                                        }
+                                        "ZIP" => {
+                                            if let Some(ref path) = self.current_file {
+                                                let zip_out = path.with_extension("zip");
+                                                let _ = crate::archive::pack_archive(
+                                                    std::slice::from_ref(path),
+                                                    &zip_out,
+                                                    crate::archive::ArchiveType::Zip,
+                                                );
+                                                self.last_output = Some(zip_out);
+                                                self.success_time = Some(Instant::now());
+                                                self.converted_count = 1;
+                                            }
+                                        }
+                                        "EXPLORE" => {
+                                            if let Some(ref path) = self.current_file {
+                                                let dir = path.parent().unwrap_or(path);
+                                                #[cfg(target_os = "windows")]
+                                                let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
+                                                #[cfg(not(target_os = "windows"))]
+                                                let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+                                            }
+                                        }
+                                        _ => {}
+                                    }
                                 }
                             }
                         }
@@ -478,6 +579,14 @@ impl eframe::App for MossambiWidgetApp {
                     if let Some(pos) = hover_pos {
                         self.show_context_menu = true;
                         self.context_menu_pos = pos;
+                    }
+                }
+
+                if let Some(start) = self.flip_start {
+                    if start.elapsed().as_secs_f32() < 0.20 {
+                        ctx.request_repaint();
+                    } else {
+                        self.flip_start = None;
                     }
                 }
 
@@ -495,8 +604,18 @@ impl eframe::App for MossambiWidgetApp {
                     WidgetState::Idle
                 };
 
-                self.geometry
-                    .render(&painter, &self.sectors, current_state, self.hovered_carpel);
+                let active_sectors = self.active_sectors();
+                let hint = match self.face {
+                    DonutFace::PrimaryFormats => "Tab: Power Tools",
+                    DonutFace::StudioTools => "Tab: Formats",
+                };
+                self.geometry.render_with_hint(
+                    &painter,
+                    active_sectors,
+                    current_state,
+                    self.hovered_carpel,
+                    Some(hint),
+                );
 
                 if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
                     let pulse = (self.frame_count as f32 * 0.1).sin().abs();

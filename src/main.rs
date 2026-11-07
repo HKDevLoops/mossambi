@@ -969,6 +969,8 @@ fn handle_bench(file: &Path, target: Option<&str>, as_json: bool) -> Result<()> 
 
 fn handle_hw(as_json: bool) -> Result<()> {
     let hw = detect_hardware_capabilities();
+    let specs = mossambi::hwaccel::detect_system_specs();
+    let suggestions = mossambi::hwaccel::get_system_auto_suggestions(&specs);
     let (os, arch) = get_system_arch_info();
 
     if as_json {
@@ -976,6 +978,8 @@ fn handle_hw(as_json: bool) -> Result<()> {
             "os": os,
             "arch": arch,
             "gpu_vendor": format!("{:?}", hw.vendor),
+            "gpu_name": specs.gpu_name,
+            "total_ram_gb": specs.total_ram_gb,
             "npu_engine": format!("{:?}", hw.npu_engine),
             "npu_name": hw.npu_name,
             "supports_gpu_transcode": hw.supports_gpu_transcode,
@@ -989,6 +993,9 @@ fn handle_hw(as_json: bool) -> Result<()> {
             "h264_encoder": hw.h264_encoder,
             "hevc_encoder": hw.hevc_encoder,
             "optimal_thread_count": hw.optimal_thread_count,
+            "recommended_concurrency": specs.recommended_concurrency,
+            "recommended_ai_model": specs.recommended_ai_model,
+            "auto_suggestions": suggestions,
         });
         println!("{}", serde_json::to_string_pretty(&res)?);
     } else {
@@ -996,7 +1003,12 @@ fn handle_hw(as_json: bool) -> Result<()> {
         println!("==========================================================");
         println!("OS Platform:          {}", os);
         println!("CPU Architecture:     {}", arch);
+        println!("Primary GPU:          {}", specs.gpu_name);
         println!("Detected GPU Vendor:  {:?}", hw.vendor);
+        println!(
+            "Physical RAM:         {:.1} GB Installed",
+            specs.total_ram_gb
+        );
         println!("FFmpeg HW Flag:       {}", hw.ffmpeg_hwaccel_flag);
         println!("H.264 Encoder:        {}", hw.h264_encoder);
         println!("HEVC Encoder:         {}", hw.hevc_encoder);
@@ -1030,9 +1042,16 @@ fn handle_hw(as_json: bool) -> Result<()> {
             }
         );
         println!(
-            "Multi-Core Threads:   {} concurrent worker threads",
-            hw.optimal_thread_count
+            "Multi-Core Threads:   {} logical cores (Auto-tuned: {} workers)",
+            hw.optimal_thread_count, specs.recommended_concurrency
         );
+        println!("----------------------------------------------------------");
+        println!("Auto-Aware System Optimization & Suggestions:");
+        for s in suggestions {
+            println!("  [{}] {}", s.badge, s.title);
+            println!("    -> Recommendation: {}", s.recommendation);
+            println!("       Rationale:      {}", s.rationale);
+        }
         println!("==========================================================");
     }
 
