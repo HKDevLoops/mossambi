@@ -53,6 +53,11 @@ gates clean). See git history for the full matrix; key contracts preserved:
 6. open-computer-use QA pass on Windows for GUI work.
 7. Keep `graphify-out/` untracked. Do not stage scratch artifacts (screenshots, test dirs).
 
+## Token Economy & Heavy Action Policy (Mandatory)
+
+- **DO NOT run `/gsd-graphify` automatically on intermediate code changes or normal commits.** It wastes tokens and AST extraction cycles. Only run `/gsd-graphify` when the user explicitly requests it or after asking user confirmation prior to milestone sign-off.
+- **DO NOT perform new release packaging or git release tagging automatically.** Always ask the user for confirmation before performing actions like cutting a new release, tagging, or publishing.
+
 ## ACTIVE USER INSTRUCTIONS - UI OVERHAUL PHASE (est. 2026-11-06)
 
 The user opened the UI overhaul. Target design language: **macOS Finder**, not Windows-style
