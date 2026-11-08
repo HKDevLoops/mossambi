@@ -103,6 +103,7 @@ impl MossambiApp {
     }
 
     pub fn new_with_path(cc: &eframe::CreationContext<'_>, initial_path: Option<PathBuf>) -> Self {
+        log::info!("MossambiApp::new_with_path entry");
         let cfg = crate::core::MossambiConfig::load();
         let current_theme = ThemeStyle::from(cfg.theme_mode);
         let palette = current_theme.colors();
@@ -504,6 +505,9 @@ impl eframe::App for MossambiApp {
         }
 
         // Synchronize Windows DWM Backdrop (Acrylic / Mica) with active theme & glass effect
+        if self.frame_count == 0 {
+            log::info!("MossambiApp::update first frame rendering!");
+        }
         self.frame_count = self.frame_count.saturating_add(1);
         let cfg = crate::core::MossambiConfig::load();
         // Sync icon pack from config (live)

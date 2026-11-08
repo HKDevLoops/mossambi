@@ -80,9 +80,7 @@ impl DirWatcher {
     /// Stop watching the current directory.
     pub fn stop(&mut self) {
         self.shutdown.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.worker.take() {
-            let _ = handle.join();
-        }
+        self.worker = None;
         self.current_watched_dir = None;
     }
 }
@@ -95,27 +93,18 @@ impl Drop for DirWatcher {
 
 #[cfg(target_os = "windows")]
 fn run_watcher_loop(dir: PathBuf, shutdown: Arc<AtomicBool>, tx: Sender<()>) {
-    use std::ffi::c_void;
-    use std::ptr::null_mut;
-    use windows_sys::Win32::Foundation::{CloseHandle, BOOL, HANDLE, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_LIST_DIRECTORY, FILE_NOTIFY_CHANGE_DIR_NAME,
-        FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SIZE,
-        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-    };
+    use windows_sys::Win32::Foundation::{BOOL, HANDLE};
 
     #[link(name = "kernel32")]
     extern "system" {
-        fn ReadDirectoryChangesW(
-            hDirectory: HANDLE,
-            lpBuffer: *mut c_void,
-            nBufferLength: u32,
+        fn FindFirstChangeNotificationW(
+            lpPathName: *const u16,
             bWatchSubtree: BOOL,
             dwNotifyFilter: u32,
-            lpBytesReturned: *mut u32,
-            lpOverlapped: *mut c_void,
-            lpCompletionRoutine: Option<unsafe extern "system" fn(u32, u32, *mut c_void)>,
-        ) -> BOOL;
+        ) -> HANDLE;
+        fn FindNextChangeNotification(hChangeHandle: HANDLE) -> BOOL;
+        fn FindCloseChangeNotification(hChangeHandle: HANDLE) -> BOOL;
+        fn WaitForSingleObject(hHandle: HANDLE, dwMilliseconds: u32) -> u32;
     }
 
     if !dir.is_dir() {
@@ -125,61 +114,51 @@ fn run_watcher_loop(dir: PathBuf, shutdown: Arc<AtomicBool>, tx: Sender<()>) {
     let mut wide_path: Vec<u16> = dir.as_os_str().encode_wide().collect();
     wide_path.push(0);
 
-    let handle = unsafe {
-        CreateFileW(
-            wide_path.as_ptr(),
-            FILE_LIST_DIRECTORY,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            null_mut(),
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS,
-            null_mut(),
-        )
-    };
-
-    if handle == INVALID_HANDLE_VALUE || handle.is_null() {
-        // Fall back to robust polling if directory handle cannot be opened
-        run_polling_fallback(dir, shutdown, tx);
-        return;
-    }
+    const FILE_NOTIFY_CHANGE_FILE_NAME: u32 = 0x00000001;
+    const FILE_NOTIFY_CHANGE_DIR_NAME: u32 = 0x00000002;
+    const FILE_NOTIFY_CHANGE_LAST_WRITE: u32 = 0x00000010;
+    const FILE_NOTIFY_CHANGE_SIZE: u32 = 0x00000008;
 
     let filter = FILE_NOTIFY_CHANGE_FILE_NAME
         | FILE_NOTIFY_CHANGE_DIR_NAME
         | FILE_NOTIFY_CHANGE_LAST_WRITE
         | FILE_NOTIFY_CHANGE_SIZE;
 
-    let mut buffer = [0u8; 4096];
-    let mut bytes_returned = 0u32;
+    let handle = unsafe {
+        FindFirstChangeNotificationW(
+            wide_path.as_ptr(),
+            0, // watch subtree = false
+            filter,
+        )
+    };
+
+    let invalid = (-1isize) as HANDLE;
+    if handle.is_null() || handle == invalid {
+        run_polling_fallback(dir, shutdown, tx);
+        return;
+    }
+
+    const WAIT_OBJECT_0: u32 = 0;
+    const WAIT_TIMEOUT: u32 = 258;
 
     while !shutdown.load(Ordering::Relaxed) {
-        let success = unsafe {
-            ReadDirectoryChangesW(
-                handle,
-                buffer.as_mut_ptr() as *mut _,
-                buffer.len() as u32,
-                0, // watch subtree = false (immediate children only for max efficiency)
-                filter,
-                &mut bytes_returned,
-                null_mut(),
-                None,
-            )
-        };
-
-        if success != 0 && bytes_returned > 0 {
+        let wait_res = unsafe { WaitForSingleObject(handle, 150) };
+        if wait_res == WAIT_OBJECT_0 {
             // Debounce rapid bursts (e.g. multi-file writes)
-            std::thread::sleep(Duration::from_millis(80));
+            std::thread::sleep(Duration::from_millis(60));
             let _ = tx.send(());
-        } else {
-            // Directory handle might have become invalid or closed
-            std::thread::sleep(Duration::from_millis(200));
+            let _ = unsafe { FindNextChangeNotification(handle) };
+        } else if wait_res == WAIT_TIMEOUT {
             if !dir.exists() {
                 break;
             }
+        } else {
+            break;
         }
     }
 
     unsafe {
-        CloseHandle(handle);
+        FindCloseChangeNotification(handle);
     }
 }
 
