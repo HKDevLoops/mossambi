@@ -1036,9 +1036,9 @@ fn handle_key_event(state: &mut AppState, code: KeyCode) {
             state.config.tui_transparent_bg = !state.config.tui_transparent_bg;
             let _ = state.config.save();
             state.status_message = if state.config.tui_transparent_bg {
-                "✨ TUI Glass: Terminal Transparency & Compositor Blur Enabled".to_string()
+                "[Glass] TUI Glass: Terminal Transparency & Compositor Blur Enabled".to_string()
             } else {
-                "⬛ TUI Opaque: Solid Pantone Background Enabled".to_string()
+                "[Opaque] TUI Opaque: Solid Pantone Background Enabled".to_string()
             };
         }
 

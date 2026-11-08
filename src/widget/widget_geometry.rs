@@ -100,6 +100,54 @@ impl RadialWidgetGeometry {
         )
     }
 
+    /// Calculate inner and outer radii for the group fan-out sub-ring.
+    pub fn sub_radii(&self) -> (f32, f32) {
+        let sub_inner = self.outer_radius + 13.0;
+        let sub_outer = sub_inner + 46.0;
+        (sub_inner, sub_outer)
+    }
+
+    /// Hit-test which sub-petal of an expanded group (0..sub_count - 1) the point lies within.
+    pub fn hit_test_sub_petal(
+        &self,
+        point: Pos2,
+        group_idx: usize,
+        sub_count: usize,
+    ) -> Option<usize> {
+        if sub_count == 0 {
+            return None;
+        }
+        let delta = point - self.center;
+        let dist = delta.length();
+        let (sub_inner, sub_outer) = self.sub_radii();
+
+        if dist < sub_inner - 2.0 || dist > sub_outer + 8.0 {
+            return None;
+        }
+
+        let angle = delta.y.atan2(delta.x);
+        let sector_span = (2.0 * PI) / 8.0;
+        let parent_mid = -PI / 2.0 + (group_idx as f32) * sector_span;
+
+        // Sub-span covers parent span * 1.5 spread across children
+        let sub_span =
+            (sector_span * 1.5 / sub_count as f32).max(44.0 / ((sub_inner + sub_outer) / 2.0));
+        let total_fan = sub_span * sub_count as f32;
+
+        let diff = (angle - parent_mid + PI).rem_euclid(2.0 * PI) - PI;
+        if diff.abs() > (total_fan / 2.0) + 0.04 {
+            return None;
+        }
+
+        let offset = diff + (total_fan / 2.0);
+        let idx = (offset / sub_span).floor() as usize;
+        if idx < sub_count {
+            Some(idx)
+        } else {
+            None
+        }
+    }
+
     /// Render the complete radial widget according to the visual specification of `Image reference.png`.
     pub fn render(
         &self,
@@ -118,6 +166,28 @@ impl RadialWidgetGeometry {
         state: WidgetState,
         drag_hover_target: Option<usize>,
         hub_hint: Option<&str>,
+    ) {
+        self.render_with_full_details(
+            painter,
+            sectors,
+            state,
+            drag_hover_target,
+            hub_hint,
+            0.0,
+            None,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_with_full_details(
+        &self,
+        painter: &Painter,
+        sectors: &[&str],
+        state: WidgetState,
+        drag_hover_target: Option<usize>,
+        hub_hint: Option<&str>,
+        hover_pop: f32,
+        expanded_group: Option<(usize, &[&str], f32, Option<usize>)>,
     ) {
         let sector_span = (2.0 * PI) / 8.0;
         // Aesthetic radial gap between petals (~3.0 degrees)
@@ -171,11 +241,126 @@ impl RadialWidgetGeometry {
                 center_angle,
                 label,
                 is_hovered,
+                if is_hovered { hover_pop } else { 0.0 },
             );
         }
 
-        // 2. Render Central Hub matching Image reference.png States 1, 4, 5, 6
+        // 2. Render Sub-Ring Fan-Out if a group slice is expanded
+        if let Some((grp_idx, sub_items, expansion, sub_hover)) = expanded_group {
+            self.render_sub_ring(painter, grp_idx, sub_items, expansion, sub_hover);
+        }
+
+        // 3. Render Central Hub matching Image reference.png States 1, 4, 5, 6
         self.render_hub(painter, state, hub_hint);
+    }
+
+    /// Render outer sub-ring fan-out for group slices (Filee DonutMenu.Groups parity)
+    pub fn render_sub_ring(
+        &self,
+        painter: &Painter,
+        group_idx: usize,
+        sub_items: &[&str],
+        expansion: f32,
+        hovered_sub: Option<usize>,
+    ) {
+        if sub_items.is_empty() || expansion <= 0.01 {
+            return;
+        }
+        let is_dark = self.theme == WidgetTheme::Dark;
+        let (sub_inner, sub_outer) = self.sub_radii();
+        let sector_span = (2.0 * PI) / 8.0;
+        let parent_mid = -PI / 2.0 + (group_idx as f32) * sector_span;
+
+        let sub_span = (sector_span * 1.5 / sub_items.len() as f32)
+            .max(44.0 / ((sub_inner + sub_outer) / 2.0));
+        let gap = 0.04_f32;
+
+        for (sub_idx, &label) in sub_items.iter().enumerate() {
+            let is_sub_hovered = hovered_sub == Some(sub_idx);
+            let sub_mid =
+                parent_mid + (sub_idx as f32 - (sub_items.len() - 1) as f32 / 2.0) * sub_span;
+            let start_a = sub_mid - (sub_span / 2.0) + gap;
+            let end_a = sub_mid + (sub_span / 2.0) - gap;
+
+            // Animate expansion radius
+            let cur_inner = self.outer_radius + (sub_inner - self.outer_radius) * expansion;
+            let cur_outer = cur_inner + (sub_outer - sub_inner) * expansion;
+
+            let (fill, stroke, text_col) = if is_dark {
+                if is_sub_hovered {
+                    (
+                        Color32::from_rgb(38, 98, 40),
+                        Stroke::new(1.8_f32, Color32::from_rgb(95, 215, 80)),
+                        Color32::WHITE,
+                    )
+                } else {
+                    (
+                        Color32::from_rgba_premultiplied(28, 33, 44, (230.0 * expansion) as u8),
+                        Stroke::new(
+                            1.0_f32,
+                            Color32::from_rgba_premultiplied(
+                                70,
+                                80,
+                                100,
+                                (180.0 * expansion) as u8,
+                            ),
+                        ),
+                        Color32::from_rgb(230, 234, 245),
+                    )
+                }
+            } else if is_sub_hovered {
+                (
+                    Color32::from_rgb(226, 247, 214),
+                    Stroke::new(1.6_f32, Color32::from_rgb(120, 190, 32)),
+                    Color32::from_rgb(32, 44, 26),
+                )
+            } else {
+                (
+                    Color32::from_rgba_premultiplied(245, 247, 250, (245.0 * expansion) as u8),
+                    Stroke::new(
+                        1.0_f32,
+                        Color32::from_rgba_premultiplied(215, 220, 230, (200.0 * expansion) as u8),
+                    ),
+                    Color32::from_rgb(40, 48, 60),
+                )
+            };
+
+            let pts =
+                self.generate_petal_capsule_points(cur_inner, cur_outer, start_a, end_a, 9.0, 6.5);
+
+            // Drop shadow
+            let shadow_pts = offset_points(&pts, Vec2::new(0.0, 2.5));
+            painter.add(PathShape::convex_polygon(
+                shadow_pts,
+                Color32::from_black_alpha((35.0 * expansion) as u8),
+                Stroke::NONE,
+            ));
+
+            if is_sub_hovered {
+                let glow_pts = offset_points(&pts, Vec2::new(0.0, 1.0));
+                painter.add(PathShape::convex_polygon(
+                    glow_pts,
+                    Color32::TRANSPARENT,
+                    Stroke::new(3.0_f32, Color32::from_rgba_premultiplied(120, 210, 50, 70)),
+                ));
+            }
+
+            painter.add(PathShape::convex_polygon(pts, fill, stroke));
+
+            // Content position
+            let r_mid = (cur_inner + cur_outer) / 2.0;
+            let content_pos = Pos2::new(
+                self.center.x + r_mid * sub_mid.cos(),
+                self.center.y + r_mid * sub_mid.sin(),
+            );
+            painter.text(
+                content_pos,
+                egui::Align2::CENTER_CENTER,
+                label,
+                FontId::proportional(11.0),
+                text_col,
+            );
+        }
     }
 
     /// Render an individual petal with pill-rounded corners, soft drop shadow, icon, and label.
@@ -188,6 +373,7 @@ impl RadialWidgetGeometry {
         center_angle: f32,
         label: &str,
         is_hovered: bool,
+        hover_pop: f32,
     ) {
         let is_dark = self.theme == WidgetTheme::Dark;
 
@@ -234,7 +420,7 @@ impl RadialWidgetGeometry {
         // Construct 100% organic rounded capsule polygon points
         let outer_corner_r = 13.0_f32;
         let inner_corner_r = 8.5_f32;
-        let petal_pts = self.generate_petal_capsule_points(
+        let base_pts = self.generate_petal_capsule_points(
             self.inner_radius,
             self.outer_radius,
             start_angle,
@@ -242,6 +428,17 @@ impl RadialWidgetGeometry {
             outer_corner_r,
             inner_corner_r,
         );
+
+        // Apply dynamic radial pop-out translation along spoke angle if hovered
+        let pop_vec = if is_hovered && hover_pop > 0.0 {
+            Vec2::new(
+                center_angle.cos() * hover_pop,
+                center_angle.sin() * hover_pop,
+            )
+        } else {
+            Vec2::ZERO
+        };
+        let petal_pts = offset_points(&base_pts, pop_vec);
 
         // 1. Soft Ambient Drop Shadows under the individual petal
         let shadow_pts_deep = offset_points(&petal_pts, Vec2::new(0.0, 3.5));
@@ -297,12 +494,12 @@ impl RadialWidgetGeometry {
         let icon_pos = Pos2::new(
             self.center.x + r_icon * center_angle.cos(),
             self.center.y + r_icon * center_angle.sin(),
-        );
+        ) + pop_vec;
 
         let text_pos = Pos2::new(
             self.center.x + r_text * center_angle.cos(),
             self.center.y + r_text * center_angle.sin(),
-        );
+        ) + pop_vec;
 
         // 4. Draw Authentic Vector Glyph Icon matching Image reference.png
         self.render_petal_icon(painter, icon_pos, label, icon_color);
@@ -885,7 +1082,7 @@ impl RadialWidgetGeometry {
 
                 painter.circle(self.center, self.hub_radius, hub_fill, hub_stroke);
 
-                // Draw crisp upward arrow `↑` matching Image reference.png
+                // Draw crisp upward arrow matching Image reference.png
                 let arrow_center = self.center - Vec2::new(0.0, 10.0);
                 let shaft_top = arrow_center - Vec2::new(0.0, 8.5);
                 let shaft_bottom = arrow_center + Vec2::new(0.0, 7.5);
@@ -946,7 +1143,7 @@ impl RadialWidgetGeometry {
     }
 }
 
-/// Computes a point on a quadratic Bézier curve: B(t) = (1-t)^2 P0 + 2(1-t)t P1 + t^2 P2
+/// Computes a point on a quadratic Bezier curve: B(t) = (1-t)^2 P0 + 2(1-t)t P1 + t^2 P2
 #[inline]
 fn quadratic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, t: f32) -> Pos2 {
     let u = 1.0 - t;

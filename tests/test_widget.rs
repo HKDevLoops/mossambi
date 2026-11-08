@@ -146,3 +146,32 @@ fn test_widget_dynamic_category_sectors() {
     assert!(arch_sectors.contains(&"7Z"));
     assert!(arch_sectors.contains(&"TAR.GZ"));
 }
+
+#[test]
+fn test_sub_ring_geometry_and_hit_testing() {
+    let geo = RadialWidgetGeometry::default();
+    let (sub_inner, sub_outer) = geo.sub_radii();
+    assert!(sub_inner > geo.outer_radius);
+    assert!(sub_outer > sub_inner);
+    assert_eq!(sub_outer - sub_inner, 46.0);
+
+    // Group 0 is at top North (-PI/2)
+    // Center of sub-ring radial distance:
+    let r_sub_mid = (sub_inner + sub_outer) / 2.0;
+    let north_point = Pos2::new(geo.center.x, geo.center.y - r_sub_mid);
+
+    // 4 sub-items: items 0, 1, 2, 3
+    // Item 1 or 2 should be close to center angle
+    let hit = geo.hit_test_sub_petal(north_point, 0, 4);
+    assert!(hit.is_some());
+    let idx = hit.unwrap();
+    assert!(idx < 4);
+
+    // Point outside sub-ring radius -> None
+    let far_point = Pos2::new(geo.center.x, geo.center.y - (sub_outer + 30.0));
+    assert_eq!(geo.hit_test_sub_petal(far_point, 0, 4), None);
+
+    // Inside main donut -> None for sub-ring
+    let inside_point = Pos2::new(geo.center.x, geo.center.y - geo.outer_radius * 0.5);
+    assert_eq!(geo.hit_test_sub_petal(inside_point, 0, 4), None);
+}

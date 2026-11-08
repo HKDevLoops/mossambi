@@ -297,3 +297,46 @@ says otherwise. Ordered by the phase that must satisfy it.
    - 0 test failures, 0 ignored tests (`cargo test`).
    - 0 security vulnerabilities (`cargo audit`).
 
+
+### H. Phase 19 Master Architecture: Pixel-Perfect Sweet Lime Radial Donut Widget & Unlimited Animation Engine (2026-11-08)
+
+1. **Pixel-Perfect Sweet Lime Radial Donut Widget (Filee Feature Parity & Apple HIG Design):**
+   - **Outer Sub-Ring Group Fan-Out:** Group wedge activation expands concentric outer sub-ring slices (`SubGap = 6px`, `SubBand = 46px`, `SubOverhang = 0.25`, `sub_inner = outer_radius + 13.0`, `sub_outer = sub_inner + 46.0`). Angular fan distribution (`parent_span * 1.5 / count`) with dedicated child actions for all 9 groups:
+     - `EDIT`: Crop, Rotate, Flip, Grayscale, Annotate, Blur
+     - `PDF`: Merge, Split, Compress, Searchable PDF
+     - `ZIP`: Extract, Pack ZIP, Pack 7Z, Pack TAR.GZ
+     - `FLIP`: Flip Horizontal, Flip Vertical
+     - `CROP`: 1:1 Square, 4:3 Standard, 16:9 Widescreen, 3:2 Photo, 5:4 Print, Freeform
+     - `Pages per sheet`: 2 pages, 4 pages, 6 pages, 8 pages, 9 pages
+     - `CAD`: DXF to SVG, DXF to PDF, DXF to PNG, Mesh to 3D
+     - `3D`: Relief Heightmap, Mesh STL, Mesh OBJ, Mesh GLB
+     - `META`: Strip EXIF, View Metadata, GPS Scrub, Edit Tags
+   - **Elastic Radial Spoke Hover Pop-Out:** Hovering over any slice translates the wedge 7px outward along its radial angle spoke vector (`cos(angle) * 7.0`, `sin(angle) * 7.0`) via an underdamped spring with responsive overshoot.
+   - **Interactive Conversion Progress Mode:** Live animated progress ring replaces outer petals during active batch conversions (`sweep_angle = progress * 2*PI`, Sweet Lime arc stroke, bold centered percentage text, and bouncy spring checkmark pop-in badge held for 0.9s upon completion).
+   - **Full Keyboard Navigation:**
+     - `ArrowLeft` / `ArrowRight` / `ArrowUp` / `ArrowDown`: Step selection across radial wedges.
+     - `Enter`: Execute action or expand hovered group.
+     - `Tab` or `Space`: 3D cosine flip between Face 1 (Primary Formats) and Face 2 (Power Tools).
+     - `Escape`: Collapse outer fan-out or dismiss widget.
+   - **Dynamic Center Columella Hub Hints:** Live context-aware hub text ("Tab: Power Tools", "Tab: Formats", "Enter: Expand", "Enter: Convert", "Converting...", "Converted", with active profile name and slice count `N/12`).
+   - **Live Geometry Synchronization:** Size (`320..540px`) and hole radius (`30..80px`) synchronize dynamically with `cfg.donut.appearance`.
+
+2. **Unlimited Animation Engine Across 3 Modalities (Widget, Explorer, TUI):**
+   - **8 Motion Presets:**
+     - `Spring`: Real physical harmonic oscillator (`f = -k*x - c*v`, customizable stiffness, damping, mass).
+     - `Snappy`: 150ms quick response curve for rapid power-user interactions.
+     - `Natural`: 250ms Apple HIG deceleration curve (`1 - (1-t)^3`).
+     - `Bouncy`: Underdamped spring with physical overshoot.
+     - `Gentle`: 350ms fluid ease-in-out curve (`t^2 * (3 - 2t)`).
+     - `Cinematic`: 600ms showcase smooth step curve.
+     - `Fade`: Linear alpha transition.
+     - `None`: Instantaneous zero-duration (reduced motion standard).
+   - **Dedicated Preferences Surface:** "Motion & Animations" section under Appearance with interactive curve preset buttons, spring stiffness/damping/mass sliders, and Apple HIG toggle switches for `Reduced Motion`, `Micro-interactions`, `Shimmer Effects`, `Progress Ring Mode`, `Group Fan-Out`, `Elastic Hover`, and `Terminal TUI Glass`.
+
+3. **Zero-Defect Quality Gates:**
+   - `cargo fmt --check`: Clean (0 diffs).
+   - `cargo clippy --all-targets -- -D warnings`: Clean (0 warnings, 0 errors).
+   - `cargo test --test gui_ascii_gate`: PASSED (100% pure ASCII verified).
+   - `cargo test`: 128 tests pass (66 unit + 62 integration across all 15 suites), 0 failed, 0 ignored.
+   - `cargo audit`: Clean (0 security vulnerabilities across 588 dependencies).
+   - Knowledge Graph sync via `/gsd-graphify`: 2,258 nodes, 4,256 edges, 115 communities in `.planning/graphs/`.

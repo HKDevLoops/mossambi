@@ -9,7 +9,7 @@
 //! The integrator is a semi-implicit Euler step with sub-stepping so that a
 //! dropped frame (long delta) cannot make the spring explode.
 
-use crate::core::config::AnimStyle;
+use crate::core::config::{AnimStyle, AnimationSettings};
 use eframe::egui;
 
 /// A single damped-spring value.
@@ -22,6 +22,8 @@ pub struct Spring {
     pub stiffness: f32,
     /// Damping ratio multiplier. 1.0 = critical damping.
     pub damping: f32,
+    /// Virtual mass for momentum calculation.
+    pub mass: f32,
 }
 
 impl Default for Spring {
@@ -30,8 +32,9 @@ impl Default for Spring {
             value: 0.0,
             velocity: 0.0,
             target: 0.0,
-            stiffness: 220.0,
+            stiffness: 240.0,
             damping: 1.0,
+            mass: 1.0,
         }
     }
 }
@@ -55,14 +58,21 @@ impl Spring {
 
     /// Advance the simulation by `dt` seconds and return the new value.
     pub fn step(&mut self, dt: f32) -> f32 {
+        self.step_with_params(dt, self.stiffness, self.damping, self.mass)
+    }
+
+    /// Advance the simulation using explicit physical parameters.
+    pub fn step_with_params(&mut self, dt: f32, stiffness: f32, damping: f32, mass: f32) -> f32 {
         let dt = dt.clamp(0.0, 0.1);
+        let mass = mass.max(0.01);
         // Sub-step so large frame gaps stay stable.
         let steps = ((dt / (1.0 / 240.0)).ceil() as usize).clamp(1, 24);
         let h = dt / steps as f32;
         for _ in 0..steps {
             let delta = self.value - self.target;
-            let accel = -self.stiffness * delta
-                - 2.0 * self.damping * self.stiffness.sqrt() * self.velocity;
+            let accel = (-stiffness * delta
+                - 2.0 * damping * (stiffness * mass).sqrt() * self.velocity)
+                / mass;
             self.velocity += accel * h;
             self.value += self.velocity * h;
         }
@@ -85,16 +95,51 @@ pub fn frame_dt(ctx: &egui::Context) -> f32 {
 
 /// Advance a spring according to the user-selected motion style.
 ///
-/// * [`AnimStyle::Spring`] - damped spring.
-/// * [`AnimStyle::Snappy`] - fast exponential ease-out.
-/// * [`AnimStyle::Fade`]   - linear ramp.
-/// * [`AnimStyle::None`]   - instant snap.
+/// * [`AnimStyle::Spring`]    - critically-damped physical spring.
+/// * [`AnimStyle::Snappy`]    - fast exponential ease-out (150ms).
+/// * [`AnimStyle::Natural`]   - Apple HIG standard ease-out (250ms).
+/// * [`AnimStyle::Bouncy`]    - dynamic physical spring with overshoot.
+/// * [`AnimStyle::Gentle`]    - smooth fluid Apple HIG ease-in-out (350ms).
+/// * [`AnimStyle::Cinematic`] - dramatic 600ms slow-motion ease.
+/// * [`AnimStyle::Fade`]      - linear ramp.
+/// * [`AnimStyle::None`]      - instant snap.
 pub fn advance(spring: &mut Spring, target: f32, style: AnimStyle, dt: f32) -> f32 {
     spring.target = target;
     match style {
         AnimStyle::Spring => spring.step(dt),
         AnimStyle::Snappy => {
-            let k = 1.0 - (-18.0 * dt).exp();
+            let k = 1.0 - (-24.0 * dt).exp();
+            spring.value += (target - spring.value) * k;
+            if (spring.value - target).abs() < 0.001 {
+                spring.value = target;
+            }
+            spring.velocity = 0.0;
+            spring.value
+        }
+        AnimStyle::Natural => {
+            let k = 1.0 - (-14.0 * dt).exp();
+            spring.value += (target - spring.value) * k;
+            if (spring.value - target).abs() < 0.001 {
+                spring.value = target;
+            }
+            spring.velocity = 0.0;
+            spring.value
+        }
+        AnimStyle::Bouncy => {
+            // Under-damped spring (0.55 damping ratio) produces authentic bounce
+            spring.step_with_params(dt, spring.stiffness, 0.55, spring.mass)
+        }
+        AnimStyle::Gentle => {
+            let k = 1.0 - (-8.0 * dt).exp();
+            spring.value += (target - spring.value) * k;
+            if (spring.value - target).abs() < 0.001 {
+                spring.value = target;
+            }
+            spring.velocity = 0.0;
+            spring.value
+        }
+        AnimStyle::Cinematic => {
+            let k = 1.0 - (-4.5 * dt).exp();
             spring.value += (target - spring.value) * k;
             if (spring.value - target).abs() < 0.001 {
                 spring.value = target;
@@ -116,6 +161,24 @@ pub fn advance(spring: &mut Spring, target: f32, style: AnimStyle, dt: f32) -> f
             spring.value
         }
     }
+}
+
+/// Advance a spring using full global animation settings.
+pub fn advance_with_settings(
+    spring: &mut Spring,
+    target: f32,
+    style: AnimStyle,
+    dt: f32,
+    settings: &AnimationSettings,
+) -> f32 {
+    if settings.reduced_motion {
+        spring.set(target);
+        return spring.value;
+    }
+    spring.stiffness = settings.spring_stiffness;
+    spring.damping = settings.spring_damping;
+    spring.mass = settings.spring_mass;
+    advance(spring, target, style, dt)
 }
 
 /// A registry of independent animated scalars keyed by a stable id.

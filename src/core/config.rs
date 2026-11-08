@@ -283,14 +283,22 @@ impl MenuStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AnimStyle {
-    /// Critically-damped spring — the UX best-practice default.
+    /// Critically-damped physical spring - standard Apple HIG motion.
     #[default]
     Spring,
-    /// Fast ease-out curve — snappy, no overshoot.
+    /// Fast ease-out curve - snappy 150ms with zero overshoot.
     Snappy,
+    /// Standard Apple HIG 250ms natural deceleration curve.
+    Natural,
+    /// Physical spring with dynamic overshoot and elastic settle.
+    Bouncy,
+    /// Smooth fluid Apple HIG 350ms ease-in-out curve.
+    Gentle,
+    /// Dramatic 600ms cinematic slow-motion showcase curve.
+    Cinematic,
     /// Linear opacity fade.
     Fade,
-    /// Motion disabled entirely.
+    /// Motion disabled entirely (instantaneous snap).
     None,
 }
 
@@ -299,6 +307,10 @@ impl AnimStyle {
         &[
             AnimStyle::Spring,
             AnimStyle::Snappy,
+            AnimStyle::Natural,
+            AnimStyle::Bouncy,
+            AnimStyle::Gentle,
+            AnimStyle::Cinematic,
             AnimStyle::Fade,
             AnimStyle::None,
         ]
@@ -306,17 +318,21 @@ impl AnimStyle {
 
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Spring => "Spring",
-            Self::Snappy => "Snappy",
-            Self::Fade => "Fade",
-            Self::None => "None",
+            Self::Spring => "Spring (Physical)",
+            Self::Snappy => "Snappy (150ms)",
+            Self::Natural => "Natural (Apple HIG 250ms)",
+            Self::Bouncy => "Bouncy (Overshoot)",
+            Self::Gentle => "Gentle (Fluid 350ms)",
+            Self::Cinematic => "Cinematic (600ms)",
+            Self::Fade => "Fade (Linear)",
+            Self::None => "None (Instant)",
         }
     }
 }
 
 /// Per-feature motion configuration. Every explorer/widget animation can be
 /// re-tuned independently from Settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AnimationSettings {
     #[serde(default)]
     pub hover: AnimStyle,
@@ -332,6 +348,66 @@ pub struct AnimationSettings {
     pub widget: AnimStyle,
     #[serde(default)]
     pub scroll: AnimStyle,
+    #[serde(default)]
+    pub tui: AnimStyle,
+
+    // Physics parameters for Spring solver
+    #[serde(default = "default_spring_stiffness")]
+    pub spring_stiffness: f32,
+    #[serde(default = "default_spring_damping")]
+    pub spring_damping: f32,
+    #[serde(default = "default_spring_mass")]
+    pub spring_mass: f32,
+
+    // Feature toggles for unlimited animations
+    #[serde(default)]
+    pub reduced_motion: bool,
+    #[serde(default = "default_true")]
+    pub micro_interactions: bool,
+    #[serde(default = "default_true")]
+    pub shimmer_effects: bool,
+    #[serde(default = "default_true")]
+    pub widget_progress_ring: bool,
+    #[serde(default = "default_true")]
+    pub widget_group_fanout: bool,
+    #[serde(default = "default_true")]
+    pub widget_elastic_hover: bool,
+}
+
+fn default_spring_stiffness() -> f32 {
+    240.0
+}
+
+fn default_spring_damping() -> f32 {
+    1.0
+}
+
+fn default_spring_mass() -> f32 {
+    1.0
+}
+
+impl Default for AnimationSettings {
+    fn default() -> Self {
+        Self {
+            hover: AnimStyle::Spring,
+            selection: AnimStyle::Snappy,
+            open: AnimStyle::Natural,
+            peek: AnimStyle::Gentle,
+            toolbar: AnimStyle::Natural,
+            widget: AnimStyle::Bouncy,
+            scroll: AnimStyle::Natural,
+            tui: AnimStyle::Natural,
+            spring_stiffness: 240.0,
+            spring_damping: 1.0,
+            spring_mass: 1.0,
+            reduced_motion: false,
+            micro_interactions: true,
+            shimmer_effects: true,
+            widget_progress_ring: true,
+            widget_group_fanout: true,
+            widget_elastic_hover: true,
+        }
+    }
 }
 
 /// Accessor signature for one animated field inside [`AnimationSettings`].
@@ -341,7 +417,7 @@ pub type AnimFieldAccessor = fn(&mut AnimationSettings) -> &mut AnimStyle;
 pub type AnimField = (&'static str, &'static str, AnimFieldAccessor);
 
 impl AnimationSettings {
-    pub fn all_fields() -> [AnimField; 7] {
+    pub fn all_fields() -> [AnimField; 8] {
         [
             ("hover", "Hover", |s| &mut s.hover),
             ("selection", "Selection", |s| &mut s.selection),
@@ -350,6 +426,7 @@ impl AnimationSettings {
             ("toolbar", "Toolbar", |s| &mut s.toolbar),
             ("widget", "Radial widget", |s| &mut s.widget),
             ("scroll", "Scroll", |s| &mut s.scroll),
+            ("tui", "Terminal TUI", |s| &mut s.tui),
         ]
     }
 }

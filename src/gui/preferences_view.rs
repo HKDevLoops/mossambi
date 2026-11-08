@@ -9,7 +9,9 @@
 //
 // Pure ASCII. No emoji. Uses the shared design tokens from crate::gui::design.
 
-use crate::core::config::{CheckboxMode, GlassEffect, MenuStyle, MossambiConfig, OutputMode};
+use crate::core::config::{
+    AnimStyle, CheckboxMode, GlassEffect, MenuStyle, MossambiConfig, OutputMode,
+};
 use crate::core::donut_config::{DonutConfig, DonutProfile, DonutSlicePreset};
 use crate::core::fields_config::FieldsConfig;
 use crate::core::icon_packs::IconPack;
@@ -1841,6 +1843,190 @@ impl PreferencesView {
                     *dirty = true;
                 }
             },
+        );
+
+        section(ui, palette, "Motion & Animations");
+        ui.label(
+            egui::RichText::new(
+                "Configure physical spring dynamics, motion curves, and animations across Widget, Explorer, and TUI.",
+            )
+            .size(design::type_scale::BODY_SM)
+            .color(palette.text_secondary),
+        );
+        ui.add_space(design::space::SM);
+
+        // Motion Curve Preset for General Surfaces
+        let current_style = self.cfg.animations.widget;
+        let style_lbl = current_style.name().to_string();
+        setting_row(
+            ui,
+            palette,
+            "Motion curve",
+            &style_lbl,
+            dirty,
+            |ui, dirty| {
+                ui.horizontal(|ui| {
+                    for &style in AnimStyle::all() {
+                        let is_active = self.cfg.animations.widget == style;
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(style.name())
+                                        .size(design::type_scale::SMALL)
+                                        .color(if is_active {
+                                            palette.accent
+                                        } else {
+                                            palette.text_secondary
+                                        }),
+                                )
+                                .fill(if is_active {
+                                    palette.card_hover
+                                } else {
+                                    Color32::TRANSPARENT
+                                })
+                                .stroke(Stroke::new(
+                                    if is_active { 1.5_f32 } else { 0.5_f32 },
+                                    if is_active {
+                                        palette.accent
+                                    } else {
+                                        palette.border
+                                    },
+                                ))
+                                .rounding(Rounding::same(design::radius::XS)),
+                            )
+                            .clicked()
+                        {
+                            self.cfg.animations.hover = style;
+                            self.cfg.animations.selection = style;
+                            self.cfg.animations.open = style;
+                            self.cfg.animations.peek = style;
+                            self.cfg.animations.toolbar = style;
+                            self.cfg.animations.widget = style;
+                            self.cfg.animations.scroll = style;
+                            self.cfg.animations.tui = style;
+                            *dirty = true;
+                        }
+                    }
+                });
+            },
+        );
+
+        // Spring Physics Controls
+        let stiffness = self.cfg.animations.spring_stiffness;
+        let stiff_lbl = format!("{:.0}", stiffness);
+        setting_row(
+            ui,
+            palette,
+            "Spring stiffness",
+            &stiff_lbl,
+            dirty,
+            |ui, dirty| {
+                if ui
+                    .add(
+                        egui::Slider::new(&mut self.cfg.animations.spring_stiffness, 80.0..=500.0)
+                            .show_value(false),
+                    )
+                    .changed()
+                {
+                    *dirty = true;
+                }
+            },
+        );
+
+        let damping = self.cfg.animations.spring_damping;
+        let damp_lbl = format!("{:.2}", damping);
+        setting_row(
+            ui,
+            palette,
+            "Damping ratio",
+            &damp_lbl,
+            dirty,
+            |ui, dirty| {
+                if ui
+                    .add(
+                        egui::Slider::new(&mut self.cfg.animations.spring_damping, 0.40..=2.00)
+                            .show_value(false),
+                    )
+                    .changed()
+                {
+                    *dirty = true;
+                }
+            },
+        );
+
+        let mass = self.cfg.animations.spring_mass;
+        let mass_lbl = format!("{:.2}", mass);
+        setting_row(
+            ui,
+            palette,
+            "Virtual mass",
+            &mass_lbl,
+            dirty,
+            |ui, dirty| {
+                if ui
+                    .add(
+                        egui::Slider::new(&mut self.cfg.animations.spring_mass, 0.50..=3.00)
+                            .show_value(false),
+                    )
+                    .changed()
+                {
+                    *dirty = true;
+                }
+            },
+        );
+
+        toggle_row(
+            ui,
+            palette,
+            "Reduced motion (Accessibility)",
+            "Disables all spring and easing animations across the application",
+            &mut self.cfg.animations.reduced_motion,
+            dirty,
+        );
+
+        toggle_row(
+            ui,
+            palette,
+            "Micro-interactions",
+            "Delightful button presses, icon lifts, and row hover glows",
+            &mut self.cfg.animations.micro_interactions,
+            dirty,
+        );
+
+        toggle_row(
+            ui,
+            palette,
+            "Shimmer & progress wave effects",
+            "Animated specular light sweeps over active progress bars",
+            &mut self.cfg.animations.shimmer_effects,
+            dirty,
+        );
+
+        toggle_row(
+            ui,
+            palette,
+            "Radial widget group slice outer fan-out",
+            "Fans out outer sub-ring when hovering grouped preset petals",
+            &mut self.cfg.animations.widget_group_fanout,
+            dirty,
+        );
+
+        toggle_row(
+            ui,
+            palette,
+            "Radial widget progress ring mode",
+            "Sucks petals into center and shows animated progress ring during conversions",
+            &mut self.cfg.animations.widget_progress_ring,
+            dirty,
+        );
+
+        toggle_row(
+            ui,
+            palette,
+            "Radial widget elastic hover pop-out",
+            "Translates active hovered petal 7px outward along its spoke vector",
+            &mut self.cfg.animations.widget_elastic_hover,
+            dirty,
         );
     }
 

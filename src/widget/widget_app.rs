@@ -24,6 +24,22 @@ pub const STUDIO_TOOL_SECTORS: [&str; 8] = [
     "CROP", "EXAM", "META", "RENAME", "AI OCR", "PDF", "ZIP", "EXPLORE",
 ];
 
+/// Returns sub-ring children for grouped preset petals (Filee group slices parity).
+pub fn group_children_for(label: &str) -> Option<&'static [&'static str]> {
+    match label {
+        "EDIT" | "Edit Group of 6" => Some(&["CROP", "FLIP", "ROTATE", "RESIZE", "TRIM", "BLUR"]),
+        "PDF" => Some(&["MERGE", "SPLIT", "COMPRESS", "OCR"]),
+        "ZIP" => Some(&["7Z", "TAR", "ZIP", "UNPACK"]),
+        "FLIP" | "Flip Group of 2" => Some(&["HORIZ", "VERT"]),
+        "CROP" | "Crop video Group of 6" => Some(&["FREE", "1:1", "16:9", "4:3", "3:2", "5:4"]),
+        "Pages per sheet Group of 5" => Some(&["1-UP", "2-UP", "4-UP", "6-UP", "9-UP"]),
+        "CAD" => Some(&["SVG", "PDF", "PNG", "DXF"]),
+        "3D" => Some(&["STL", "OBJ", "PLY", "GLTF"]),
+        "META" => Some(&["EXIF", "STRIP", "TAGS", "COPY"]),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum WidgetResult {
     Success(Vec<PathBuf>),
@@ -39,6 +55,16 @@ pub struct MossambiWidgetApp {
     pub hovered_carpel: Option<usize>,
     pub current_file: Option<PathBuf>,
     pub current_category: FileCategory,
+
+    // Filee Group Fan-out & Animation Springs
+    pub expanded_group: Option<usize>,
+    pub hovered_sub_petal: Option<usize>,
+    pub expand_spring: crate::gui::anim::Spring,
+    pub hover_pop_spring: crate::gui::anim::Spring,
+    pub selected_wedge: usize,
+    pub pending_group: Option<usize>,
+    pub pending_group_time: Option<Instant>,
+    pub last_pointer_dist: f32,
 
     // State Tracking
     pub is_converting: bool,
@@ -81,6 +107,15 @@ impl Default for MossambiWidgetApp {
             hovered_carpel: None,
             current_file: None,
             current_category: FileCategory::Image,
+
+            expanded_group: None,
+            hovered_sub_petal: None,
+            expand_spring: crate::gui::anim::Spring::new(0.0),
+            hover_pop_spring: crate::gui::anim::Spring::new(0.0),
+            selected_wedge: 0,
+            pending_group: None,
+            pending_group_time: None,
+            last_pointer_dist: 0.0,
 
             is_converting: false,
             progress: 0.0,
@@ -437,11 +472,80 @@ impl eframe::App for MossambiWidgetApp {
 
             if i.pointer.button_released(egui::PointerButton::Primary) && !self.is_converting {
                 if let Some(pos) = i.pointer.hover_pos() {
-                    if let Some(carpel_idx) = self.geometry.hit_test_petal(pos) {
-                        if let Some(target) = self.sectors.get(carpel_idx).copied() {
+                    if let (Some(grp_idx), Some(sub_idx)) =
+                        (self.expanded_group, self.hovered_sub_petal)
+                    {
+                        let child_opt = {
+                            let active = self.active_sectors();
+                            group_children_for(active.get(grp_idx).copied().unwrap_or(""))
+                                .and_then(|children| children.get(sub_idx).copied())
+                        };
+                        if let Some(child_fmt) = child_opt {
                             if self.current_file.is_some() {
-                                self.start_conversion(target);
+                                self.start_conversion(child_fmt);
                             }
+                        }
+                    } else if let Some(carpel_idx) = self.geometry.hit_test_petal(pos) {
+                        let target_opt =
+                            self.sectors.get(carpel_idx).copied().map(|s| s.to_string());
+                        if let Some(target) = target_opt {
+                            if group_children_for(&target).is_some() {
+                                if self.expanded_group == Some(carpel_idx) {
+                                    self.expanded_group = None;
+                                } else {
+                                    self.expanded_group = Some(carpel_idx);
+                                }
+                            } else if self.current_file.is_some() {
+                                self.start_conversion(&target);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Keyboard navigation across dial wedges (Filee keyboard parity)
+            if i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::ArrowDown) {
+                self.selected_wedge = (self.selected_wedge + 1) % 8;
+                self.hovered_carpel = Some(self.selected_wedge);
+                self.expanded_group = None;
+                self.hovered_sub_petal = None;
+            }
+            if i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::ArrowUp) {
+                self.selected_wedge = (self.selected_wedge + 7) % 8;
+                self.hovered_carpel = Some(self.selected_wedge);
+                self.expanded_group = None;
+                self.hovered_sub_petal = None;
+            }
+            if i.key_pressed(Key::Enter) {
+                if let (Some(grp_idx), Some(sub_idx)) =
+                    (self.expanded_group, self.hovered_sub_petal)
+                {
+                    let child_opt = {
+                        let active = self.active_sectors();
+                        group_children_for(active.get(grp_idx).copied().unwrap_or(""))
+                            .and_then(|children| children.get(sub_idx).copied())
+                    };
+                    if let Some(child_fmt) = child_opt {
+                        if self.current_file.is_some() {
+                            self.start_conversion(child_fmt);
+                        }
+                    }
+                } else if let Some(idx) = self.hovered_carpel {
+                    let target_opt = self
+                        .active_sectors()
+                        .get(idx)
+                        .copied()
+                        .map(|s| s.to_string());
+                    if let Some(target) = target_opt {
+                        if group_children_for(&target).is_some() {
+                            if self.expanded_group == Some(idx) {
+                                self.expanded_group = None;
+                            } else {
+                                self.expanded_group = Some(idx);
+                                self.hovered_sub_petal = Some(0);
+                            }
+                        } else if self.current_file.is_some() {
+                            self.start_conversion(&target);
                         }
                     }
                 }
@@ -467,7 +571,12 @@ impl eframe::App for MossambiWidgetApp {
             }
 
             if i.key_pressed(Key::Escape) {
-                ctx.send_viewport_cmd(ViewportCommand::Close);
+                if self.expanded_group.is_some() {
+                    self.expanded_group = None;
+                    self.hovered_sub_petal = None;
+                } else {
+                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
             }
         });
 
@@ -475,13 +584,91 @@ impl eframe::App for MossambiWidgetApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(Color32::TRANSPARENT))
             .show(ctx, |ui| {
+                let cfg = crate::core::MossambiConfig::load();
+                let dt = crate::gui::anim::frame_dt(ctx);
+
+                // Synchronize geometry size and hole radius from settings
+                self.geometry.outer_radius = cfg.donut.appearance.size * 0.44;
+                self.geometry.inner_radius = cfg.donut.appearance.hole.max(30.0);
+                self.geometry.hub_radius = self.geometry.inner_radius * 0.90;
+
+                // Advance spring physics
+                crate::gui::anim::advance_with_settings(
+                    &mut self.expand_spring,
+                    if self.expanded_group.is_some() { 1.0 } else { 0.0 },
+                    cfg.animations.widget,
+                    dt,
+                    &cfg.animations,
+                );
+                crate::gui::anim::advance_with_settings(
+                    &mut self.hover_pop_spring,
+                    if self.hovered_carpel.is_some() { 7.0 } else { 0.0 },
+                    cfg.animations.widget,
+                    dt,
+                    &cfg.animations,
+                );
+
                 let (rect, response) =
                     ui.allocate_exact_size(Vec2::new(400.0, 400.0), egui::Sense::click_and_drag());
                 let painter = ui.painter_at(rect);
                 self.geometry.center = rect.center();
 
                 let hover_pos = response.hover_pos();
-                self.hovered_carpel = hover_pos.and_then(|p| self.geometry.hit_test_petal(p));
+                let mut is_on_sub_ring = false;
+
+                if let Some(pos) = hover_pos {
+                    let dist = (pos - self.geometry.center).length();
+
+                    // Check if interacting with expanded group sub-ring
+                    if let Some(grp_idx) = self.expanded_group {
+                        let active = self.active_sectors();
+                        if let Some(children) = group_children_for(active.get(grp_idx).copied().unwrap_or("")) {
+                            if let Some(sub_idx) = self.geometry.hit_test_sub_petal(pos, grp_idx, children.len()) {
+                                self.hovered_sub_petal = Some(sub_idx);
+                                is_on_sub_ring = true;
+                            } else if self.geometry.hit_test_petal(pos) == Some(grp_idx) {
+                                self.hovered_sub_petal = None;
+                                is_on_sub_ring = true;
+                            } else if self.geometry.hit_test_hub(pos)
+                                || self.geometry.hit_test_petal(pos).is_some()
+                                || dist > self.geometry.sub_radii().1 + 16.0
+                            {
+                                self.expanded_group = None;
+                                self.hovered_sub_petal = None;
+                            }
+                        }
+                    }
+
+                    if !is_on_sub_ring {
+                        if let Some(petal_idx) = self.geometry.hit_test_petal(pos) {
+                            self.hovered_carpel = Some(petal_idx);
+                            self.selected_wedge = petal_idx;
+                            let active = self.active_sectors();
+                            let label = active.get(petal_idx).copied().unwrap_or("");
+
+                            if group_children_for(label).is_some() {
+                                if self.pending_group != Some(petal_idx) {
+                                    self.pending_group = Some(petal_idx);
+                                    self.pending_group_time = Some(Instant::now());
+                                    self.last_pointer_dist = dist;
+                                } else {
+                                    let elapsed = self.pending_group_time.map(|t| t.elapsed()).unwrap_or_default();
+                                    let moved_outward = dist - self.last_pointer_dist >= 10.0;
+                                    if elapsed >= Duration::from_millis(160) || moved_outward {
+                                        self.expanded_group = Some(petal_idx);
+                                    }
+                                }
+                            } else {
+                                self.pending_group = None;
+                            }
+                        } else {
+                            self.hovered_carpel = None;
+                            self.pending_group = None;
+                        }
+                    }
+                } else {
+                    self.hovered_carpel = None;
+                }
 
                 if response.dragged() {
                     if let Some(pos) = hover_pos {
@@ -515,73 +702,102 @@ impl eframe::App for MossambiWidgetApp {
 
                 if response.clicked() {
                     if let Some(pos) = hover_pos {
-                        if self.geometry.hit_test_hub(pos) && !self.is_converting {
+                        if let (Some(grp_idx), Some(sub_idx)) = (self.expanded_group, self.hovered_sub_petal) {
+                            let active = self.active_sectors();
+                            if let Some(children) = group_children_for(active.get(grp_idx).copied().unwrap_or("")) {
+                                if let Some(&child_fmt) = children.get(sub_idx) {
+                                    if self.current_file.is_some() {
+                                        self.start_conversion(child_fmt);
+                                    } else if let Some(path) = rfd::FileDialog::new().pick_file() {
+                                        self.select_file(path);
+                                        self.start_conversion(child_fmt);
+                                    }
+                                }
+                            }
+                        } else if self.geometry.hit_test_hub(pos) && !self.is_converting {
                             if let Some(path) = rfd::FileDialog::new().pick_file() {
                                 self.select_file(path);
                             }
                         } else if let Some(petal_idx) = self.hovered_carpel {
                             match self.face {
                                 DonutFace::PrimaryFormats => {
-                                    if let Some(fmt) = self.sectors.get(petal_idx).copied() {
-                                        if self.current_file.is_some() {
-                                            self.start_conversion(fmt);
+                                    let fmt_opt = self.active_sectors().get(petal_idx).copied().map(|s| s.to_string());
+                                    if let Some(fmt) = fmt_opt {
+                                        if group_children_for(&fmt).is_some() {
+                                            if self.expanded_group == Some(petal_idx) {
+                                                self.expanded_group = None;
+                                            } else {
+                                                self.expanded_group = Some(petal_idx);
+                                                self.hovered_sub_petal = Some(0);
+                                            }
+                                        } else if self.current_file.is_some() {
+                                            self.start_conversion(&fmt);
                                         } else if let Some(path) = rfd::FileDialog::new().pick_file() {
                                             self.select_file(path);
-                                            self.start_conversion(fmt);
+                                            self.start_conversion(&fmt);
                                         }
                                     }
                                 }
                                 DonutFace::StudioTools => {
                                     let tool = STUDIO_TOOL_SECTORS.get(petal_idx).copied().unwrap_or("");
-                                    match tool {
-                                        "CROP" => {
-                                            log::info!("Studio Power Tool: Crop triggered from Radial Donut");
+                                    if group_children_for(tool).is_some() {
+                                        if self.expanded_group == Some(petal_idx) {
+                                            self.expanded_group = None;
+                                        } else {
+                                            self.expanded_group = Some(petal_idx);
+                                            self.hovered_sub_petal = Some(0);
                                         }
-                                        "EXAM" => {
-                                            log::info!("Studio Power Tool: Exam Conformer triggered");
-                                        }
-                                        "META" => {
-                                            log::info!("Studio Power Tool: Metadata Editor triggered");
-                                        }
-                                        "RENAME" => {
-                                            log::info!("Studio Power Tool: Batch Renamer triggered");
-                                        }
-                                        "AI OCR" => {
-                                            log::info!("Studio Power Tool: AI OCR Extraction triggered");
-                                            if let Some(ref path) = self.current_file {
-                                                if let Ok(text) = crate::codec::extract_text_from_pdf(path) {
-                                                    log::info!("Extracted {} characters via OCR", text.len());
+                                    } else {
+                                        match tool {
+                                            "CROP" => {
+                                                log::info!("Studio Power Tool: Crop triggered from Radial Donut");
+                                            }
+                                            "EXAM" => {
+                                                log::info!("Studio Power Tool: Exam Conformer triggered");
+                                            }
+                                            "META" => {
+                                                log::info!("Studio Power Tool: Metadata Editor triggered");
+                                            }
+                                            "RENAME" => {
+                                                log::info!("Studio Power Tool: Batch Renamer triggered");
+                                            }
+                                            "AI OCR" => {
+                                                log::info!("Studio Power Tool: AI OCR Extraction triggered");
+                                                if let Some(ref path) = self.current_file {
+                                                    if let Ok(text) = crate::codec::extract_text_from_pdf(path) {
+                                                        log::info!("Extracted {} characters via OCR", text.len());
+                                                    }
                                                 }
                                             }
-                                        }
-                                        "PDF" => {
-                                            if self.current_file.is_some() {
-                                                self.start_conversion("PDF");
+                                            "PDF" => {
+                                                if self.current_file.is_some() {
+                                                    self.start_conversion("PDF");
+                                                }
                                             }
-                                        }
-                                        "ZIP" => {
-                                            if let Some(ref path) = self.current_file {
-                                                let zip_out = path.with_extension("zip");
-                                                let _ = crate::archive::pack_archive(
-                                                    std::slice::from_ref(path),
-                                                    &zip_out,
-                                                    crate::archive::ArchiveType::Zip,
-                                                );
-                                                self.last_output = Some(zip_out);
-                                                self.success_time = Some(Instant::now());
-                                                self.converted_count = 1;
+                                            "ZIP" => {
+                                                if let Some(ref path) = self.current_file {
+                                                    let zip_out = path.with_extension("zip");
+                                                    let _ = crate::archive::pack_archive(
+                                                        std::slice::from_ref(path),
+                                                        &zip_out,
+                                                        crate::archive::ArchiveType::Zip,
+                                                    );
+                                                    self.last_output = Some(zip_out);
+                                                    self.success_time = Some(Instant::now());
+                                                    self.converted_count = 1;
+                                                }
                                             }
-                                        }
-                                        "EXPLORE" => {
-                                            if let Some(ref path) = self.current_file {
-                                                let dir = path.parent().unwrap_or(path);
-                                                #[cfg(target_os = "windows")]
-                                                let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
-                                                #[cfg(not(target_os = "windows"))]
-                                                let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+                                            "EXPLORE" => {
+                                                if let Some(ref path) = self.current_file {
+                                                    let dir = path.parent().unwrap_or(path);
+                                                    #[cfg(target_os = "windows")]
+                                                    let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
+                                                    #[cfg(not(target_os = "windows"))]
+                                                    let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+                                                }
                                             }
+                                            _ => {}
                                         }
-                                        _ => {}
                                     }
                                 }
                             }
@@ -619,16 +835,43 @@ impl eframe::App for MossambiWidgetApp {
                 };
 
                 let active_sectors = self.active_sectors();
-                let hint = match self.face {
-                    DonutFace::PrimaryFormats => "Tab: Power Tools",
-                    DonutFace::StudioTools => "Tab: Formats",
+                let dynamic_hint: String = if self.is_converting {
+                    "Converting...".to_string()
+                } else if self.success_time.is_some() {
+                    "Converted".to_string()
+                } else if let (Some(grp_idx), Some(sub_idx)) = (self.expanded_group, self.hovered_sub_petal) {
+                    if let Some(children) = group_children_for(active_sectors.get(grp_idx).copied().unwrap_or("")) {
+                        children.get(sub_idx).copied().unwrap_or("Convert").to_string()
+                    } else {
+                        "Convert".to_string()
+                    }
+                } else if let Some(idx) = self.hovered_carpel {
+                    let label = active_sectors.get(idx).copied().unwrap_or("");
+                    if group_children_for(label).is_some() {
+                        "Enter: Expand".to_string()
+                    } else {
+                        "Enter: Convert".to_string()
+                    }
+                } else {
+                    match self.face {
+                        DonutFace::PrimaryFormats => "Tab: Power Tools".to_string(),
+                        DonutFace::StudioTools => "Tab: Formats".to_string(),
+                    }
                 };
-                self.geometry.render_with_hint(
+
+                let expanded_info = self.expanded_group.and_then(|g| {
+                    let children = group_children_for(active_sectors.get(g).copied().unwrap_or(""))?;
+                    Some((g, children, self.expand_spring.value, self.hovered_sub_petal))
+                });
+
+                self.geometry.render_with_full_details(
                     &painter,
                     active_sectors,
                     current_state,
                     self.hovered_carpel,
-                    Some(hint),
+                    Some(&dynamic_hint),
+                    self.hover_pop_spring.value,
+                    expanded_info,
                 );
 
                 if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
