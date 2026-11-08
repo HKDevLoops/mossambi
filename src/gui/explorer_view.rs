@@ -332,6 +332,10 @@ pub struct ExplorerView {
 
     // Finder-Style Multi-Item Batch Renamer
     pub batch_rename: BatchRenameState,
+
+    // Real-Time Filesystem Directory Watchers
+    pub dir_watcher: crate::core::DirWatcher,
+    pub secondary_dir_watcher: crate::core::DirWatcher,
 }
 
 #[derive(Debug, Clone)]
@@ -360,6 +364,17 @@ impl Default for BatchRenameState {
             start_index: 1,
             target_paths: Vec::new(),
         }
+    }
+}
+
+/// Spawns an independent, concurrent Mossambi explorer window at the specified directory.
+pub fn spawn_new_explorer_window(dir: Option<&Path>) {
+    if let Ok(exe) = std::env::current_exe() {
+        let mut cmd = std::process::Command::new(exe);
+        if let Some(d) = dir {
+            cmd.arg(d);
+        }
+        let _ = cmd.spawn();
     }
 }
 
@@ -462,6 +477,8 @@ impl Default for ExplorerView {
             show_inspector_pane: false,
             permanent_delete_prompt: None,
             batch_rename: BatchRenameState::default(),
+            dir_watcher: crate::core::DirWatcher::new(),
+            secondary_dir_watcher: crate::core::DirWatcher::new(),
         };
 
         view.navigate_to(current_dir);
@@ -559,6 +576,8 @@ impl ExplorerView {
             };
             tab.icon = if self.is_home_view { "H" } else { "D" };
         }
+
+        self.dir_watcher.watch(&dir);
 
         let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
         spawn_async_dir_scan(
@@ -714,8 +733,22 @@ impl ExplorerView {
         self.is_home_view = true;
     }
 
-    /// Process incoming background directory scanning batches
+    /// Process incoming background directory scanning batches and filesystem watcher events
     pub fn poll_background_scans(&mut self) {
+        if self.dir_watcher.try_recv() {
+            let dir = self.current_dir.clone();
+            let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
+            spawn_async_dir_scan(
+                dir,
+                new_gen,
+                Arc::clone(&self.scan_gen),
+                self.scan_tx.clone(),
+            );
+        }
+        if self.split_view_enabled && self.secondary_dir_watcher.try_recv() {
+            self.secondary_entries = list_directory_sync(&self.secondary_dir);
+        }
+
         while let Ok(batch) = self.scan_rx.try_recv() {
             if batch.gen == self.scan_gen.load(Ordering::Relaxed) {
                 self.entries = batch.entries;
@@ -936,15 +969,13 @@ impl ExplorerView {
 
             // Vim & Emacs Navigation (Active when not typing in text boxes)
             if !is_typing {
-                // Vim `j` / Down / Emacs `Ctrl+N`: Cursor Down
+                // Vim `j` / Down: Cursor Down
                 if total_nav_items > 0
                     && ((i.key_pressed(egui::Key::J)
                         && !i.modifiers.command
                         && !i.modifiers.ctrl
                         && !i.modifiers.alt)
-                        || i.key_pressed(egui::Key::ArrowDown)
-                        || ((i.modifiers.ctrl || i.modifiers.command)
-                            && i.key_pressed(egui::Key::N)))
+                        || i.key_pressed(egui::Key::ArrowDown))
                 {
                     self.focused_row = (self.focused_row + 1).min(total_nav_items - 1);
                     if let Some(item) = nav_entries.get(self.focused_row) {
@@ -1325,6 +1356,31 @@ impl ExplorerView {
                 && i.key_pressed(egui::Key::N)
             {
                 self.show_new_folder_dialog = true;
+            }
+            // Ctrl+N / Cmd+N (without Shift): Open New Concurrent Explorer Window
+            if (i.modifiers.ctrl || i.modifiers.command)
+                && !i.modifiers.shift
+                && !i.modifiers.alt
+                && i.key_pressed(egui::Key::N)
+            {
+                spawn_new_explorer_window(Some(&self.current_dir));
+            }
+            // Ctrl+T / Cmd+T: Open New Tab
+            if (i.modifiers.ctrl || i.modifiers.command)
+                && !i.modifiers.shift
+                && !i.modifiers.alt
+                && i.key_pressed(egui::Key::T)
+            {
+                self.add_tab(self.current_dir.clone());
+            }
+            // Ctrl+W / Cmd+W: Close Current Tab
+            if (i.modifiers.ctrl || i.modifiers.command)
+                && !i.modifiers.shift
+                && !i.modifiers.alt
+                && i.key_pressed(egui::Key::W)
+                && self.tabs.len() > 1
+            {
+                self.close_tab(self.active_tab_index);
             }
             if i.key_pressed(egui::Key::F2) {
                 if let Some(item) = nav_entries.get(self.focused_row) {
@@ -3808,6 +3864,12 @@ impl ExplorerView {
         if canvas_intents.new_folder {
             self.show_new_folder_dialog = true;
         }
+        if canvas_intents.new_window {
+            spawn_new_explorer_window(Some(&self.current_dir));
+        }
+        if canvas_intents.new_tab {
+            self.add_tab(self.current_dir.clone());
+        }
         if canvas_intents.refresh {
             self.navigate_to(self.current_dir.clone());
         }
@@ -4897,6 +4959,12 @@ impl ExplorerView {
         // Apply menu intents (mutations live OUTSIDE the popup closures).
         if canvas_intents.new_folder {
             self.show_new_folder_dialog = true;
+        }
+        if canvas_intents.new_window {
+            spawn_new_explorer_window(Some(&self.current_dir));
+        }
+        if canvas_intents.new_tab {
+            self.add_tab(self.current_dir.clone());
         }
         if canvas_intents.refresh {
             self.navigate_to(self.current_dir.clone());
@@ -7104,6 +7172,8 @@ use crate::gui::file_menu as fm;
 #[derive(Default, Debug, Clone)]
 pub struct CanvasMenuIntents {
     pub new_folder: bool,
+    pub new_window: bool,
+    pub new_tab: bool,
     pub refresh: bool,
     pub go_up: bool,
     pub select_all: bool,
@@ -7145,6 +7215,8 @@ pub enum CopyPathKind {
 #[derive(Default, Debug, Clone)]
 pub struct ItemMenuIntents {
     pub nav_into_dir: Option<PathBuf>,
+    pub open_in_new_window: Option<PathBuf>,
+    pub open_in_new_tab: Option<PathBuf>,
     pub peek: Option<FileItem>,
     pub open_default: Option<PathBuf>,
     pub open_in_editor: Option<PathBuf>,
@@ -7352,6 +7424,12 @@ impl ExplorerView {
 
         if let Some(dir) = intent.nav_into_dir {
             self.navigate_to(dir);
+        }
+        if let Some(dir) = intent.open_in_new_window {
+            spawn_new_explorer_window(Some(&dir));
+        }
+        if let Some(dir) = intent.open_in_new_tab {
+            self.add_tab(dir);
         }
         if let Some(file) = intent.peek {
             self.peek_item = Some(file);
@@ -7643,6 +7721,14 @@ impl ExplorerView {
             intent.new_folder = true;
             menu_ui.close_menu();
         }
+        if menu_row(menu_ui, true, pack, fm::MenuAction::NewWindow, style, tint).clicked() {
+            intent.new_window = true;
+            menu_ui.close_menu();
+        }
+        if menu_row(menu_ui, true, pack, fm::MenuAction::NewTab, style, tint).clicked() {
+            intent.new_tab = true;
+            menu_ui.close_menu();
+        }
         if menu_row(menu_ui, true, pack, fm::MenuAction::Refresh, style, tint).clicked() {
             intent.refresh = true;
             menu_ui.close_menu();
@@ -7826,6 +7912,14 @@ impl ExplorerView {
         if is_dir {
             if menu_row(menu_ui, true, pack, fm::MenuAction::OpenFolder, style, tint).clicked() {
                 intent.nav_into_dir = Some(path.clone());
+                menu_ui.close_menu();
+            }
+            if menu_row(menu_ui, true, pack, fm::MenuAction::NewWindow, style, tint).clicked() {
+                intent.open_in_new_window = Some(path.clone());
+                menu_ui.close_menu();
+            }
+            if menu_row(menu_ui, true, pack, fm::MenuAction::NewTab, style, tint).clicked() {
+                intent.open_in_new_tab = Some(path.clone());
                 menu_ui.close_menu();
             }
         } else {

@@ -192,55 +192,65 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
         return;
     }
 
-    // Register global Win + Shift + C (Radial Widget) & Win + Ctrl + C (Studio GUI)
-    unsafe {
-        let reg_widget = RegisterHotKey(
-            hwnd,
-            HOTKEY_WIDGET_ID,
-            MOD_WIN | MOD_SHIFT | MOD_NOREPEAT,
-            VK_C,
-        );
-        if reg_widget != 0 {
-            log::info!("Registered global Win+Shift+C hotkey (Radial Widget).");
-        } else {
-            log::warn!("Could not register global Win+Shift+C hotkey.");
-        }
+    let tray_mutex_name: Vec<u16> = "Local\\MossambiTrayMasterMutex\0".encode_utf16().collect();
+    let is_master_tray = unsafe {
+        use windows_sys::Win32::Foundation::GetLastError;
+        use windows_sys::Win32::System::Threading::CreateMutexW;
+        const ERROR_ALREADY_EXISTS: u32 = 183;
+        let h_mut = CreateMutexW(null_mut(), 0, tray_mutex_name.as_ptr());
+        !h_mut.is_null() && GetLastError() != ERROR_ALREADY_EXISTS
+    };
 
-        let reg_gui = RegisterHotKey(
-            hwnd,
-            HOTKEY_GUI_ID,
-            MOD_WIN | MOD_CONTROL | MOD_NOREPEAT,
-            VK_C,
-        );
-        if reg_gui != 0 {
-            log::info!("Registered global Win+Ctrl+C hotkey (Studio GUI).");
-        } else {
-            log::warn!("Could not register global Win+Ctrl+C hotkey.");
-        }
-    }
-
-    // Initialize System Tray Icon
     let mut nid: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
-    nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-    nid.hWnd = hwnd;
-    nid.uID = TRAY_UID;
-    nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-    nid.uCallbackMessage = WM_TRAYICON;
-    nid.hIcon = unsafe { LoadIconW(null_mut(), IDI_APPLICATION) };
 
-    let tip = "Mossambi - Sweet Lime Transcoder & Indian Exam Studio\0";
-    for (i, ch) in tip.encode_utf16().enumerate().take(127) {
-        nid.szTip[i] = ch;
-    }
+    if is_master_tray {
+        // Register global Win + Shift + C (Radial Widget) & Win + Ctrl + C (Studio GUI)
+        unsafe {
+            let reg_widget = RegisterHotKey(
+                hwnd,
+                HOTKEY_WIDGET_ID,
+                MOD_WIN | MOD_SHIFT | MOD_NOREPEAT,
+                VK_C,
+            );
+            if reg_widget != 0 {
+                log::info!("Registered global Win+Shift+C hotkey (Radial Widget).");
+            }
 
-    unsafe {
-        Shell_NotifyIconW(NIM_ADD, &nid);
+            let reg_gui = RegisterHotKey(
+                hwnd,
+                HOTKEY_GUI_ID,
+                MOD_WIN | MOD_CONTROL | MOD_NOREPEAT,
+                VK_C,
+            );
+            if reg_gui != 0 {
+                log::info!("Registered global Win+Ctrl+C hotkey (Studio GUI).");
+            }
+        }
+
+        // Initialize System Tray Icon
+        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        nid.hWnd = hwnd;
+        nid.uID = TRAY_UID;
+        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+        nid.uCallbackMessage = WM_TRAYICON;
+        nid.hIcon = unsafe { LoadIconW(null_mut(), IDI_APPLICATION) };
+
+        let tip = "Mossambi - Sweet Lime Transcoder & Indian Exam Studio\0";
+        for (i, ch) in tip.encode_utf16().enumerate().take(127) {
+            nid.szTip[i] = ch;
+        }
+
+        unsafe {
+            Shell_NotifyIconW(NIM_ADD, &nid);
+        }
+    } else {
+        log::info!("Secondary Mossambi window active: master tray and global hotkeys retained by primary instance.");
     }
 
     let cfg = crate::core::MossambiConfig::load();
     let allow_shake = cfg.gesture_type == "shake" || cfg.gesture_type == "both";
     let allow_circle = cfg.gesture_type == "circle" || cfg.gesture_type == "both";
-    let mut drag_listener = if cfg.enable_gesture_wakeup {
+    let mut drag_listener = if is_master_tray && cfg.enable_gesture_wakeup {
         Some(crate::core::DragGestureListener::start(
             allow_shake,
             allow_circle,
@@ -496,9 +506,11 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
     }
 
     unsafe {
-        UnregisterHotKey(hwnd, HOTKEY_WIDGET_ID);
-        UnregisterHotKey(hwnd, HOTKEY_GUI_ID);
-        Shell_NotifyIconW(NIM_DELETE, &nid);
+        if is_master_tray {
+            UnregisterHotKey(hwnd, HOTKEY_WIDGET_ID);
+            UnregisterHotKey(hwnd, HOTKEY_GUI_ID);
+            Shell_NotifyIconW(NIM_DELETE, &nid);
+        }
         DestroyWindow(hwnd);
         UnregisterClassW(class_name.as_ptr(), null_mut());
     }

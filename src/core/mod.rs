@@ -5,6 +5,7 @@ pub mod action_journal;
 pub mod async_worker;
 pub mod config;
 pub mod default_explorer;
+pub mod dir_watcher;
 pub mod dnd_backend;
 pub mod donut_config;
 pub mod drag_listener;
@@ -37,6 +38,7 @@ pub use action_journal::{
 };
 pub use async_worker::{AsyncWorkerPool, TaskUpdate};
 pub use config::{GlassEffect, MossambiConfig, OutputMode, ThemeMode};
+pub use dir_watcher::DirWatcher;
 pub use donut_config::{DonutAppearance, DonutConfig, DonutProfile, DonutSlicePreset};
 #[cfg(target_os = "windows")]
 pub use drag_listener::query_active_explorer_files;

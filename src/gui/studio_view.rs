@@ -494,6 +494,21 @@ impl StudioView {
                             self.current_tab = StudioTab::Preferences;
                         }
 
+                        // New Window Button (Ctrl+N)
+                        if ui
+                            .button(
+                                egui::RichText::new("New Win")
+                                    .size(12.0)
+                                    .color(palette.text_secondary),
+                            )
+                            .on_hover_text("Open New Concurrent Explorer Window (Ctrl+N)")
+                            .clicked()
+                        {
+                            crate::gui::explorer_view::spawn_new_explorer_window(Some(
+                                &self.explorer_view.current_dir,
+                            ));
+                        }
+
                         // View layout toggle
                         let view_glyph = match self.explorer_view.view_mode {
                             crate::gui::explorer_view::ViewMode::Details => "List",

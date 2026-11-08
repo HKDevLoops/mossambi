@@ -51,6 +51,8 @@ pub enum MenuAction {
     Compress,
     Tags,
     PinSidebar,
+    NewWindow,
+    NewTab,
 }
 
 impl MenuAction {
@@ -198,6 +200,14 @@ impl MenuAction {
             (PinSidebar, Windows) => "Pin to Sidebar",
             (PinSidebar, Finder) => "Pin to Sidebar",
             (PinSidebar, Linux) => "Pin to Sidebar",
+
+            (NewWindow, Windows) => "Open in new window",
+            (NewWindow, Finder) => "New Finder Window",
+            (NewWindow, Linux) => "Open in New Window",
+
+            (NewTab, Windows) => "Open in new tab",
+            (NewTab, Finder) => "New Tab",
+            (NewTab, Linux) => "Open in New Tab",
         }
     }
 
@@ -205,6 +215,8 @@ impl MenuAction {
     pub fn glyph(&self) -> IconGlyph {
         use MenuAction::*;
         match self {
+            NewWindow => IconGlyph::DriveSystem,
+            NewTab => IconGlyph::ActionNewFolder,
             OpenFolder => IconGlyph::ActionFolderOpen,
             OpenFile => IconGlyph::ActionOpen,
             OpenWith => IconGlyph::ActionView,
