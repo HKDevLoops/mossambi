@@ -770,16 +770,12 @@ impl ExplorerView {
         if self.can_go_back() {
             self.history_idx -= 1;
             let dir = self.history[self.history_idx].clone();
-            self.current_dir = dir.clone();
-            self.path_edit_buffer = dir.to_string_lossy().to_string();
-            self.is_editing_path = false;
-            let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
-            spawn_async_dir_scan(
-                dir,
-                new_gen,
-                Arc::clone(&self.scan_gen),
-                self.scan_tx.clone(),
-            );
+            // Route through navigate_to so the Miller column stack, inspector
+            // preview, Home flag, tab metadata, and dir watcher reset exactly
+            // like a normal navigation. navigate_to skips its history push
+            // when the target already sits at history_idx, so back/forward
+            // positions are preserved.
+            self.navigate_to(dir);
         }
     }
 
@@ -787,16 +783,7 @@ impl ExplorerView {
         if self.can_go_forward() {
             self.history_idx += 1;
             let dir = self.history[self.history_idx].clone();
-            self.current_dir = dir.clone();
-            self.path_edit_buffer = dir.to_string_lossy().to_string();
-            self.is_editing_path = false;
-            let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
-            spawn_async_dir_scan(
-                dir,
-                new_gen,
-                Arc::clone(&self.scan_gen),
-                self.scan_tx.clone(),
-            );
+            self.navigate_to(dir);
         }
     }
 
@@ -5354,12 +5341,17 @@ impl ExplorerView {
         let mut peek_to_open: Option<FileItem> = None;
         let mut column_drop: Option<DropOp> = None;
 
+        // Auto-preview: open the inspector for the first file when the columns
+        // view shows a folder with nothing selected yet. Directory rows are
+        // intentionally NOT auto-expanded here, and the preview only fires for
+        // entries that actually belong to the current directory: on the first
+        // render after a navigation the async directory scan may still be in
+        // flight and `entries` can momentarily hold the previous folder's
+        // listing, which used to push a phantom column from an unrelated
+        // directory (the anaconda3 root) into the column stack.
         if self.column_stack.is_empty() && self.column_preview_item.is_none() {
             if let Some(first) = entries.first() {
-                if first.is_dir {
-                    let sub_entries = self.get_column_entries(&first.path);
-                    self.column_stack.push((first.path.clone(), sub_entries));
-                } else {
+                if !first.is_dir && first.path.parent() == Some(self.current_dir.as_path()) {
                     self.column_preview_item = Some(first.clone());
                 }
             }
