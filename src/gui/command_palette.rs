@@ -469,11 +469,11 @@ impl CommandPalette {
                                         painter.rect_filled(
                                             rrect,
                                             Rounding::same(radius::SM),
-                                            Color32::from_rgba_premultiplied(
+                                            Color32::from_rgba_unmultiplied(
                                                 palette.accent.r(),
                                                 palette.accent.g(),
                                                 palette.accent.b(),
-                                                if palette.is_dark { 50 } else { 30 },
+                                                if palette.is_dark { 45 } else { 26 },
                                             ),
                                         );
                                     } else if is_hovered {

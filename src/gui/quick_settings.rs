@@ -104,7 +104,7 @@ impl QuickSettingsState {
     /// Renders the sleek macOS-styled floating quick settings panel.
     pub fn render_ui(&mut self, ui: &mut Ui) {
         let frame = Frame::none()
-            .fill(Color32::from_rgba_premultiplied(30, 36, 28, 240))
+            .fill(Color32::from_rgba_unmultiplied(30, 36, 28, 240))
             .stroke(Stroke::new(1.0_f32, Color32::from_rgb(120, 190, 32))) // Pantone 376 C border
             .rounding(Rounding::same(12.0))
             .inner_margin(Margin::same(14.0));

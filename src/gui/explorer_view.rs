@@ -1002,7 +1002,7 @@ impl ExplorerView {
         if is_hovered {
             ui.add_space(4.0);
             let drop_frame = egui::Frame::none()
-                .fill(Color32::from_rgba_premultiplied(120, 190, 32, 50))
+                .fill(Color32::from_rgba_unmultiplied(120, 190, 32, 50))
                 .stroke(Stroke::new(1.5_f32, palette.accent))
                 .rounding(Rounding::same(8.0))
                 .inner_margin(egui::Margin::symmetric(14.0, 7.0));
@@ -2647,7 +2647,7 @@ impl ExplorerView {
                                 Rounding::same(5.0),
                                 Stroke::new(
                                     (a * 2.0).max(1.0),
-                                    Color32::from_rgba_premultiplied(
+                                    Color32::from_rgba_unmultiplied(
                                         palette.accent.r(),
                                         palette.accent.g(),
                                         palette.accent.b(),
@@ -3312,17 +3312,23 @@ impl ExplorerView {
                         ui.painter().rect_filled(
                             bar_rect,
                             Rounding::same(2.0),
-                            Color32::from_rgba_premultiplied(palette.border.r(), palette.border.g(), palette.border.b(), 120),
+                            Color32::from_rgba_unmultiplied(palette.border.r(), palette.border.g(), palette.border.b(), 120),
                         );
                         let fill_w = (bar_w * drive.usage_ratio().clamp(0.0, 1.0)).max(2.0);
                         let fill_rect = Rect::from_min_size(Pos2::new(text_left, bar_y), Vec2::new(fill_w, bar_h));
                         ui.painter().rect_filled(fill_rect, Rounding::same(2.0), palette.accent);
 
-                        // Storage text
+                        // Storage text (a drive whose capacity query failed gets an
+                        // explicit note instead of an empty caption)
+                        let capacity_text = if drive.total_bytes == 0 {
+                            "Capacity unknown"
+                        } else {
+                            &drive.formatted_space()
+                        };
                         ui.painter().text(
                             Pos2::new(text_left, rect.top() + 40.0),
                             egui::Align2::LEFT_TOP,
-                            drive.formatted_space(),
+                            capacity_text,
                             egui::FontId::proportional(11.0),
                             palette.text_secondary,
                         );
@@ -3388,7 +3394,13 @@ impl ExplorerView {
                 });
                 ui.add_space(8.0);
 
-                let recent_files: Vec<&FileItem> = self.entries.iter().filter(|e| !e.is_dir).take(15).collect();
+                let mut recent_files: Vec<&FileItem> = self
+                    .entries
+                    .iter()
+                    .filter(|e| !e.is_dir && !e.is_hidden)
+                    .collect();
+                recent_files.sort_by_key(|e| std::cmp::Reverse(e.modified));
+                recent_files.truncate(15);
                 if recent_files.is_empty() {
                     ui.label(egui::RichText::new("No recent standalone files in home directory. Choose a folder above to browse.").size(12.0).color(palette.text_muted));
                 } else {
@@ -3565,14 +3577,16 @@ impl ExplorerView {
             let id = ui.make_persistent_id(("hdr", col));
             let resp = ui.interact(hrect, id, egui::Sense::click());
             if resp.hovered() {
+                // Straight-alpha hover band: premul with raw card_hover rgb
+                // rendered near-opaque over the header row.
                 hp.rect_filled(
                     hrect.shrink2(Vec2::new(0.0, 3.0)),
                     Rounding::same(4.0),
-                    Color32::from_rgba_premultiplied(
+                    Color32::from_rgba_unmultiplied(
                         palette.card_hover.r(),
                         palette.card_hover.g(),
                         palette.card_hover.b(),
-                        160,
+                        if palette.is_dark { 45 } else { 28 },
                     ),
                 );
             }
@@ -3777,7 +3791,7 @@ impl ExplorerView {
                     // so the name always sits on the normal fill (Finder detail).
                     let mut name_color = palette.text_primary;
                     if item.is_hidden {
-                        name_color = Color32::from_rgba_premultiplied(
+                        name_color = Color32::from_rgba_unmultiplied(
                             name_color.r(),
                             name_color.g(),
                             name_color.b(),
@@ -3927,7 +3941,7 @@ impl ExplorerView {
                                 ui.painter().rect_filled(
                                     row_rect,
                                     Rounding::same(5.0),
-                                    Color32::from_rgba_premultiplied(
+                                    Color32::from_rgba_unmultiplied(
                                         palette.accent.r(),
                                         palette.accent.g(),
                                         palette.accent.b(),
@@ -3998,7 +4012,7 @@ impl ExplorerView {
                 mp.rect_filled(
                     mrect,
                     Rounding::same(2.0),
-                    Color32::from_rgba_premultiplied(
+                    Color32::from_rgba_unmultiplied(
                         palette.accent.r(),
                         palette.accent.g(),
                         palette.accent.b(),
@@ -4491,7 +4505,7 @@ impl ExplorerView {
             .order(egui::Order::Tooltip)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style())
-                    .fill(Color32::from_rgba_premultiplied(
+                    .fill(Color32::from_rgba_unmultiplied(
                         palette.window_bg.r(),
                         palette.window_bg.g(),
                         palette.window_bg.b(),
@@ -4816,15 +4830,16 @@ impl ExplorerView {
                         marquee_rects.push(rect);
 
                         // Card background on hover or selection (subtle Apple HIG outline, never covers icons)
+                        // Selection tint: straight accent alpha, 45 dark / 26 light.
                         if is_checked {
                             ui.painter().rect_filled(
                                 rect,
                                 Rounding::same(8.0),
-                                Color32::from_rgba_premultiplied(
+                                Color32::from_rgba_unmultiplied(
                                     palette.accent.r(),
                                     palette.accent.g(),
                                     palette.accent.b(),
-                                    20,
+                                    if palette.is_dark { 45 } else { 26 },
                                 ),
                             );
                             ui.painter().rect_stroke(
@@ -4833,14 +4848,16 @@ impl ExplorerView {
                                 Stroke::new(1.2_f32, palette.accent),
                             );
                         } else if resp.hovered() {
+                            // Hover tint: straight text alpha, 20 dark / 12 light
+                            // (premul with raw rgb drowned the tile content).
                             ui.painter().rect_filled(
                                 rect,
                                 Rounding::same(8.0),
-                                Color32::from_rgba_premultiplied(
+                                Color32::from_rgba_unmultiplied(
                                     palette.text_primary.r(),
                                     palette.text_primary.g(),
                                     palette.text_primary.b(),
-                                    12,
+                                    if palette.is_dark { 20 } else { 12 },
                                 ),
                             );
                             ui.painter().rect_stroke(
@@ -4848,7 +4865,7 @@ impl ExplorerView {
                                 Rounding::same(8.0),
                                 Stroke::new(
                                     1.0_f32,
-                                    Color32::from_rgba_premultiplied(
+                                    Color32::from_rgba_unmultiplied(
                                         palette.border.r(),
                                         palette.border.g(),
                                         palette.border.b(),
@@ -4920,7 +4937,7 @@ impl ExplorerView {
                                     ui.painter().rect_filled(
                                         rect,
                                         Rounding::same(8.0),
-                                        Color32::from_rgba_premultiplied(
+                                        Color32::from_rgba_unmultiplied(
                                             palette.accent.r(),
                                             palette.accent.g(),
                                             palette.accent.b(),
@@ -4979,7 +4996,7 @@ impl ExplorerView {
                             ui.painter().rect_filled(
                                 img_rect,
                                 Rounding::same(6.0),
-                                Color32::from_rgba_premultiplied(
+                                Color32::from_rgba_unmultiplied(
                                     palette.border.r(),
                                     palette.border.g(),
                                     palette.border.b(),
@@ -4994,9 +5011,9 @@ impl ExplorerView {
                                 Stroke::new(
                                     1.0_f32,
                                     if palette.is_dark {
-                                        Color32::from_rgba_premultiplied(255, 255, 255, 25)
+                                        Color32::from_rgba_unmultiplied(255, 255, 255, 25)
                                     } else {
-                                        Color32::from_rgba_premultiplied(0, 0, 0, 25)
+                                        Color32::from_rgba_unmultiplied(0, 0, 0, 25)
                                     },
                                 ),
                             );
@@ -5029,7 +5046,7 @@ impl ExplorerView {
                         let raw_name = format!("{}{}", item.name, symlink_suffix);
 
                         let tile_name_color = if item.is_hidden {
-                            Color32::from_rgba_premultiplied(
+                            Color32::from_rgba_unmultiplied(
                                 palette.text_primary.r(),
                                 palette.text_primary.g(),
                                 palette.text_primary.b(),
@@ -5157,7 +5174,7 @@ impl ExplorerView {
                 mp.rect_filled(
                     mrect,
                     Rounding::same(2.0),
-                    Color32::from_rgba_premultiplied(
+                    Color32::from_rgba_unmultiplied(
                         palette.accent.r(),
                         palette.accent.g(),
                         palette.accent.b(),
@@ -5441,7 +5458,7 @@ impl ExplorerView {
                                                                 ui.painter().rect_filled(
                                                             row_rect,
                                                             Rounding::same(5.0),
-                                                            Color32::from_rgba_premultiplied(
+                                                            Color32::from_rgba_unmultiplied(
                                                                 palette.accent.r(),
                                                                 palette.accent.g(),
                                                                 palette.accent.b(),
@@ -5476,21 +5493,24 @@ impl ExplorerView {
                                                     }
                                                     // Row band: hover/selected
                                                     if is_selected {
+                                                        // Selection tint: straight accent alpha,
+                                                        // 45 dark / 26 light (premul with raw
+                                                        // rgb rendered near-opaque).
                                                         ui.painter().rect_filled(
                                                             row_rect,
                                                             Rounding::same(5.0),
-                                                            Color32::from_rgba_premultiplied(
+                                                            Color32::from_rgba_unmultiplied(
                                                                 palette.accent.r(),
                                                                 palette.accent.g(),
                                                                 palette.accent.b(),
-                                                                38,
+                                                                if palette.is_dark { 45 } else { 26 },
                                                             ),
                                                         );
                                                     } else if resp.hovered() {
                                                         ui.painter().rect_filled(
                                                             row_rect,
                                                             Rounding::same(5.0),
-                                                            Color32::from_rgba_premultiplied(
+                                                            Color32::from_rgba_unmultiplied(
                                                                 palette.accent.r(),
                                                                 palette.accent.g(),
                                                                 palette.accent.b(),
@@ -5692,7 +5712,7 @@ impl ExplorerView {
                                                             ui.painter().rect_filled(
                                                                 row_rect,
                                                                 Rounding::same(5.0),
-                                                                Color32::from_rgba_premultiplied(
+                                                                Color32::from_rgba_unmultiplied(
                                                                     palette.accent.r(),
                                                                     palette.accent.g(),
                                                                     palette.accent.b(),
@@ -5722,21 +5742,23 @@ impl ExplorerView {
                                                     }
                                                         }
                                                         if is_sel {
+                                                            // Selection tint: straight accent
+                                                            // alpha, 45 dark / 26 light.
                                                             ui.painter().rect_filled(
                                                                 row_rect,
                                                                 Rounding::same(5.0),
-                                                                Color32::from_rgba_premultiplied(
+                                                                Color32::from_rgba_unmultiplied(
                                                                     palette.accent.r(),
                                                                     palette.accent.g(),
                                                                     palette.accent.b(),
-                                                                    38,
+                                                                    if palette.is_dark { 45 } else { 26 },
                                                                 ),
                                                             );
                                                         } else if resp.hovered() {
                                                             ui.painter().rect_filled(
                                                                 row_rect,
                                                                 Rounding::same(5.0),
-                                                                Color32::from_rgba_premultiplied(
+                                                                Color32::from_rgba_unmultiplied(
                                                                     palette.accent.r(),
                                                                     palette.accent.g(),
                                                                     palette.accent.b(),
@@ -6571,7 +6593,7 @@ impl ExplorerView {
             .map(|d| format!("{} available on {}", d.formatted_space(), d.display_name));
 
         egui::Frame::none()
-            .fill(Color32::from_rgba_premultiplied(
+            .fill(Color32::from_rgba_unmultiplied(
                 palette.card_bg.r(),
                 palette.card_bg.g(),
                 palette.card_bg.b(),
@@ -8707,17 +8729,17 @@ impl ExplorerView {
         } else {
             let bg_alpha = (14.0 * alpha) as u8;
             let bg_col = if palette.is_dark {
-                Color32::from_rgba_premultiplied(255, 255, 255, bg_alpha)
+                Color32::from_rgba_unmultiplied(255, 255, 255, bg_alpha)
             } else {
-                Color32::from_rgba_premultiplied(0, 0, 0, bg_alpha)
+                Color32::from_rgba_unmultiplied(0, 0, 0, bg_alpha)
             };
             ui.painter().rect_filled(rect, rounding, bg_col);
 
             let border_alpha = (55.0 * alpha) as u8;
             let border_col = if palette.is_dark {
-                Color32::from_rgba_premultiplied(160, 165, 175, border_alpha)
+                Color32::from_rgba_unmultiplied(160, 165, 175, border_alpha)
             } else {
-                Color32::from_rgba_premultiplied(110, 115, 125, border_alpha)
+                Color32::from_rgba_unmultiplied(110, 115, 125, border_alpha)
             };
             ui.painter()
                 .rect_stroke(rect, rounding, Stroke::new(0.85_f32, border_col));

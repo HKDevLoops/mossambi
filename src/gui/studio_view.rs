@@ -1036,7 +1036,7 @@ impl StudioView {
                                         painter.rect_filled(
                                             rect,
                                             Rounding::same(radius::SM),
-                                            Color32::from_rgba_premultiplied(
+                                            Color32::from_rgba_unmultiplied(
                                                 palette.accent.r(),
                                                 palette.accent.g(),
                                                 palette.accent.b(),
@@ -1768,9 +1768,9 @@ impl StudioView {
             // 1. Hero Drag-and-Drop Dropzone
             let dropzone_frame = egui::Frame::none()
                 .fill(if palette.is_dark {
-                    Color32::from_rgba_premultiplied(22, 24, 28, 230)
+                    Color32::from_rgba_unmultiplied(22, 24, 28, 230)
                 } else {
-                    Color32::from_rgba_premultiplied(248, 250, 252, 240)
+                    Color32::from_rgba_unmultiplied(248, 250, 252, 240)
                 })
                 .stroke(Stroke::new(1.0_f32, palette.border))
                 .rounding(Rounding::same(14.0))

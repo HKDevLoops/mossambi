@@ -155,7 +155,9 @@ pub fn toolbar_icon_button(
         painter.rect_filled(
             rect,
             Rounding::same(radius::MD),
-            Color32::from_rgba_premultiplied(
+            // Straight-alpha hover tint: premultiplied with raw rgb renders
+            // near-opaque and drowns the glyph (premul-vs-unmul semantics).
+            Color32::from_rgba_unmultiplied(
                 palette.text_primary.r(),
                 palette.text_primary.g(),
                 palette.text_primary.b(),
@@ -213,7 +215,7 @@ pub fn toolbar_text_button(ui: &mut Ui, palette: &ThemePalette, label: &str, act
         painter.rect_filled(
             rect,
             Rounding::same(radius::MD),
-            Color32::from_rgba_premultiplied(
+            Color32::from_rgba_unmultiplied(
                 palette.text_primary.r(),
                 palette.text_primary.g(),
                 palette.text_primary.b(),
@@ -248,11 +250,12 @@ pub fn render_segmented_view_switcher(
     let (container_rect, _) = ui.allocate_exact_size(Vec2::new(total_w, height), Sense::hover());
     let painter = ui.painter_at(container_rect);
 
-    // Subtle background pill & border
+    // Subtle background pill & border (straight alpha: premul with raw
+    // rgb renders near-opaque and would glare in dark themes)
     let bg_col = if palette.is_dark {
-        Color32::from_rgba_premultiplied(255, 255, 255, 14)
+        Color32::from_rgba_unmultiplied(255, 255, 255, 14)
     } else {
-        Color32::from_rgba_premultiplied(0, 0, 0, 10)
+        Color32::from_rgba_unmultiplied(0, 0, 0, 10)
     };
     painter.rect_filled(container_rect, Rounding::same(radius::MD), bg_col);
     painter.rect_stroke(
@@ -302,7 +305,7 @@ pub fn render_segmented_view_switcher(
             painter.rect_filled(
                 hover_rect,
                 Rounding::same(radius::SM),
-                Color32::from_rgba_premultiplied(
+                Color32::from_rgba_unmultiplied(
                     palette.text_primary.r(),
                     palette.text_primary.g(),
                     palette.text_primary.b(),
@@ -442,7 +445,7 @@ pub fn render_filter_popover(
             let is_active = i == selected;
             let row = egui::Frame::none()
                 .fill(if is_active {
-                    Color32::from_rgba_premultiplied(
+                    Color32::from_rgba_unmultiplied(
                         palette.accent.r(),
                         palette.accent.g(),
                         palette.accent.b(),
@@ -561,8 +564,11 @@ pub fn render_sidebar_row(ui: &mut Ui, palette: &ThemePalette, spec: &SidebarRow
     let is_hovered = response.hovered();
     let painter = ui.painter_at(rect);
 
+    // Straight-alpha fill. Feeding raw accent rgb into from_rgba_premultiplied
+    // renders the selection close to full opacity, drowning the accent label
+    // (blue-on-blue selected rows, first seen on the Drives sidebar rows).
     let bg_color = if spec.selected {
-        Color32::from_rgba_premultiplied(
+        Color32::from_rgba_unmultiplied(
             palette.accent.r(),
             palette.accent.g(),
             palette.accent.b(),
@@ -598,18 +604,15 @@ pub fn render_sidebar_row(ui: &mut Ui, palette: &ThemePalette, spec: &SidebarRow
     let label_max_w = (rect.max.x - label_x - pin_side - space::SM).max(space::LG);
     let font_id = FontId::proportional(14.0);
     let display_label = design::elide_end(ui, spec.label, &font_id, label_max_w);
-    let text_color = if spec.selected {
-        if palette.is_dark {
-            palette.accent
-        } else {
-            palette.text_primary
-        }
-    } else if is_hovered {
+    // High-contrast labels: the 3px accent bar already marks selection, so the
+    // label itself always keeps primary contrast. Painting the label in
+    // palette.accent over an accent-tinted row read as blue-on-blue in dark
+    // themes (the Drives sidebar rows defect).
+    let text_color = if spec.selected || is_hovered {
         palette.text_primary
     } else {
         palette.text_secondary
     };
-
     painter.text(
         Pos2::new(label_x, rect.center().y),
         egui::Align2::LEFT_CENTER,

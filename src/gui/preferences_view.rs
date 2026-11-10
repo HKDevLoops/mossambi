@@ -198,11 +198,11 @@ impl PreferencesView {
                                                 ui.painter().rect_filled(
                                                     rect,
                                                     Rounding::same(design::radius::SM),
-                                                    Color32::from_rgba_premultiplied(
+                                                    Color32::from_rgba_unmultiplied(
                                                         palette.accent.r(),
                                                         palette.accent.g(),
                                                         palette.accent.b(),
-                                                        35,
+                                                        if palette.is_dark { 45 } else { 26 },
                                                     ),
                                                 );
                                                 ui.painter().rect_stroke(
@@ -214,11 +214,11 @@ impl PreferencesView {
                                                 ui.painter().rect_filled(
                                                     rect,
                                                     Rounding::same(design::radius::SM),
-                                                    Color32::from_rgba_premultiplied(
+                                                    Color32::from_rgba_unmultiplied(
                                                         palette.text_primary.r(),
                                                         palette.text_primary.g(),
                                                         palette.text_primary.b(),
-                                                        12,
+                                                        if palette.is_dark { 20 } else { 12 },
                                                     ),
                                                 );
                                             }
@@ -857,7 +857,7 @@ impl PreferencesView {
                                     let bg_color = if is_selected {
                                         palette.card_hover
                                     } else if is_hovered {
-                                        Color32::from_rgba_premultiplied(palette.card_hover.r(), palette.card_hover.g(), palette.card_hover.b(), 70)
+                                        Color32::from_rgba_unmultiplied(palette.card_hover.r(), palette.card_hover.g(), palette.card_hover.b(), 70)
                                     } else {
                                         Color32::TRANSPARENT
                                     };
@@ -3210,7 +3210,7 @@ fn setting_row(
                     ui.painter().rect_filled(
                         r,
                         Rounding::same(design::radius::SM),
-                        Color32::from_rgba_premultiplied(
+                        Color32::from_rgba_unmultiplied(
                             palette.card_hover.r(),
                             palette.card_hover.g(),
                             palette.card_hover.b(),

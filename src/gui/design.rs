@@ -245,12 +245,12 @@ impl SemanticColors {
         let (accent, selection_fill) = if p.is_dark {
             (
                 p.accent,
-                Color32::from_rgba_premultiplied(p.accent.r(), p.accent.g(), p.accent.b(), 58),
+                Color32::from_rgba_unmultiplied(p.accent.r(), p.accent.g(), p.accent.b(), 45),
             )
         } else {
             (
                 p.accent,
-                Color32::from_rgba_premultiplied(p.accent.r(), p.accent.g(), p.accent.b(), 44),
+                Color32::from_rgba_unmultiplied(p.accent.r(), p.accent.g(), p.accent.b(), 26),
             )
         };
         Self {

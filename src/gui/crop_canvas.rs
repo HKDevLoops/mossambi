@@ -212,7 +212,7 @@ impl CropCanvas {
 
         // 3. Rule of Thirds Guide Lines
         if self.show_grid || self.is_dragging {
-            let grid_col = Color32::from_rgba_premultiplied(255, 255, 255, 75);
+            let grid_col = Color32::from_rgba_unmultiplied(255, 255, 255, 75);
             let grid_stroke = Stroke::new(1.0_f32, grid_col);
 
             let w3 = crop_screen_rect.width() / 3.0;
@@ -349,12 +349,12 @@ impl CropCanvas {
         painter.rect_filled(
             badge_rect,
             5.0,
-            Color32::from_rgba_premultiplied(20, 25, 35, 220),
+            Color32::from_rgba_unmultiplied(20, 25, 35, 220),
         );
         painter.rect_stroke(
             badge_rect,
             5.0,
-            Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(255, 255, 255, 45)),
+            Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 45)),
         );
         painter.text(
             badge_pos,

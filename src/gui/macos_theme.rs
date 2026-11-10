@@ -420,8 +420,12 @@ pub const MAC_WINDOW_BG: Color32 = Color32::from_rgb(22, 22, 24);
 pub const MAC_SIDEBAR_BG: Color32 = Color32::from_rgb(29, 29, 32);
 pub const MAC_CARD_BG: Color32 = Color32::from_rgb(38, 38, 43);
 pub const MAC_CARD_HOVER: Color32 = Color32::from_rgb(48, 48, 54);
-pub const MAC_BORDER: Color32 = Color32::from_rgba_premultiplied(255, 255, 255, 20);
-pub const MAC_DIVIDER: Color32 = Color32::from_rgba_premultiplied(255, 255, 255, 14);
+// Hairline strokes used by popovers (dark themes would render raw-white
+// premul near-opaque). Hand-premultiplied white (const fn limitation:
+// from_rgba_unmultiplied is not const-callable) - premul(255,255,255,20)
+// is exactly (20,20,20,20); premul(255,255,255,14) is (14,14,14,14).
+pub const MAC_BORDER: Color32 = Color32::from_rgba_premultiplied(20, 20, 20, 20);
+pub const MAC_DIVIDER: Color32 = Color32::from_rgba_premultiplied(14, 14, 14, 14);
 pub const MAC_TEXT_PRIMARY: Color32 = Color32::from_rgb(245, 245, 247);
 pub const MAC_TEXT_SECONDARY: Color32 = Color32::from_rgb(161, 161, 166);
 pub const MAC_TEXT_MUTED: Color32 = Color32::from_rgb(120, 120, 126);
@@ -456,8 +460,10 @@ pub fn render_sidebar_item_with_pin(
 
     let is_hovered = response.hovered();
 
+    // Straight-alpha fill (premultiplied with raw rgb renders near-opaque and
+    // drowns the label - same class as the render_sidebar_row defect).
     let bg_color = if is_selected {
-        Color32::from_rgba_premultiplied(
+        Color32::from_rgba_unmultiplied(
             theme.accent.r(),
             theme.accent.g(),
             theme.accent.b(),
@@ -477,13 +483,9 @@ pub fn render_sidebar_item_with_pin(
         painter.rect_filled(bar_rect, Rounding::same(1.5), theme.accent);
     }
 
-    let text_color = if is_selected {
-        if theme.is_dark {
-            theme.accent
-        } else {
-            theme.text_primary
-        }
-    } else if is_hovered {
+    // The accent bar marks selection; the label keeps primary contrast in
+    // every theme (accent-on-accent-tint read as blue-on-blue in dark).
+    let text_color = if is_selected || is_hovered {
         theme.text_primary
     } else {
         theme.text_secondary
@@ -644,11 +646,11 @@ pub fn apply_theme_visuals(ctx: &egui::Context, palette: &ThemePalette) {
     visuals.widgets.active.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
     visuals.widgets.active.rounding = Rounding::same(6.0);
 
-    visuals.selection.bg_fill = Color32::from_rgba_premultiplied(
+    visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(
         palette.accent.r(),
         palette.accent.g(),
         palette.accent.b(),
-        60,
+        if palette.is_dark { 45 } else { 26 },
     );
     visuals.selection.stroke = Stroke::new(1.0_f32, palette.accent);
 

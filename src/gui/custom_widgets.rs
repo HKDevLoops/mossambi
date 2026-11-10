@@ -42,7 +42,7 @@ pub fn render_custom_progress_bar(
         painter.rect_filled(
             spec_rect,
             Rounding::same(height * 0.25),
-            Color32::from_rgba_premultiplied(255, 255, 255, 60),
+            Color32::from_rgba_unmultiplied(255, 255, 255, 60),
         );
     }
 

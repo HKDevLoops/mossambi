@@ -230,7 +230,7 @@ impl CitrusGeometry {
             painter.circle_filled(
                 Pos2::new(gx, gy),
                 1.0,
-                Color32::from_rgba_premultiplied(255, 255, 255, 60),
+                Color32::from_rgba_unmultiplied(255, 255, 255, 60),
             );
         }
 
