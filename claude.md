@@ -543,3 +543,45 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   standard geometry and confirming the tab via capture before the decisive
   click; keep a config baseline snapshot and Compare-Object the JSON for
   exact key-level proof.
+
+[Settings-apply wave: fixed-code 2026-11-10, commit 4de5917]
+
+- Wave: settings now APPLY to the running app (queued defect #1 from the
+  live-save wave) plus the maximized donut layout fix (queued defect #3).
+- Root cause (settings-apply): PreferencesView owned a detached
+  MossambiConfig copy (loaded its own at construction, studio_view.rs:91)
+  while the live app reads studio_app.config; render_preferences_tab
+  passed no config, so every cfg-backed change persisted to disk but took
+  effect only on restart.
+- Fix (settings-apply): single source of truth. StudioView::render now
+  receives the live &mut MossambiConfig (studio_app.rs call site passes
+  &mut self.config; disjoint field borrows) and threads it through the
+  tab dispatcher into render_preferences_tab, which swaps the live config
+  into prefs_view.cfg for the frame (std::mem::swap before/after
+  PreferencesView::render). The stale construction-time snapshot is
+  discarded in both directions. Safe because PreferencesView::render has
+  no early returns (verified 2026-11-10) and its only caller is
+  render_preferences_tab; search_preferences and setting_value_label are
+  free functions taking cfg as a parameter with no external callers, so
+  no staleness vector remains.
+- Root cause (maximized): ui.set_width(donut_w) only raises the minimum
+  rect, so render_donut_toolbar computed its 3 columns from the full pane
+  available_width; in maximized mode the columns ran past the right
+  window edge after the centering pad_x (col3 "Available presets"
+  clipped) and the 680px donut_w cap left a large centering void.
+- Fix (maximized): donut_w uncapped 680 -> 1280 (still centered) and
+  ui.set_max_width(donut_w) added so the inner 3-column layout sees
+  exactly donut_w (preferences_view.rs donut branch). Preset buttons
+  needed no change: card_w = (col3_w - 16).max(180) is always <= col3_w
+  because col3_w >= 215 in every width branch.
+- Gates GREEN: fmt; clippy -D warnings (zero warnings); cargo test (19
+  suites, 67 lib tests, 0 failed, gui_ascii_gate included); ASCII sweep
+  on the diff (clean); release build (51.98s). Diff +29/-3 across
+  studio_view.rs, studio_app.rs, preferences_view.rs only.
+- Still queued: theme round-trip clobber (ThemeMode::LiquidGlass maps to
+  DarkAnthracite in both From impls, macos_theme.rs:332-396; theme wave);
+  toolbar Search box clip (mechanism unexplained, diagnose during the
+  maximized live capture); Miller 2+ unfiltered listings; explorer icon
+  blur; app-death anomaly monitoring; context-menu wave (Miller
+  right-click broken, unified Finder design, menu customization in
+  Preferences) is the user-prioritized next wave.
