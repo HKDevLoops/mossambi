@@ -585,3 +585,31 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   blur; app-death anomaly monitoring; context-menu wave (Miller
   right-click broken, unified Finder design, menu customization in
   Preferences) is the user-prioritized next wave.
+
+[Keybinding double-fire wave: fixed-code 2026-11-10, commit 2c2828d]
+
+- Wave: user-reported live defect - "pressing any keybinding performs the
+  same action 2 times".
+- Root cause: 4 duplicate handler sites. Two cross-layer (Ctrl+T / Ctrl+W
+  handled globally in StudioView::render where they also switch to the
+  explorer tab, AND again inside ExplorerView::render's single ui.input
+  closure); two verbatim duplicates inside that same closure (F5, F2).
+- Fix: deleted all 4 duplicate sites in explorer_view.rs, keeping the more
+  capable/guarded site each time. Kept: studio_view Ctrl+T/W (also
+  switches tabs), split-view-aware F5, is_typing-guarded F2, the Ctrl+Tab
+  cycler (NOT a duplicate - no other handler exists), and Ctrl+L.
+  Replaced the Ctrl+T/W block with a comment documenting the single
+  global handling.
+- Visible effect per duplicate: F5 rescanned the directory twice per
+  press; Ctrl+T opened 2 tabs per press; Ctrl+W closed 2 tabs per press;
+  the second F2 site fired even while typing (unguarded).
+- Gates GREEN: fmt; clippy -D warnings (zero warnings); cargo test (19
+  suites, 67 lib tests, 0 failed, gui_ascii_gate included); ASCII sweep
+  on the diff (clean); release build (50.56s; app kill first - the app
+  had already exited, so Stop-Process was a no-op).
+- Still queued: theme round-trip clobber (ThemeMode::LiquidGlass maps to
+  DarkAnthracite in both From impls, macos_theme.rs:332-396; theme wave);
+  toolbar Search box clip (diagnose during the maximized live capture);
+  Miller 2+ unfiltered listings; explorer icon blur; app-death anomaly
+  monitoring; live verification of keybinding single-fire + settings-
+  apply + maximized layout next; context-menu wave then theme wave.
