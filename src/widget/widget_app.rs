@@ -99,7 +99,7 @@ impl Default for MossambiWidgetApp {
         let default_sectors = vec!["JPG", "WEBP", "HEIC", "TIFF", "AVIF", "BMP", "PDF", "DOCX"];
 
         Self {
-            geometry: RadialWidgetGeometry::new(Pos2::new(200.0, 200.0), cfg.donut.appearance.size),
+            geometry: RadialWidgetGeometry::new(Pos2::new(240.0, 240.0), cfg.donut.appearance.size),
             sectors: default_sectors,
             face: DonutFace::PrimaryFormats,
             flip_start: None,
@@ -337,6 +337,32 @@ impl eframe::App for MossambiWidgetApp {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame_count = self.frame_count.saturating_add(1);
+
+        // Automated QA snapshot capture via MOSSAMBI_SNAPSHOT_PATH
+        if let Ok(snap_path) = std::env::var("MOSSAMBI_SNAPSHOT_PATH") {
+            if self.frame_count == 8 {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+            }
+            for event in &ctx.input(|i| i.events.clone()) {
+                if let egui::Event::Screenshot { image, .. } = event {
+                    let (w, h) = (image.width() as u32, image.height() as u32);
+                    let mut raw = Vec::with_capacity((w * h * 4) as usize);
+                    for p in &image.pixels {
+                        raw.push(p.r());
+                        raw.push(p.g());
+                        raw.push(p.b());
+                        raw.push(p.a());
+                    }
+                    if let Some(rgba) = image::RgbaImage::from_raw(w, h, raw) {
+                        let _ = rgba.save(&snap_path);
+                        log::info!("Saved Widget QA snapshot to {}", snap_path);
+                    }
+                    if std::env::var("MOSSAMBI_SNAPSHOT_EXIT").is_ok() {
+                        std::process::exit(0);
+                    }
+                }
+            }
+        }
 
         if self.frame_count == 1 {
             let cfg = crate::core::MossambiConfig::load();
@@ -587,9 +613,9 @@ impl eframe::App for MossambiWidgetApp {
                 let cfg = crate::core::MossambiConfig::load();
                 let dt = crate::gui::anim::frame_dt(ctx);
 
-                // Synchronize geometry size and hole radius from settings
-                self.geometry.outer_radius = cfg.donut.appearance.size * 0.44;
-                self.geometry.inner_radius = cfg.donut.appearance.hole.max(30.0);
+                // Synchronize geometry size and hole radius from settings with safe window margin clamping
+                self.geometry.outer_radius = (cfg.donut.appearance.size * 0.36).clamp(115.0, 155.0);
+                self.geometry.inner_radius = cfg.donut.appearance.hole.clamp(32.0, 60.0);
                 self.geometry.hub_radius = self.geometry.inner_radius * 0.90;
 
                 // Advance spring physics
@@ -609,7 +635,7 @@ impl eframe::App for MossambiWidgetApp {
                 );
 
                 let (rect, response) =
-                    ui.allocate_exact_size(Vec2::new(400.0, 400.0), egui::Sense::click_and_drag());
+                    ui.allocate_exact_size(Vec2::new(480.0, 480.0), egui::Sense::click_and_drag());
                 let painter = ui.painter_at(rect);
                 self.geometry.center = rect.center();
 
@@ -1046,9 +1072,9 @@ pub fn run_widget_with_args(
 
     let mut builder = ViewportBuilder::default()
         .with_title("Mossambi Radial Widget")
-        .with_inner_size([400.0, 400.0])
-        .with_min_inner_size([400.0, 400.0])
-        .with_max_inner_size([400.0, 400.0])
+        .with_inner_size([480.0, 480.0])
+        .with_min_inner_size([480.0, 480.0])
+        .with_max_inner_size([480.0, 480.0])
         .with_resizable(false)
         .with_decorations(false) // ZERO titlebar, ZERO system borders
         .with_transparent(true) // 100% borderless transparency

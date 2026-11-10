@@ -45,11 +45,7 @@ impl PetalPopover {
 
         // 2. Frosted macOS Card Background with 1px border
         painter.rect_filled(rect, Rounding::same(10.0), Color32::from_rgb(28, 28, 32));
-        painter.rect_stroke(
-            rect,
-            Rounding::same(10.0),
-            Stroke::new(1.0_f32, PANTONE_FLAVEDO),
-        );
+        painter.rect_stroke(rect, Rounding::same(10.0), Stroke::new(1.0_f32, MAC_BORDER));
 
         // 3. Anchor Triangle Pointer
         let triangle_pts = if anchor_pos.y < 160.0 {
@@ -68,7 +64,7 @@ impl PetalPopover {
         painter.add(eframe::epaint::Shape::convex_polygon(
             triangle_pts,
             Color32::from_rgb(28, 28, 32),
-            Stroke::new(1.0_f32, PANTONE_FLAVEDO),
+            Stroke::new(1.0_f32, MAC_BORDER),
         ));
 
         // 4. Popover Content Area
@@ -79,7 +75,7 @@ impl PetalPopover {
                 egui::RichText::new(format!("[*] Quick Settings * {}", format_name))
                     .size(15.5)
                     .strong()
-                    .color(PANTONE_FLAVEDO),
+                    .color(Color32::WHITE),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
@@ -220,7 +216,7 @@ impl PetalPopover {
             child_ui.label(
                 egui::RichText::new("[v] Zip-Slip Protection Active")
                     .size(13.5)
-                    .color(PANTONE_FLAVEDO),
+                    .color(PANTONE_GOLD),
             );
         } else if fmt == "ALL" {
             child_ui.label(

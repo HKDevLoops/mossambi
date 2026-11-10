@@ -256,7 +256,12 @@ impl RoutePlanner {
         }
 
         // 3D Models
-        p.add_edge("STL", "OBJ", 3, "Facet mesh re-indexing");
+        p.add_edge("STL", "OBJ", 3, "Facet mesh re-indexing to OBJ");
+        p.add_edge("OBJ", "STL", 3, "Facet mesh re-indexing to STL");
+        p.add_edge("STL", "PLY", 3, "Stanford polygon mesh conversion");
+        p.add_edge("OBJ", "PLY", 3, "Stanford polygon mesh conversion");
+        p.add_edge("PLY", "STL", 3, "Polygon mesh to STL triangles");
+        p.add_edge("PLY", "OBJ", 3, "Polygon mesh to Wavefront OBJ");
         p.add_edge("OBJ", "GLTF", 4, "glTF 2.0 PBR asset conversion");
         p.add_edge("GLTF", "GLB", 2, "Binary glTF container pack");
         p.add_edge("GLB", "GLTF", 2, "JSON glTF unpack with binary buffer");
@@ -266,9 +271,68 @@ impl RoutePlanner {
             3,
             "Additive manufacturing triangular mesh export",
         );
+        p.add_edge("PNG", "STL", 8, "Luminance heightmap 3D relief generation");
+        p.add_edge("JPG", "STL", 8, "Luminance heightmap 3D relief generation");
 
-        // PDF Vector / Text
+        // Geospatial Vector Data
+        let geo = ["GEOJSON", "KML", "KMZ", "GPX", "CSV"];
+        for &g1 in &geo {
+            for &g2 in &geo {
+                if g1 != g2 {
+                    p.add_edge(g1, g2, 3, "Geospatial vector coordinate translation");
+                }
+            }
+        }
+
+        // Data Exchange
+        p.add_edge(
+            "JSON",
+            "CSV",
+            2,
+            "Structured JSON object array to tabular CSV",
+        );
+        p.add_edge("CSV", "JSON", 2, "Tabular CSV records to JSON array");
+        p.add_edge(
+            "JSON",
+            "JSONL",
+            2,
+            "Pretty JSON to newline-delimited stream",
+        );
+        p.add_edge("JSONL", "JSON", 2, "Newline-delimited stream to JSON array");
+        p.add_edge("XML", "JSON", 3, "Hierarchical XML tree to structured JSON");
+        p.add_edge("JSON", "XML", 3, "Structured JSON to hierarchical XML tree");
+        p.add_edge("VCF", "JSON", 3, "vCard contact parsing to JSON schema");
+        p.add_edge("ICS", "JSON", 3, "iCalendar events to JSON schema");
+        p.add_edge("VCF", "CSV", 4, "vCard contact book to CSV spreadsheet");
+        p.add_edge("ICS", "CSV", 4, "iCalendar events to CSV agenda");
+
+        // Fonts
+        let fonts = ["TTF", "OTF", "WOFF", "WOFF2"];
+        for &f1 in &fonts {
+            for &f2 in &fonts {
+                if f1 != f2 {
+                    p.add_edge(f1, f2, 4, "SFNT font table transform and compression");
+                }
+            }
+        }
+        p.add_edge("TTF", "EOT", 5, "Embedded OpenType compression");
+        p.add_edge("OTF", "EOT", 5, "Embedded OpenType compression");
+
+        // Email & MIME Archives
+        p.add_edge("EML", "HTML", 3, "MIME multipart email body extraction");
+        p.add_edge("EML", "TXT", 2, "MIME plain-text email body extraction");
+        p.add_edge("EML", "ZIP", 3, "Email attachments bundle packaging");
+        p.add_edge("MSG", "HTML", 3, "Outlook message body extraction");
+        p.add_edge("MSG", "TXT", 2, "Outlook message text extraction");
+        p.add_edge("MSG", "ZIP", 3, "Outlook attachments package");
+        p.add_edge("MHTML", "HTML", 2, "MIME HTML multipart unpack");
+        p.add_edge("MHTML", "TXT", 2, "MIME HTML text strip");
+        p.add_edge("MHTML", "ZIP", 3, "MHTML resources bundle");
+
+        // PDF Vector / Text / Image Rasterization
         p.add_edge("PDF", "PNG", 8, "High-DPI rasterization (150-300 DPI)");
+        p.add_edge("PDF", "JPG", 8, "High-DPI rasterization (150-300 DPI)");
+        p.add_edge("PDF", "WEBP", 8, "High-DPI rasterization (150-300 DPI)");
         p.add_edge("PDF", "TXT", 2, "lopdf content stream character extraction");
 
         // Audio Transcode Matrix (Cost: 2 for stream copy, 5 for lossless, 8 for lossy)

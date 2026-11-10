@@ -10,7 +10,7 @@
 // Pure ASCII. No emoji. Uses the shared design tokens from crate::gui::design.
 
 use crate::core::config::{
-    AnimStyle, CheckboxMode, GlassEffect, MenuStyle, MossambiConfig, OutputMode,
+    AnimStyle, AnimationSettings, CheckboxMode, GlassEffect, MenuStyle, MossambiConfig, OutputMode,
 };
 use crate::core::donut_config::{DonutConfig, DonutProfile, DonutSlicePreset};
 use crate::core::fields_config::FieldsConfig;
@@ -20,7 +20,7 @@ use crate::gui::macos_theme::ThemePalette;
 use crate::gui::macos_theme::ThemeStyle;
 use crate::gui::quick_settings::QuickSettingsState;
 use eframe::egui::{
-    self, Align, Align2, Color32, Frame, Layout, Margin, Rounding, ScrollArea, Sense, Stroke,
+    self, Align, Align2, Color32, Frame, Layout, Margin, Pos2, Rounding, ScrollArea, Sense, Stroke,
     TextEdit, Ui, Vec2,
 };
 use std::path::PathBuf;
@@ -149,130 +149,231 @@ impl PreferencesView {
         // Keep cfg.theme_mode in sync with the live theme selection.
         self.cfg.theme_mode = (*current_theme).into();
 
-        // Sidebar.
-        egui::SidePanel::left("prefs_sidebar_panel")
-            .exact_width(208.0)
-            .frame(
-                Frame::none()
-                    .fill(palette.sidebar_bg)
-                    .inner_margin(Margin::symmetric(10.0, 10.0)),
-            )
-            .show_inside(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("Settings")
-                        .size(design::type_scale::TITLE)
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                ui.add_space(design::space::SM);
-                ui.add(
-                    TextEdit::singleline(&mut self.search)
-                        .hint_text("Search settings")
-                        .desired_width(f32::INFINITY),
-                );
-                ui.add_space(design::space::MD);
+        // Fluid macOS System Settings layout: strictly partitioned 210px sidebar + 1px divider + fluid detail pane
+        let total_avail = ui.available_size();
+        let sidebar_w = 210.0_f32;
 
-                if self.search.trim().is_empty() {
-                    for (i, cat) in CATEGORIES.iter().enumerate() {
-                        let is_sel = self.selected == i;
-                        let resp = ui.selectable_label(
-                            is_sel,
-                            egui::RichText::new(*cat)
-                                .size(design::type_scale::BODY)
-                                .color(if is_sel {
-                                    palette.accent
-                                } else {
-                                    palette.text_primary
-                                }),
-                        );
-                        if resp.clicked() {
-                            self.selected = i;
-                        }
-                        ui.label(
-                            egui::RichText::new(self.category_summary(i))
-                                .size(design::type_scale::CAPTION)
-                                .color(palette.text_muted),
-                        );
-                        ui.add_space(design::space::XS);
-                    }
-                } else {
-                    // Filtered results across all categories.
-                    let q = self.search.to_lowercase();
-                    let hits = self.search_hits();
-                    if hits.is_empty() {
-                        ui.label(
-                            egui::RichText::new("No matching settings.")
-                                .size(design::type_scale::BODY_SM)
-                                .color(palette.text_muted),
-                        );
-                        ui.label(
-                            egui::RichText::new(
-                                "Try a different word, e.g. \"opacity\" or \"tags\".",
-                            )
-                            .size(design::type_scale::CAPTION)
-                            .color(palette.text_muted),
-                        );
-                    } else {
-                        for hit in &hits {
-                            if !hit.setting_label.to_lowercase().contains(&q)
-                                && !hit.value_label.to_lowercase().contains(&q)
-                                && !hit.category_title.to_lowercase().contains(&q)
-                            {
-                                continue;
-                            }
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::ZERO;
+
+            // 1. Fluid macOS System Settings sidebar (210px) with dedicated vertical scroll area
+            ui.allocate_ui_with_layout(
+                Vec2::new(sidebar_w, total_avail.y),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    Frame::none()
+                        .fill(palette.sidebar_bg)
+                        .inner_margin(Margin::symmetric(10.0, 12.0))
+                        .show(ui, |ui| {
                             ui.label(
-                                egui::RichText::new(hit.setting_label)
-                                    .size(design::type_scale::BODY_SM)
+                                egui::RichText::new("Settings")
+                                    .size(design::type_scale::TITLE)
+                                    .strong()
                                     .color(palette.text_primary),
                             );
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "{}  -  {}",
-                                    hit.category_title, hit.value_label
-                                ))
-                                .size(design::type_scale::CAPTION)
-                                .color(palette.text_muted),
+                            ui.add_space(design::space::SM);
+                            ui.add(
+                                TextEdit::singleline(&mut self.search)
+                                    .hint_text("Search settings")
+                                    .desired_width(sidebar_w - 24.0),
                             );
-                            ui.add_space(design::space::XS);
-                        }
-                    }
-                }
-            });
+                            ui.add_space(design::space::SM);
 
-        // Detail pane.
-        let mut dirty = false;
-        ScrollArea::vertical()
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                ui.add_space(design::space::SM);
-                let title = CATEGORIES[self.selected];
-                ui.label(
-                    egui::RichText::new(title)
-                        .size(design::type_scale::TITLE_LG)
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                ui.label(
-                    egui::RichText::new(self.category_subtitle(self.selected))
-                        .size(design::type_scale::BODY_SM)
-                        .color(palette.text_secondary),
-                );
-                ui.add_space(design::space::MD);
+                            ScrollArea::vertical()
+                                .id_salt("prefs_sidebar_scroll")
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    if self.search.trim().is_empty() {
+                                        for (i, cat) in CATEGORIES.iter().enumerate() {
+                                            let is_sel = self.selected == i;
+                                            let item_h = 38.0_f32;
+                                            let (rect, resp) = ui.allocate_exact_size(
+                                                Vec2::new(sidebar_w - 24.0, item_h),
+                                                Sense::click(),
+                                            );
+                                            if resp.clicked() {
+                                                self.selected = i;
+                                            }
+                                            if is_sel {
+                                                ui.painter().rect_filled(
+                                                    rect,
+                                                    Rounding::same(design::radius::SM),
+                                                    Color32::from_rgba_premultiplied(
+                                                        palette.accent.r(),
+                                                        palette.accent.g(),
+                                                        palette.accent.b(),
+                                                        35,
+                                                    ),
+                                                );
+                                                ui.painter().rect_stroke(
+                                                    rect,
+                                                    Rounding::same(design::radius::SM),
+                                                    Stroke::new(1.0_f32, palette.accent),
+                                                );
+                                            } else if resp.hovered() {
+                                                ui.painter().rect_filled(
+                                                    rect,
+                                                    Rounding::same(design::radius::SM),
+                                                    Color32::from_rgba_premultiplied(
+                                                        palette.text_primary.r(),
+                                                        palette.text_primary.g(),
+                                                        palette.text_primary.b(),
+                                                        12,
+                                                    ),
+                                                );
+                                            }
+                                            let text_x = rect.left() + 8.0;
+                                            ui.painter().text(
+                                                Pos2::new(text_x, rect.top() + 11.0),
+                                                Align2::LEFT_CENTER,
+                                                *cat,
+                                                egui::FontId::proportional(design::type_scale::BODY_SM),
+                                                if is_sel {
+                                                    palette.accent
+                                                } else {
+                                                    palette.text_primary
+                                                },
+                                            );
+                                            ui.painter().text(
+                                                Pos2::new(text_x, rect.top() + 26.0),
+                                                Align2::LEFT_CENTER,
+                                                self.category_summary(i),
+                                                egui::FontId::proportional(design::type_scale::MICRO),
+                                                palette.text_muted,
+                                            );
+                                            ui.add_space(2.0);
+                                        }
+                                    } else {
+                                        // Filtered results across all categories.
+                                        let q = self.search.to_lowercase();
+                                        let hits = self.search_hits();
+                                        if hits.is_empty() {
+                                            ui.label(
+                                                egui::RichText::new("No matching settings.")
+                                                    .size(design::type_scale::BODY_SM)
+                                                    .color(palette.text_muted),
+                                            );
+                                            ui.label(
+                                                egui::RichText::new(
+                                                    "Try a different word, e.g. \"opacity\" or \"tags\".",
+                                                )
+                                                .size(design::type_scale::CAPTION)
+                                                .color(palette.text_muted),
+                                            );
+                                        } else {
+                                            for hit in &hits {
+                                                if !hit.setting_label.to_lowercase().contains(&q)
+                                                    && !hit.value_label.to_lowercase().contains(&q)
+                                                    && !hit.category_title.to_lowercase().contains(&q)
+                                                {
+                                                    continue;
+                                                }
+                                                ui.label(
+                                                    egui::RichText::new(hit.setting_label)
+                                                        .size(design::type_scale::BODY_SM)
+                                                        .color(palette.text_primary),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "{}  -  {}",
+                                                        hit.category_title, hit.value_label
+                                                    ))
+                                                    .size(design::type_scale::CAPTION)
+                                                    .color(palette.text_muted),
+                                                );
+                                                ui.add_space(design::space::XS);
+                                            }
+                                        }
+                                    }
+                                });
+                        });
+                },
+            );
 
-                match self.selected {
-                    0 => self.render_general(ui, palette, &mut dirty),
-                    1 => self.render_donut_toolbar(ui, palette, &mut dirty),
-                    2 => self.render_shortcuts(ui, palette, &mut dirty),
-                    3 => self.render_fields(ui, palette, &mut dirty),
-                    4 => self.render_appearance(ui, palette, current_theme, &mut dirty),
-                    5 => self.render_explorer(ui, palette, &mut dirty),
-                    6 => self.render_behavior(ui, palette, &mut dirty),
-                    7 => self.render_performance(ui, palette, &mut dirty),
-                    8 => self.render_conversion(ui, palette, settings, &mut dirty),
-                    _ => self.render_about(ui, palette),
-                }
-                let _ = dirty;
-            });
+            // 2. Subtle 1px vertical separator
+            let (div_rect, _) =
+                ui.allocate_exact_size(Vec2::new(1.0, total_avail.y), Sense::hover());
+            ui.painter()
+                .rect_filled(div_rect, Rounding::ZERO, palette.border);
+
+            // 3. Detail Content Pane
+            let detail_w = (ui.available_width() - 8.0).max(320.0);
+            ui.allocate_ui_with_layout(
+                Vec2::new(detail_w, total_avail.y),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    let mut dirty = false;
+                    ScrollArea::vertical()
+                        .id_salt("prefs_detail_scroll")
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            if self.selected == 1 {
+                                // Donut toolbar: fluid 3-column layout centered with safety padding
+                                let donut_w = 680.0_f32.min(ui.available_width() - 32.0);
+                                let pad_x = ((ui.available_width() - donut_w) * 0.5).max(16.0);
+                                ui.horizontal(|ui| {
+                                    ui.add_space(pad_x);
+                                    ui.vertical(|ui| {
+                                        ui.set_width(donut_w);
+                                        ui.add_space(design::space::SM);
+                                        let title = CATEGORIES[self.selected];
+                                        ui.label(
+                                            egui::RichText::new(title)
+                                                .size(design::type_scale::TITLE_LG)
+                                                .strong()
+                                                .color(palette.text_primary),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(self.category_subtitle(self.selected))
+                                                .size(design::type_scale::BODY_SM)
+                                                .color(palette.text_secondary),
+                                        );
+                                        ui.add_space(design::space::MD);
+                                        self.render_donut_toolbar(ui, palette, &mut dirty);
+                                    });
+                                });
+                            } else {
+                                // Authentic macOS System Settings: bounded 520px width, centered with generous breathing room
+                                let content_w = 520.0_f32.min(ui.available_width() - 48.0);
+                                let pad_x = ((ui.available_width() - content_w) * 0.5).max(24.0);
+                                ui.horizontal(|ui| {
+                                    ui.add_space(pad_x);
+                                    ui.vertical(|ui| {
+                                        ui.set_width(content_w);
+                                        ui.add_space(design::space::SM);
+                                        let title = CATEGORIES[self.selected];
+                                        ui.label(
+                                            egui::RichText::new(title)
+                                                .size(design::type_scale::TITLE_LG)
+                                                .strong()
+                                                .color(palette.text_primary),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(self.category_subtitle(self.selected))
+                                                .size(design::type_scale::BODY_SM)
+                                                .color(palette.text_secondary),
+                                        );
+                                        ui.add_space(design::space::MD);
+
+                                        match self.selected {
+                                            0 => self.render_general(ui, palette, &mut dirty),
+                                            2 => self.render_shortcuts(ui, palette, &mut dirty),
+                                            3 => self.render_fields(ui, palette, &mut dirty),
+                                            4 => self.render_appearance(ui, palette, current_theme, &mut dirty),
+                                            5 => self.render_explorer(ui, palette, &mut dirty),
+                                            6 => self.render_behavior(ui, palette, &mut dirty),
+                                            7 => self.render_performance(ui, palette, &mut dirty),
+                                            8 => self.render_conversion(ui, palette, settings, &mut dirty),
+                                            _ => self.render_about(ui, palette),
+                                        }
+                                    });
+                                });
+                            }
+                            let _ = dirty;
+                        });
+                },
+            );
+        });
 
         if self.dirty {
             let _ = self.cfg.save();
@@ -694,508 +795,531 @@ impl PreferencesView {
     }
 
     fn render_donut_toolbar(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
-        let total_w = ui.available_width();
-        let col1_w = 210.0;
-        let col2_w = 360.0;
-        let col3_w = (total_w - col1_w - col2_w - 32.0).max(220.0);
+        // Tailwind CSS-grade fluid 3-column responsive layout with horizontal scroll safety
+        let avail_w = ui.available_width().max(680.0);
+        let (col1_w, col2_w, col3_w) = if avail_w >= 880.0 {
+            let c1 = (avail_w * 0.22).clamp(170.0, 210.0);
+            let c3 = (avail_w * 0.32).clamp(220.0, 300.0);
+            let c2 = (avail_w - c1 - c3 - 36.0).max(300.0);
+            (c1, c2, c3)
+        } else if avail_w >= 740.0 {
+            let c1 = 165.0;
+            let c2 = 310.0;
+            let c3 = (avail_w - c1 - c2 - 36.0).max(210.0);
+            (c1, c2, c3)
+        } else {
+            (165.0, 300.0, 215.0)
+        };
 
-        ui.horizontal_top(|ui| {
-            // ---- COLUMN 1: 1. Choose a profile ----
-            ui.allocate_ui_with_layout(Vec2::new(col1_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
-                ui.label(
-                    egui::RichText::new("1. Choose a profile")
-                        .size(design::type_scale::TITLE_SM)
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                ui.add_space(design::space::XS);
-
-                ui.add(
-                    TextEdit::singleline(&mut self.donut_profile_search)
-                        .hint_text("Search")
-                        .desired_width(col1_w - 10.0),
-                );
-                ui.add_space(design::space::SM);
-
-                let search_q = self.donut_profile_search.trim().to_lowercase();
-                let num_profiles = self.cfg.donut.profiles.len();
-
-                ScrollArea::vertical()
-                    .id_salt("donut_profiles_scroll")
-                    .max_height(480.0)
-                    .show(ui, |ui| {
-                        for i in 0..num_profiles {
-                            let (name, front_len, back_len, is_mixed) = {
-                                let p = &self.cfg.donut.profiles[i];
-                                (p.name.clone(), p.front_slices.len(), p.back_slices.len(), p.is_mixed_selection)
-                            };
-
-                            if !search_q.is_empty() && !name.to_lowercase().contains(&search_q) {
-                                continue;
-                            }
-
-                            let is_selected = self.selected_donut_profile_idx == i;
-                            let card_rect = ui.allocate_space(Vec2::new(col1_w - 16.0, 32.0)).1;
-                            let is_hovered = ui.rect_contains_pointer(card_rect);
-
-                            let bg_color = if is_selected {
-                                palette.card_hover
-                            } else if is_hovered {
-                                Color32::from_rgba_premultiplied(palette.card_hover.r(), palette.card_hover.g(), palette.card_hover.b(), 70)
-                            } else {
-                                Color32::TRANSPARENT
-                            };
-
-                            ui.painter().rect_filled(card_rect, Rounding::same(design::radius::SM), bg_color);
-                            if is_selected {
-                                ui.painter().rect_stroke(card_rect, Rounding::same(design::radius::SM), Stroke::new(1.0_f32, palette.accent));
-                            }
-
-                            let text_color = if is_selected { palette.accent } else { palette.text_primary };
-                            let label_pos = egui::pos2(card_rect.min.x + 8.0, card_rect.center().y - 7.0);
-                            ui.painter().text(
-                                label_pos,
-                                Align2::LEFT_TOP,
-                                &name,
-                                egui::FontId::proportional(design::type_scale::BODY_SM),
-                                text_color,
-                            );
-
-                            let badge_str = if is_mixed {
-                                format!("M {}-{}", front_len, back_len)
-                            } else {
-                                format!("{}-{}", front_len, back_len)
-                            };
-                            let badge_pos = egui::pos2(card_rect.max.x - 8.0, card_rect.center().y - 6.0);
-                            ui.painter().text(
-                                badge_pos,
-                                Align2::RIGHT_TOP,
-                                badge_str,
-                                egui::FontId::proportional(design::type_scale::MICRO),
-                                palette.text_muted,
-                            );
-
-                            if ui.interact(card_rect, ui.id().with(i), Sense::click()).clicked() {
-                                self.selected_donut_profile_idx = i;
-                            }
-                            ui.add_space(2.0);
-                        }
-                    });
-
-                ui.add_space(design::space::SM);
-                ui.horizontal(|ui| {
-                    if ui.button("+ New profile").clicked() {
-                        let new_id = format!("custom_{}", self.cfg.donut.profiles.len() + 1);
-                        let new_prof = DonutProfile::new(
-                            &new_id,
-                            "New Profile",
-                            &[".txt"],
-                            &["PNG", "PDF", "WEBP", "JPG"],
-                            &["CROP", "RENAME", "ZIP", "EXPLORE"],
+        ScrollArea::horizontal()
+            .id_salt("donut_toolbar_h_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    // ---- COLUMN 1: 1. Choose a profile ----
+                    ui.allocate_ui_with_layout(Vec2::new(col1_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
+                        ui.label(
+                            egui::RichText::new("1. Choose a profile")
+                                .size(design::type_scale::TITLE_SM)
+                                .strong()
+                                .color(palette.text_primary),
                         );
-                        self.cfg.donut.profiles.push(new_prof);
-                        self.selected_donut_profile_idx = self.cfg.donut.profiles.len() - 1;
-                        *dirty = true;
-                    }
-                    if ui.button("Alt+Up").clicked() && self.selected_donut_profile_idx > 0 {
-                        self.cfg.donut.move_profile_up(self.selected_donut_profile_idx);
-                        self.selected_donut_profile_idx -= 1;
-                        *dirty = true;
-                    }
-                    if ui.button("Alt+Down").clicked()
-                        && self.selected_donut_profile_idx + 1 < self.cfg.donut.profiles.len()
-                    {
-                        self.cfg.donut.move_profile_down(self.selected_donut_profile_idx);
-                        self.selected_donut_profile_idx += 1;
-                        *dirty = true;
-                    }
-                });
+                        ui.add_space(design::space::XS);
 
-                ui.add_space(design::space::XS);
-                ui.label(
-                    egui::RichText::new("When two profiles share an extension, the higher one opens. Alt+Up / Alt+Down moves the selected profile.")
-                        .size(design::type_scale::MICRO)
-                        .color(palette.text_muted),
-                );
-            });
+                        ui.add(
+                            TextEdit::singleline(&mut self.donut_profile_search)
+                                .hint_text("Search")
+                                .desired_width(col1_w - 12.0),
+                        );
+                        ui.add_space(design::space::SM);
 
-            ui.add_space(design::space::SM);
-            // Vertical divider line between col 1 and col 2
-            let div1_rect = ui.allocate_space(Vec2::new(1.0, 560.0)).1;
-            ui.painter().rect_filled(div1_rect, Rounding::ZERO, palette.border);
-            ui.add_space(design::space::SM);
+                        let search_q = self.donut_profile_search.trim().to_lowercase();
+                        let num_profiles = self.cfg.donut.profiles.len();
 
-            // ---- COLUMN 2: 2. Arrange presets ----
-            ui.allocate_ui_with_layout(Vec2::new(col2_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
-                ui.label(
-                    egui::RichText::new("2. Arrange presets")
-                        .size(design::type_scale::TITLE_SM)
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                ui.add_space(design::space::XS);
+                        ScrollArea::vertical()
+                            .id_salt("donut_profiles_scroll")
+                            .max_height(480.0)
+                            .show(ui, |ui| {
+                                for i in 0..num_profiles {
+                                    let (name, front_len, back_len, is_mixed) = {
+                                        let p = &self.cfg.donut.profiles[i];
+                                        (p.name.clone(), p.front_slices.len(), p.back_slices.len(), p.is_mixed_selection)
+                                    };
 
-                if self.selected_donut_profile_idx >= self.cfg.donut.profiles.len() {
-                    self.selected_donut_profile_idx = 0;
-                }
-                let (profile_name, profile_id, front_len, back_len, slices_copy) = {
-                    let p = &self.cfg.donut.profiles[self.selected_donut_profile_idx];
-                    let slices = if self.donut_view_back { &p.back_slices } else { &p.front_slices };
-                    (p.name.clone(), p.id.clone(), p.front_slices.len(), p.back_slices.len(), slices.clone())
-                };
-
-                // Front / Back toggle pills
-                ui.horizontal(|ui| {
-                    let front_btn = egui::Button::new(
-                        egui::RichText::new(format!("Front {}", front_len))
-                            .size(design::type_scale::BODY_SM)
-                            .color(if !self.donut_view_back { palette.accent } else { palette.text_secondary }),
-                    )
-                    .fill(if !self.donut_view_back { palette.card_hover } else { palette.card_bg })
-                    .stroke(Stroke::new(1.0_f32, if !self.donut_view_back { palette.accent } else { palette.border }))
-                    .rounding(Rounding::same(design::radius::SM));
-                    if ui.add(front_btn).clicked() {
-                        self.donut_view_back = false;
-                    }
-
-                    let back_btn = egui::Button::new(
-                        egui::RichText::new(format!("Back {}", back_len))
-                            .size(design::type_scale::BODY_SM)
-                            .color(if self.donut_view_back { palette.accent } else { palette.text_secondary }),
-                    )
-                    .fill(if self.donut_view_back { palette.card_hover } else { palette.card_bg })
-                    .stroke(Stroke::new(1.0_f32, if self.donut_view_back { palette.accent } else { palette.border }))
-                    .rounding(Rounding::same(design::radius::SM));
-                    if ui.add(back_btn).clicked() {
-                        self.donut_view_back = true;
-                    }
-                });
-
-                ui.label(
-                    egui::RichText::new("Flip the open donut: Tab / mouse wheel")
-                        .size(design::type_scale::MICRO)
-                        .color(palette.text_muted),
-                );
-                ui.add_space(design::space::SM);
-
-                // Live Vector Radial Donut Preview
-                let (preview_rect, _) = ui.allocate_exact_size(Vec2::new(260.0, 240.0), Sense::hover());
-                let center = preview_rect.center();
-                let painter = ui.painter_at(preview_rect);
-
-                let n_slices = slices_copy.len().max(1);
-                let outer_r = 95.0f32;
-                let inner_r = 42.0f32;
-
-                use std::f32::consts::PI;
-                let step_angle = 2.0 * PI / (n_slices as f32);
-
-                for (idx, slice) in slices_copy.iter().enumerate() {
-                    let a0 = -PI / 2.0 + (idx as f32) * step_angle;
-                    let a1 = a0 + step_angle;
-                    let seg_steps = 16;
-                    let mut points = Vec::new();
-
-                    for s in 0..=seg_steps {
-                        let t = (s as f32) / (seg_steps as f32);
-                        let a = a0 + t * (a1 - a0);
-                        points.push(egui::pos2(center.x + outer_r * a.cos(), center.y + outer_r * a.sin()));
-                    }
-                    for s in (0..=seg_steps).rev() {
-                        let t = (s as f32) / (seg_steps as f32);
-                        let a = a0 + t * (a1 - a0);
-                        points.push(egui::pos2(center.x + inner_r * a.cos(), center.y + inner_r * a.sin()));
-                    }
-
-                    painter.add(egui::Shape::convex_polygon(
-                        points,
-                        palette.card_bg,
-                        Stroke::new(1.0_f32, palette.border),
-                    ));
-
-                    let mid_a = (a0 + a1) * 0.5;
-                    let label_r = (inner_r + outer_r) * 0.5;
-                    let text_pos = egui::pos2(center.x + label_r * mid_a.cos(), center.y + label_r * mid_a.sin());
-                    painter.text(
-                        text_pos,
-                        Align2::CENTER_CENTER,
-                        &slice.label,
-                        egui::FontId::proportional(design::type_scale::BODY_SM),
-                        palette.text_primary,
-                    );
-                }
-
-                // Center columella hub
-                painter.circle_filled(center, inner_r, palette.card_hover);
-                painter.circle_stroke(center, inner_r, Stroke::new(1.5_f32, palette.accent));
-                painter.text(
-                    center,
-                    Align2::CENTER_CENTER,
-                    format!("{}\n{}/12", profile_name, slices_copy.len()),
-                    egui::FontId::proportional(design::type_scale::BODY_SM),
-                    palette.accent,
-                );
-
-                ui.add_space(design::space::SM);
-
-                let mut do_reset = false;
-                let mut do_delete = false;
-
-                // Profile Configuration Card
-                card(ui, palette, |ui| {
-                    let prof = &mut self.cfg.donut.profiles[self.selected_donut_profile_idx];
-                    ui.label(egui::RichText::new("Name").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                    if ui.add(TextEdit::singleline(&mut prof.name).desired_width(f32::INFINITY)).changed() {
-                        *dirty = true;
-                    }
-                    ui.add_space(design::space::XS);
-
-                    ui.horizontal(|ui| {
-                        if ui.checkbox(&mut prof.is_mixed_selection, "Use for mixed selections (files of different types)").changed() {
-                            *dirty = true;
-                        }
-                    });
-                    ui.add_space(design::space::XS);
-
-                    ui.label(egui::RichText::new("Used for these extensions").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                    let mut ext_to_remove = None;
-
-                    ScrollArea::vertical()
-                        .id_salt("ext_tags_scroll")
-                        .max_height(100.0)
-                        .show(ui, |ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                for (ext_idx, ext) in prof.extensions.iter().enumerate() {
-                                    let pill_resp = ui.button(format!("{} x", ext));
-                                    if pill_resp.clicked() {
-                                        ext_to_remove = Some(ext_idx);
+                                    if !search_q.is_empty() && !name.to_lowercase().contains(&search_q) {
+                                        continue;
                                     }
+
+                                    let is_selected = self.selected_donut_profile_idx == i;
+                                    let card_rect = ui.allocate_space(Vec2::new(col1_w - 14.0, 32.0)).1;
+                                    let is_hovered = ui.rect_contains_pointer(card_rect);
+
+                                    let bg_color = if is_selected {
+                                        palette.card_hover
+                                    } else if is_hovered {
+                                        Color32::from_rgba_premultiplied(palette.card_hover.r(), palette.card_hover.g(), palette.card_hover.b(), 70)
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    };
+
+                                    ui.painter().rect_filled(card_rect, Rounding::same(design::radius::SM), bg_color);
+                                    if is_selected {
+                                        ui.painter().rect_stroke(card_rect, Rounding::same(design::radius::SM), Stroke::new(1.0_f32, palette.accent));
+                                    }
+
+                                    let text_color = if is_selected { palette.accent } else { palette.text_primary };
+                                    let label_pos = egui::pos2(card_rect.min.x + 8.0, card_rect.center().y - 7.0);
+                                    ui.painter().text(
+                                        label_pos,
+                                        Align2::LEFT_TOP,
+                                        &name,
+                                        egui::FontId::proportional(design::type_scale::BODY_SM),
+                                        text_color,
+                                    );
+
+                                    let badge_str = if is_mixed {
+                                        format!("M {}-{}", front_len, back_len)
+                                    } else {
+                                        format!("{}-{}", front_len, back_len)
+                                    };
+                                    let badge_pos = egui::pos2(card_rect.max.x - 8.0, card_rect.center().y - 6.0);
+                                    ui.painter().text(
+                                        badge_pos,
+                                        Align2::RIGHT_TOP,
+                                        badge_str,
+                                        egui::FontId::proportional(design::type_scale::MICRO),
+                                        palette.text_muted,
+                                    );
+
+                                    if ui.interact(card_rect, ui.id().with(i), Sense::click()).clicked() {
+                                        self.selected_donut_profile_idx = i;
+                                    }
+                                    ui.add_space(2.0);
+                                }
+                            });
+
+                        ui.add_space(design::space::SM);
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("+ New profile").clicked() {
+                                let new_id = format!("custom_{}", self.cfg.donut.profiles.len() + 1);
+                                let new_prof = DonutProfile::new(
+                                    &new_id,
+                                    "New Profile",
+                                    &[".txt"],
+                                    &["PNG", "PDF", "WEBP", "JPG"],
+                                    &["CROP", "RENAME", "ZIP", "EXPLORE"],
+                                );
+                                self.cfg.donut.profiles.push(new_prof);
+                                self.selected_donut_profile_idx = self.cfg.donut.profiles.len() - 1;
+                                *dirty = true;
+                            }
+                            if ui.button("Alt+Up").clicked() && self.selected_donut_profile_idx > 0 {
+                                self.cfg.donut.move_profile_up(self.selected_donut_profile_idx);
+                                self.selected_donut_profile_idx -= 1;
+                                *dirty = true;
+                            }
+                            if ui.button("Alt+Down").clicked()
+                                && self.selected_donut_profile_idx + 1 < self.cfg.donut.profiles.len()
+                            {
+                                self.cfg.donut.move_profile_down(self.selected_donut_profile_idx);
+                                self.selected_donut_profile_idx += 1;
+                                *dirty = true;
+                            }
+                        });
+
+                        ui.add_space(design::space::XS);
+                        ui.label(
+                            egui::RichText::new("When two profiles share an extension, the higher one opens. Alt+Up / Alt+Down moves the selected profile.")
+                                .size(design::type_scale::MICRO)
+                                .color(palette.text_muted),
+                        );
+                    });
+
+                    ui.add_space(design::space::SM);
+                    // Vertical divider line between col 1 and col 2
+                    let div1_rect = ui.allocate_space(Vec2::new(1.0, 560.0)).1;
+                    ui.painter().rect_filled(div1_rect, Rounding::ZERO, palette.border);
+                    ui.add_space(design::space::SM);
+
+                    // ---- COLUMN 2: 2. Arrange presets ----
+                    ui.allocate_ui_with_layout(Vec2::new(col2_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
+                        ui.label(
+                            egui::RichText::new("2. Arrange presets")
+                                .size(design::type_scale::TITLE_SM)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
+                        ui.add_space(design::space::XS);
+
+                        if self.selected_donut_profile_idx >= self.cfg.donut.profiles.len() {
+                            self.selected_donut_profile_idx = 0;
+                        }
+                        let (profile_name, profile_id, front_len, back_len, slices_copy) = {
+                            let p = &self.cfg.donut.profiles[self.selected_donut_profile_idx];
+                            let slices = if self.donut_view_back { &p.back_slices } else { &p.front_slices };
+                            (p.name.clone(), p.id.clone(), p.front_slices.len(), p.back_slices.len(), slices.clone())
+                        };
+
+                        // Front / Back toggle pills
+                        ui.horizontal_wrapped(|ui| {
+                            let front_btn = egui::Button::new(
+                                egui::RichText::new(format!("Front {}", front_len))
+                                    .size(design::type_scale::BODY_SM)
+                                    .color(if !self.donut_view_back { palette.accent } else { palette.text_secondary }),
+                            )
+                            .fill(if !self.donut_view_back { palette.card_hover } else { palette.card_bg })
+                            .stroke(Stroke::new(1.0_f32, if !self.donut_view_back { palette.accent } else { palette.border }))
+                            .rounding(Rounding::same(design::radius::SM));
+                            if ui.add(front_btn).clicked() {
+                                self.donut_view_back = false;
+                            }
+
+                            let back_btn = egui::Button::new(
+                                egui::RichText::new(format!("Back {}", back_len))
+                                    .size(design::type_scale::BODY_SM)
+                                    .color(if self.donut_view_back { palette.accent } else { palette.text_secondary }),
+                            )
+                            .fill(if self.donut_view_back { palette.card_hover } else { palette.card_bg })
+                            .stroke(Stroke::new(1.0_f32, if self.donut_view_back { palette.accent } else { palette.border }))
+                            .rounding(Rounding::same(design::radius::SM));
+                            if ui.add(back_btn).clicked() {
+                                self.donut_view_back = true;
+                            }
+                        });
+
+                        ui.label(
+                            egui::RichText::new("Flip the open donut: Tab / mouse wheel")
+                                .size(design::type_scale::MICRO)
+                                .color(palette.text_muted),
+                        );
+                        ui.add_space(design::space::SM);
+
+                        // Live Vector Radial Donut Preview (Dynamically scaled to col2_w)
+                        let canvas_w = (col2_w - 24.0).clamp(210.0, 270.0);
+                        let canvas_h = (canvas_w * 0.90).clamp(190.0, 245.0);
+                        let (preview_rect, _) = ui.allocate_exact_size(Vec2::new(canvas_w, canvas_h), Sense::hover());
+                        let center = preview_rect.center();
+                        let painter = ui.painter_at(preview_rect);
+
+                        let n_slices = slices_copy.len().max(1);
+                        let outer_r = (canvas_w * 0.38).clamp(70.0, 100.0);
+                        let inner_r = (outer_r * 0.44).clamp(32.0, 46.0);
+
+                        use std::f32::consts::PI;
+                        let step_angle = 2.0 * PI / (n_slices as f32);
+
+                        for (idx, slice) in slices_copy.iter().enumerate() {
+                            let a0 = -PI / 2.0 + (idx as f32) * step_angle;
+                            let a1 = a0 + step_angle;
+                            let seg_steps = 16;
+                            let mut points = Vec::new();
+
+                            for s in 0..=seg_steps {
+                                let t = (s as f32) / (seg_steps as f32);
+                                let a = a0 + t * (a1 - a0);
+                                points.push(egui::pos2(center.x + outer_r * a.cos(), center.y + outer_r * a.sin()));
+                            }
+                            for s in (0..=seg_steps).rev() {
+                                let t = (s as f32) / (seg_steps as f32);
+                                let a = a0 + t * (a1 - a0);
+                                points.push(egui::pos2(center.x + inner_r * a.cos(), center.y + inner_r * a.sin()));
+                            }
+
+                            painter.add(egui::Shape::convex_polygon(
+                                points,
+                                palette.card_bg,
+                                Stroke::new(1.0_f32, palette.border),
+                            ));
+
+                            let mid_a = (a0 + a1) * 0.5;
+                            let label_r = (inner_r + outer_r) * 0.5;
+                            let text_pos = egui::pos2(center.x + label_r * mid_a.cos(), center.y + label_r * mid_a.sin());
+                            painter.text(
+                                text_pos,
+                                Align2::CENTER_CENTER,
+                                &slice.label,
+                                egui::FontId::proportional(design::type_scale::BODY_SM),
+                                palette.text_primary,
+                            );
+                        }
+
+                        // Center columella hub
+                        painter.circle_filled(center, inner_r, palette.card_hover);
+                        painter.circle_stroke(center, inner_r, Stroke::new(1.5_f32, palette.accent));
+                        painter.text(
+                            center,
+                            Align2::CENTER_CENTER,
+                            format!("{}\n{}/12", profile_name, slices_copy.len()),
+                            egui::FontId::proportional(design::type_scale::BODY_SM),
+                            palette.accent,
+                        );
+
+                        ui.add_space(design::space::SM);
+
+                        let mut do_reset = false;
+                        let mut do_delete = false;
+
+                        // Profile Configuration Card
+                        card(ui, palette, |ui| {
+                            let prof = &mut self.cfg.donut.profiles[self.selected_donut_profile_idx];
+                            ui.label(egui::RichText::new("Name").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                            if ui.add(TextEdit::singleline(&mut prof.name).desired_width(f32::INFINITY)).changed() {
+                                *dirty = true;
+                            }
+                            ui.add_space(design::space::XS);
+
+                            ui.horizontal_wrapped(|ui| {
+                                if ui.checkbox(&mut prof.is_mixed_selection, "Use for mixed selections (files of different types)").changed() {
+                                    *dirty = true;
+                                }
+                            });
+                            ui.add_space(design::space::XS);
+
+                            ui.label(egui::RichText::new("Used for these extensions").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                            let mut ext_to_remove = None;
+
+                            ScrollArea::vertical()
+                                .id_salt("ext_tags_scroll")
+                                .max_height(100.0)
+                                .show(ui, |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        for (ext_idx, ext) in prof.extensions.iter().enumerate() {
+                                            let pill_resp = ui.button(format!("{} x", ext));
+                                            if pill_resp.clicked() {
+                                                ext_to_remove = Some(ext_idx);
+                                            }
+                                        }
+                                    });
+                                });
+
+                            if let Some(idx) = ext_to_remove {
+                                if idx < prof.extensions.len() {
+                                    prof.extensions.remove(idx);
+                                    *dirty = true;
+                                }
+                            }
+
+                            ui.horizontal_wrapped(|ui| {
+                                ui.add(TextEdit::singleline(&mut self.new_ext_input).hint_text(".jpg").desired_width(100.0));
+                                if ui.button("+ Add extension").clicked() {
+                                    let clean = self.new_ext_input.trim();
+                                    if !clean.is_empty() {
+                                        let formatted = if clean.starts_with('.') { clean.to_string() } else { format!(".{}", clean) };
+                                        if !prof.extensions.contains(&formatted) {
+                                            prof.extensions.push(formatted);
+                                            self.new_ext_input.clear();
+                                            *dirty = true;
+                                        }
+                                    }
+                                }
+                            });
+
+                            ui.add_space(design::space::XS);
+                            ui.horizontal_wrapped(|ui| {
+                                if ui.button("Reset to default").clicked() {
+                                    do_reset = true;
+                                }
+                                if profile_id != "images" && ui.button("Delete profile").clicked() {
+                                    do_delete = true;
                                 }
                             });
                         });
 
-                    if let Some(idx) = ext_to_remove {
-                        if idx < prof.extensions.len() {
-                            prof.extensions.remove(idx);
-                            *dirty = true;
-                        }
-                    }
-
-                    ui.horizontal(|ui| {
-                        ui.add(TextEdit::singleline(&mut self.new_ext_input).hint_text(".jpg").desired_width(120.0));
-                        if ui.button("+ Add extension").clicked() {
-                            let clean = self.new_ext_input.trim();
-                            if !clean.is_empty() {
-                                let formatted = if clean.starts_with('.') { clean.to_string() } else { format!(".{}", clean) };
-                                if !prof.extensions.contains(&formatted) {
-                                    prof.extensions.push(formatted);
-                                    self.new_ext_input.clear();
-                                    *dirty = true;
-                                }
+                        if do_reset {
+                            let default_cfg = DonutConfig::default();
+                            if let Some(def_p) = default_cfg.profiles.get(self.selected_donut_profile_idx) {
+                                self.cfg.donut.profiles[self.selected_donut_profile_idx] = def_p.clone();
+                                *dirty = true;
                             }
                         }
-                    });
-
-                    ui.add_space(design::space::XS);
-                    ui.horizontal(|ui| {
-                        if ui.button("Reset to default").clicked() {
-                            do_reset = true;
-                        }
-                        if profile_id != "images" && ui.button("Delete profile").clicked() {
-                            do_delete = true;
-                        }
-                    });
-                });
-
-                if do_reset {
-                    let default_cfg = DonutConfig::default();
-                    if let Some(def_p) = default_cfg.profiles.get(self.selected_donut_profile_idx) {
-                        self.cfg.donut.profiles[self.selected_donut_profile_idx] = def_p.clone();
-                        *dirty = true;
-                    }
-                }
-                if do_delete && self.cfg.donut.profiles.len() > 1 {
-                    self.cfg.donut.profiles.remove(self.selected_donut_profile_idx);
-                    self.selected_donut_profile_idx = 0;
-                    *dirty = true;
-                }
-
-                ui.add_space(design::space::SM);
-
-                // Appearance Card
-                card(ui, palette, |ui| {
-                    ui.label(egui::RichText::new("Appearance").size(design::type_scale::TITLE_SM).strong().color(palette.text_primary));
-                    ui.add_space(design::space::XS);
-
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Size").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                        if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.size, 320.0..=540.0).suffix(" px")).changed() {
+                        if do_delete && self.cfg.donut.profiles.len() > 1 {
+                            self.cfg.donut.profiles.remove(self.selected_donut_profile_idx);
+                            self.selected_donut_profile_idx = 0;
                             *dirty = true;
                         }
+
+                        ui.add_space(design::space::SM);
+
+                        // Appearance Card
+                        card(ui, palette, |ui| {
+                            ui.label(egui::RichText::new("Appearance").size(design::type_scale::TITLE_SM).strong().color(palette.text_primary));
+                            ui.add_space(design::space::XS);
+
+                            let slider_w = (col2_w - 90.0).clamp(110.0, 180.0);
+                            ui.spacing_mut().slider_width = slider_w;
+
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Size").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                                if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.size, 320.0..=540.0).suffix(" px")).changed() {
+                                    *dirty = true;
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Hole").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                                if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.hole, 30.0..=80.0).suffix(" px")).changed() {
+                                    *dirty = true;
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Opacity").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                                if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.opacity, 0.20..=1.00)).changed() {
+                                    *dirty = true;
+                                }
+                            });
+                        });
                     });
 
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Hole").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                        if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.hole, 30.0..=80.0).suffix(" px")).changed() {
-                            *dirty = true;
-                        }
-                    });
+                    ui.add_space(design::space::SM);
+                    // Vertical divider line between col 2 and col 3
+                    let div2_rect = ui.allocate_space(Vec2::new(1.0, 560.0)).1;
+                    ui.painter().rect_filled(div2_rect, Rounding::ZERO, palette.border);
+                    ui.add_space(design::space::SM);
 
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Opacity").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                        if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.opacity, 0.20..=1.00)).changed() {
-                            *dirty = true;
-                        }
+                    // ---- COLUMN 3: Available presets catalog ----
+                    ui.allocate_ui_with_layout(Vec2::new(col3_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
+                        ui.label(
+                            egui::RichText::new("Available presets")
+                                .size(design::type_scale::TITLE_SM)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
+                        ui.add_space(design::space::XS);
+
+                        ui.horizontal_wrapped(|ui| {
+                            let _ = ui.button("+ New preset");
+                            let _ = ui.button("New group");
+                            let _ = ui.button("Copy to folder");
+                        });
+                        ui.add_space(design::space::XS);
+
+                        ui.add(
+                            TextEdit::singleline(&mut self.donut_preset_search)
+                                .hint_text("Search presets")
+                                .desired_width(col3_w - 12.0),
+                        );
+                        ui.add_space(design::space::XS);
+
+                        // Category filter pills
+                        let categories = ["All", "Image", "Document", "Video & audio", "Edit", "3D & CAD"];
+                        ui.horizontal_wrapped(|ui| {
+                            for cat in categories {
+                                let active = self.donut_preset_category == cat;
+                                let btn = egui::Button::new(
+                                    egui::RichText::new(cat)
+                                        .size(design::type_scale::MICRO)
+                                        .color(if active { palette.accent } else { palette.text_secondary }),
+                                )
+                                .fill(if active { palette.card_hover } else { palette.card_bg })
+                                .stroke(Stroke::new(1.0_f32, if active { palette.accent } else { palette.border }))
+                                .rounding(Rounding::same(design::radius::SM));
+                                if ui.add(btn).clicked() {
+                                    self.donut_preset_category = cat.to_string();
+                                }
+                            }
+                        });
+                        ui.add_space(design::space::SM);
+
+                        let available_catalog = [
+                            ("Edit Group of 6", "Edit", true),
+                            ("Pages per sheet Group of 5", "Document", true),
+                            ("Flip Group of 2", "Edit", true),
+                            ("Crop video Group of 6", "Video & audio", true),
+                            ("JPG 70%", "Image", false),
+                            ("TIFF", "Image", false),
+                            ("BMP", "Image", false),
+                            ("ICO", "Image", false),
+                            ("AVIF", "Image", false),
+                            ("HEIC", "Image", false),
+                            ("Grayscale Same format", "Edit", true),
+                            ("Trim transparent borders", "Edit", true),
+                            ("Pixelate / blur Same format", "Edit", true),
+                            ("Annotate Same format", "Edit", true),
+                            ("Rotate left PDF", "Document", true),
+                            ("Rotate right PDF", "Document", true),
+                            ("2 pages per sheet PDF", "Document", true),
+                            ("4 pages per sheet PDF", "Document", true),
+                            ("6 pages per sheet PDF", "Document", true),
+                            ("8 pages per sheet PDF", "Document", true),
+                            ("9 pages per sheet PDF", "Document", true),
+                            ("Rotate left Same format", "Edit", true),
+                            ("Rotate right Same format", "Edit", true),
+                            ("Rotate 180 Same format", "Edit", true),
+                            ("Flip horizontal Same format", "Edit", true),
+                            ("Flip vertical Same format", "Edit", true),
+                            ("TIFF 300dpi", "Image", false),
+                            ("Merge PDF", "Document", true),
+                            ("Long image PNG", "Image", false),
+                            ("Split PDF", "Document", true),
+                            ("Compress PDF", "Document", true),
+                            ("Searchable PDF", "Document", true),
+                            ("STL", "3D & CAD", false),
+                            ("OBJ", "3D & CAD", false),
+                            ("PLY", "3D & CAD", false),
+                            ("DXF", "3D & CAD", false),
+                            ("DWG", "3D & CAD", false),
+                        ];
+
+                        let search_p = self.donut_preset_search.trim().to_lowercase();
+                        let cat_filter = &self.donut_preset_category;
+
+                        ScrollArea::vertical()
+                            .id_salt("donut_presets_catalog_scroll")
+                            .max_height(420.0)
+                            .show(ui, |ui| {
+                                for (preset_name, cat, is_action) in available_catalog {
+                                    if cat_filter != "All" && cat != cat_filter {
+                                        continue;
+                                    }
+                                    if !search_p.is_empty() && !preset_name.to_lowercase().contains(&search_p) {
+                                        continue;
+                                    }
+
+                                    let card_w = (col3_w - 16.0).max(180.0);
+                                    let btn = egui::Button::new(
+                                        egui::RichText::new(preset_name)
+                                            .size(design::type_scale::BODY_SM)
+                                            .color(palette.text_primary),
+                                    )
+                                    .wrap()
+                                    .fill(palette.card_bg)
+                                    .stroke(Stroke::new(1.0_f32, palette.border))
+                                    .rounding(Rounding::same(design::radius::SM));
+
+                                    if ui.add_sized(Vec2::new(card_w, 28.0), btn).clicked()
+                                        && self.selected_donut_profile_idx < self.cfg.donut.profiles.len()
+                                    {
+                                        let prof = &mut self.cfg.donut.profiles[self.selected_donut_profile_idx];
+                                        let target_list = if self.donut_view_back {
+                                            &mut prof.back_slices
+                                        } else {
+                                            &mut prof.front_slices
+                                        };
+                                        let max_s = if self.donut_view_back {
+                                            prof.max_back_slices
+                                        } else {
+                                            prof.max_front_slices
+                                        };
+                                        if target_list.len() < max_s {
+                                            target_list.push(if is_action {
+                                                DonutSlicePreset::action(
+                                                    preset_name,
+                                                    preset_name,
+                                                    preset_name,
+                                                )
+                                            } else {
+                                                DonutSlicePreset::format(preset_name)
+                                            });
+                                            *dirty = true;
+                                        }
+                                    }
+                                    ui.add_space(2.0);
+                                }
+                            });
                     });
                 });
             });
-
-            ui.add_space(design::space::SM);
-            // Vertical divider line between col 2 and col 3
-            let div2_rect = ui.allocate_space(Vec2::new(1.0, 560.0)).1;
-            ui.painter().rect_filled(div2_rect, Rounding::ZERO, palette.border);
-            ui.add_space(design::space::SM);
-
-            // ---- COLUMN 3: Available presets catalog ----
-            ui.allocate_ui_with_layout(Vec2::new(col3_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
-                ui.label(
-                    egui::RichText::new("Available presets")
-                        .size(design::type_scale::TITLE_SM)
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                ui.add_space(design::space::XS);
-
-                ui.horizontal(|ui| {
-                    let _ = ui.button("+ New preset");
-                    let _ = ui.button("New group");
-                    let _ = ui.button("Copy to folder");
-                });
-                ui.add_space(design::space::XS);
-
-                ui.add(
-                    TextEdit::singleline(&mut self.donut_preset_search)
-                        .hint_text("Search presets")
-                        .desired_width(col3_w - 10.0),
-                );
-                ui.add_space(design::space::XS);
-
-                // Category filter pills
-                let categories = ["All", "Image", "Document", "Video & audio", "Edit", "3D & CAD"];
-                ui.horizontal_wrapped(|ui| {
-                    for cat in categories {
-                        let active = self.donut_preset_category == cat;
-                        let btn = egui::Button::new(
-                            egui::RichText::new(cat)
-                                .size(design::type_scale::MICRO)
-                                .color(if active { palette.accent } else { palette.text_secondary }),
-                        )
-                        .fill(if active { palette.card_hover } else { palette.card_bg })
-                        .stroke(Stroke::new(1.0_f32, if active { palette.accent } else { palette.border }))
-                        .rounding(Rounding::same(design::radius::SM));
-                        if ui.add(btn).clicked() {
-                            self.donut_preset_category = cat.to_string();
-                        }
-                    }
-                });
-                ui.add_space(design::space::SM);
-
-                let available_catalog = [
-                    ("Edit Group of 6", "Edit", true),
-                    ("Pages per sheet Group of 5", "Document", true),
-                    ("Flip Group of 2", "Edit", true),
-                    ("Crop video Group of 6", "Video & audio", true),
-                    ("JPG 70%", "Image", false),
-                    ("TIFF", "Image", false),
-                    ("BMP", "Image", false),
-                    ("ICO", "Image", false),
-                    ("AVIF", "Image", false),
-                    ("HEIC", "Image", false),
-                    ("Grayscale Same format", "Edit", true),
-                    ("Trim transparent borders", "Edit", true),
-                    ("Pixelate / blur Same format", "Edit", true),
-                    ("Annotate Same format", "Edit", true),
-                    ("Rotate left PDF", "Document", true),
-                    ("Rotate right PDF", "Document", true),
-                    ("2 pages per sheet PDF", "Document", true),
-                    ("4 pages per sheet PDF", "Document", true),
-                    ("6 pages per sheet PDF", "Document", true),
-                    ("8 pages per sheet PDF", "Document", true),
-                    ("9 pages per sheet PDF", "Document", true),
-                    ("Rotate left Same format", "Edit", true),
-                    ("Rotate right Same format", "Edit", true),
-                    ("Rotate 180 Same format", "Edit", true),
-                    ("Flip horizontal Same format", "Edit", true),
-                    ("Flip vertical Same format", "Edit", true),
-                    ("TIFF 300dpi", "Image", false),
-                    ("Merge PDF", "Document", true),
-                    ("Long image PNG", "Image", false),
-                    ("Split PDF", "Document", true),
-                    ("Compress PDF", "Document", true),
-                    ("Searchable PDF", "Document", true),
-                    ("STL", "3D & CAD", false),
-                    ("OBJ", "3D & CAD", false),
-                    ("PLY", "3D & CAD", false),
-                    ("DXF", "3D & CAD", false),
-                    ("DWG", "3D & CAD", false),
-                ];
-
-                let search_p = self.donut_preset_search.trim().to_lowercase();
-                let cat_filter = &self.donut_preset_category;
-
-                ScrollArea::vertical()
-                    .id_salt("donut_presets_catalog_scroll")
-                    .max_height(420.0)
-                    .show(ui, |ui| {
-                        for (preset_name, cat, is_action) in available_catalog {
-                            if cat_filter != "All" && cat != cat_filter {
-                                continue;
-                            }
-                            if !search_p.is_empty() && !preset_name.to_lowercase().contains(&search_p) {
-                                continue;
-                            }
-
-                            let btn = egui::Button::new(
-                                egui::RichText::new(preset_name)
-                                    .size(design::type_scale::BODY_SM)
-                                    .color(palette.text_primary),
-                            )
-                            .fill(palette.card_bg)
-                            .stroke(Stroke::new(1.0_f32, palette.border))
-                            .rounding(Rounding::same(design::radius::SM));
-
-                            if ui.add_sized(Vec2::new(col3_w - 20.0, 28.0), btn).clicked()
-                                && self.selected_donut_profile_idx < self.cfg.donut.profiles.len()
-                            {
-                                let prof = &mut self.cfg.donut.profiles[self.selected_donut_profile_idx];
-                                let target_list = if self.donut_view_back {
-                                    &mut prof.back_slices
-                                } else {
-                                    &mut prof.front_slices
-                                };
-                                let max_s = if self.donut_view_back {
-                                    prof.max_back_slices
-                                } else {
-                                    prof.max_front_slices
-                                };
-                                if target_list.len() < max_s {
-                                    target_list.push(if is_action {
-                                        DonutSlicePreset::action(
-                                            preset_name,
-                                            preset_name,
-                                            preset_name,
-                                        )
-                                    } else {
-                                        DonutSlicePreset::format(preset_name)
-                                    });
-                                    *dirty = true;
-                                }
-                            }
-                            ui.add_space(2.0);
-                        }
-                    });
-            });
-        });
     }
 
     fn render_shortcuts(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
@@ -1565,9 +1689,10 @@ impl PreferencesView {
                 .color(palette.text_secondary),
         );
         ui.add_space(design::space::SM);
-        // Compact swatch grid.
+        // Compact swatch grid (2 responsive columns fitting cleanly in bounded card).
         let themes = ThemeStyle::all();
-        for chunk in themes.chunks(4) {
+        let btn_w = ((ui.available_width() - 36.0) * 0.5).clamp(160.0, 235.0);
+        for chunk in themes.chunks(2) {
             ui.horizontal(|ui| {
                 for t in chunk {
                     let is_active = *current_theme == *t;
@@ -1599,7 +1724,7 @@ impl PreferencesView {
                         },
                     ))
                     .rounding(Rounding::same(design::radius::SM));
-                    if ui.add_sized(Vec2::new(150.0, 26.0), btn).clicked() {
+                    if ui.add_sized(Vec2::new(btn_w, 26.0), btn).clicked() {
                         *current_theme = *t;
                         self.cfg.theme_mode = (*t).into();
                         *dirty = true;
@@ -1614,16 +1739,9 @@ impl PreferencesView {
         }
 
         section(ui, palette, "Glass & window");
-        let glass = self.cfg.glass_effect;
-        let glass_lbl = glass_label(glass).to_string();
-        let glass_mut = &mut self.cfg.glass_effect;
-        setting_row(
-            ui,
-            palette,
-            "Glass effect",
-            &glass_lbl,
-            dirty,
-            |ui, dirty| {
+        card(ui, palette, |ui| {
+            let glass_mut = &mut self.cfg.glass_effect;
+            setting_row(ui, palette, "Glass effect", "", dirty, |ui, dirty| {
                 for (v, lab) in [
                     (GlassEffect::FrostedGlass, "Frosted"),
                     (GlassEffect::LiquidGlass, "Liquid"),
@@ -1662,188 +1780,187 @@ impl PreferencesView {
                         *dirty = true;
                     }
                 }
-            },
-        );
+            });
 
-        let op = self.cfg.window_opacity;
-        let op_lbl = format!("{:.0}%", op * 100.0);
-        let op_mut = &mut self.cfg.window_opacity;
-        setting_row(
-            ui,
-            palette,
-            "Window opacity",
-            &op_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui
-                    .add(egui::Slider::new(op_mut, 0.5..=1.0).show_value(false))
-                    .changed()
-                {
-                    *dirty = true;
-                }
-            },
-        );
+            let op = self.cfg.window_opacity;
+            let op_lbl = format!("{:.0}%", op * 100.0);
+            let op_mut = &mut self.cfg.window_opacity;
+            setting_row(
+                ui,
+                palette,
+                "Window opacity",
+                &op_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui
+                        .add(egui::Slider::new(op_mut, 0.5..=1.0).show_value(false))
+                        .changed()
+                    {
+                        *dirty = true;
+                    }
+                },
+            );
 
-        let ms = self.cfg.menu_style;
-        let ms_lbl = menu_style_label(ms).to_string();
-        let ms_mut = &mut self.cfg.menu_style;
-        setting_row(ui, palette, "Menu style", &ms_lbl, dirty, |ui, dirty| {
-            for (v, lab) in [
-                (MenuStyle::Finder, "Finder"),
-                (MenuStyle::Windows, "Windows"),
-                (MenuStyle::Linux, "Linux"),
-            ] {
-                let active = *ms_mut == v;
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new(lab)
-                                .size(design::type_scale::SMALL)
-                                .color(if active {
+            let ms_mut = &mut self.cfg.menu_style;
+            setting_row(ui, palette, "Menu style", "", dirty, |ui, dirty| {
+                for (v, lab) in [
+                    (MenuStyle::Finder, "Finder"),
+                    (MenuStyle::Windows, "Windows"),
+                    (MenuStyle::Linux, "Linux"),
+                ] {
+                    let active = *ms_mut == v;
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(lab)
+                                    .size(design::type_scale::SMALL)
+                                    .color(if active {
+                                        palette.accent
+                                    } else {
+                                        palette.text_secondary
+                                    }),
+                            )
+                            .fill(if active {
+                                palette.card_hover
+                            } else {
+                                Color32::TRANSPARENT
+                            })
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                if active {
                                     palette.accent
                                 } else {
-                                    palette.text_secondary
-                                }),
+                                    palette.border
+                                },
+                            ))
+                            .rounding(Rounding::same(design::radius::XS)),
                         )
-                        .fill(if active {
-                            palette.card_hover
-                        } else {
-                            Color32::TRANSPARENT
-                        })
-                        .stroke(Stroke::new(
-                            1.0_f32,
-                            if active {
-                                palette.accent
-                            } else {
-                                palette.border
-                            },
-                        ))
-                        .rounding(Rounding::same(design::radius::XS)),
-                    )
-                    .clicked()
-                {
-                    *ms_mut = v;
-                    *dirty = true;
+                        .clicked()
+                    {
+                        *ms_mut = v;
+                        *dirty = true;
+                    }
                 }
-            }
-        });
+            });
 
-        let cm = self.cfg.checkbox_mode;
-        let cm_lbl = checkbox_mode_label(cm).to_string();
-        let cm_mut = &mut self.cfg.checkbox_mode;
-        setting_row(ui, palette, "Checkbox mode", &cm_lbl, dirty, |ui, dirty| {
-            for (v, lab) in [
-                (CheckboxMode::Always, "Always"),
-                (CheckboxMode::Hover, "On hover"),
-                (CheckboxMode::Off, "Hidden"),
-            ] {
-                let active = *cm_mut == v;
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new(lab)
-                                .size(design::type_scale::SMALL)
-                                .color(if active {
+            let cm_mut = &mut self.cfg.checkbox_mode;
+            setting_row(ui, palette, "Checkbox mode", "", dirty, |ui, dirty| {
+                for (v, lab) in [
+                    (CheckboxMode::Always, "Always"),
+                    (CheckboxMode::Hover, "On hover"),
+                    (CheckboxMode::Off, "Hidden"),
+                ] {
+                    let active = *cm_mut == v;
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(lab)
+                                    .size(design::type_scale::SMALL)
+                                    .color(if active {
+                                        palette.accent
+                                    } else {
+                                        palette.text_secondary
+                                    }),
+                            )
+                            .fill(if active {
+                                palette.card_hover
+                            } else {
+                                Color32::TRANSPARENT
+                            })
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                if active {
                                     palette.accent
                                 } else {
-                                    palette.text_secondary
-                                }),
+                                    palette.border
+                                },
+                            ))
+                            .rounding(Rounding::same(design::radius::XS)),
                         )
-                        .fill(if active {
-                            palette.card_hover
-                        } else {
-                            Color32::TRANSPARENT
-                        })
-                        .stroke(Stroke::new(
-                            1.0_f32,
-                            if active {
-                                palette.accent
-                            } else {
-                                palette.border
-                            },
-                        ))
-                        .rounding(Rounding::same(design::radius::XS)),
-                    )
-                    .clicked()
-                {
-                    *cm_mut = v;
-                    *dirty = true;
-                }
-            }
-        });
-
-        let icon_pack_id = self.cfg.icon_pack.clone();
-        let ip_lbl = IconPack::from_config_id(&icon_pack_id).label().to_string();
-        setting_row(ui, palette, "Icon pack", &ip_lbl, dirty, |ui, dirty| {
-            // Show as a compact menu button listing all packs.
-            ui.menu_button("Change", |menu_ui| {
-                for pack in IconPack::all() {
-                    if menu_ui.button(pack.label()).clicked() {
-                        self.cfg.icon_pack = pack.id().to_string();
+                        .clicked()
+                    {
+                        *cm_mut = v;
                         *dirty = true;
                     }
                 }
             });
         });
 
-        let mut font = self.cfg.font_family.clone().unwrap_or_default();
-        let font_lbl = if font.is_empty() {
-            "System".to_string()
-        } else {
-            font.clone()
-        };
-        setting_row(ui, palette, "Font family", &font_lbl, dirty, |ui, dirty| {
-            if ui
-                .add(TextEdit::singleline(&mut font).desired_width(140.0))
-                .changed()
-            {
-                self.cfg.font_family = if font.trim().is_empty() {
-                    None
-                } else {
-                    Some(font.trim().to_string())
-                };
-                *dirty = true;
-            }
-        });
+        section(ui, palette, "Icons & typography");
+        card(ui, palette, |ui| {
+            let icon_pack_id = self.cfg.icon_pack.clone();
+            let ip_lbl = IconPack::from_config_id(&icon_pack_id).label().to_string();
+            setting_row(ui, palette, "Icon pack", &ip_lbl, dirty, |ui, dirty| {
+                // Show as a compact menu button listing all packs.
+                ui.menu_button("Change", |menu_ui| {
+                    for pack in IconPack::all() {
+                        if menu_ui.button(pack.label()).clicked() {
+                            self.cfg.icon_pack = pack.id().to_string();
+                            *dirty = true;
+                        }
+                    }
+                });
+            });
 
-        let mut shade = self.cfg.citrus_shade.clone();
-        let shade_lbl = if shade.is_empty() {
-            "Default".to_string()
-        } else {
-            shade.clone()
-        };
-        setting_row(
-            ui,
-            palette,
-            "Citrus shade",
-            &shade_lbl,
-            dirty,
-            |ui, dirty| {
+            let mut font = self.cfg.font_family.clone().unwrap_or_default();
+            let font_lbl = if font.is_empty() {
+                "System".to_string()
+            } else {
+                font.clone()
+            };
+            setting_row(ui, palette, "Font family", &font_lbl, dirty, |ui, dirty| {
                 if ui
-                    .add(TextEdit::singleline(&mut shade).desired_width(140.0))
+                    .add(TextEdit::singleline(&mut font).desired_width(140.0))
                     .changed()
                 {
-                    self.cfg.citrus_shade = shade.clone();
+                    self.cfg.font_family = if font.trim().is_empty() {
+                        None
+                    } else {
+                        Some(font.trim().to_string())
+                    };
                     *dirty = true;
                 }
-            },
-        );
+            });
 
-        let tui = self.cfg.tui_transparent_bg;
-        let tui_lbl = on_off(tui).to_string();
-        let tui_mut = &mut self.cfg.tui_transparent_bg;
-        setting_row(
-            ui,
-            palette,
-            "Transparent TUI background",
-            &tui_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(tui_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
+            let mut shade = self.cfg.citrus_shade.clone();
+            let shade_lbl = if shade.is_empty() {
+                "Default".to_string()
+            } else {
+                shade.clone()
+            };
+            setting_row(
+                ui,
+                palette,
+                "Citrus shade",
+                &shade_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui
+                        .add(TextEdit::singleline(&mut shade).desired_width(140.0))
+                        .changed()
+                    {
+                        self.cfg.citrus_shade = shade.clone();
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let tui = self.cfg.tui_transparent_bg;
+            let tui_lbl = on_off(tui).to_string();
+            let tui_mut = &mut self.cfg.tui_transparent_bg;
+            setting_row(
+                ui,
+                palette,
+                "Transparent TUI background",
+                &tui_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(tui_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+        });
 
         section(ui, palette, "Motion & Animations");
         ui.label(
@@ -1865,51 +1982,57 @@ impl PreferencesView {
             &style_lbl,
             dirty,
             |ui, dirty| {
-                ui.horizontal(|ui| {
-                    for &style in AnimStyle::all() {
-                        let is_active = self.cfg.animations.widget == style;
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new(style.name())
-                                        .size(design::type_scale::SMALL)
-                                        .color(if is_active {
-                                            palette.accent
-                                        } else {
-                                            palette.text_secondary
-                                        }),
-                                )
-                                .fill(if is_active {
-                                    palette.card_hover
-                                } else {
-                                    Color32::TRANSPARENT
-                                })
-                                .stroke(Stroke::new(
-                                    if is_active { 1.5_f32 } else { 0.5_f32 },
-                                    if is_active {
-                                        palette.accent
-                                    } else {
-                                        palette.border
-                                    },
-                                ))
-                                .rounding(Rounding::same(design::radius::XS)),
-                            )
-                            .clicked()
-                        {
-                            self.cfg.animations.hover = style;
-                            self.cfg.animations.selection = style;
-                            self.cfg.animations.open = style;
-                            self.cfg.animations.peek = style;
-                            self.cfg.animations.toolbar = style;
-                            self.cfg.animations.widget = style;
-                            self.cfg.animations.scroll = style;
-                            self.cfg.animations.tui = style;
-                            *dirty = true;
+                egui::ComboBox::from_id_salt("prefs_master_motion_curve_combo")
+                    .selected_text(self.cfg.animations.widget.name())
+                    .width(180.0)
+                    .show_ui(ui, |ui| {
+                        for &style in AnimStyle::all() {
+                            let is_active = self.cfg.animations.widget == style;
+                            if ui.selectable_label(is_active, style.name()).clicked() {
+                                self.cfg.animations.hover = style;
+                                self.cfg.animations.selection = style;
+                                self.cfg.animations.open = style;
+                                self.cfg.animations.peek = style;
+                                self.cfg.animations.toolbar = style;
+                                self.cfg.animations.widget = style;
+                                self.cfg.animations.scroll = style;
+                                self.cfg.animations.tui = style;
+                                *dirty = true;
+                            }
                         }
-                    }
-                });
+                    });
             },
         );
+
+        // Independent Per-Surface Motion Tuning (Unlimited Animation Customization)
+        egui::CollapsingHeader::new(
+            egui::RichText::new("Independent Surface Motion Overrides")
+                .size(design::type_scale::BODY_SM)
+                .strong()
+                .color(palette.text_primary),
+        )
+        .default_open(false)
+        .show(ui, |ui| {
+            ui.add_space(design::space::XS);
+            for (id, label, accessor) in AnimationSettings::all_fields() {
+                let cur = *accessor(&mut self.cfg.animations);
+                let cur_name = cur.name().to_string();
+                setting_row(ui, palette, label, &cur_name, dirty, |ui, dirty| {
+                    egui::ComboBox::from_id_salt(format!("prefs_motion_override_{}", id))
+                        .selected_text(cur.name())
+                        .width(180.0)
+                        .show_ui(ui, |ui| {
+                            for &style in AnimStyle::all() {
+                                let is_active = *accessor(&mut self.cfg.animations) == style;
+                                if ui.selectable_label(is_active, style.name()).clicked() {
+                                    *accessor(&mut self.cfg.animations) = style;
+                                    *dirty = true;
+                                }
+                            }
+                        });
+                });
+            }
+        });
 
         // Spring Physics Controls
         let stiffness = self.cfg.animations.spring_stiffness;
@@ -2031,319 +2154,337 @@ impl PreferencesView {
     }
 
     fn render_explorer(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
-        section(ui, palette, "Layout");
-        let layouts = ["Details", "List", "Grid", "Columns"];
-        let lay = self.cfg.default_explorer_layout as usize;
-        let lay_lbl = layouts.get(lay).copied().unwrap_or("Details").to_string();
-        let lay_mut = &mut self.cfg.default_explorer_layout;
-        setting_row(
-            ui,
-            palette,
-            "Default layout",
-            &lay_lbl,
-            dirty,
-            |ui, dirty| {
-                for (i, name) in layouts.iter().enumerate() {
-                    let active = *lay_mut as usize == i;
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(*name)
-                                    .size(design::type_scale::SMALL)
-                                    .color(if active {
+        section(ui, palette, "Layout & views");
+        card(ui, palette, |ui| {
+            let layouts = ["Details", "List", "Grid", "Columns"];
+            let lay = self.cfg.default_explorer_layout as usize;
+            let lay_lbl = layouts.get(lay).copied().unwrap_or("Details").to_string();
+            let lay_mut = &mut self.cfg.default_explorer_layout;
+            setting_row(
+                ui,
+                palette,
+                "Default layout",
+                &lay_lbl,
+                dirty,
+                |ui, dirty| {
+                    for (i, name) in layouts.iter().enumerate() {
+                        let active = *lay_mut as usize == i;
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(*name)
+                                        .size(design::type_scale::SMALL)
+                                        .color(if active {
+                                            palette.accent
+                                        } else {
+                                            palette.text_secondary
+                                        }),
+                                )
+                                .fill(if active {
+                                    palette.card_hover
+                                } else {
+                                    Color32::TRANSPARENT
+                                })
+                                .stroke(Stroke::new(
+                                    1.0_f32,
+                                    if active {
                                         palette.accent
                                     } else {
-                                        palette.text_secondary
-                                    }),
+                                        palette.border
+                                    },
+                                ))
+                                .rounding(Rounding::same(design::radius::XS)),
                             )
-                            .fill(if active {
-                                palette.card_hover
-                            } else {
-                                Color32::TRANSPARENT
-                            })
-                            .stroke(Stroke::new(
-                                1.0_f32,
-                                if active {
-                                    palette.accent
-                                } else {
-                                    palette.border
-                                },
-                            ))
-                            .rounding(Rounding::same(design::radius::XS)),
-                        )
-                        .clicked()
+                            .clicked()
+                        {
+                            *lay_mut = i as u8;
+                            *dirty = true;
+                        }
+                    }
+                },
+            );
+
+            let gis = self.cfg.grid_icon_size;
+            let gis_lbl = format!("{} px", gis);
+            let gis_mut = &mut self.cfg.grid_icon_size;
+            setting_row(
+                ui,
+                palette,
+                "Grid icon size",
+                &gis_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui
+                        .add(egui::Slider::new(gis_mut, 32..=128).show_value(false))
+                        .changed()
                     {
-                        *lay_mut = i as u8;
                         *dirty = true;
                     }
-                }
-            },
-        );
+                },
+            );
 
-        let sh = self.cfg.show_hidden_files;
-        let sh_lbl = on_off(sh).to_string();
-        let sh_mut = &mut self.cfg.show_hidden_files;
-        setting_row(
-            ui,
-            palette,
-            "Show hidden files",
-            &sh_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(sh_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let cc = self.cfg.calculate_checksums;
-        let cc_lbl = on_off(cc).to_string();
-        let cc_mut = &mut self.cfg.calculate_checksums;
-        setting_row(
-            ui,
-            palette,
-            "Calculate checksums",
-            &cc_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(cc_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let gis = self.cfg.grid_icon_size;
-        let gis_lbl = format!("{} px", gis);
-        let gis_mut = &mut self.cfg.grid_icon_size;
-        setting_row(
-            ui,
-            palette,
-            "Grid icon size",
-            &gis_lbl,
-            dirty,
-            |ui, dirty| {
+            let ez = self.cfg.explorer_zoom;
+            let ez_lbl = format!("Level {}", ez);
+            let ez_mut = &mut self.cfg.explorer_zoom;
+            setting_row(ui, palette, "Explorer zoom", &ez_lbl, dirty, |ui, dirty| {
                 if ui
-                    .add(egui::Slider::new(gis_mut, 32..=128).show_value(false))
+                    .add(egui::Slider::new(ez_mut, 0..=4).show_value(false))
                     .changed()
                 {
                     *dirty = true;
                 }
-            },
-        );
-
-        let ez = self.cfg.explorer_zoom;
-        let ez_lbl = format!("Level {}", ez);
-        let ez_mut = &mut self.cfg.explorer_zoom;
-        setting_row(ui, palette, "Explorer zoom", &ez_lbl, dirty, |ui, dirty| {
-            if ui
-                .add(egui::Slider::new(ez_mut, 0..=4).show_value(false))
-                .changed()
-            {
-                *dirty = true;
-            }
+            });
         });
 
-        let sts = self.cfg.show_tags_section;
-        let sts_lbl = on_off(sts).to_string();
-        let sts_mut = &mut self.cfg.show_tags_section;
-        setting_row(
-            ui,
-            palette,
-            "Show tags section",
-            &sts_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(sts_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
+        section(ui, palette, "Visibility & sections");
+        card(ui, palette, |ui| {
+            let sh = self.cfg.show_hidden_files;
+            let sh_lbl = on_off(sh).to_string();
+            let sh_mut = &mut self.cfg.show_hidden_files;
+            setting_row(
+                ui,
+                palette,
+                "Show hidden files",
+                &sh_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(sh_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
 
-        let scp = self.cfg.show_custom_pinned;
-        let scp_lbl = on_off(scp).to_string();
-        let scp_mut = &mut self.cfg.show_custom_pinned;
-        setting_row(
-            ui,
-            palette,
-            "Show custom pinned folders",
-            &scp_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(scp_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
+            let cc = self.cfg.calculate_checksums;
+            let cc_lbl = on_off(cc).to_string();
+            let cc_mut = &mut self.cfg.calculate_checksums;
+            setting_row(
+                ui,
+                palette,
+                "Calculate checksums",
+                &cc_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(cc_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let sts = self.cfg.show_tags_section;
+            let sts_lbl = on_off(sts).to_string();
+            let sts_mut = &mut self.cfg.show_tags_section;
+            setting_row(
+                ui,
+                palette,
+                "Show tags section",
+                &sts_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(sts_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let scp = self.cfg.show_custom_pinned;
+            let scp_lbl = on_off(scp).to_string();
+            let scp_mut = &mut self.cfg.show_custom_pinned;
+            setting_row(
+                ui,
+                palette,
+                "Show custom pinned folders",
+                &scp_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(scp_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+        });
 
         section(ui, palette, "Custom pinned folders");
-        let mut to_remove: Option<usize> = None;
-        for (i, p) in self.cfg.pinned_custom.iter().enumerate() {
+        card(ui, palette, |ui| {
+            let mut to_remove: Option<usize> = None;
+            for (i, p) in self.cfg.pinned_custom.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(p)
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_primary),
+                    );
+                    if ui.small_button("Remove").clicked() {
+                        to_remove = Some(i);
+                        *dirty = true;
+                    }
+                });
+            }
+            if let Some(i) = to_remove {
+                self.cfg.pinned_custom.remove(i);
+            }
+            let mut new_pin = String::new();
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(p)
-                        .size(design::type_scale::BODY_SM)
-                        .color(palette.text_primary),
+                ui.add(
+                    TextEdit::singleline(&mut new_pin)
+                        .hint_text("Path to pin")
+                        .desired_width(260.0),
                 );
-                if ui.small_button("Remove").clicked() {
-                    to_remove = Some(i);
+                if ui.button("Add").clicked() && !new_pin.trim().is_empty() {
+                    self.cfg.pinned_custom.push(new_pin.trim().to_string());
                     *dirty = true;
                 }
             });
-        }
-        if let Some(i) = to_remove {
-            self.cfg.pinned_custom.remove(i);
-        }
-        let mut new_pin = String::new();
-        ui.horizontal(|ui| {
-            ui.add(
-                TextEdit::singleline(&mut new_pin)
-                    .hint_text("Path to pin")
-                    .desired_width(260.0),
-            );
-            if ui.button("Add").clicked() && !new_pin.trim().is_empty() {
-                self.cfg.pinned_custom.push(new_pin.trim().to_string());
-                *dirty = true;
-            }
         });
     }
 
     fn render_behavior(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
-        let aot = self.cfg.always_on_top;
-        let aot_lbl = on_off(aot).to_string();
-        let aot_mut = &mut self.cfg.always_on_top;
-        setting_row(
-            ui,
-            palette,
-            "Always on top",
-            &aot_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(aot_mut, "").changed() {
+        section(ui, palette, "Window & system");
+        card(ui, palette, |ui| {
+            let aot = self.cfg.always_on_top;
+            let aot_lbl = on_off(aot).to_string();
+            let aot_mut = &mut self.cfg.always_on_top;
+            setting_row(
+                ui,
+                palette,
+                "Always on top",
+                &aot_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(aot_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let ps = self.cfg.play_sound;
+            let ps_lbl = on_off(ps).to_string();
+            let ps_mut = &mut self.cfg.play_sound;
+            setting_row(ui, palette, "Play sound", &ps_lbl, dirty, |ui, dirty| {
+                if ui.checkbox(ps_mut, "").changed() {
                     *dirty = true;
                 }
-            },
-        );
+            });
 
-        let ps = self.cfg.play_sound;
-        let ps_lbl = on_off(ps).to_string();
-        let ps_mut = &mut self.cfg.play_sound;
-        setting_row(ui, palette, "Play sound", &ps_lbl, dirty, |ui, dirty| {
-            if ui.checkbox(ps_mut, "").changed() {
-                *dirty = true;
-            }
+            let lal = self.cfg.launch_at_login;
+            let lal_lbl = on_off(lal).to_string();
+            let lal_mut = &mut self.cfg.launch_at_login;
+            setting_row(
+                ui,
+                palette,
+                "Launch at login",
+                &lal_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(lal_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
         });
 
-        let lal = self.cfg.launch_at_login;
-        let lal_lbl = on_off(lal).to_string();
-        let lal_mut = &mut self.cfg.launch_at_login;
-        setting_row(
-            ui,
-            palette,
-            "Launch at login",
-            &lal_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(lal_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let bw = self.cfg.background_work;
-        let bw_lbl = on_off(bw).to_string();
-        let bw_mut = &mut self.cfg.background_work;
-        setting_row(
-            ui,
-            palette,
-            "Background work",
-            &bw_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(bw_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let mf = self.cfg.max_fps;
-        let mf_lbl = on_off(mf).to_string();
-        let mf_mut = &mut self.cfg.max_fps;
-        setting_row(
-            ui,
-            palette,
-            "Max frame rate",
-            &mf_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(mf_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let wt = self.cfg.worker_threads;
-        let wt_lbl = format!("{}", wt);
-        let wt_mut = &mut self.cfg.worker_threads;
-        setting_row(
-            ui,
-            palette,
-            "Worker threads",
-            &wt_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui
-                    .add(egui::Slider::new(wt_mut, 1..=16).show_value(false))
-                    .changed()
-                {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let status = crate::core::default_explorer::status();
-        let status_lbl = match status {
-            crate::core::default_explorer::TakeoverState::Active => "Active (Mossambi is Default)",
-            crate::core::default_explorer::TakeoverState::NotActive => {
-                "Not Active (Windows Explorer)"
-            }
-            crate::core::default_explorer::TakeoverState::Unknown => "Unknown",
-        };
-        setting_row(
-            ui,
-            palette,
-            "Default file manager",
-            status_lbl,
-            dirty,
-            |ui, _dirty| {
-                ui.horizontal(|ui| {
-                    if ui.button("Take Over Win+E").clicked() {
-                        let _ = crate::core::default_explorer::take_over();
+        section(ui, palette, "Execution & performance");
+        card(ui, palette, |ui| {
+            let bw = self.cfg.background_work;
+            let bw_lbl = on_off(bw).to_string();
+            let bw_mut = &mut self.cfg.background_work;
+            setting_row(
+                ui,
+                palette,
+                "Background work",
+                &bw_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(bw_mut, "").changed() {
+                        *dirty = true;
                     }
-                    if ui.button("Restore Explorer").clicked() {
-                        let _ = crate::core::default_explorer::restore();
-                    }
-                });
-            },
-        );
+                },
+            );
 
-        let ret = self.cfg.retention_days;
-        let ret_lbl = format!("{} days", ret);
-        let ret_mut = &mut self.cfg.retention_days;
-        setting_row(
-            ui,
-            palette,
-            "Trash retention",
-            &ret_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui
-                    .add(egui::Slider::new(ret_mut, 1..=365).suffix(" d"))
-                    .changed()
-                {
-                    *dirty = true;
+            let mf = self.cfg.max_fps;
+            let mf_lbl = on_off(mf).to_string();
+            let mf_mut = &mut self.cfg.max_fps;
+            setting_row(
+                ui,
+                palette,
+                "Max frame rate",
+                &mf_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(mf_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let wt = self.cfg.worker_threads;
+            let wt_lbl = format!("{}", wt);
+            let wt_mut = &mut self.cfg.worker_threads;
+            setting_row(
+                ui,
+                palette,
+                "Worker threads",
+                &wt_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui
+                        .add(egui::Slider::new(wt_mut, 1..=16).show_value(false))
+                        .changed()
+                    {
+                        *dirty = true;
+                    }
+                },
+            );
+        });
+
+        section(ui, palette, "Shell integration & maintenance");
+        card(ui, palette, |ui| {
+            let status = crate::core::default_explorer::status();
+            let status_lbl = match status {
+                crate::core::default_explorer::TakeoverState::Active => {
+                    "Active (Mossambi is Default)"
                 }
-            },
-        );
+                crate::core::default_explorer::TakeoverState::NotActive => {
+                    "Not Active (Windows Explorer)"
+                }
+                crate::core::default_explorer::TakeoverState::Unknown => "Unknown",
+            };
+            setting_row(
+                ui,
+                palette,
+                "Default file manager",
+                status_lbl,
+                dirty,
+                |ui, _dirty| {
+                    ui.horizontal(|ui| {
+                        if ui.button("Take Over Win+E").clicked() {
+                            let _ = crate::core::default_explorer::take_over();
+                        }
+                        if ui.button("Restore Explorer").clicked() {
+                            let _ = crate::core::default_explorer::restore();
+                        }
+                    });
+                },
+            );
+
+            let ret = self.cfg.retention_days;
+            let ret_lbl = format!("{} days", ret);
+            let ret_mut = &mut self.cfg.retention_days;
+            setting_row(
+                ui,
+                palette,
+                "Trash retention",
+                &ret_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui
+                        .add(egui::Slider::new(ret_mut, 1..=365).suffix(" d"))
+                        .changed()
+                    {
+                        *dirty = true;
+                    }
+                },
+            );
+        });
     }
 
     fn render_input(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
@@ -2535,6 +2676,29 @@ impl PreferencesView {
                 }
             },
         );
+
+        let es = self.cfg.explorer_style;
+        let es_lbl = es.name();
+        let es_mut = &mut self.cfg.explorer_style;
+        setting_row(ui, palette, "Explorer style", es_lbl, dirty, |ui, dirty| {
+            if ui
+                .selectable_label(*es_mut == crate::core::ExplorerStyle::MacOS, "macOS Finder")
+                .clicked()
+            {
+                *es_mut = crate::core::ExplorerStyle::MacOS;
+                *dirty = true;
+            }
+            if ui
+                .selectable_label(
+                    *es_mut == crate::core::ExplorerStyle::Windows,
+                    "Windows Explorer",
+                )
+                .clicked()
+            {
+                *es_mut = crate::core::ExplorerStyle::Windows;
+                *dirty = true;
+            }
+        });
     }
 
     fn render_performance(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
@@ -2649,260 +2813,257 @@ impl PreferencesView {
         settings: &mut QuickSettingsState,
         dirty: &mut bool,
     ) {
-        section(ui, palette, "Output");
-        let om = self.cfg.output_mode;
-        let om_lbl = output_mode_label(om).to_string();
-        let om_mut = &mut self.cfg.output_mode;
-        setting_row(ui, palette, "Output mode", &om_lbl, dirty, |ui, dirty| {
-            for (v, lab) in [
-                (OutputMode::Sibling, "Sibling"),
-                (OutputMode::Custom, "Custom"),
-            ] {
-                let active = *om_mut == v;
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new(lab)
-                                .size(design::type_scale::SMALL)
-                                .color(if active {
+        section(ui, palette, "Output destination & policy");
+        card(ui, palette, |ui| {
+            let om = self.cfg.output_mode;
+            let om_lbl = output_mode_label(om).to_string();
+            let om_mut = &mut self.cfg.output_mode;
+            setting_row(ui, palette, "Output mode", &om_lbl, dirty, |ui, dirty| {
+                for (v, lab) in [
+                    (OutputMode::Sibling, "Sibling"),
+                    (OutputMode::Custom, "Custom"),
+                ] {
+                    let active = *om_mut == v;
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(lab)
+                                    .size(design::type_scale::SMALL)
+                                    .color(if active {
+                                        palette.accent
+                                    } else {
+                                        palette.text_secondary
+                                    }),
+                            )
+                            .fill(if active {
+                                palette.card_hover
+                            } else {
+                                Color32::TRANSPARENT
+                            })
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                if active {
                                     palette.accent
                                 } else {
-                                    palette.text_secondary
-                                }),
+                                    palette.border
+                                },
+                            ))
+                            .rounding(Rounding::same(design::radius::XS)),
                         )
-                        .fill(if active {
-                            palette.card_hover
+                        .clicked()
+                    {
+                        *om_mut = v;
+                        *dirty = true;
+                    }
+                }
+            });
+
+            let mut dir = self
+                .cfg
+                .custom_output_dir
+                .clone()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let dir_lbl = if dir.trim().is_empty() {
+                "None".to_string()
+            } else {
+                dir.clone()
+            };
+            setting_row(
+                ui,
+                palette,
+                "Custom output folder",
+                &dir_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui
+                        .add(TextEdit::singleline(&mut dir).desired_width(220.0))
+                        .changed()
+                    {
+                        self.cfg.custom_output_dir = if dir.trim().is_empty() {
+                            None
                         } else {
-                            Color32::TRANSPARENT
-                        })
-                        .stroke(Stroke::new(
-                            1.0_f32,
-                            if active {
-                                palette.accent
-                            } else {
-                                palette.border
-                            },
-                        ))
-                        .rounding(Rounding::same(design::radius::XS)),
-                    )
-                    .clicked()
-                {
-                    *om_mut = v;
-                    *dirty = true;
-                }
-            }
+                            Some(PathBuf::from(dir.trim()))
+                        };
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let ezl = self.cfg.enforce_zero_loss;
+            let ezl_lbl = on_off(ezl).to_string();
+            let ezl_mut = &mut self.cfg.enforce_zero_loss;
+            setting_row(
+                ui,
+                palette,
+                "Enforce zero loss",
+                &ezl_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(ezl_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
         });
-
-        let mut dir = self
-            .cfg
-            .custom_output_dir
-            .clone()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let dir_lbl = if dir.trim().is_empty() {
-            "None".to_string()
-        } else {
-            dir.clone()
-        };
-        setting_row(
-            ui,
-            palette,
-            "Custom output folder",
-            &dir_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui
-                    .add(TextEdit::singleline(&mut dir).desired_width(220.0))
-                    .changed()
-                {
-                    self.cfg.custom_output_dir = if dir.trim().is_empty() {
-                        None
-                    } else {
-                        Some(PathBuf::from(dir.trim()))
-                    };
-                    *dirty = true;
-                }
-            },
-        );
-
-        let ezl = self.cfg.enforce_zero_loss;
-        let ezl_lbl = on_off(ezl).to_string();
-        let ezl_mut = &mut self.cfg.enforce_zero_loss;
-        setting_row(
-            ui,
-            palette,
-            "Enforce zero loss",
-            &ezl_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(ezl_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
 
         section(ui, palette, "Conversion defaults");
-        ui.label(
-            egui::RichText::new("Quick conversion settings (image, audio, video, archive, exam).")
-                .size(design::type_scale::BODY_SM)
-                .color(palette.text_secondary),
-        );
-        ui.add_space(design::space::SM);
-
-        let iq = settings.image_quality;
-        let iq_lbl = format!("{}%", iq);
-        let iq_mut = &mut settings.image_quality;
-        setting_row(ui, palette, "Image quality", &iq_lbl, dirty, |ui, dirty| {
-            if ui
-                .add(egui::Slider::new(iq_mut, 1..=100).show_value(false))
-                .changed()
-            {
-                *dirty = true;
-            }
-        });
-
-        let il = settings.image_lossless;
-        let il_lbl = on_off(il).to_string();
-        let il_mut = &mut settings.image_lossless;
-        setting_row(
-            ui,
-            palette,
-            "Image lossless",
-            &il_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(il_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let idpi = settings.image_dpi;
-        let idpi_lbl = format!("{}", idpi);
-        let idpi_mut = &mut settings.image_dpi;
-        setting_row(ui, palette, "Image DPI", &idpi_lbl, dirty, |ui, dirty| {
-            if ui
-                .add(egui::Slider::new(idpi_mut, 72..=600).show_value(false))
-                .changed()
-            {
-                *dirty = true;
-            }
-        });
-
-        let ab = settings.audio_bitrate.clone();
-        let ab_lbl = if ab.is_empty() {
-            "Default".to_string()
-        } else {
-            ab.clone()
-        };
-        let ab_mut = &mut settings.audio_bitrate;
-        setting_row(ui, palette, "Audio bitrate", &ab_lbl, dirty, |ui, dirty| {
-            if ui
-                .add(TextEdit::singleline(ab_mut).desired_width(120.0))
-                .changed()
-            {
-                *dirty = true;
-            }
-        });
-
-        let asl = settings.audio_strict_lossless;
-        let asl_lbl = on_off(asl).to_string();
-        let asl_mut = &mut settings.audio_strict_lossless;
-        setting_row(
-            ui,
-            palette,
-            "Audio strict lossless",
-            &asl_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(asl_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let vcrf = settings.video_crf;
-        let vcrf_lbl = format!("{}", vcrf);
-        let vcrf_mut = &mut settings.video_crf;
-        setting_row(ui, palette, "Video CRF", &vcrf_lbl, dirty, |ui, dirty| {
-            if ui
-                .add(egui::Slider::new(vcrf_mut, 0..=51).show_value(false))
-                .changed()
-            {
-                *dirty = true;
-            }
-        });
-
-        let vp = settings.video_preset.clone();
-        let vp_lbl = if vp.is_empty() {
-            "Default".to_string()
-        } else {
-            vp.clone()
-        };
-        let vp_mut = &mut settings.video_preset;
-        setting_row(ui, palette, "Video preset", &vp_lbl, dirty, |ui, dirty| {
-            if ui
-                .add(TextEdit::singleline(vp_mut).desired_width(120.0))
-                .changed()
-            {
-                *dirty = true;
-            }
-        });
-
-        let vhw = settings.video_hw_accel;
-        let vhw_lbl = on_off(vhw).to_string();
-        let vhw_mut = &mut settings.video_hw_accel;
-        setting_row(
-            ui,
-            palette,
-            "Video HW accel",
-            &vhw_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(vhw_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let ac = settings.archive_compression.clone();
-        let ac_lbl = if ac.is_empty() {
-            "Default".to_string()
-        } else {
-            ac.clone()
-        };
-        let ac_mut = &mut settings.archive_compression;
-        setting_row(
-            ui,
-            palette,
-            "Archive compression",
-            &ac_lbl,
-            dirty,
-            |ui, dirty| {
+        card(ui, palette, |ui| {
+            let iq = settings.image_quality;
+            let iq_lbl = format!("{}%", iq);
+            let iq_mut = &mut settings.image_quality;
+            setting_row(ui, palette, "Image quality", &iq_lbl, dirty, |ui, dirty| {
                 if ui
-                    .add(TextEdit::singleline(ac_mut).desired_width(120.0))
+                    .add(egui::Slider::new(iq_mut, 1..=100).show_value(false))
                     .changed()
                 {
                     *dirty = true;
                 }
-            },
-        );
+            });
 
-        let em = settings.exam_mode_enabled;
-        let em_lbl = on_off(em).to_string();
-        let em_mut = &mut settings.exam_mode_enabled;
-        setting_row(
-            ui,
-            palette,
-            "Exam mode enabled",
-            &em_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(em_mut, "").changed() {
+            let il = settings.image_lossless;
+            let il_lbl = on_off(il).to_string();
+            let il_mut = &mut settings.image_lossless;
+            setting_row(
+                ui,
+                palette,
+                "Image lossless",
+                &il_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(il_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let idpi = settings.image_dpi;
+            let idpi_lbl = format!("{}", idpi);
+            let idpi_mut = &mut settings.image_dpi;
+            setting_row(ui, palette, "Image DPI", &idpi_lbl, dirty, |ui, dirty| {
+                if ui
+                    .add(egui::Slider::new(idpi_mut, 72..=600).show_value(false))
+                    .changed()
+                {
                     *dirty = true;
                 }
-            },
-        );
+            });
+
+            let ab = settings.audio_bitrate.clone();
+            let ab_lbl = if ab.is_empty() {
+                "Default".to_string()
+            } else {
+                ab.clone()
+            };
+            let ab_mut = &mut settings.audio_bitrate;
+            setting_row(ui, palette, "Audio bitrate", &ab_lbl, dirty, |ui, dirty| {
+                if ui
+                    .add(TextEdit::singleline(ab_mut).desired_width(120.0))
+                    .changed()
+                {
+                    *dirty = true;
+                }
+            });
+
+            let asl = settings.audio_strict_lossless;
+            let asl_lbl = on_off(asl).to_string();
+            let asl_mut = &mut settings.audio_strict_lossless;
+            setting_row(
+                ui,
+                palette,
+                "Audio strict lossless",
+                &asl_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(asl_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let vcrf = settings.video_crf;
+            let vcrf_lbl = format!("{}", vcrf);
+            let vcrf_mut = &mut settings.video_crf;
+            setting_row(ui, palette, "Video CRF", &vcrf_lbl, dirty, |ui, dirty| {
+                if ui
+                    .add(egui::Slider::new(vcrf_mut, 0..=51).show_value(false))
+                    .changed()
+                {
+                    *dirty = true;
+                }
+            });
+
+            let vp = settings.video_preset.clone();
+            let vp_lbl = if vp.is_empty() {
+                "Default".to_string()
+            } else {
+                vp.clone()
+            };
+            let vp_mut = &mut settings.video_preset;
+            setting_row(ui, palette, "Video preset", &vp_lbl, dirty, |ui, dirty| {
+                if ui
+                    .add(TextEdit::singleline(vp_mut).desired_width(120.0))
+                    .changed()
+                {
+                    *dirty = true;
+                }
+            });
+
+            let vhw = settings.video_hw_accel;
+            let vhw_lbl = on_off(vhw).to_string();
+            let vhw_mut = &mut settings.video_hw_accel;
+            setting_row(
+                ui,
+                palette,
+                "Video HW accel",
+                &vhw_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(vhw_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let ac = settings.archive_compression.clone();
+            let ac_lbl = if ac.is_empty() {
+                "Default".to_string()
+            } else {
+                ac.clone()
+            };
+            let ac_mut = &mut settings.archive_compression;
+            setting_row(
+                ui,
+                palette,
+                "Archive compression",
+                &ac_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui
+                        .add(TextEdit::singleline(ac_mut).desired_width(120.0))
+                        .changed()
+                    {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let em = settings.exam_mode_enabled;
+            let em_lbl = on_off(em).to_string();
+            let em_mut = &mut settings.exam_mode_enabled;
+            setting_row(
+                ui,
+                palette,
+                "Exam mode enabled",
+                &em_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(em_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+        });
     }
 
     fn render_about(&mut self, ui: &mut Ui, palette: &ThemePalette) {
@@ -2948,8 +3109,8 @@ fn card<R>(ui: &mut Ui, palette: &ThemePalette, add_contents: impl FnOnce(&mut U
     Frame::none()
         .fill(palette.card_bg)
         .stroke(Stroke::new(1.0_f32, palette.border))
-        .rounding(Rounding::same(design::radius::MD))
-        .inner_margin(Margin::same(design::space::SM))
+        .rounding(Rounding::same(10.0))
+        .inner_margin(Margin::symmetric(16.0, 10.0))
         .show(ui, add_contents)
         .inner
 }
@@ -2963,24 +3124,32 @@ fn toggle_row(
     dirty: &mut bool,
 ) {
     let w = ui.available_width();
+    let row_height = if description.is_empty() { 36.0 } else { 48.0 };
     ui.allocate_ui_with_layout(
-        Vec2::new(w, 36.0),
+        Vec2::new(w, row_height),
         Layout::left_to_right(Align::Center),
         |ui| {
-            ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new(label)
-                        .size(design::type_scale::BODY)
-                        .color(palette.text_primary),
-                );
-                if !description.is_empty() {
+            let ctrl_width = 80.0_f32;
+            let left_w = (ui.available_width() - ctrl_width - 8.0).max(120.0);
+            ui.allocate_ui_with_layout(
+                Vec2::new(left_w, row_height),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    ui.add_space(2.0);
                     ui.label(
-                        egui::RichText::new(description)
-                            .size(design::type_scale::CAPTION)
-                            .color(palette.text_secondary),
+                        egui::RichText::new(label)
+                            .size(design::type_scale::BODY)
+                            .color(palette.text_primary),
                     );
-                }
-            });
+                    if !description.is_empty() {
+                        ui.label(
+                            egui::RichText::new(description)
+                                .size(design::type_scale::CAPTION)
+                                .color(palette.text_secondary),
+                        );
+                    }
+                },
+            );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // Authentic Apple HIG Pill Toggle Switch (38x22 px)
                 let track_size = Vec2::new(38.0, 22.0);
@@ -3031,10 +3200,11 @@ fn setting_row(
     let w = ui.available_width();
     let pos = ui.input(|i| i.pointer.hover_pos());
     ui.allocate_ui_with_layout(
-        Vec2::new(w, 30.0),
+        Vec2::new(w, 34.0),
         Layout::left_to_right(Align::Center),
         |ui| {
             let r = ui.max_rect();
+            ui.set_clip_rect(r);
             if let Some(p) = pos {
                 if r.contains(p) {
                     ui.painter().rect_filled(
@@ -3044,32 +3214,40 @@ fn setting_row(
                             palette.card_hover.r(),
                             palette.card_hover.g(),
                             palette.card_hover.b(),
-                            60,
+                            50,
                         ),
                     );
                 }
             }
-            ui.horizontal(|ui| {
-                ui.add_space(design::space::XS);
-                ui.label(
-                    egui::RichText::new(label)
-                        .size(design::type_scale::BODY)
-                        .color(palette.text_primary),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    body(ui, dirty);
-                    if !value.is_empty() {
-                        ui.add_space(design::space::XS);
-                        ui.label(
-                            egui::RichText::new(value)
-                                .size(design::type_scale::SMALL)
-                                .color(palette.text_muted),
-                        );
-                    }
-                });
+            let ctrl_width = 240.0_f32;
+            let left_w = (ui.available_width() - ctrl_width - 8.0).max(120.0);
+            ui.allocate_ui_with_layout(
+                Vec2::new(left_w, 34.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.add_space(design::space::XS);
+                    ui.label(
+                        egui::RichText::new(label)
+                            .size(design::type_scale::BODY)
+                            .color(palette.text_primary),
+                    );
+                },
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(6.0);
+                body(ui, dirty);
+                if !value.is_empty() {
+                    ui.add_space(design::space::XS);
+                    ui.label(
+                        egui::RichText::new(value)
+                            .size(design::type_scale::SMALL)
+                            .color(palette.text_muted),
+                    );
+                }
             });
         },
     );
+    ui.add_space(design::space::XS);
 }
 
 pub fn setting_value_label(key: &str, cfg: &MossambiConfig) -> Option<String> {

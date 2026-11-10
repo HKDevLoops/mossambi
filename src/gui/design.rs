@@ -142,27 +142,27 @@ pub mod motion {
 /// Fixed layout metrics that must agree across surfaces.
 pub mod layout {
     /// Finder title bar / chrome height.
-    pub const TITLE_BAR_H: f32 = 40.0;
+    pub const TITLE_BAR_H: f32 = 42.0;
     /// Finder toolbar row height.
-    pub const TOOLBAR_H: f32 = 36.0;
+    pub const TOOLBAR_H: f32 = 38.0;
     /// Bottom path bar height.
-    pub const PATH_BAR_H: f32 = 26.0;
+    pub const PATH_BAR_H: f32 = 28.0;
     /// Status bar height.
-    pub const STATUS_BAR_H: f32 = 24.0;
+    pub const STATUS_BAR_H: f32 = 26.0;
     /// Sidebar minimum width.
-    pub const SIDEBAR_MIN_W: f32 = 176.0;
+    pub const SIDEBAR_MIN_W: f32 = 180.0;
     /// Sidebar default width.
-    pub const SIDEBAR_W: f32 = 208.0;
+    pub const SIDEBAR_W: f32 = 216.0;
     /// Sidebar maximum width.
     pub const SIDEBAR_MAX_W: f32 = 320.0;
     /// Minimum main content width before the layout is considered cramped.
     pub const CONTENT_MIN_W: f32 = 420.0;
     /// List row height in the details table.
-    pub const ROW_H: f32 = 24.0;
+    pub const ROW_H: f32 = 28.0;
     /// Column header height in the details table.
-    pub const HEADER_H: f32 = 26.0;
+    pub const HEADER_H: f32 = 28.0;
     /// Traffic light diameter.
-    pub const TRAFFIC_LIGHT_D: f32 = 12.0;
+    pub const TRAFFIC_LIGHT_D: f32 = 14.0;
     /// Traffic light horizontal gap.
     pub const TRAFFIC_LIGHT_GAP: f32 = 8.0;
 }

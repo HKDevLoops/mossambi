@@ -38,6 +38,12 @@ fn auto_target(path: &std::path::Path) -> &'static str {
         FileCategory::Spreadsheet => "CSV",
         FileCategory::Presentation => "PDF",
         FileCategory::Subtitle => "SRT",
+        FileCategory::Cad => "SVG",
+        FileCategory::Models3D => "OBJ",
+        FileCategory::Geo => "KML",
+        FileCategory::Fonts => "WOFF",
+        FileCategory::Data => "CSV",
+        FileCategory::Email => "HTML",
         FileCategory::Archive => "EXTRACT",
         FileCategory::Unknown => "ZIP",
     }

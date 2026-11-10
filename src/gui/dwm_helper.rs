@@ -44,20 +44,6 @@ mod win32_dwm {
         EnumWindows, GetClassNameW, GetWindowThreadProcessId,
     };
 
-    #[repr(C)]
-    struct Margins {
-        cx_left: i32,
-        cx_right: i32,
-        cy_top: i32,
-        cy_bottom: i32,
-    }
-
-    #[link(name = "dwmapi")]
-    extern "system" {
-        fn GetCurrentProcessId() -> u32;
-        fn DwmExtendFrameIntoClientArea(hwnd: HWND, pmar_inset: *const Margins) -> i32;
-    }
-
     pub fn apply_dwm_attributes(dark_mode: bool, backdrop: BackdropKind) {
         let param = (backdrop as usize) | if dark_mode { 0x100 } else { 0 };
         unsafe {
@@ -66,7 +52,7 @@ mod win32_dwm {
     }
 
     unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let current_pid = GetCurrentProcessId();
+        let current_pid = std::process::id();
         let mut wnd_pid = 0u32;
         GetWindowThreadProcessId(hwnd, &mut wnd_pid);
 
@@ -75,24 +61,12 @@ mod win32_dwm {
             let len = GetClassNameW(hwnd, class_name.as_mut_ptr(), 256);
             let class_str = String::from_utf16_lossy(&class_name[..len as usize]);
 
-            // Matches eframe / winit window class
-            if class_str == "Window Class"
-                || class_str.contains("winit")
-                || class_str.contains("egui")
-            {
+            // Matches eframe / winit primary window class (skip internal event targets)
+            if class_str == "Window Class" {
                 let dark_mode = (lparam & 0x100) != 0;
                 let backdrop_val = (lparam & 0xFF) as i32;
 
-                // 1. Extend DWM frame into client area for full-window blur
-                let margins = Margins {
-                    cx_left: -1,
-                    cx_right: -1,
-                    cy_top: -1,
-                    cy_bottom: -1,
-                };
-                let _ = DwmExtendFrameIntoClientArea(hwnd, &margins as *const _);
-
-                // 2. Synchronize Immersive Dark Mode with active theme
+                // 1. Synchronize Immersive Dark Mode with active theme
                 let dark_val: i32 = if dark_mode { 1 } else { 0 };
                 let _ = DwmSetWindowAttribute(
                     hwnd,

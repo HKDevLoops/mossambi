@@ -85,19 +85,22 @@ static GLOBAL_CTX: std::sync::Mutex<Option<HookContext>> = std::sync::Mutex::new
 
 #[cfg(target_os = "windows")]
 fn is_mossambi_foreground() -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentProcessId() -> u32;
+    }
 
     let hwnd = unsafe { GetForegroundWindow() };
     if hwnd.is_null() {
         return false;
     }
-    let mut buf = [0u16; 256];
-    let len = unsafe { GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
-    if len <= 0 {
-        return false;
-    }
-    let title = String::from_utf16_lossy(&buf[..len as usize]);
-    title.starts_with("Mossambi")
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+    pid == unsafe { GetCurrentProcessId() }
 }
 
 #[cfg(target_os = "windows")]
@@ -128,12 +131,25 @@ fn run_mouse_hook(sender: Sender<MouseNavEvent>, shutdown: Arc<AtomicBool>) {
             return CallNextHookEx(null_mut(), n_code, w_param, l_param);
         }
 
-        let info = *(l_param as *const MSLLHOOKSTRUCT);
         let msg = w_param as u32;
+        // Fast-path: Only process XBUTTON (thumb) and MBUTTON events; ignore ordinary mouse movement
+        if msg != WM_XBUTTONDOWN
+            && msg != WM_MBUTTONDOWN
+            && msg != WM_MBUTTONUP
+            && msg != WM_MOUSEMOVE
+        {
+            return CallNextHookEx(null_mut(), n_code, w_param, l_param);
+        }
+
+        let info = *(l_param as *const MSLLHOOKSTRUCT);
 
         if let Ok(mut guard) = GLOBAL_CTX.try_lock() {
             if let Some(ctx) = guard.as_mut() {
                 if ctx.shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+                    return CallNextHookEx(null_mut(), n_code, w_param, l_param);
+                }
+                // Only inspect mouse movement if middle button is actively depressed
+                if msg == WM_MOUSEMOVE && !ctx.mb_down {
                     return CallNextHookEx(null_mut(), n_code, w_param, l_param);
                 }
                 if !is_mossambi_foreground() {
@@ -195,7 +211,17 @@ fn run_mouse_hook(sender: Sender<MouseNavEvent>, shutdown: Arc<AtomicBool>) {
 
         let mut msg = std::mem::zeroed::<windows_sys::Win32::UI::WindowsAndMessaging::MSG>();
         while !shutdown.load(Ordering::Relaxed) {
-            use windows_sys::Win32::UI::WindowsAndMessaging::{PeekMessageW, PM_REMOVE};
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                MsgWaitForMultipleObjectsEx, PeekMessageW, MWMO_INPUTAVAILABLE, PM_REMOVE,
+                QS_ALLINPUT,
+            };
+            let _ = MsgWaitForMultipleObjectsEx(
+                0,
+                std::ptr::null(),
+                100,
+                QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE,
+            );
             while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
                 if msg.message == WM_QUIT_MSG {
                     break;
@@ -203,7 +229,6 @@ fn run_mouse_hook(sender: Sender<MouseNavEvent>, shutdown: Arc<AtomicBool>) {
                 windows_sys::Win32::UI::WindowsAndMessaging::TranslateMessage(&msg);
                 windows_sys::Win32::UI::WindowsAndMessaging::DispatchMessageW(&msg);
             }
-            std::thread::sleep(Duration::from_millis(16));
         }
 
         UnhookWindowsHookEx(hook);

@@ -56,6 +56,9 @@ pub struct MossambiApp {
     pub last_applied_theme: Option<ThemeStyle>,
     pub last_applied_glass: Option<crate::core::GlassEffect>,
 
+    // Cached persistent configuration (avoids reading disk every frame)
+    pub config: crate::core::MossambiConfig,
+
     // Ctrl+Mouse-Wheel UI zoom (Finder/Explorer parity), 1.0 = native scale
     pub ui_zoom: f32,
 }
@@ -92,6 +95,7 @@ impl Default for MossambiApp {
             frame_count: 0,
             last_applied_theme: None,
             last_applied_glass: None,
+            config: cfg,
             ui_zoom: 1.0,
         }
     }
@@ -153,6 +157,53 @@ impl MossambiApp {
                         .navigate_to(parent.to_path_buf());
                 }
                 app.select_file(path);
+            }
+        }
+        if let Ok(tab_str) = std::env::var("MOSSAMBI_INITIAL_TAB") {
+            match tab_str.to_lowercase().as_str() {
+                "preferences" | "prefs" | "settings" => {
+                    app.studio_view.current_tab = crate::gui::studio_view::StudioTab::Preferences;
+                    if let Ok(cat_str) = std::env::var("MOSSAMBI_PREFS_CAT") {
+                        if let Ok(idx) = cat_str.parse::<usize>() {
+                            app.studio_view.prefs_view.selected = idx;
+                        }
+                    }
+                }
+                "transcoder" | "transcode" => {
+                    app.studio_view.current_tab = crate::gui::studio_view::StudioTab::Transcoder;
+                }
+                "customconformer" | "conformer" => {
+                    app.studio_view.current_tab = crate::gui::studio_view::StudioTab::ExamStudio;
+                }
+                "inspector" | "quality" => {
+                    app.studio_view.current_tab =
+                        crate::gui::studio_view::StudioTab::QualityInspector;
+                }
+                "archive" | "archives" => {
+                    app.studio_view.current_tab = crate::gui::studio_view::StudioTab::ArchiveSuite;
+                }
+                "hardware" | "hw" | "ai" => {
+                    app.studio_view.current_tab =
+                        crate::gui::studio_view::StudioTab::HardwareTelemetry;
+                }
+                _ => {}
+            }
+        }
+        if let Ok(mode_str) = std::env::var("MOSSAMBI_VIEW_MODE") {
+            match mode_str.to_lowercase().as_str() {
+                "grid" | "icons" => {
+                    app.studio_view.explorer_view.view_mode =
+                        crate::gui::explorer_view::ViewMode::Grid;
+                }
+                "list" | "details" => {
+                    app.studio_view.explorer_view.view_mode =
+                        crate::gui::explorer_view::ViewMode::Details;
+                }
+                "columns" | "miller" => {
+                    app.studio_view.explorer_view.view_mode =
+                        crate::gui::explorer_view::ViewMode::Columns;
+                }
+                _ => {}
             }
         }
         app
@@ -432,7 +483,13 @@ pub fn execute_conversion(
 
 impl eframe::App for MossambiApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
+        let pal = self.theme.colors();
+        [
+            pal.window_bg.r() as f32 / 255.0,
+            pal.window_bg.g() as f32 / 255.0,
+            pal.window_bg.b() as f32 / 255.0,
+            1.0,
+        ]
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -507,14 +564,45 @@ impl eframe::App for MossambiApp {
         // Synchronize Windows DWM Backdrop (Acrylic / Mica) with active theme & glass effect
         if self.frame_count == 0 {
             log::info!("MossambiApp::update first frame rendering!");
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
         self.frame_count = self.frame_count.saturating_add(1);
-        let cfg = crate::core::MossambiConfig::load();
+
+        // Automated QA snapshot capture via MOSSAMBI_SNAPSHOT_PATH
+        if let Ok(snap_path) = std::env::var("MOSSAMBI_SNAPSHOT_PATH") {
+            if self.frame_count == 8 {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+            }
+            for event in &ctx.input(|i| i.events.clone()) {
+                if let egui::Event::Screenshot { image, .. } = event {
+                    let (w, h) = (image.width() as u32, image.height() as u32);
+                    let mut raw = Vec::with_capacity((w * h * 4) as usize);
+                    for p in &image.pixels {
+                        raw.push(p.r());
+                        raw.push(p.g());
+                        raw.push(p.b());
+                        raw.push(p.a());
+                    }
+                    if let Some(rgba) = image::RgbaImage::from_raw(w, h, raw) {
+                        let _ = rgba.save(&snap_path);
+                        log::info!("Saved QA snapshot to {}", snap_path);
+                    }
+                    if std::env::var("MOSSAMBI_SNAPSHOT_EXIT").is_ok() {
+                        std::process::exit(0);
+                    }
+                }
+            }
+        }
+        if self.frame_count % 120 == 0 {
+            self.config = crate::core::MossambiConfig::load();
+        }
+        let cfg = &self.config;
         // Sync icon pack from config (live)
         self.studio_view.explorer_view.icon_pack =
             crate::core::icon_packs::IconPack::from_config_id(&cfg.icon_pack);
         let current_glass = cfg.glass_effect;
-        if self.frame_count <= 10
+        if self.frame_count == 1
             || self.last_applied_theme != Some(self.theme)
             || self.last_applied_glass != Some(current_glass)
         {
@@ -728,40 +816,39 @@ impl eframe::App for MossambiApp {
 impl MossambiApp {
     /// Dirty-checks the live [`StudioView`]'s explorer preference fields
     /// against the persisted config and saves only when something changed.
-    fn sync_explorer_prefs(&self) {
+    fn sync_explorer_prefs(&mut self) {
         let explorer = &self.studio_view.explorer_view;
-        let mut cfg = crate::core::MossambiConfig::load();
         let mut dirty = false;
 
         let pack_id = explorer.icon_pack.id().to_string();
-        if cfg.icon_pack != pack_id {
-            cfg.icon_pack = pack_id;
+        if self.config.icon_pack != pack_id {
+            self.config.icon_pack = pack_id;
             dirty = true;
         }
-        if cfg.explorer_zoom != explorer.explorer_zoom {
-            cfg.explorer_zoom = explorer.explorer_zoom;
+        if self.config.explorer_zoom != explorer.explorer_zoom {
+            self.config.explorer_zoom = explorer.explorer_zoom;
             dirty = true;
         }
-        if cfg.checkbox_mode != explorer.checkbox_mode {
-            cfg.checkbox_mode = explorer.checkbox_mode;
+        if self.config.checkbox_mode != explorer.checkbox_mode {
+            self.config.checkbox_mode = explorer.checkbox_mode;
             dirty = true;
         }
-        if cfg.menu_style != explorer.menu_style {
-            cfg.menu_style = explorer.menu_style;
+        if self.config.menu_style != explorer.menu_style {
+            self.config.menu_style = explorer.menu_style;
             dirty = true;
         }
-        if cfg.animations != explorer.animations {
-            cfg.animations = explorer.animations;
+        if self.config.animations != explorer.animations {
+            self.config.animations = explorer.animations;
             dirty = true;
         }
 
         if dirty {
             log::debug!(
                 "explorer prefs changed - saving config (zoom={}, pack={})",
-                cfg.explorer_zoom,
-                cfg.icon_pack
+                self.config.explorer_zoom,
+                self.config.icon_pack
             );
-            let _ = cfg.save();
+            let _ = self.config.save();
         }
     }
 }
@@ -809,10 +896,11 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
         .with_title("Mossambi - Universal File Conversion Studio")
         .with_inner_size([1120.0, 720.0])
         .with_min_inner_size([920.0, 580.0])
-        .with_decorations(true)
+        .with_decorations(false)
         .with_transparent(false)
         .with_resizable(true)
-        .with_visible(true);
+        .with_visible(true)
+        .with_active(true);
 
     if let Some(icon) = load_app_icon() {
         builder = builder.with_icon(icon);

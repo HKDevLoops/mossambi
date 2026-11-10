@@ -122,6 +122,30 @@ impl StudioView {
             self.command_palette.toggle();
         }
 
+        // Global shortcuts: Ctrl+T / Cmd+T (New Tab), Ctrl+W / Cmd+W (Close Tab)
+        let open_new_tab = ctx.input(|i| {
+            (i.modifiers.ctrl || i.modifiers.command)
+                && !i.modifiers.shift
+                && !i.modifiers.alt
+                && i.key_pressed(egui::Key::T)
+        });
+        if open_new_tab {
+            self.current_tab = StudioTab::FileExplorer;
+            self.explorer_view
+                .add_tab(self.explorer_view.current_dir.clone());
+        }
+
+        let close_tab_key = ctx.input(|i| {
+            (i.modifiers.ctrl || i.modifiers.command)
+                && !i.modifiers.shift
+                && !i.modifiers.alt
+                && i.key_pressed(egui::Key::W)
+        });
+        if close_tab_key && self.explorer_view.tabs.len() > 1 {
+            self.explorer_view
+                .close_tab(self.explorer_view.active_tab_index);
+        }
+
         // 1. Unified Top Panel (Windows 11 Fluent Tabs + Navigation Toolbar)
         let top_frame = egui::Frame::none()
             .fill(palette.sidebar_bg)
@@ -151,8 +175,8 @@ impl StudioView {
 
                     ui.add_space(6.0);
 
-                    // Brand Icon
-                    let (b_rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+                    // Brand Icon (enlarged Finder proportions)
+                    let (b_rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
                     crate::core::icon_packs::paint_icon(
                         ui,
                         self.explorer_view.icon_pack,
@@ -165,6 +189,7 @@ impl StudioView {
                     let mut tab_to_select: Option<usize> = None;
                     let mut tab_to_close: Option<usize> = None;
                     let tabs_count = self.explorer_view.tabs.len();
+                    let pack = self.explorer_view.icon_pack;
 
                     for (idx, tab) in self.explorer_view.tabs.iter().enumerate() {
                         let is_active = self.current_tab == StudioTab::FileExplorer
@@ -198,17 +223,31 @@ impl StudioView {
                                 .rect_stroke(rect, Rounding::same(6.0), tab_stroke);
                         }
 
-                        // Tab icon
-                        ui.painter().text(
-                            rect.left_center() + Vec2::new(10.0, 0.0),
-                            egui::Align2::LEFT_CENTER,
-                            tab.icon,
-                            egui::FontId::proportional(20.0),
-                            if is_active {
-                                palette.accent
-                            } else {
-                                palette.text_secondary
-                            },
+                        // Real vector tab icon
+                        let tab_glyph = if tab.is_home {
+                            IconGlyph::Home
+                        } else {
+                            IconGlyph::Folder
+                        };
+                        let tab_icon_rect = Rect::from_center_size(
+                            rect.left_center() + Vec2::new(14.0, 0.0),
+                            Vec2::splat(16.0),
+                        );
+                        let tab_icon_rgb = if is_active {
+                            [79, 168, 255]
+                        } else {
+                            [
+                                palette.text_secondary.r(),
+                                palette.text_secondary.g(),
+                                palette.text_secondary.b(),
+                            ]
+                        };
+                        crate::core::icon_packs::paint_icon(
+                            ui,
+                            pack,
+                            tab_glyph,
+                            tab_icon_rect,
+                            tab_icon_rgb,
                         );
 
                         // Tab title (truncated)
@@ -223,10 +262,10 @@ impl StudioView {
                         };
 
                         ui.painter().text(
-                            rect.left_center() + Vec2::new(28.0, 0.0),
+                            rect.left_center() + Vec2::new(30.0, 0.0),
                             egui::Align2::LEFT_CENTER,
                             title_display,
-                            egui::FontId::proportional(13.0),
+                            egui::FontId::proportional(13.5),
                             if is_active {
                                 palette.text_primary
                             } else {
@@ -311,93 +350,165 @@ impl StudioView {
                     }
                 });
 
-                ui.add_space(6.0);
+                // ROW 2 (Navigation Buttons + Breadcrumbs + Search + Utilities)
+                // is ONLY shown when the user is in the File Explorer tab (macOS Finder parity).
+                if self.current_tab == StudioTab::FileExplorer {
+                    ui.add_space(6.0);
 
-                // ==============================================================
-                // ROW 2: Navigation Buttons + Breadcrumbs + Search + Utilities
-                // ==============================================================
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
 
-                    // Back Button
-                    let can_back = self.explorer_view.can_go_back();
-                    let back_btn = egui::Button::new("<")
-                        .min_size(Vec2::splat(26.0))
-                        .fill(if can_back {
-                            palette.card_bg
-                        } else {
-                            Color32::TRANSPARENT
-                        })
-                        .rounding(Rounding::same(4.0));
-                    if ui
-                        .add_enabled(can_back, back_btn)
-                        .on_hover_text("Back (Alt+Left)")
-                        .clicked()
-                    {
-                        self.current_tab = StudioTab::FileExplorer;
-                        self.explorer_view.go_back();
-                    }
+                        // Navigation Cluster (Finder-style vector icon buttons)
+                        let pack = self.explorer_view.icon_pack;
+                        let text_rgb = [
+                            palette.text_primary.r(),
+                            palette.text_primary.g(),
+                            palette.text_primary.b(),
+                        ];
+                        let muted_rgb = [
+                            palette.text_muted.r(),
+                            palette.text_muted.g(),
+                            palette.text_muted.b(),
+                        ];
 
-                    // Forward Button
-                    let can_fwd = self.explorer_view.can_go_forward();
-                    let fwd_btn = egui::Button::new(">")
-                        .min_size(Vec2::splat(26.0))
-                        .fill(if can_fwd {
-                            palette.card_bg
-                        } else {
-                            Color32::TRANSPARENT
-                        })
-                        .rounding(Rounding::same(4.0));
-                    if ui
-                        .add_enabled(can_fwd, fwd_btn)
-                        .on_hover_text("Forward (Alt+Right)")
-                        .clicked()
-                    {
-                        self.current_tab = StudioTab::FileExplorer;
-                        self.explorer_view.go_forward();
-                    }
+                        let can_back = self.explorer_view.can_go_back();
+                        if crate::gui::finder_chrome::toolbar_icon_button(
+                            ui,
+                            &palette,
+                            pack,
+                            IconGlyph::ActionBack,
+                            if can_back { text_rgb } else { muted_rgb },
+                            "Back (Alt+Left)",
+                            false,
+                        ) && can_back
+                        {
+                            self.current_tab = StudioTab::FileExplorer;
+                            self.explorer_view.go_back();
+                        }
 
-                    // Up Folder Button
-                    let up_btn = egui::Button::new("^")
-                        .min_size(Vec2::splat(26.0))
-                        .fill(palette.card_bg)
-                        .rounding(Rounding::same(4.0));
-                    if ui
-                        .add(up_btn)
-                        .on_hover_text("Up to parent folder (Alt+Up)")
-                        .clicked()
-                    {
-                        self.current_tab = StudioTab::FileExplorer;
-                        if let Some(parent) = self.explorer_view.current_dir.parent() {
-                            let p = parent.to_path_buf();
-                            if !p.as_os_str().is_empty() {
-                                self.explorer_view.navigate_to(p);
+                        let can_fwd = self.explorer_view.can_go_forward();
+                        if crate::gui::finder_chrome::toolbar_icon_button(
+                            ui,
+                            &palette,
+                            pack,
+                            IconGlyph::ActionForward,
+                            if can_fwd { text_rgb } else { muted_rgb },
+                            "Forward (Alt+Right)",
+                            false,
+                        ) && can_fwd
+                        {
+                            self.current_tab = StudioTab::FileExplorer;
+                            self.explorer_view.go_forward();
+                        }
+
+                        if crate::gui::finder_chrome::toolbar_icon_button(
+                            ui,
+                            &palette,
+                            pack,
+                            IconGlyph::ActionUp,
+                            text_rgb,
+                            "Up to parent folder (Alt+Up / Backspace)",
+                            false,
+                        ) {
+                            self.current_tab = StudioTab::FileExplorer;
+                            if let Some(parent) = self.explorer_view.current_dir.parent() {
+                                let p = parent.to_path_buf();
+                                if !p.as_os_str().is_empty() {
+                                    self.explorer_view.navigate_to(p);
+                                }
                             }
                         }
-                    }
 
-                    // Refresh Button
-                    let ref_btn = egui::Button::new("R")
-                        .min_size(Vec2::splat(26.0))
-                        .fill(palette.card_bg)
-                        .rounding(Rounding::same(4.0));
-                    if ui.add(ref_btn).on_hover_text("Refresh (F5)").clicked() {
-                        self.explorer_view
-                            .navigate_to(self.explorer_view.current_dir.clone());
-                    }
+                        if crate::gui::finder_chrome::toolbar_icon_button(
+                            ui,
+                            &palette,
+                            pack,
+                            IconGlyph::ActionRefresh,
+                            text_rgb,
+                            "Refresh directory (F5)",
+                            false,
+                        ) {
+                            self.explorer_view
+                                .navigate_to(self.explorer_view.current_dir.clone());
+                        }
 
-                    ui.add_space(4.0);
+                        if crate::gui::finder_chrome::toolbar_icon_button(
+                            ui,
+                            &palette,
+                            pack,
+                            IconGlyph::ActionNewFolder,
+                            text_rgb,
+                            "New Folder (Ctrl+Shift+N)",
+                            false,
+                        ) {
+                            self.explorer_view.show_new_folder_dialog = true;
+                        }
 
-                    // Address / Breadcrumb Bar
-                    let search_area_w = 280.0_f32;
-                    let breadcrumb_w = (ui.available_width() - search_area_w - 10.0).max(160.0);
+                        ui.add_space(4.0);
 
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(breadcrumb_w, 28.0),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            let (bc_rect, _) = ui
-                                .allocate_exact_size(Vec2::new(breadcrumb_w, 28.0), Sense::hover());
+                        let cfg = crate::core::MossambiConfig::load();
+                        let is_macos_style =
+                            cfg.explorer_style == crate::core::ExplorerStyle::MacOS;
+
+                        let mut nav_target: Option<PathBuf> = None;
+                        let mut toggle_edit = false;
+
+                        if is_macos_style {
+                            // Authentic macOS Finder Header: Folder Icon + Title
+                            let is_home = self.explorer_view.is_home_view;
+                            let title_str = if is_home {
+                                "Home".to_string()
+                            } else {
+                                self.explorer_view
+                                    .current_dir
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| {
+                                        self.explorer_view.current_dir.to_string_lossy().to_string()
+                                    })
+                            };
+                            let glyph = if is_home {
+                                IconGlyph::Home
+                            } else if self.explorer_view.current_dir.parent().is_none() {
+                                IconGlyph::Drive
+                            } else {
+                                IconGlyph::Folder
+                            };
+
+                            ui.add_space(6.0);
+                            let (h_rect, _) =
+                                ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+                            crate::core::icon_packs::paint_icon(
+                                ui,
+                                pack,
+                                glyph,
+                                h_rect,
+                                [palette.accent.r(), palette.accent.g(), palette.accent.b()],
+                            );
+                            ui.add_space(4.0);
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(&title_str)
+                                            .size(15.0)
+                                            .strong()
+                                            .color(palette.text_primary),
+                                    )
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::NONE),
+                                )
+                                .on_hover_text("Click to edit folder path (Ctrl+L)")
+                                .clicked()
+                            {
+                                toggle_edit = true;
+                            }
+                        } else {
+                            // Windows Explorer Path Ribbon
+                            let search_area_w = 320.0_f32;
+                            let ribbon_w = (ui.available_width() - search_area_w - 8.0).max(180.0);
+
+                            let (bc_rect, _) =
+                                ui.allocate_exact_size(Vec2::new(ribbon_w, 28.0), Sense::hover());
                             ui.painter()
                                 .rect_filled(bc_rect, Rounding::same(6.0), palette.card_bg);
                             ui.painter().rect_stroke(
@@ -408,24 +519,36 @@ impl StudioView {
 
                             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bc_rect), |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.add_space(8.0);
+                                    ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+                                    ui.add_space(4.0);
+
                                     if self.explorer_view.is_home_view {
+                                        let (h_rect, _) = ui
+                                            .allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+                                        crate::core::icon_packs::paint_icon(
+                                            ui,
+                                            pack,
+                                            IconGlyph::Home,
+                                            h_rect,
+                                            [
+                                                palette.accent.r(),
+                                                palette.accent.g(),
+                                                palette.accent.b(),
+                                            ],
+                                        );
                                         ui.label(
                                             egui::RichText::new("Home")
+                                                .size(13.0)
                                                 .strong()
-                                                .color(palette.accent),
-                                        );
-                                        ui.label(
-                                            egui::RichText::new("v")
-                                                .size(11.0)
-                                                .color(palette.text_muted),
+                                                .color(palette.text_primary),
                                         );
                                     } else if self.explorer_view.is_editing_path {
+                                        let edit_box_w = (ribbon_w - 74.0).max(100.0);
                                         let text_resp = ui.add(
                                             egui::TextEdit::singleline(
                                                 &mut self.explorer_view.path_edit_buffer,
                                             )
-                                            .desired_width(breadcrumb_w - 40.0)
+                                            .desired_width(edit_box_w)
                                             .font(egui::TextStyle::Monospace),
                                         );
                                         if text_resp.lost_focus()
@@ -434,132 +557,229 @@ impl StudioView {
                                             let new_p =
                                                 PathBuf::from(&self.explorer_view.path_edit_buffer);
                                             if new_p.exists() {
-                                                self.explorer_view.navigate_to(new_p);
+                                                nav_target = Some(new_p);
                                             }
+                                            self.explorer_view.is_editing_path = false;
+                                        }
+                                        if ui.small_button("Go").clicked() {
+                                            let new_p =
+                                                PathBuf::from(&self.explorer_view.path_edit_buffer);
+                                            if new_p.exists() {
+                                                nav_target = Some(new_p);
+                                            }
+                                            self.explorer_view.is_editing_path = false;
+                                        }
+                                        if ui.small_button("x").on_hover_text("Cancel").clicked() {
                                             self.explorer_view.is_editing_path = false;
                                         }
                                     } else {
                                         let segments = crate::core::parse_breadcrumbs(
                                             &self.explorer_view.current_dir,
                                         );
-                                        for seg in segments {
-                                            let is_current =
-                                                seg.target_path == self.explorer_view.current_dir;
-                                            if ui
-                                                .link(egui::RichText::new(&seg.label).color(
-                                                    if is_current {
-                                                        palette.accent
-                                                    } else {
-                                                        palette.text_primary
-                                                    },
-                                                ))
-                                                .clicked()
-                                            {
-                                                self.explorer_view.navigate_to(seg.target_path);
+                                        let num_segs = segments.len();
+
+                                        for (idx, seg) in segments.iter().enumerate() {
+                                            if idx > 0 {
+                                                ui.label(
+                                                    egui::RichText::new(">")
+                                                        .size(12.5)
+                                                        .color(palette.text_muted),
+                                                );
                                             }
-                                            ui.label(
-                                                egui::RichText::new("/").color(palette.text_muted),
-                                            );
+                                            let is_current = idx + 1 == num_segs;
+                                            let is_root = idx == 0
+                                                && (seg.target_path.parent().is_none()
+                                                    || seg.label.contains(':'));
+                                            let glyph = if is_root {
+                                                IconGlyph::Drive
+                                            } else if seg.label.eq_ignore_ascii_case("home")
+                                                || seg.label.eq_ignore_ascii_case("users")
+                                            {
+                                                IconGlyph::Home
+                                            } else {
+                                                IconGlyph::Folder
+                                            };
+
+                                            let seg_resp = ui.horizontal(|ui| {
+                                                let (s_icon_rect, _) = ui.allocate_exact_size(
+                                                    Vec2::splat(16.0),
+                                                    Sense::hover(),
+                                                );
+                                                crate::core::icon_packs::paint_icon(
+                                                    ui,
+                                                    pack,
+                                                    glyph,
+                                                    s_icon_rect,
+                                                    if is_current {
+                                                        [
+                                                            palette.accent.r(),
+                                                            palette.accent.g(),
+                                                            palette.accent.b(),
+                                                        ]
+                                                    } else {
+                                                        muted_rgb
+                                                    },
+                                                );
+                                                let text = egui::RichText::new(&seg.label)
+                                                    .size(12.5)
+                                                    .color(if is_current {
+                                                        palette.text_primary
+                                                    } else {
+                                                        palette.text_secondary
+                                                    });
+                                                ui.add(
+                                                    egui::Button::new(text)
+                                                        .fill(Color32::TRANSPARENT)
+                                                        .stroke(Stroke::NONE)
+                                                        .rounding(Rounding::same(4.0)),
+                                                )
+                                            });
+
+                                            if seg_resp.inner.clicked() {
+                                                nav_target = Some(seg.target_path.clone());
+                                            }
+
+                                            seg_resp.inner.context_menu(|menu_ui| {
+                                                menu_ui.set_max_width(220.0);
+                                                let parent_dir = seg
+                                                    .target_path
+                                                    .parent()
+                                                    .unwrap_or(&seg.target_path);
+                                                let subs =
+                                                    crate::core::list_directory_sync(parent_dir);
+                                                let dirs: Vec<_> =
+                                                    subs.into_iter().filter(|e| e.is_dir).collect();
+                                                if dirs.is_empty() {
+                                                    menu_ui.label(
+                                                        egui::RichText::new("No sibling folders")
+                                                            .size(12.0)
+                                                            .color(palette.text_muted),
+                                                    );
+                                                } else {
+                                                    for d in dirs {
+                                                        let is_this = d.path == seg.target_path;
+                                                        let item_text = egui::RichText::new(
+                                                            format!("> {}", d.name),
+                                                        )
+                                                        .size(12.5)
+                                                        .color(if is_this {
+                                                            palette.accent
+                                                        } else {
+                                                            palette.text_primary
+                                                        });
+                                                        if menu_ui.button(item_text).clicked() {
+                                                            nav_target = Some(d.path);
+                                                            menu_ui.close_menu();
+                                                        }
+                                                    }
+                                                }
+                                            });
                                         }
-                                        if ui
-                                            .small_button("Edit")
-                                            .on_hover_text("Edit path (Ctrl+L)")
-                                            .clicked()
-                                        {
-                                            self.explorer_view.path_edit_buffer = self
-                                                .explorer_view
-                                                .current_dir
-                                                .to_string_lossy()
-                                                .to_string();
-                                            self.explorer_view.is_editing_path = true;
-                                        }
+
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                if ui
+                                                    .small_button("Edit")
+                                                    .on_hover_text("Edit path (Ctrl+L / Alt+D)")
+                                                    .clicked()
+                                                {
+                                                    toggle_edit = true;
+                                                }
+                                            },
+                                        );
                                     }
                                 });
                             });
-                        },
-                    );
-
-                    // Search Box & Action Icons on Right
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Settings Gear
-                        if ui
-                            .button(
-                                egui::RichText::new("Prefs")
-                                    .size(12.0)
-                                    .color(palette.text_secondary),
-                            )
-                            .on_hover_text("Settings & Themes")
-                            .clicked()
-                        {
-                            self.current_tab = StudioTab::Preferences;
                         }
 
-                        // New Window Button (Ctrl+N)
-                        if ui
-                            .button(
-                                egui::RichText::new("New Win")
-                                    .size(12.0)
-                                    .color(palette.text_secondary),
-                            )
-                            .on_hover_text("Open New Concurrent Explorer Window (Ctrl+N)")
-                            .clicked()
-                        {
-                            crate::gui::explorer_view::spawn_new_explorer_window(Some(
-                                &self.explorer_view.current_dir,
-                            ));
+                        if let Some(target) = nav_target {
+                            self.explorer_view.navigate_to(target);
+                        }
+                        if toggle_edit {
+                            self.explorer_view.path_edit_buffer =
+                                self.explorer_view.current_dir.to_string_lossy().to_string();
+                            self.explorer_view.is_editing_path = true;
                         }
 
-                        // View layout toggle
-                        let view_glyph = match self.explorer_view.view_mode {
-                            crate::gui::explorer_view::ViewMode::Details => "List",
-                            crate::gui::explorer_view::ViewMode::Grid => "Grid",
-                            crate::gui::explorer_view::ViewMode::Columns => "Cols",
-                        };
-                        if ui
-                            .button(
-                                egui::RichText::new(view_glyph)
-                                    .size(12.0)
-                                    .color(palette.text_secondary),
-                            )
-                            .on_hover_text("Change View Mode (Details, Grid, Columns)")
-                            .clicked()
-                        {
-                            self.explorer_view.view_mode = match self.explorer_view.view_mode {
-                                crate::gui::explorer_view::ViewMode::Details => {
-                                    crate::gui::explorer_view::ViewMode::Grid
-                                }
-                                crate::gui::explorer_view::ViewMode::Grid => {
-                                    crate::gui::explorer_view::ViewMode::Columns
-                                }
-                                crate::gui::explorer_view::ViewMode::Columns => {
-                                    crate::gui::explorer_view::ViewMode::Details
-                                }
-                            };
-                        }
+                        // Search Box & Action Icons on Right (Finder vector chrome)
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // 1. Search box on FAR RIGHT (macOS Finder standard)
+                            let search_w = 170.0_f32;
+                            let search_resp = ui.add(
+                                egui::TextEdit::singleline(&mut self.explorer_view.search_query)
+                                    .id_source("mossambi_global_search_input")
+                                    .hint_text("Search (/)...")
+                                    .desired_width(search_w),
+                            );
+                            if self.explorer_view.focus_search_requested {
+                                search_resp.request_focus();
+                                self.explorer_view.focus_search_requested = false;
+                            }
 
-                        // Ready / Sync Checkmark
-                        ui.label(egui::RichText::new("OK").size(12.0).color(palette.accent))
-                            .on_hover_text("System Ready | Bit-Exact Standard Active");
+                            // 2. Clear search button (when active)
+                            if !self.explorer_view.search_query.is_empty()
+                                && crate::gui::finder_chrome::toolbar_icon_button(
+                                    ui,
+                                    &palette,
+                                    pack,
+                                    IconGlyph::ActionClose,
+                                    text_rgb,
+                                    "Clear search (Esc)",
+                                    false,
+                                )
+                            {
+                                self.explorer_view.search_query.clear();
+                                ui.memory_mut(|m| {
+                                    m.surrender_focus(egui::Id::new("mossambi_global_search_input"))
+                                });
+                            }
 
-                        // Search box
-                        if !self.explorer_view.search_query.is_empty()
-                            && ui.button("x").on_hover_text("Clear search").clicked()
-                        {
-                            self.explorer_view.search_query.clear();
-                        }
+                            ui.add_space(4.0);
 
-                        let search_w = 160.0_f32;
-                        let search_resp = ui.add(
-                            egui::TextEdit::singleline(&mut self.explorer_view.search_query)
-                                .hint_text("Search")
-                                .desired_width(search_w),
-                        );
-                        if self.explorer_view.focus_search_requested {
-                            search_resp.request_focus();
-                            self.explorer_view.focus_search_requested = false;
-                        }
+                            // 3. Settings Gear
+                            if crate::gui::finder_chrome::toolbar_icon_button(
+                                ui,
+                                &palette,
+                                pack,
+                                IconGlyph::Gear,
+                                text_rgb,
+                                "Preferences & Settings (Cmd+,)",
+                                false,
+                            ) {
+                                self.current_tab = StudioTab::Preferences;
+                            }
+
+                            // 4. New Window Button (Ctrl+N)
+                            if crate::gui::finder_chrome::toolbar_icon_button(
+                                ui,
+                                &palette,
+                                pack,
+                                IconGlyph::ActionNewFolder,
+                                text_rgb,
+                                "Open New Concurrent Explorer Window (Ctrl+N)",
+                                false,
+                            ) {
+                                crate::gui::explorer_view::spawn_new_explorer_window(Some(
+                                    &self.explorer_view.current_dir,
+                                ));
+                            }
+
+                            ui.add_space(6.0);
+
+                            // 5. Authentic macOS Connected Segmented View Switcher: [ Icons | List | Columns ]
+                            crate::gui::finder_chrome::render_segmented_view_switcher(
+                                ui,
+                                &palette,
+                                pack,
+                                self.explorer_view.view_mode,
+                                |mode| {
+                                    self.explorer_view.view_mode = mode;
+                                },
+                            );
+                        });
                     });
-                });
+                }
             });
 
         // 2. Left Sidebar Panel (Pinned, Drives, Cloud, Network, Tags, Tools)
@@ -576,16 +796,14 @@ impl StudioView {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let pack = self.explorer_view.icon_pack;
-                        let accent_rgb =
-                            [palette.accent.r(), palette.accent.g(), palette.accent.b()];
 
-                        // 1. Home Item
+                        // 1. Home Item (Apple HIG Home Blue)
                         let is_home_active = self.current_tab == StudioTab::FileExplorer
                             && self.explorer_view.is_home_view;
                         let home_spec = SidebarRowSpec {
                             pack,
                             glyph: IconGlyph::Home,
-                            accent_rgb,
+                            accent_rgb: [79, 168, 255],
                             label: "Home",
                             selected: is_home_active,
                             show_pin: false,
@@ -601,7 +819,7 @@ impl StudioView {
                             self.explorer_view.is_home_view = true;
                         }
 
-                        // 2. FAVORITES Section
+                        // 2. FAVORITES Section (Authentic Finder folder colors)
                         render_sidebar_section_header(ui, &palette, "Favorites");
 
                         let cfg = crate::core::MossambiConfig::load();
@@ -610,39 +828,60 @@ impl StudioView {
                             .ok();
                         if let Some(home_str) = home_opt {
                             let base = PathBuf::from(home_str);
-                            let recycle_target = self
-                                .explorer_view
-                                .drives
-                                .iter()
-                                .find(|d| d.is_system)
-                                .map(|d| d.path.join("$Recycle.Bin"))
-                                .unwrap_or_else(|| base.clone());
-                            let pinned = [
-                                ("Desktop", IconGlyph::FolderDesktop, base.join("Desktop")),
+                            let recycle_target = crate::core::resolve_recycle_bin_target();
+                            let pinned: [(&str, IconGlyph, [u8; 3], PathBuf); 7] = [
+                                (
+                                    "Desktop",
+                                    IconGlyph::FolderDesktop,
+                                    [70, 130, 240],
+                                    base.join("Desktop"),
+                                ),
                                 (
                                     "Downloads",
                                     IconGlyph::FolderDownloads,
+                                    [40, 180, 220],
                                     base.join("Downloads"),
                                 ),
                                 (
                                     "Documents",
                                     IconGlyph::FolderDocuments,
+                                    [79, 168, 255],
                                     base.join("Documents"),
                                 ),
-                                ("Pictures", IconGlyph::FolderPictures, base.join("Pictures")),
-                                ("Music", IconGlyph::FolderMusic, base.join("Music")),
-                                ("Videos", IconGlyph::FolderVideos, base.join("Videos")),
-                                ("Recycle Bin", IconGlyph::RecycleBin, recycle_target),
+                                (
+                                    "Pictures",
+                                    IconGlyph::FolderPictures,
+                                    [255, 100, 150],
+                                    base.join("Pictures"),
+                                ),
+                                (
+                                    "Music",
+                                    IconGlyph::FolderMusic,
+                                    [255, 140, 30],
+                                    base.join("Music"),
+                                ),
+                                (
+                                    "Videos",
+                                    IconGlyph::FolderVideos,
+                                    [170, 90, 240],
+                                    base.join("Videos"),
+                                ),
+                                (
+                                    "Recycle Bin",
+                                    IconGlyph::RecycleBin,
+                                    [140, 145, 155],
+                                    recycle_target,
+                                ),
                             ];
 
-                            for (name, glyph, path) in pinned {
+                            for (name, glyph, icon_col, path) in pinned {
                                 let is_active = self.current_tab == StudioTab::FileExplorer
                                     && !self.explorer_view.is_home_view
                                     && self.explorer_view.current_dir == path;
                                 let spec = SidebarRowSpec {
                                     pack,
                                     glyph,
-                                    accent_rgb,
+                                    accent_rgb: icon_col,
                                     label: name,
                                     selected: is_active,
                                     show_pin: true,
@@ -673,7 +912,7 @@ impl StudioView {
                                     let spec = SidebarRowSpec {
                                         pack,
                                         glyph: IconGlyph::Folder,
-                                        accent_rgb,
+                                        accent_rgb: [79, 168, 255],
                                         label: &name,
                                         selected: is_active,
                                         show_pin: true,
@@ -708,10 +947,15 @@ impl StudioView {
                                 } else {
                                     IconGlyph::Drive
                                 };
+                                let drive_rgb: [u8; 3] = if drive.is_system {
+                                    [79, 168, 255]
+                                } else {
+                                    [140, 145, 155]
+                                };
                                 let spec = SidebarRowSpec {
                                     pack,
                                     glyph,
-                                    accent_rgb,
+                                    accent_rgb: drive_rgb,
                                     label: &drive.display_name,
                                     selected: is_active,
                                     show_pin: false,
@@ -743,7 +987,7 @@ impl StudioView {
                                     let spec = SidebarRowSpec {
                                         pack,
                                         glyph: IconGlyph::Cloud,
-                                        accent_rgb,
+                                        accent_rgb: [70, 130, 240],
                                         label: "OneDrive",
                                         selected: is_active,
                                         show_pin: false,
@@ -881,13 +1125,23 @@ impl StudioView {
                                 ("Preferences", IconGlyph::Gear, StudioTab::Preferences),
                             ];
 
+                            let sec_rgb = [
+                                palette.text_secondary.r(),
+                                palette.text_secondary.g(),
+                                palette.text_secondary.b(),
+                            ];
                             for (label, glyph, tab) in tools {
+                                let is_active = self.current_tab == tab;
                                 let spec = SidebarRowSpec {
                                     pack,
                                     glyph,
-                                    accent_rgb,
+                                    accent_rgb: if is_active {
+                                        [palette.accent.r(), palette.accent.g(), palette.accent.b()]
+                                    } else {
+                                        sec_rgb
+                                    },
                                     label,
-                                    selected: self.current_tab == tab,
+                                    selected: is_active,
                                     show_pin: false,
                                 };
                                 if render_sidebar_row(ui, &palette, &spec) {
@@ -972,60 +1226,68 @@ impl StudioView {
                         }
                     }
                 }
+                StudioTab::Preferences => {
+                    self.render_preferences_tab(ui, &palette, current_theme, quick_settings);
+                }
                 other => {
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
-                        .show(ui, |ui| match other {
-                            StudioTab::FileExplorer => unreachable!(),
-                            StudioTab::Transcoder => {
-                                self.render_transcoder_tab(
-                                    ui,
-                                    &palette,
-                                    current_file,
-                                    quick_settings,
-                                    &mut on_pick_file,
-                                    &mut on_convert_batch,
-                                );
-                            }
-                            StudioTab::ExamStudio => {
-                                self.render_exam_studio_tab(
-                                    ui,
-                                    &palette,
-                                    current_file,
-                                    quick_settings,
-                                    &mut on_pick_file,
-                                    on_open_folder,
-                                );
-                            }
-                            StudioTab::QualityInspector => {
-                                self.render_quality_inspector_tab(
-                                    ui,
-                                    &palette,
-                                    current_file,
-                                    &mut on_pick_file,
-                                );
-                            }
-                            StudioTab::ArchiveSuite => {
-                                self.render_archive_tab(
-                                    ui,
-                                    &palette,
-                                    current_file,
-                                    quick_settings,
-                                    &mut on_pick_file,
-                                    &mut on_convert_batch,
-                                );
-                            }
-                            StudioTab::HardwareTelemetry => {
-                                self.render_telemetry_tab(ui, &palette);
-                            }
-                            StudioTab::Preferences => {
-                                self.render_preferences_tab(
-                                    ui,
-                                    &palette,
-                                    current_theme,
-                                    quick_settings,
-                                );
-                            }
+                        .show(ui, |ui| {
+                            let content_w = 680.0_f32.min(ui.available_width() - 48.0);
+                            let pad_x = ((ui.available_width() - content_w) * 0.5).max(24.0);
+                            ui.horizontal(|ui| {
+                                ui.add_space(pad_x);
+                                ui.vertical(|ui| {
+                                    ui.set_width(content_w);
+                                    ui.add_space(16.0);
+                                    match other {
+                                        StudioTab::FileExplorer | StudioTab::Preferences => {
+                                            unreachable!()
+                                        }
+                                        StudioTab::Transcoder => {
+                                            self.render_transcoder_tab(
+                                                ui,
+                                                &palette,
+                                                current_file,
+                                                quick_settings,
+                                                &mut on_pick_file,
+                                                &mut on_convert_batch,
+                                            );
+                                        }
+                                        StudioTab::ExamStudio => {
+                                            self.render_exam_studio_tab(
+                                                ui,
+                                                &palette,
+                                                current_file,
+                                                quick_settings,
+                                                &mut on_pick_file,
+                                                on_open_folder,
+                                            );
+                                        }
+                                        StudioTab::QualityInspector => {
+                                            self.render_quality_inspector_tab(
+                                                ui,
+                                                &palette,
+                                                current_file,
+                                                &mut on_pick_file,
+                                            );
+                                        }
+                                        StudioTab::ArchiveSuite => {
+                                            self.render_archive_tab(
+                                                ui,
+                                                &palette,
+                                                current_file,
+                                                quick_settings,
+                                                &mut on_pick_file,
+                                                &mut on_convert_batch,
+                                            );
+                                        }
+                                        StudioTab::HardwareTelemetry => {
+                                            self.render_telemetry_tab(ui, &palette);
+                                        }
+                                    }
+                                });
+                            });
                         });
                 }
             });
@@ -1088,14 +1350,7 @@ impl StudioView {
             }
             PaletteAction::NavigateRecycleBin => {
                 self.current_tab = StudioTab::FileExplorer;
-                let base = crate::core::platform_paths::home_dir();
-                let recycle_target = self
-                    .explorer_view
-                    .drives
-                    .iter()
-                    .find(|d| d.is_system)
-                    .map(|d| d.path.join("$Recycle.Bin"))
-                    .unwrap_or_else(|| base);
+                let recycle_target = crate::core::resolve_recycle_bin_target();
                 self.explorer_view.show_hidden_files = true;
                 self.explorer_view.navigate_to(recycle_target);
                 self.explorer_view.is_home_view = false;
@@ -1211,7 +1466,7 @@ impl StudioView {
                 ui.label(egui::RichText::new("0.00% Zero-Loss Standard | 200+ Formats | Multi-Threaded Rayon Concurrency").size(12.0).color(palette.text_secondary));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new("16 Threads Ready").size(12.0).color(PANTONE_FLAVEDO));
+                ui.label(egui::RichText::new("16 Threads Ready").size(12.0).color(palette.accent));
             });
         });
 
@@ -1232,7 +1487,7 @@ impl StudioView {
 
             let staged_frame = egui::Frame::none()
                 .fill(palette.card_bg)
-                .stroke(Stroke::new(1.2_f32, PANTONE_FLAVEDO))
+                .stroke(Stroke::new(1.0_f32, palette.border))
                 .rounding(Rounding::same(12.0))
                 .inner_margin(egui::Margin::same(16.0));
 
@@ -1318,14 +1573,14 @@ impl StudioView {
                             },
                         ))
                         .fill(if is_sel {
-                            PANTONE_FLAVEDO
+                            palette.accent
                         } else {
                             palette.card_bg
                         })
                         .stroke(Stroke::new(
                             1.0_f32,
                             if is_sel {
-                                PANTONE_FLAVEDO
+                                palette.accent
                             } else {
                                 palette.border
                             },
@@ -1355,7 +1610,7 @@ impl StudioView {
                             settings.active_format
                         ))
                         .strong()
-                        .color(PANTONE_FLAVEDO),
+                        .color(palette.text_primary),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let convert_btn = ui.add(
@@ -1368,7 +1623,7 @@ impl StudioView {
                                 .strong()
                                 .color(Color32::WHITE),
                             )
-                            .fill(PANTONE_FLAVEDO)
+                            .fill(palette.accent)
                             .rounding(Rounding::same(8.0)),
                         );
                         if convert_btn.clicked() {
@@ -1512,15 +1767,25 @@ impl StudioView {
 
             // 1. Hero Drag-and-Drop Dropzone
             let dropzone_frame = egui::Frame::none()
-                .fill(Color32::from_rgba_premultiplied(22, 26, 36, 200))
-                .stroke(Stroke::new(1.8_f32, PANTONE_FLAVEDO))
-                .rounding(Rounding::same(16.0))
+                .fill(if palette.is_dark {
+                    Color32::from_rgba_premultiplied(22, 24, 28, 230)
+                } else {
+                    Color32::from_rgba_premultiplied(248, 250, 252, 240)
+                })
+                .stroke(Stroke::new(1.0_f32, palette.border))
+                .rounding(Rounding::same(14.0))
                 .inner_margin(egui::Margin::same(24.0));
 
             dropzone_frame.show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     let (hero_r, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
-                crate::core::icon_packs::paint_icon(ui, self.explorer_view.icon_pack, IconGlyph::ActionShield, hero_r, [palette.accent.r(), palette.accent.g(), palette.accent.b()]);
+                    crate::core::icon_packs::paint_icon(
+                        ui,
+                        self.explorer_view.icon_pack,
+                        IconGlyph::ActionShield,
+                        hero_r,
+                        [palette.accent.r(), palette.accent.g(), palette.accent.b()],
+                    );
                     ui.add_space(6.0);
                     ui.label(
                         egui::RichText::new("Drag & Drop Any Files or Folders Here")
@@ -1542,9 +1807,9 @@ impl StudioView {
                                 egui::RichText::new("Choose Files")
                                     .size(13.5)
                                     .strong()
-                                    .color(Color32::from_rgb(25, 40, 10)),
+                                    .color(Color32::WHITE),
                             )
-                            .fill(PANTONE_FLAVEDO)
+                            .fill(palette.accent)
                             .rounding(Rounding::same(8.0)),
                         );
                         if pick_btn.clicked() {
@@ -1579,7 +1844,7 @@ impl StudioView {
                         ui.separator();
                         ui.label(egui::RichText::new("12 Archives").size(12.0).color(palette.text_muted));
                         ui.separator();
-                        ui.label(egui::RichText::new("Indian Exam Portals").size(12.0).color(PANTONE_FLAVEDO));
+                        ui.label(egui::RichText::new("Indian Exam Portals").size(12.0).color(palette.accent));
                     });
                 });
             });
@@ -1606,7 +1871,7 @@ impl StudioView {
                     ui.label(egui::RichText::new("Web Image Optimizer").size(14.0).strong().color(palette.text_primary));
                     ui.label(egui::RichText::new("Convert PNG/JPG to WebP/AVIF for up to 80% size savings with zero perceptual loss.").size(12.5).color(palette.text_secondary));
                     ui.add_space(6.0);
-                    if ui.button(egui::RichText::new("Select Images ->").size(12.5).color(PANTONE_FLAVEDO)).clicked() {
+                    if ui.button(egui::RichText::new("Select Images ->").size(12.5).color(palette.accent)).clicked() {
                         on_pick_file();
                     }
                 });
@@ -1621,7 +1886,7 @@ impl StudioView {
                     ui.label(egui::RichText::new("Notes to Vector PDF").size(14.0).strong().color(palette.text_primary));
                     ui.label(egui::RichText::new("Typeset text, markdown, and code into publication-grade 300 DPI vector PDF.").size(12.5).color(palette.text_secondary));
                     ui.add_space(6.0);
-                    if ui.button(egui::RichText::new("Select Document ->").size(12.5).color(PANTONE_FLAVEDO)).clicked() {
+                    if ui.button(egui::RichText::new("Select Document ->").size(12.5).color(palette.accent)).clicked() {
                         on_pick_file();
                     }
                 });
@@ -1640,7 +1905,7 @@ impl StudioView {
                     ui.label(egui::RichText::new("Lossless Audio Remux").size(14.0).strong().color(palette.text_primary));
                     ui.label(egui::RichText::new("Bit-exact WAV <-> FLAC transcoding with zero stream re-encoding and CRC verification.").size(12.5).color(palette.text_secondary));
                     ui.add_space(6.0);
-                    if ui.button(egui::RichText::new("Select Audio ->").size(12.5).color(PANTONE_FLAVEDO)).clicked() {
+                    if ui.button(egui::RichText::new("Select Audio ->").size(12.5).color(palette.accent)).clicked() {
                         on_pick_file();
                     }
                 });
@@ -1655,7 +1920,7 @@ impl StudioView {
                     ui.label(egui::RichText::new("Custom Form Conformer").size(14.0).strong().color(palette.text_primary));
                     ui.label(egui::RichText::new("Conforms any photo, signature, or document to exact custom dimensions, DPI, and file size boundaries.").size(12.5).color(palette.text_secondary));
                     ui.add_space(6.0);
-                    if ui.button(egui::RichText::new("Open Conformer ->").size(12.5).color(PANTONE_FLAVEDO)).clicked() {
+                    if ui.button(egui::RichText::new("Open Conformer ->").size(12.5).color(palette.accent)).clicked() {
                         self.current_tab = StudioTab::ExamStudio;
                     }
                 });
@@ -1790,7 +2055,7 @@ impl StudioView {
                     let chip_frame = egui::Frame::none()
                         .fill(palette.card_bg)
                         .stroke(Stroke::new(1.0_f32, palette.border))
-                        .rounding(Rounding::same(8.0))
+                        .rounding(Rounding::same(6.0))
                         .inner_margin(egui::Margin::symmetric(10.0, 6.0));
 
                     chip_frame.show(ui, |ui| {
@@ -1799,7 +2064,7 @@ impl StudioView {
                                 egui::RichText::new(fmt)
                                     .size(13.0)
                                     .strong()
-                                    .color(PANTONE_FLAVEDO),
+                                    .color(palette.text_primary),
                             );
                             ui.label(
                                 egui::RichText::new(desc)
@@ -1848,7 +2113,7 @@ impl StudioView {
                 ui.label(
                     egui::RichText::new("Custom Parameter Envelope")
                         .strong()
-                        .color(PANTONE_FLAVEDO),
+                        .color(palette.text_primary),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
@@ -2246,7 +2511,7 @@ impl StudioView {
                                 .strong()
                                 .color(Color32::WHITE),
                         )
-                        .fill(PANTONE_FLAVEDO)
+                        .fill(palette.accent)
                         .rounding(Rounding::same(8.0)),
                     );
 
@@ -2374,7 +2639,7 @@ impl StudioView {
                     .button(
                         egui::RichText::new("Safe Extract")
                             .size(13.0)
-                            .color(PANTONE_FLAVEDO),
+                            .color(palette.accent),
                     )
                     .clicked()
                 {
@@ -2428,7 +2693,7 @@ impl StudioView {
                     egui::RichText::new("Primary GPU:")
                         .size(13.5)
                         .strong()
-                        .color(PANTONE_FLAVEDO),
+                        .color(palette.accent),
                 );
                 ui.label(format!(
                     "{} (H.264: {} | HEVC: {})",
@@ -2441,7 +2706,7 @@ impl StudioView {
                     egui::RichText::new("Physical Memory:")
                         .size(13.5)
                         .strong()
-                        .color(PANTONE_FLAVEDO),
+                        .color(palette.accent),
                 );
                 ui.label(format!(
                     "{:.1} GB Installed Physical RAM",
@@ -2454,7 +2719,7 @@ impl StudioView {
                     egui::RichText::new("NPU AI Accelerator:")
                         .size(13.5)
                         .strong()
-                        .color(PANTONE_FLAVEDO),
+                        .color(palette.accent),
                 );
                 ui.label(format!("{} (Active)", hw.npu_name));
             });
@@ -2464,7 +2729,7 @@ impl StudioView {
                     egui::RichText::new("CPU Concurrency:")
                         .size(13.5)
                         .strong()
-                        .color(PANTONE_FLAVEDO),
+                        .color(palette.accent),
                 );
                 ui.label(format!(
                     "{} Logical Cores (Optimal Concurrency: {} threads)",
@@ -2477,7 +2742,7 @@ impl StudioView {
                     egui::RichText::new("SIMD Vector Units:")
                         .size(13.5)
                         .strong()
-                        .color(PANTONE_FLAVEDO),
+                        .color(palette.accent),
                 );
                 ui.label(format!(
                     "AVX2: {} | NEON: {}",
@@ -2524,7 +2789,7 @@ impl StudioView {
                         egui::RichText::new(format!("[{}]", item.badge))
                             .size(11.0)
                             .strong()
-                            .color(PANTONE_FLAVEDO),
+                            .color(palette.accent),
                     );
                     ui.label(
                         egui::RichText::new(item.title)
@@ -2652,7 +2917,7 @@ impl StudioView {
                                     .strong()
                                     .color(Color32::WHITE),
                             )
-                            .fill(PANTONE_FLAVEDO)
+                            .fill(palette.accent)
                             .rounding(Rounding::same(8.0)),
                         );
                         if inspect_btn.clicked() {
@@ -2725,7 +2990,7 @@ impl StudioView {
                         egui::RichText::new(format!("Overall Score: {:.1}%", rep.overall_score))
                             .size(15.0)
                             .strong()
-                            .color(PANTONE_FLAVEDO),
+                            .color(palette.accent),
                     );
                     ui.separator();
                     ui.label(
@@ -3005,7 +3270,7 @@ impl StudioView {
                             ))
                             .size(13.0)
                             .strong()
-                            .color(PANTONE_FLAVEDO),
+                            .color(palette.accent),
                         );
                         ui.separator();
                         ui.label(
@@ -3079,7 +3344,7 @@ impl StudioView {
                     ui.label(
                         egui::RichText::new(&bench.summary)
                             .size(12.5)
-                            .color(PANTONE_FLAVEDO),
+                            .color(palette.text_primary),
                     );
                 });
             }

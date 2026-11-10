@@ -134,3 +134,43 @@ fn test_image_to_pdf_vector_container() {
     let _ = fs::remove_file(img_path);
     let _ = fs::remove_file(pdf_path);
 }
+
+#[test]
+fn test_pdf_first_page_thumbnail_render() {
+    let temp_dir = std::env::temp_dir().join("mossambi_test_pdf_thumb");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let txt_path = temp_dir.join("test_doc.txt");
+    let pdf_path = temp_dir.join("test_doc.pdf");
+
+    fs::write(
+        &txt_path,
+        "Hello Mossambi PDF Thumbnail Test\nPage 1 Content",
+    )
+    .unwrap();
+    convert_text_to_pdf_vector(&txt_path, &pdf_path, None).unwrap();
+
+    let rgba = mossambi::codec::render_pdf_first_page_thumbnail(&pdf_path, 320)
+        .expect("PDF thumbnail failed");
+    assert!(rgba.width() > 0);
+    assert!(rgba.height() > 0);
+    assert!(rgba.into_raw().len() > 100);
+
+    let _ = fs::remove_file(txt_path);
+    let _ = fs::remove_file(pdf_path);
+}
+
+#[test]
+fn test_pdf_to_jpg_transcode() {
+    let gate_pdf = std::path::Path::new(r"Z:\HK\Best GATE Free Resources  - ECE.pdf");
+    if gate_pdf.exists() {
+        let temp_dir = std::env::temp_dir().join("mossambi_test_pdf_jpg");
+        let _ = fs::create_dir_all(&temp_dir);
+        let out_jpg = temp_dir.join("test_gate.jpg");
+        mossambi::codec::pdf_image::transcode_pdf_to_images(gate_pdf, &out_jpg, "JPG").unwrap();
+        assert!(out_jpg.exists());
+        let meta = fs::metadata(&out_jpg).unwrap();
+        println!("out_jpg length: {}", meta.len());
+        assert!(meta.len() > 1000);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+}

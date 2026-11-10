@@ -211,6 +211,28 @@ enum HoverContent {
     Meta,
 }
 
+/// Asynchronous filesystem operation dispatched to background worker
+pub enum FsOperation {
+    Copy {
+        sources: Vec<PathBuf>,
+        dest_dir: PathBuf,
+    },
+    Move {
+        sources: Vec<PathBuf>,
+        dest_dir: PathBuf,
+    },
+    Delete {
+        targets: Vec<PathBuf>,
+    },
+}
+
+/// Outcome of an asynchronous filesystem operation
+pub struct FsOpResult {
+    pub op_name: &'static str,
+    pub count: usize,
+    pub errors: Vec<String>,
+}
+
 pub struct ExplorerView {
     pub current_dir: PathBuf,
     pub entries: Vec<FileItem>,
@@ -253,6 +275,10 @@ pub struct ExplorerView {
     pub scan_tx: Sender<ScanBatch>,
     pub scan_rx: Receiver<ScanBatch>,
 
+    // Async Background Filesystem Worker
+    pub fs_worker_tx: Sender<FsOperation>,
+    pub fs_worker_rx: Receiver<FsOpResult>,
+
     // Quick Look / Peek Modal Overlay State
     pub peek_item: Option<FileItem>,
     pub peek_texture: Option<(PathBuf, egui::TextureHandle)>,
@@ -277,6 +303,7 @@ pub struct ExplorerView {
     pub column_subfolder: Option<(PathBuf, Vec<FileItem>)>,
     pub column_stack: Vec<(PathBuf, Vec<FileItem>)>,
     pub column_preview_item: Option<FileItem>,
+    pub column_cache: std::collections::HashMap<PathBuf, Vec<FileItem>>,
 
     // Windows 11 & macOS Home Dashboard View
     pub is_home_view: bool,
@@ -381,6 +408,80 @@ pub fn spawn_new_explorer_window(dir: Option<&Path>) {
 impl Default for ExplorerView {
     fn default() -> Self {
         let (scan_tx, scan_rx) = channel();
+        let (fs_worker_tx, fs_op_rx) = channel::<FsOperation>();
+        let (fs_result_tx, fs_worker_rx) = channel::<FsOpResult>();
+
+        std::thread::Builder::new()
+            .name("mossambi-fs-worker".into())
+            .spawn(move || {
+                while let Ok(op) = fs_op_rx.recv() {
+                    match op {
+                        FsOperation::Copy { sources, dest_dir } => {
+                            let mut count = 0;
+                            let mut errors = Vec::new();
+                            for src in sources {
+                                if let Some(name) = src.file_name() {
+                                    let dest = dest_dir.join(name);
+                                    let unique = resolve_unique_paste_path(&dest);
+                                    match copy_entry_recursive(&src, &unique) {
+                                        Ok(_) => {
+                                            crate::core::action_journal::record_copy(
+                                                src.clone(),
+                                                unique,
+                                            );
+                                            count += 1;
+                                        }
+                                        Err(e) => errors.push(format!("{}: {}", src.display(), e)),
+                                    }
+                                }
+                            }
+                            let _ = fs_result_tx.send(FsOpResult {
+                                op_name: "Copied",
+                                count,
+                                errors,
+                            });
+                        }
+                        FsOperation::Move { sources, dest_dir } => {
+                            let mut count = 0;
+                            let mut errors = Vec::new();
+                            for src in sources {
+                                if let Some(name) = src.file_name() {
+                                    let dest = dest_dir.join(name);
+                                    match move_entry(&src, &dest) {
+                                        Ok(_) => {
+                                            crate::core::action_journal::record_move(
+                                                src.clone(),
+                                                dest,
+                                            );
+                                            count += 1;
+                                        }
+                                        Err(e) => errors.push(format!("{}: {}", src.display(), e)),
+                                    }
+                                }
+                            }
+                            let _ = fs_result_tx.send(FsOpResult {
+                                op_name: "Moved",
+                                count,
+                                errors,
+                            });
+                        }
+                        FsOperation::Delete { targets } => {
+                            let count = targets.len();
+                            let mut errors = Vec::new();
+                            if let Err(e) = crate::core::action_journal::stage_delete(&targets) {
+                                errors.push(e);
+                            }
+                            let _ = fs_result_tx.send(FsOpResult {
+                                op_name: "Deleted",
+                                count,
+                                errors,
+                            });
+                        }
+                    }
+                }
+            })
+            .ok();
+
         let home_opt = std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
             .ok()
@@ -420,7 +521,11 @@ impl Default for ExplorerView {
             next_tab_id: 2,
             history: vec![current_dir.clone()],
             history_idx: 0,
-            view_mode: ViewMode::Details,
+            view_mode: match crate::core::MossambiConfig::load().default_explorer_layout {
+                2 => ViewMode::Grid,
+                3 => ViewMode::Columns,
+                _ => ViewMode::Details,
+            },
             icon_size: 96.0,
             sort_column: SortColumn::Name,
             sort_direction: SortDirection::Ascending,
@@ -438,6 +543,8 @@ impl Default for ExplorerView {
             scan_gen: Arc::clone(&scan_gen),
             scan_tx: scan_tx.clone(),
             scan_rx,
+            fs_worker_tx,
+            fs_worker_rx,
             peek_item: None,
             peek_texture: None,
             peek_text_cache: None,
@@ -453,6 +560,7 @@ impl Default for ExplorerView {
             column_subfolder: None,
             column_stack: Vec::new(),
             column_preview_item: None,
+            column_cache: std::collections::HashMap::new(),
             hover_preview: None,
             thumb_cache: std::collections::HashMap::new(),
             thumb_decode_budget: (0, Instant::now()),
@@ -555,6 +663,9 @@ impl ExplorerView {
         self.is_editing_path = false;
         self.renaming_path = None;
         self.focused_row = 0;
+        self.column_stack.clear();
+        self.column_subfolder = None;
+        self.column_preview_item = None;
 
         let home_opt = std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
@@ -586,6 +697,19 @@ impl ExplorerView {
             Arc::clone(&self.scan_gen),
             self.scan_tx.clone(),
         );
+    }
+
+    /// Fetches directory entries for Miller columns, using the fast in-memory cache
+    /// to avoid freezing the UI with synchronous disk IO on every folder click.
+    pub fn get_column_entries(&mut self, path: &Path) -> Vec<FileItem> {
+        if let Some(entries) = self.column_cache.get(path) {
+            entries.clone()
+        } else {
+            let entries = list_directory_sync(path);
+            self.column_cache
+                .insert(path.to_path_buf(), entries.clone());
+            entries
+        }
     }
 
     pub fn add_tab(&mut self, path: PathBuf) {
@@ -754,6 +878,30 @@ impl ExplorerView {
                 self.entries = batch.entries;
             }
         }
+
+        while let Ok(res) = self.fs_worker_rx.try_recv() {
+            if !res.errors.is_empty() {
+                log::warn!(
+                    "FS operation had {} error(s): {:?}",
+                    res.errors.len(),
+                    res.errors
+                );
+                self.show_status_note(Err(format!(
+                    "Warning: {} error(s) during {}",
+                    res.errors.len(),
+                    res.op_name
+                )));
+            } else if res.count > 0 {
+                log::info!(
+                    "FS operation completed: {} {} item(s)",
+                    res.op_name,
+                    res.count
+                );
+                self.show_status_note(Ok(format!("{} {} item(s)", res.op_name, res.count)));
+            }
+            let dir = self.current_dir.clone();
+            self.navigate_to(dir);
+        }
     }
 
     /// Filter and sort entries according to active filter, search query, and sort column
@@ -765,6 +913,7 @@ impl ExplorerView {
         let mut scored_list: Vec<(&FileItem, i64)> = self
             .entries
             .iter()
+            .filter(|e| !crate::core::is_protected_os_file(&e.path))
             .filter(|e| self.show_hidden_files || !e.is_hidden)
             .filter(|e| self.category_filter.matches(e))
             .filter(|e| match active_tag {
@@ -864,7 +1013,7 @@ impl ExplorerView {
                             "Drop external files or folders here to stage, inspect, or transcode",
                         )
                         .strong()
-                        .color(Color32::from_rgb(215, 255, 120)),
+                        .color(palette.accent),
                     );
                 });
             });
@@ -898,15 +1047,16 @@ impl ExplorerView {
         // stays inside, `dnd_release_payload` on the folder rows keeps its
         // Explorer-parity semantics.
         if egui::DragAndDrop::has_payload_of_type::<FileDragPayload>(ui.ctx()) {
+            let screen_rect = ui.ctx().screen_rect();
             let (any_down, pos_outside, decided) = ui.input(|i| {
+                let p_opt = i.pointer.latest_pos();
+                let outside = match p_opt {
+                    Some(p) => !screen_rect.contains(p),
+                    None => false,
+                };
                 (
                     i.pointer.any_down(),
-                    i.pointer
-                        .interact_pos()
-                        .map(|p| !ui.ctx().screen_rect().contains(p))
-                        // `PointerGone` cleared `latest_pos`: the pointer is
-                        // not over the viewport, i.e. it exited the window.
-                        .unwrap_or(true),
+                    outside,
                     i.pointer.is_decidedly_dragging(),
                 )
             });
@@ -943,11 +1093,13 @@ impl ExplorerView {
         }
 
         // 2. Global Explorer Hotkey Interceptions with Vim & Emacs Navigation Engine
+        let is_search_focused =
+            ui.memory(|m| m.has_focus(egui::Id::new("mossambi_global_search_input")));
         let is_typing = self.is_editing_path
             || self.renaming_path.is_some()
             || self.show_new_folder_dialog
             || self.properties_item.is_some()
-            || ui.memory(|m| m.focused().is_some());
+            || is_search_focused;
 
         let nav_entries: Vec<FileItem> = self
             .filtered_and_sorted_entries()
@@ -958,6 +1110,12 @@ impl ExplorerView {
 
         ui.input(|i| {
             if i.key_pressed(egui::Key::Escape) {
+                if !self.search_query.is_empty() || is_search_focused {
+                    self.search_query.clear();
+                    ui.memory_mut(|m| {
+                        m.surrender_focus(egui::Id::new("mossambi_global_search_input"))
+                    });
+                }
                 self.peek_item = None;
                 self.peek_texture = None;
                 self.peek_text_cache = None;
@@ -1110,12 +1268,13 @@ impl ExplorerView {
                     }
                 }
 
-                // Vim `/` / Emacs `Ctrl+S`: Focus Search Bar
+                // Vim `/` / Neovim / Emacs `Ctrl+S` / `Ctrl+F`: Focus Search Bar
                 if (i.key_pressed(egui::Key::Slash)
                     && !i.modifiers.ctrl
                     && !i.modifiers.command
                     && !i.modifiers.alt)
-                    || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::S))
+                    || ((i.modifiers.ctrl || i.modifiers.command)
+                        && (i.key_pressed(egui::Key::F) || i.key_pressed(egui::Key::S)))
                 {
                     self.focus_search_requested = true;
                 }
@@ -1153,19 +1312,6 @@ impl ExplorerView {
                     self.clipboard_is_cut = false;
                 }
 
-                // Emacs `Ctrl+W`: Cut Region
-                if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::W) {
-                    if self.selected_paths.is_empty() {
-                        if let Some(item) = nav_entries.get(self.focused_row) {
-                            self.clipboard_paths = vec![item.path.clone()];
-                        }
-                    } else {
-                        self.clipboard_paths =
-                            self.selected_paths.iter().cloned().collect::<Vec<_>>();
-                    }
-                    self.clipboard_is_cut = true;
-                }
-
                 // Vim `p` / Emacs `Ctrl+Y`: Put / Paste
                 if (i.key_pressed(egui::Key::P)
                     && !i.modifiers.ctrl
@@ -1173,26 +1319,7 @@ impl ExplorerView {
                     && !i.modifiers.alt)
                     || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::Y))
                 {
-                    let mut pasted = false;
-                    for src in &self.clipboard_paths {
-                        if let Some(file_name) = src.file_name() {
-                            let dest = self.current_dir.join(file_name);
-                            if self.clipboard_is_cut {
-                                log_result("Move", src, move_entry(src, &dest));
-                            } else {
-                                let unique = resolve_unique_paste_path(&dest);
-                                log_result("Copy", src, copy_entry_recursive(src, &unique));
-                            }
-                            pasted = true;
-                        }
-                    }
-                    if self.clipboard_is_cut {
-                        self.clipboard_paths.clear();
-                        self.clipboard_is_cut = false;
-                    }
-                    if pasted {
-                        self.navigate_to(self.current_dir.clone());
-                    }
+                    self.paste_from_clipboard();
                 }
 
                 // Vim `d` (without modifiers): Delete focused/selected
@@ -1382,6 +1509,25 @@ impl ExplorerView {
             {
                 self.close_tab(self.active_tab_index);
             }
+            // Ctrl+Tab / Ctrl+Shift+Tab: Cycle Next/Previous Tab
+            if (i.modifiers.ctrl || i.modifiers.command)
+                && i.key_pressed(egui::Key::Tab)
+                && !self.tabs.is_empty()
+            {
+                if i.modifiers.shift {
+                    if self.active_tab_index == 0 {
+                        self.active_tab_index = self.tabs.len().saturating_sub(1);
+                    } else {
+                        self.active_tab_index = self.active_tab_index.saturating_sub(1);
+                    }
+                } else {
+                    self.active_tab_index = (self.active_tab_index + 1) % self.tabs.len();
+                }
+                if let Some(tab) = self.tabs.get(self.active_tab_index) {
+                    let target = tab.path.clone();
+                    self.navigate_to(target);
+                }
+            }
             if i.key_pressed(egui::Key::F2) {
                 if let Some(item) = nav_entries.get(self.focused_row) {
                     self.renaming_path = Some((item.path.clone(), item.name.clone()));
@@ -1413,7 +1559,7 @@ impl ExplorerView {
                     "rename-edit"
                 } else if self.is_editing_path {
                     "path-edit"
-                } else if ui.memory(|m| m.focused().is_some()) {
+                } else if is_search_focused {
                     "text-input"
                 } else {
                     "explorer-nav"
@@ -1456,26 +1602,7 @@ impl ExplorerView {
                 self.clipboard_is_cut = true;
             }
             if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::V) {
-                let mut pasted = false;
-                for src in &self.clipboard_paths {
-                    if let Some(file_name) = src.file_name() {
-                        let dest = self.current_dir.join(file_name);
-                        if self.clipboard_is_cut {
-                            log_result("Move", src, move_entry(src, &dest));
-                        } else {
-                            let unique = resolve_unique_paste_path(&dest);
-                            log_result("Copy", src, copy_entry_recursive(src, &unique));
-                        }
-                        pasted = true;
-                    }
-                }
-                if self.clipboard_is_cut {
-                    self.clipboard_paths.clear();
-                    self.clipboard_is_cut = false;
-                }
-                if pasted {
-                    self.navigate_to(self.current_dir.clone());
-                }
+                self.paste_from_clipboard();
             }
             if i.key_pressed(egui::Key::Delete) {
                 let paths_to_delete: Vec<PathBuf> = if self.selected_paths.is_empty() {
@@ -1486,6 +1613,11 @@ impl ExplorerView {
                 } else {
                     self.selected_paths.iter().cloned().collect()
                 };
+
+                let paths_to_delete: Vec<PathBuf> = paths_to_delete
+                    .into_iter()
+                    .filter(|p| !crate::core::is_protected_os_file(p))
+                    .collect();
 
                 if !paths_to_delete.is_empty() {
                     if i.modifiers.shift {
@@ -1500,44 +1632,81 @@ impl ExplorerView {
             }
         });
 
-        // 3. New Folder Modal Dialog
+        let modal_bg = if palette.is_dark {
+            Color32::from_rgb(30, 32, 36)
+        } else {
+            Color32::from_rgb(250, 250, 252)
+        };
+
+        // 3. New Folder Modal Dialog (Apple Sheet aesthetic)
         if self.show_new_folder_dialog {
             let mut close_dialog = false;
             let mut create_folder = false;
 
-            egui::Window::new("Create New Folder")
+            egui::Window::new("Create New Folder Dialog")
+                .title_bar(false)
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .frame(
-                    egui::Frame::window(&ui.ctx().style())
-                        .fill(palette.card_bg)
+                    egui::Frame::none()
+                        .fill(modal_bg)
                         .stroke(Stroke::new(1.0_f32, palette.border))
-                        .rounding(Rounding::same(10.0))
-                        .inner_margin(egui::Margin::same(16.0)),
+                        .rounding(Rounding::same(12.0))
+                        .inner_margin(egui::Margin::same(18.0)),
                 )
                 .show(ui.ctx(), |ui| {
                     ui.label(
-                        egui::RichText::new("Enter new folder name:").color(palette.text_primary),
+                        egui::RichText::new("New Folder")
+                            .size(15.0)
+                            .strong()
+                            .color(palette.text_primary),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("Enter folder name:")
+                            .size(12.5)
+                            .color(palette.text_secondary),
                     );
                     ui.add_space(6.0);
-                    let resp = ui.text_edit_singleline(&mut self.new_folder_buffer);
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.new_folder_buffer)
+                            .desired_width(260.0),
+                    );
                     resp.request_focus();
                     if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         create_folder = true;
                     }
 
-                    ui.add_space(10.0);
+                    ui.add_space(14.0);
                     ui.horizontal(|ui| {
-                        if ui
-                            .button(egui::RichText::new("Create").strong().color(Color32::WHITE))
-                            .clicked()
-                        {
-                            create_folder = true;
-                        }
-                        if ui.button("Cancel").clicked() {
-                            close_dialog = true;
-                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let create_btn = ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new("Create").strong().color(Color32::WHITE),
+                                )
+                                .fill(palette.accent)
+                                .rounding(Rounding::same(6.0))
+                                .min_size(Vec2::new(72.0, 26.0)),
+                            );
+                            if create_btn.clicked() {
+                                create_folder = true;
+                            }
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Cancel").color(palette.text_primary),
+                                    )
+                                    .fill(palette.card_bg)
+                                    .stroke(Stroke::new(1.0_f32, palette.border))
+                                    .rounding(Rounding::same(6.0))
+                                    .min_size(Vec2::new(72.0, 26.0)),
+                                )
+                                .clicked()
+                            {
+                                close_dialog = true;
+                            }
+                        });
                     });
                 });
 
@@ -1562,23 +1731,24 @@ impl ExplorerView {
             let mut do_permanent_delete = false;
 
             egui::Window::new("Permanent Deletion Confirmation")
+                .title_bar(false)
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .frame(
-                    egui::Frame::window(&ui.ctx().style())
-                        .fill(palette.card_bg)
+                    egui::Frame::none()
+                        .fill(modal_bg)
                         .stroke(Stroke::new(1.0_f32, palette.border))
                         .rounding(Rounding::same(12.0))
-                        .inner_margin(egui::Margin::same(16.0)),
+                        .inner_margin(egui::Margin::same(18.0)),
                 )
                 .show(ui.ctx(), |ui| {
                     ui.label(
                         egui::RichText::new(format!(
-                            "Are you sure you want to permanently delete {} item(s)?",
+                            "Permanently delete {} item(s)?",
                             targets.len()
                         ))
-                        .size(14.0)
+                        .size(15.0)
                         .strong()
                         .color(palette.text_primary),
                     );
@@ -1587,28 +1757,43 @@ impl ExplorerView {
                         egui::RichText::new(
                             "This action cannot be undone. Files will bypass the Recycle Bin.",
                         )
-                        .size(12.0)
+                        .size(12.5)
                         .color(Color32::from_rgb(255, 90, 90)),
                     );
-                    ui.add_space(12.0);
+                    ui.add_space(14.0);
                     ui.horizontal(|ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new("Permanently Delete")
-                                        .color(Color32::WHITE)
-                                        .strong(),
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Delete Permanently")
+                                            .color(Color32::WHITE)
+                                            .strong(),
+                                    )
+                                    .fill(Color32::from_rgb(220, 50, 50))
+                                    .rounding(Rounding::same(6.0))
+                                    .min_size(Vec2::new(130.0, 26.0)),
                                 )
-                                .fill(Color32::from_rgb(210, 45, 45)),
-                            )
-                            .clicked()
-                        {
-                            do_permanent_delete = true;
-                            close_dialog = true;
-                        }
-                        if ui.button("Cancel").clicked() {
-                            close_dialog = true;
-                        }
+                                .clicked()
+                            {
+                                do_permanent_delete = true;
+                                close_dialog = true;
+                            }
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Cancel").color(palette.text_primary),
+                                    )
+                                    .fill(palette.card_bg)
+                                    .stroke(Stroke::new(1.0_f32, palette.border))
+                                    .rounding(Rounding::same(6.0))
+                                    .min_size(Vec2::new(72.0, 26.0)),
+                                )
+                                .clicked()
+                            {
+                                close_dialog = true;
+                            }
+                        });
                     });
                 });
 
@@ -1624,42 +1809,73 @@ impl ExplorerView {
             }
         }
 
-        // 4. Rename Item Modal Dialog
+        // 4. Rename Item Modal Dialog (Apple Sheet style - neutral, zero lime tint!)
         if let Some((old_path, mut new_name)) = self.renaming_path.clone() {
             let mut close_dialog = false;
             let mut do_rename = false;
 
-            egui::Window::new("Rename Item")
+            egui::Window::new("Rename Item Dialog")
+                .title_bar(false)
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .frame(
-                    egui::Frame::window(&ui.ctx().style())
-                        .fill(palette.card_bg)
+                    egui::Frame::none()
+                        .fill(modal_bg)
                         .stroke(Stroke::new(1.0_f32, palette.border))
-                        .rounding(Rounding::same(10.0))
-                        .inner_margin(egui::Margin::same(16.0)),
+                        .rounding(Rounding::same(12.0))
+                        .inner_margin(egui::Margin::same(18.0)),
                 )
                 .show(ui.ctx(), |ui| {
-                    ui.label(egui::RichText::new("Enter new name:").color(palette.text_primary));
+                    ui.label(
+                        egui::RichText::new("Rename Item")
+                            .size(15.0)
+                            .strong()
+                            .color(palette.text_primary),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("Enter new name:")
+                            .size(12.5)
+                            .color(palette.text_secondary),
+                    );
                     ui.add_space(6.0);
-                    let resp = ui.text_edit_singleline(&mut new_name);
+                    let resp =
+                        ui.add(egui::TextEdit::singleline(&mut new_name).desired_width(280.0));
                     resp.request_focus();
                     if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         do_rename = true;
                     }
 
-                    ui.add_space(10.0);
+                    ui.add_space(14.0);
                     ui.horizontal(|ui| {
-                        if ui
-                            .button(egui::RichText::new("Rename").strong().color(Color32::WHITE))
-                            .clicked()
-                        {
-                            do_rename = true;
-                        }
-                        if ui.button("Cancel").clicked() {
-                            close_dialog = true;
-                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let rename_btn = ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new("Rename").strong().color(Color32::WHITE),
+                                )
+                                .fill(palette.accent)
+                                .rounding(Rounding::same(6.0))
+                                .min_size(Vec2::new(72.0, 26.0)),
+                            );
+                            if rename_btn.clicked() {
+                                do_rename = true;
+                            }
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Cancel").color(palette.text_primary),
+                                    )
+                                    .fill(palette.card_bg)
+                                    .stroke(Stroke::new(1.0_f32, palette.border))
+                                    .rounding(Rounding::same(6.0))
+                                    .min_size(Vec2::new(72.0, 26.0)),
+                                )
+                                .clicked()
+                            {
+                                close_dialog = true;
+                            }
+                        });
                     });
                 });
 
@@ -1691,17 +1907,25 @@ impl ExplorerView {
             let count = self.batch_rename.target_paths.len();
 
             egui::Window::new(format!("Batch Rename ({})", pluralize_items(count)))
+                .title_bar(false)
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .frame(
-                    egui::Frame::window(&ui.ctx().style())
-                        .fill(palette.card_bg)
+                    egui::Frame::none()
+                        .fill(modal_bg)
                         .stroke(Stroke::new(1.0_f32, palette.border))
-                        .rounding(Rounding::same(10.0))
-                        .inner_margin(egui::Margin::same(16.0)),
+                        .rounding(Rounding::same(12.0))
+                        .inner_margin(egui::Margin::same(18.0)),
                 )
                 .show(ui.ctx(), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("Batch Rename ({})", pluralize_items(count)))
+                            .size(15.0)
+                            .strong()
+                            .color(palette.text_primary),
+                    );
+                    ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if ui
                             .selectable_label(self.batch_rename.mode == 0, "Replace Text")
@@ -1943,16 +2167,16 @@ impl ExplorerView {
                 // Top Navigation & Breadcrumbs Bar (macOS Toolbar style)
                 self.render_breadcrumb_bar(ui, palette);
                 ui.add_space(6.0);
-            }
-
-            if !self.is_home_view {
-                // Category Filter Tabs Bar & View Mode Toggle (Segmented control)
-                self.render_category_filter_bar(ui, palette);
-                ui.add_space(6.0);
+                if !self.is_home_view {
+                    // Category Filter Tabs Bar & View Mode Toggle (Segmented control)
+                    self.render_category_filter_bar(ui, palette);
+                    ui.add_space(6.0);
+                }
             }
 
             // File Table, Grid, or Miller Columns View
-            let avail_h = (ui.available_height() - 28.0).max(120.0);
+            let bottom_bars_h = if self.is_home_view { 28.0 } else { 56.0 };
+            let avail_h = (ui.available_height() - bottom_bars_h).max(120.0);
             ui.allocate_ui_with_layout(
                 Vec2::new(ui.available_width(), avail_h),
                 egui::Layout::top_down(egui::Align::Min),
@@ -1969,12 +2193,11 @@ impl ExplorerView {
                 },
             );
 
+            // Finder path bar sits ABOVE the status bar (authentic macOS Finder hierarchy)
+            self.render_bottom_path_bar(ui, palette);
+
             // macOS Finder Bottom Status Bar (Items, Available Space, Zoom)
             self.render_status_bar(ui, palette);
-
-            // Finder path bar sits BELOW the status bar: the top chrome owns
-            // navigation and view controls, the bottom owns "where am I".
-            self.render_bottom_path_bar(ui, palette);
         });
 
         // 5. Modal Quick Look / Peek Display Overlay (macOS Finder style)
@@ -2023,7 +2246,8 @@ impl ExplorerView {
                     };
                     let search_resp = ui.add(
                         egui::TextEdit::singleline(&mut self.search_query)
-                            .hint_text("Filter files...")
+                            .id_source("mossambi_global_search_input")
+                            .hint_text("Filter files (/)...")
                             .desired_width(box_w),
                     );
                     if self.focus_search_requested {
@@ -2046,6 +2270,9 @@ impl ExplorerView {
                             .clicked()
                     {
                         self.search_query.clear();
+                        ui.memory_mut(|m| {
+                            m.surrender_focus(egui::Id::new("mossambi_global_search_input"))
+                        });
                     }
                     let box_w = if self.search_query.is_empty() {
                         avail_w
@@ -2054,7 +2281,8 @@ impl ExplorerView {
                     };
                     let search_resp = ui.add(
                         egui::TextEdit::singleline(&mut self.search_query)
-                            .hint_text("Filter files...")
+                            .id_source("mossambi_global_search_input")
+                            .hint_text("Filter files (/)...")
                             .desired_width(box_w),
                     );
                     if self.focus_search_requested {
@@ -2079,11 +2307,11 @@ impl ExplorerView {
             ui.ctx(),
             pack,
             IconGlyph::ActionBack,
-            18.0,
+            24.0,
             nav_tint,
         ) {
             Some(t) => {
-                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0)))
+                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(20.0)))
             }
             None => egui::Button::new("Back"),
         }
@@ -2111,11 +2339,11 @@ impl ExplorerView {
             ui.ctx(),
             pack,
             IconGlyph::ActionForward,
-            18.0,
+            24.0,
             nav_tint,
         ) {
             Some(t) => {
-                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0)))
+                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(20.0)))
             }
             None => egui::Button::new("Forward"),
         }
@@ -2143,11 +2371,11 @@ impl ExplorerView {
             ui.ctx(),
             pack,
             IconGlyph::ActionUp,
-            18.0,
+            24.0,
             nav_tint,
         ) {
             Some(t) => {
-                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0)))
+                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(20.0)))
             }
             None => egui::Button::new("Up"),
         };
@@ -2169,11 +2397,11 @@ impl ExplorerView {
             ui.ctx(),
             pack,
             IconGlyph::ActionRefresh,
-            18.0,
+            24.0,
             nav_tint,
         ) {
             Some(t) => {
-                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0)))
+                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(20.0)))
             }
             None => egui::Button::new("Refresh"),
         };
@@ -2190,11 +2418,11 @@ impl ExplorerView {
             ui.ctx(),
             pack,
             IconGlyph::ActionNewFolder,
-            18.0,
+            24.0,
             nav_tint,
         ) {
             Some(t) => {
-                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0)))
+                egui::Button::image(egui::load::SizedTexture::new(t.id(), Vec2::splat(20.0)))
             }
             None => egui::Button::new("New Folder"),
         };
@@ -2307,18 +2535,38 @@ impl ExplorerView {
         let current_dir = self.current_dir.clone();
 
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+            ui.spacing_mut().item_spacing = Vec2::new(3.0, 0.0);
             for (i, seg) in segments.iter().enumerate() {
                 if i > 0 {
                     ui.label(
                         egui::RichText::new(">")
-                            .size(11.0)
+                            .size(12.0)
                             .color(palette.text_muted),
                     );
                 }
                 let is_current = seg.target_path == current_dir;
+
+                // Authentic macOS Finder segment icon
+                let glyph = if i == 0 {
+                    IconGlyph::Drive
+                } else {
+                    IconGlyph::Folder
+                };
+                let (icon_rect, _) =
+                    ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::hover());
+                let tint = if is_current {
+                    [palette.accent.r(), palette.accent.g(), palette.accent.b()]
+                } else {
+                    [
+                        palette.text_secondary.r(),
+                        palette.text_secondary.g(),
+                        palette.text_secondary.b(),
+                    ]
+                };
+                crate::core::icon_packs::paint_icon(ui, self.icon_pack, glyph, icon_rect, tint);
+
                 let text = egui::RichText::new(&seg.label)
-                    .size(12.0)
+                    .size(12.5)
                     .color(if is_current {
                         palette.text_primary
                     } else {
@@ -2327,7 +2575,7 @@ impl ExplorerView {
                 let btn = egui::Button::new(text)
                     .fill(Color32::TRANSPARENT)
                     .stroke(Stroke::NONE)
-                    .min_size(Vec2::new(0.0, 22.0));
+                    .min_size(Vec2::new(0.0, 24.0));
                 let resp = ui.add(btn);
                 if resp.clicked() {
                     let target = seg.target_path.clone();
@@ -2506,87 +2754,17 @@ impl ExplorerView {
                 },
             );
 
-            // Right Pinned Container: macOS 3-Segmented Switcher (List / Icons / Columns) & Icon Size
+            // Right Pinned Container: macOS 3-Segmented Switcher (Icons / List / Columns) & Icon Size
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let switch_tint = [
-                    palette.text_primary.r(),
-                    palette.text_primary.g(),
-                    palette.text_primary.b(),
-                ];
-                let glyph_button = |ui: &mut Ui,
-                                    glyph: IconGlyph,
-                                    fallback: &str,
-                                    is_active: bool,
-                                    rounding: egui::Rounding|
-                 -> egui::Response {
-                    let btn = match crate::core::icon_packs::icon_texture(
-                        ui.ctx(),
-                        self.icon_pack,
-                        glyph,
-                        18.0,
-                        switch_tint,
-                    ) {
-                        Some(t) => egui::Button::image(egui::load::SizedTexture::new(
-                            t.id(),
-                            Vec2::splat(15.0),
-                        )), // icon-only segmented switcher (glyph is self-describing)
-                        None => menu_fallback_button(fallback),
-                    }
-                    .fill(if is_active {
-                        palette.accent
-                    } else {
-                        palette.card_bg
-                    })
-                    .rounding(rounding);
-                    ui.add(btn).on_hover_text(match glyph {
-                        IconGlyph::ActionColumns => "Miller Columns View",
-                        IconGlyph::ActionList => "Details Table View",
-                        _ => "Grid / Tiles View",
-                    })
-                };
-
-                let is_columns = self.view_mode == ViewMode::Columns;
-                if glyph_button(
+                let mut switch_mode = self.view_mode;
+                crate::gui::finder_chrome::render_segmented_view_switcher(
                     ui,
-                    IconGlyph::ActionColumns,
-                    "Columns",
-                    is_columns,
-                    Rounding {
-                        nw: 0.0,
-                        sw: 0.0,
-                        ne: 6.0,
-                        se: 6.0,
-                    },
-                )
-                .clicked()
-                {
-                    self.view_mode = ViewMode::Columns;
-                }
-
-                let is_grid = self.view_mode == ViewMode::Grid;
-                if glyph_button(ui, IconGlyph::ActionView, "Icons", is_grid, Rounding::ZERO)
-                    .clicked()
-                {
-                    self.view_mode = ViewMode::Grid;
-                }
-
-                let is_details = self.view_mode == ViewMode::Details;
-                if glyph_button(
-                    ui,
-                    IconGlyph::ActionList,
-                    "List",
-                    is_details,
-                    Rounding {
-                        nw: 6.0,
-                        sw: 6.0,
-                        ne: 0.0,
-                        se: 0.0,
-                    },
-                )
-                .clicked()
-                {
-                    self.view_mode = ViewMode::Details;
-                }
+                    palette,
+                    self.icon_pack,
+                    self.view_mode,
+                    |new_m| switch_mode = new_m,
+                );
+                self.view_mode = switch_mode;
 
                 ui.add_space(6.0);
 
@@ -2996,13 +3174,8 @@ impl ExplorerView {
                     pinned_folders.push((entry.name.clone(), "Folder", [235, 175, 60], entry.path.clone()));
                 }
 
-                // Append Recycle Bin -> real system-drive $Recycle.Bin when available
-                let recycle_target = self
-                    .drives
-                    .iter()
-                    .find(|d| d.is_system)
-                    .map(|d| d.path.join("$Recycle.Bin"))
-                    .unwrap_or(base.clone());
+                // Append Recycle Bin -> resolved cross-platform Recycle Bin target
+                let recycle_target = crate::core::resolve_recycle_bin_target();
                 pinned_folders.push((
                     "Recycle Bin".to_string(),
                     "Recycle Bin",
@@ -3329,12 +3502,9 @@ impl ExplorerView {
             on_inspect_file,
         );
 
-        // Finder-style column metrics: [checkbox] Name | Kind | Size | Date Modified
+        // Finder-style column metrics: [checkbox] Name | Date Modified | Size | Kind
         let scrollbar_reserve = 12.0;
         let content_width = (ui.available_width() - scrollbar_reserve).max(320.0);
-        let kind_w = 118.0_f32;
-        let size_w = 92.0_f32;
-        let date_w = 138.0_f32;
         let col_pad = 6.0_f32;
         // Checkbox door is reserved for Always and Hover modes alike (stable
         // layout, no jump on reveal); Off collapses it entirely.
@@ -3342,7 +3512,20 @@ impl ExplorerView {
             CheckboxMode::Off => 0.0_f32,
             _ => 30.0_f32,
         };
-        let name_w = (content_width - checkbox_w - kind_w - size_w - date_w).max(220.0);
+        let available_for_cols = (content_width - checkbox_w).max(320.0);
+        let (name_w, date_w, size_w, kind_w) = if available_for_cols > 860.0 {
+            let n_w = (available_for_cols * 0.44).clamp(260.0, 520.0);
+            let d_w = (available_for_cols * 0.22).clamp(140.0, 210.0);
+            let s_w = (available_for_cols * 0.13).clamp(90.0, 130.0);
+            let k_w = (available_for_cols - n_w - d_w - s_w).max(110.0);
+            (n_w, d_w, s_w, k_w)
+        } else {
+            let k_w = 110.0_f32;
+            let s_w = 88.0_f32;
+            let d_w = 130.0_f32;
+            let n_w = (available_for_cols - k_w - s_w - d_w).max(180.0);
+            (n_w, d_w, s_w, k_w)
+        };
 
         // Column header: flat interactive labels, no button boxes, hairline underneath
         let header_h = 26.0_f32;
@@ -3351,19 +3534,20 @@ impl ExplorerView {
         let hp = ui.painter_at(header_rect);
 
         // Column rects (name starts with left inset so it aligns with row glyphs)
+        // Authentic macOS Finder order: Name | Date Modified | Size | Kind
         let cols = {
             let x0 = header_rect.left() + checkbox_w;
             let y0 = header_rect.top();
             (
                 Rect::from_min_size(Pos2::new(x0 + col_pad, y0), Vec2::new(name_w, header_h)),
-                Rect::from_min_size(Pos2::new(x0 + name_w, y0), Vec2::new(kind_w, header_h)),
+                Rect::from_min_size(Pos2::new(x0 + name_w, y0), Vec2::new(date_w, header_h)),
                 Rect::from_min_size(
-                    Pos2::new(x0 + name_w + kind_w, y0),
+                    Pos2::new(x0 + name_w + date_w, y0),
                     Vec2::new(size_w, header_h),
                 ),
                 Rect::from_min_size(
-                    Pos2::new(x0 + name_w + kind_w + size_w, y0),
-                    Vec2::new(date_w + col_pad, header_h),
+                    Pos2::new(x0 + name_w + date_w + size_w, y0),
+                    Vec2::new(kind_w + col_pad, header_h),
                 ),
             )
         };
@@ -3371,9 +3555,9 @@ impl ExplorerView {
         let mut header_sort: Option<SortColumn> = None;
         let header_cells: [(&str, Rect, SortColumn, bool); 4] = [
             ("Name", cols.0, SortColumn::Name, false),
-            ("Kind", cols.1, SortColumn::Extension, false),
+            ("Date Modified", cols.1, SortColumn::Date, false),
             ("Size", cols.2, SortColumn::Size, true),
-            ("Date Modified", cols.3, SortColumn::Date, true),
+            ("Kind", cols.3, SortColumn::Extension, false),
         ];
 
         for (label, hrect, col, right_align) in header_cells {
@@ -3468,7 +3652,7 @@ impl ExplorerView {
         let icon_pack = self.icon_pack;
         let menu_style = self.menu_style;
         let has_clipboard = !self.clipboard_paths.is_empty();
-        let tint = palette.accent;
+        let tint = palette.text_secondary;
 
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
@@ -3513,7 +3697,7 @@ impl ExplorerView {
 
                 for (idx, item) in entries.iter().enumerate() {
                     let is_selected = self.selected_paths.contains(&item.path);
-                    let row_height = 26.0_f32;
+                    let row_height = 30.0_f32;
 
                     let (row_rect, row_resp) = ui.allocate_exact_size(
                         Vec2::new(content_width, row_height),
@@ -3575,11 +3759,11 @@ impl ExplorerView {
                         icon_spec.color_rgb,
                     );
 
-                    // 1. Name cell: icon + name (right-truncated, Finder semantics)
+                    // 1. Name cell: icon + name (Finder semantics)
                     let name_x = row_rect.left() + col_pad + checkbox_w;
-                    let icon_side = 16.0;
+                    let icon_side = 22.0;
                     let icon_rect = Rect::from_center_size(
-                        Pos2::new(name_x + 6.0 + icon_side * 0.5, row_rect.center().y),
+                        Pos2::new(name_x + 2.0 + icon_side * 0.5, row_rect.center().y),
                         Vec2::splat(icon_side),
                     );
                     crate::core::icon_packs::paint_icon(
@@ -3600,13 +3784,13 @@ impl ExplorerView {
                             130,
                         );
                     }
-                    let name_font = egui::FontId::proportional(13.0);
+                    let name_font = egui::FontId::proportional(13.5);
                     // Tag dots sit immediately before the name, so the name
                     // shifts right by the width the dots occupy.
                     let row_tags = crate::core::tags::read_tags_cache(&item.path);
                     let dots_w = tag_dots_width(&row_tags);
                     let name_pos_x = name_x + 28.0 + dots_w;
-                    let name_avail = name_w - 34.0 - col_pad - dots_w;
+                    let name_avail = name_w - 32.0 - col_pad - dots_w;
                     let suffix = if item.is_symlink { " ->" } else { "" };
                     let display = truncate_middle(
                         &format!("{}{}", item.name, suffix),
@@ -3624,15 +3808,15 @@ impl ExplorerView {
                         paint_tag_dots(ui, &row_tags, name_pos_x - 4.0, row_rect.center().y);
                     }
 
-                    // 2. Kind cell (Finder "Kind": human category, dim)
-                    let kind_rect = Rect::from_min_size(
+                    // 2. Date Modified cell (macOS Finder order: right after Name)
+                    let date_rect = Rect::from_min_size(
                         Pos2::new(row_rect.left() + checkbox_w + name_w, row_rect.top()),
-                        Vec2::new(kind_w, row_height),
+                        Vec2::new(date_w, row_height),
                     );
                     rp.text(
-                        Pos2::new(kind_rect.left() + 2.0, kind_rect.center().y),
+                        Pos2::new(date_rect.left() + col_pad, date_rect.center().y),
                         egui::Align2::LEFT_CENTER,
-                        icon_spec.category,
+                        item.formatted_date(),
                         egui::FontId::proportional(12.0),
                         palette.text_secondary,
                     );
@@ -3640,7 +3824,7 @@ impl ExplorerView {
                     // 3. Size cell (right-aligned, monospace). Dirs report "--".
                     let size_rect = Rect::from_min_size(
                         Pos2::new(
-                            row_rect.left() + checkbox_w + name_w + kind_w,
+                            row_rect.left() + checkbox_w + name_w + date_w,
                             row_rect.top(),
                         ),
                         Vec2::new(size_w, row_height),
@@ -3658,18 +3842,18 @@ impl ExplorerView {
                         palette.text_secondary,
                     );
 
-                    // 4. Date Modified cell (right-aligned, dim)
-                    let date_rect = Rect::from_min_size(
+                    // 4. Kind cell (Finder "Kind": human category, dim)
+                    let kind_rect = Rect::from_min_size(
                         Pos2::new(
-                            row_rect.left() + checkbox_w + name_w + kind_w + size_w,
+                            row_rect.left() + checkbox_w + name_w + date_w + size_w,
                             row_rect.top(),
                         ),
-                        Vec2::new(date_w, row_height),
+                        Vec2::new(kind_w, row_height),
                     );
                     rp.text(
-                        Pos2::new(date_rect.right() - col_pad, date_rect.center().y),
-                        egui::Align2::RIGHT_CENTER,
-                        item.formatted_date(),
+                        Pos2::new(kind_rect.left() + 2.0, kind_rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        icon_spec.category,
                         egui::FontId::proportional(12.0),
                         palette.text_muted,
                     );
@@ -4578,18 +4762,13 @@ impl ExplorerView {
             }
         }
 
-        // Icon size is the user's base grid size doubled (2x icon rule) and
-        // scaled by the zoom level (Small -> Medium -> Large -> Extra large).
+        // Icon size scaled by the zoom level (Small -> Medium -> Large -> Extra large)
         let grid_zoom_scale = Self::EXPLORER_ZOOM_LEVELS[(self.explorer_zoom as usize).min(4)];
         let grid_checkboxes = self.checkbox_mode;
-        let icon_sz = (self.icon_size * 2.0 * grid_zoom_scale).clamp(64.0, 416.0);
-        let tile_w = icon_sz * 1.18;
-        let tile_h = icon_sz * 1.15;
+        let icon_sz = (self.icon_size * grid_zoom_scale).clamp(48.0, 160.0);
+        let tile_w = (icon_sz + 32.0).clamp(96.0, 180.0);
+        let tile_h = icon_sz + 52.0;
         let tile_size = Vec2::new(tile_w, tile_h);
-
-        // Labels grow with the icon ramp (apps +4px font bump included).
-        let name_font_sz = (icon_sz * 0.115 + 4.0).clamp(14.0, 34.0);
-        let size_font_sz = (icon_sz * 0.095 + 3.0).clamp(12.5, 26.0);
 
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
@@ -4626,7 +4805,7 @@ impl ExplorerView {
                 canvas_dragging = canvas_resp.dragged();
 
                 ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 10.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(14.0, 14.0);
 
                     for item in &entries {
                         let is_checked = self.selected_paths.contains(&item.path);
@@ -4636,10 +4815,53 @@ impl ExplorerView {
                             ui.allocate_exact_size(tile_size, egui::Sense::click_and_drag());
                         marquee_rects.push(rect);
 
-                        // Selection disclosure is the checkbox ONLY (no tile wash).
-                        let cb_sz = 18.0_f32;
+                        // Card background on hover or selection (subtle Apple HIG outline, never covers icons)
+                        if is_checked {
+                            ui.painter().rect_filled(
+                                rect,
+                                Rounding::same(8.0),
+                                Color32::from_rgba_premultiplied(
+                                    palette.accent.r(),
+                                    palette.accent.g(),
+                                    palette.accent.b(),
+                                    20,
+                                ),
+                            );
+                            ui.painter().rect_stroke(
+                                rect,
+                                Rounding::same(8.0),
+                                Stroke::new(1.2_f32, palette.accent),
+                            );
+                        } else if resp.hovered() {
+                            ui.painter().rect_filled(
+                                rect,
+                                Rounding::same(8.0),
+                                Color32::from_rgba_premultiplied(
+                                    palette.text_primary.r(),
+                                    palette.text_primary.g(),
+                                    palette.text_primary.b(),
+                                    12,
+                                ),
+                            );
+                            ui.painter().rect_stroke(
+                                rect,
+                                Rounding::same(8.0),
+                                Stroke::new(
+                                    1.0_f32,
+                                    Color32::from_rgba_premultiplied(
+                                        palette.border.r(),
+                                        palette.border.g(),
+                                        palette.border.b(),
+                                        120,
+                                    ),
+                                ),
+                            );
+                        }
+
+                        // Top zone: delicate selection checkbox in top-left
+                        let cb_sz = 13.0_f32;
                         let cb_rect = Rect::from_min_size(
-                            rect.left_top() + Vec2::new(9.0, 9.0),
+                            rect.left_top() + Vec2::new(8.0, 8.0),
                             Vec2::splat(cb_sz),
                         );
                         let cb_resp = ui.interact(
@@ -4725,10 +4947,12 @@ impl ExplorerView {
                             }
                         }
 
-                        // Center vector icon & file name (Apple/Finder proportions)
-                        let center = rect.center();
-                        let icon_y_offset = tile_h * 0.14;
-                        let badge_center = center - Vec2::new(0.0, icon_y_offset);
+                        // Middle zone: Icon / Thumbnail centered strictly below the header zone
+                        let top_bound = rect.top() + 24.0;
+                        let bot_bound = rect.bottom() - 62.0;
+                        let icon_zone_h = (bot_bound - top_bound).max(40.0);
+                        let icon_center = Pos2::new(rect.center().x, top_bound + icon_zone_h * 0.5);
+                        let icon_box_side = (icon_zone_h * 0.90).min(tile_w - 24.0);
 
                         // Image files: real thumbnail preview (lazily decoded, cached)
                         let thumb = if !item.is_dir && is_image_extension(&item.extension) {
@@ -4738,15 +4962,13 @@ impl ExplorerView {
                         };
 
                         if let Some(tex) = &thumb {
-                            // Cover-crop the thumbnail into the badge region
-                            let img_sz = (tile_h * 0.58).min(tile_w - 12.0);
                             let img_rect =
-                                Rect::from_center_size(badge_center, Vec2::splat(img_sz));
+                                Rect::from_center_size(icon_center, Vec2::splat(icon_box_side));
                             let tex_wh = tex.size_vec2();
                             let target_wh = img_rect.size();
                             let scale = (target_wh.x / tex_wh.x).max(target_wh.y / tex_wh.y);
                             let shown = tex_wh * scale;
-                            let crop = ((shown - target_wh) * 0.5) / (shown);
+                            let crop = ((shown - target_wh) * 0.5) / shown;
                             let uv = egui::Rect::from_min_max(
                                 egui::pos2(crop.x.max(0.0), crop.y.max(0.0)),
                                 egui::pos2(
@@ -4766,8 +4988,19 @@ impl ExplorerView {
                             );
                             ui.painter_at(img_rect)
                                 .image(tex.id(), img_rect, uv, Color32::WHITE);
+                            ui.painter().rect_stroke(
+                                img_rect,
+                                Rounding::same(6.0),
+                                Stroke::new(
+                                    1.0_f32,
+                                    if palette.is_dark {
+                                        Color32::from_rgba_premultiplied(255, 255, 255, 25)
+                                    } else {
+                                        Color32::from_rgba_premultiplied(0, 0, 0, 25)
+                                    },
+                                ),
+                            );
                         } else {
-                            // Large embedded vector icon (pack-agnostic, antialiased)
                             let (glyph, accent) = crate::core::icon_packs::IconGlyph::resolve(
                                 &item.name,
                                 &item.extension,
@@ -4779,9 +5012,8 @@ impl ExplorerView {
                                 icon_spec.is_code,
                                 icon_spec.color_rgb,
                             );
-                            let icon_block = (tile_w * 0.52).min(tile_h * 0.56);
                             let irect =
-                                Rect::from_center_size(badge_center, Vec2::splat(icon_block));
+                                Rect::from_center_size(icon_center, Vec2::splat(icon_box_side));
                             crate::core::icon_packs::paint_icon(
                                 ui,
                                 self.icon_pack,
@@ -4791,19 +5023,11 @@ impl ExplorerView {
                             );
                         }
 
-                        let max_chars = ((tile_w / 8.0) as usize).clamp(8, 22);
-                        // Grid mirrors Details conventions: symlink arrows and
-                        // dimmed-to-alpha text for hidden entries.
+                        // Bottom zone: Filename (wrapped up to 2 lines, macOS Finder style) + Crisp File Size
                         let symlink_suffix = if item.is_symlink { " ->" } else { "" };
-                        // Tag dots ride above the tile label, centred with it.
-                        // Finder draws them in the icon's bottom-left corner;
-                        // here they sit directly under the icon so they never
-                        // fight the label for horizontal space.
                         let tile_tags = crate::core::tags::read_tags_cache(&item.path);
-                        let display_name =
-                            truncate_middle(&format!("{}{}", item.name, symlink_suffix), max_chars);
+                        let raw_name = format!("{}{}", item.name, symlink_suffix);
 
-                        let name_y_offset = tile_h * 0.18;
                         let tile_name_color = if item.is_hidden {
                             Color32::from_rgba_premultiplied(
                                 palette.text_primary.r(),
@@ -4814,35 +5038,53 @@ impl ExplorerView {
                         } else {
                             palette.text_primary
                         };
-                        ui.painter().text(
-                            center + Vec2::new(0.0, name_y_offset),
-                            egui::Align2::CENTER_CENTER,
-                            display_name,
-                            egui::FontId::proportional(name_font_sz),
+
+                        let font_id =
+                            egui::FontId::proportional((icon_sz * 0.08 + 5.0).clamp(12.0, 14.0));
+                        let max_text_w = (tile_w - 18.0).max(60.0);
+                        let mut job = egui::text::LayoutJob::simple(
+                            raw_name,
+                            font_id,
+                            tile_name_color,
+                            max_text_w,
+                        );
+                        job.wrap.max_rows = 2;
+                        job.wrap.break_anywhere = true;
+                        let galley = ui.fonts(|f| f.layout_job(job));
+                        let name_w = galley.size().x;
+                        let name_h = galley.size().y;
+                        let name_x = (rect.center().x - name_w * 0.5).clamp(
+                            rect.left() + 8.0,
+                            (rect.right() - 8.0 - name_w).max(rect.left() + 8.0),
+                        );
+                        let name_y = rect.bottom() - 26.0 - name_h;
+                        ui.painter_at(rect).galley(
+                            Pos2::new(name_x, name_y),
+                            galley,
                             tile_name_color,
                         );
+
                         if !tile_tags.is_empty() {
-                            let dots_w = tag_dots_width(&tile_tags);
-                            paint_tag_dots(
-                                ui,
-                                &tile_tags,
-                                center.x + dots_w / 2.0 - 2.0,
-                                center.y + name_y_offset - name_font_sz * 0.85,
-                            );
+                            paint_tag_dots(ui, &tile_tags, rect.right() - 14.0, rect.top() + 14.0);
                         }
 
-                        let size_y_offset = tile_h * 0.33;
+                        let size_y = rect.bottom() - 11.0;
                         let size_text = if item.is_dir {
                             String::from("--")
                         } else {
                             item.formatted_size()
                         };
-                        ui.painter().text(
-                            center + Vec2::new(0.0, size_y_offset),
+                        let size_color = if palette.is_dark {
+                            Color32::from_rgb(150, 160, 175)
+                        } else {
+                            Color32::from_rgb(105, 115, 130)
+                        };
+                        ui.painter_at(rect).text(
+                            Pos2::new(rect.center().x, size_y),
                             egui::Align2::CENTER_CENTER,
                             size_text.as_str(),
-                            egui::FontId::monospace(size_font_sz),
-                            palette.text_muted,
+                            egui::FontId::proportional(11.0),
+                            size_color,
                         );
 
                         if resp.double_clicked() {
@@ -5081,322 +5323,159 @@ impl ExplorerView {
             .cloned()
             .collect();
         let mut nav_into_dir: Option<PathBuf> = None;
-        let mut subfolder_to_load: Option<PathBuf> = None;
+        let mut subfolder_to_load: Option<(usize, PathBuf)> = None;
         let mut preview_to_set: Option<FileItem> = None;
         let mut peek_to_open: Option<FileItem> = None;
         let mut column_drop: Option<DropOp> = None;
 
+        if self.column_stack.is_empty() && self.column_preview_item.is_none() {
+            if let Some(first) = entries.first() {
+                if first.is_dir {
+                    let sub_entries = self.get_column_entries(&first.path);
+                    self.column_stack.push((first.path.clone(), sub_entries));
+                } else {
+                    self.column_preview_item = Some(first.clone());
+                }
+            }
+        }
+
+        let full_h = ui.available_height().max(320.0);
         egui::ScrollArea::horizontal()
-            .auto_shrink([false; 2])
+            .id_salt("miller_outer_hscroll")
+            .auto_shrink([false, false])
             .show(ui, |ui| {
+                ui.set_height(full_h);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(1.0, 0.0);
 
                     // ==========================================
-                    // COLUMN 1: Current Directory
+                    // DYNAMIC MILLER COLUMNS: Maximize Space Utilization
                     // ==========================================
-                    let col1_w = 240.0_f32;
-                    let col_h = ui.available_height();
+                    let active_preview = self.column_preview_item.clone();
+                    let has_inspector = active_preview.as_ref().map(|item| !item.is_dir).unwrap_or(false);
+                    let avail_w = ui.available_width().max(400.0);
+                    let inspector_w = if has_inspector {
+                        (avail_w * 0.28).clamp(280.0, 420.0)
+                    } else {
+                        0.0
+                    };
+                    let num_cols = (self.column_stack.len() + 1) as f32;
+                    let cols_avail_w = (avail_w - inspector_w - (num_cols * 2.0)).max(220.0);
+                    let natural_col_w = cols_avail_w / num_cols;
+                    let col_w = natural_col_w.max(230.0);
+                    let col1_w = col_w;
 
-                    egui::Frame::none()
-                        .fill(Color32::from_rgba_premultiplied(
-                            palette.card_bg.r(),
-                            palette.card_bg.g(),
-                            palette.card_bg.b(),
-                            180,
-                        ))
-                        .stroke(Stroke::new(1.0_f32, palette.border))
-                        .show(ui, |ui| {
-                            ui.set_width(col1_w);
-                            ui.set_height(col_h);
-                            egui::ScrollArea::vertical()
-                                .auto_shrink([false; 2])
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(col1_w, full_h),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            egui::Frame::none()
+                                .fill(palette.card_bg)
+                                .stroke(Stroke::new(1.0_f32, palette.border))
                                 .show(ui, |ui| {
-                                    for (idx, item) in entries.iter().enumerate() {
-                                        let is_selected = self.selected_paths.contains(&item.path)
-                                            || self.focused_row == idx;
-                                        let icon_spec = resolve_file_icon(
-                                            &item.name,
-                                            &item.extension,
-                                            item.is_dir,
-                                        );
-
-                                        let symlink_suffix =
-                                            if item.is_symlink { " ->" } else { "" };
-                                        let display_name = truncate_middle(
-                                            &format!("{}{}", item.name, symlink_suffix),
-                                            (col1_w / 7.0) as usize,
-                                        );
-                                        let name_text = if item.is_dir {
-                                            format!("{}  >", display_name)
-                                        } else {
-                                            display_name
-                                        };
-
-                                        let (row_rect, resp) = ui.allocate_exact_size(
-                                            Vec2::new(col1_w - 8.0, 24.0),
-                                            egui::Sense::click_and_drag(),
-                                        );
-                                        // Drag source + folder-row drop targets
-                                        // (columns view, move/Ctrl-copy parity).
-                                        if resp.drag_started_by(egui::PointerButton::Primary) {
-                                            if !is_selected {
-                                                self.selected_paths.clear();
-                                                self.selected_paths.insert(item.path.clone());
-                                            }
-                                            let paths: Vec<PathBuf> = self
-                                                .selected_paths
-                                                .iter()
-                                                .cloned()
-                                                .collect::<Vec<_>>();
-                                            egui::DragAndDrop::set_payload(
-                                                ui.ctx(),
-                                                FileDragPayload { paths },
-                                            );
-                                        }
-                                        if item.is_dir {
-                                            let drop_hl = drop_highlight_id(&item.path);
-                                            if let Some(payload) =
-                                                resp.dnd_hover_payload::<FileDragPayload>()
-                                            {
-                                                let legal = payload
-                                                    .paths
-                                                    .iter()
-                                                    .all(|p| !same_or_within(&item.path, p));
-                                                if legal {
-                                                    let a = self.hover_anims.drive(
-                                                        drop_hl,
-                                                        1.0,
-                                                        self.animations.hover,
-                                                        crate::gui::anim::frame_dt(ui.ctx()),
+                                    ui.set_min_size(Vec2::new(col1_w, full_h));
+                                    egui::ScrollArea::vertical()
+                                        .id_salt("miller_col_scroll_0")
+                                        .auto_shrink([false, false])
+                                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                                        .show(ui, |ui| {
+                                            ui.vertical(|ui| {
+                                                for (idx, item) in entries.iter().enumerate() {
+                                                    let is_selected =
+                                                        self.selected_paths.contains(&item.path)
+                                                            || self.focused_row == idx;
+                                                    let icon_spec = resolve_file_icon(
+                                                        &item.name,
+                                                        &item.extension,
+                                                        item.is_dir,
                                                     );
-                                                    ui.painter().rect_filled(
-                                                        row_rect,
-                                                        Rounding::same(5.0),
-                                                        Color32::from_rgba_premultiplied(
-                                                            palette.accent.r(),
-                                                            palette.accent.g(),
-                                                            palette.accent.b(),
-                                                            (a * 80.0) as u8,
-                                                        ),
+
+                                                    let symlink_suffix =
+                                                        if item.is_symlink { " ->" } else { "" };
+                                                    let display_name = truncate_middle(
+                                                        &format!("{}{}", item.name, symlink_suffix),
+                                                        (col1_w / 8.5) as usize,
                                                     );
-                                                }
-                                            } else {
-                                                self.hover_anims.drive(
-                                                    drop_hl,
-                                                    0.0,
-                                                    self.animations.hover,
-                                                    crate::gui::anim::frame_dt(ui.ctx()),
-                                                );
-                                            }
-                                            if let Some(payload) =
-                                                resp.dnd_release_payload::<FileDragPayload>()
-                                            {
-                                                let copy = ui.input(|i| {
-                                                    i.modifiers.ctrl || i.modifiers.command
-                                                });
-                                                column_drop = Some((
-                                                    item.path.clone(),
-                                                    payload.paths.to_vec(),
-                                                    copy,
-                                                ));
-                                            }
-                                        }
-                                        // Row band: hover/selected
-                                        if is_selected {
-                                            ui.painter().rect_filled(
-                                                row_rect,
-                                                Rounding::same(5.0),
-                                                Color32::from_rgba_premultiplied(
-                                                    palette.accent.r(),
-                                                    palette.accent.g(),
-                                                    palette.accent.b(),
-                                                    38,
-                                                ),
-                                            );
-                                        } else if resp.hovered() {
-                                            ui.painter().rect_filled(
-                                                row_rect,
-                                                Rounding::same(5.0),
-                                                Color32::from_rgba_premultiplied(
-                                                    palette.accent.r(),
-                                                    palette.accent.g(),
-                                                    palette.accent.b(),
-                                                    18,
-                                                ),
-                                            );
-                                        }
-                                        // Pack vector icon on left
-                                        let (icon_glyph, accent_rgb) =
-                                            crate::core::icon_packs::IconGlyph::resolve(
-                                                &item.name,
-                                                &item.extension,
-                                                item.is_dir,
-                                                icon_spec.is_image,
-                                                icon_spec.is_media,
-                                                icon_spec.is_archive,
-                                                icon_spec.is_document,
-                                                icon_spec.is_code,
-                                                icon_spec.color_rgb,
-                                            );
-                                        let icon_rect = Rect::from_center_size(
-                                            Pos2::new(row_rect.left() + 10.0, row_rect.center().y),
-                                            Vec2::splat(17.0),
-                                        );
-                                        crate::core::icon_packs::paint_icon(
-                                            ui,
-                                            self.icon_pack,
-                                            icon_glyph,
-                                            icon_rect,
-                                            accent_rgb,
-                                        );
-                                        // Name text right of icon
-                                        let name_color = if is_selected {
-                                            palette.text_primary
-                                        } else if item.is_hidden {
-                                            palette.text_muted
-                                        } else {
-                                            palette.text_primary
-                                        };
-                                        // Tag dots sit between the icon and the
-                                        // name, so the name shifts right by the
-                                        // width the dots occupy.
-                                        let col_tags =
-                                            crate::core::tags::read_tags_cache(&item.path);
-                                        let col_dots_w = tag_dots_width(&col_tags);
-                                        let col_name_x = row_rect.left() + 24.0 + col_dots_w;
-                                        ui.painter().text(
-                                            Pos2::new(col_name_x, row_rect.center().y),
-                                            egui::Align2::LEFT_CENTER,
-                                            name_text,
-                                            egui::FontId::proportional(13.0),
-                                            name_color,
-                                        );
-                                        if !col_tags.is_empty() {
-                                            paint_tag_dots(
-                                                ui,
-                                                &col_tags,
-                                                col_name_x - 4.0,
-                                                row_rect.center().y,
-                                            );
-                                        }
-                                        if resp.clicked() {
-                                            self.focused_row = idx;
-                                            self.selected_paths.clear();
-                                            self.selected_paths.insert(item.path.clone());
-                                            if item.is_dir {
-                                                subfolder_to_load = Some(item.path.clone());
-                                                preview_to_set = None;
-                                            } else {
-                                                preview_to_set = Some(item.clone());
-                                                self.column_subfolder = None;
-                                            }
-                                        }
-                                        if resp.double_clicked() {
-                                            if item.is_dir {
-                                                nav_into_dir = Some(item.path.clone());
-                                            } else {
-                                                open_in_default_app(&item.path);
-                                            }
-                                        }
-                                    }
-                                });
-                        });
 
-                    // ==========================================
-                    // COLUMN 2: Subfolder Contents (if any)
-                    // ==========================================
-                    if let Some((sub_path, sub_items)) = &self.column_subfolder {
-                        let col2_w = 240.0_f32;
-                        egui::Frame::none()
-                            .fill(Color32::from_rgba_premultiplied(
-                                palette.card_bg.r(),
-                                palette.card_bg.g(),
-                                palette.card_bg.b(),
-                                180,
-                            ))
-                            .stroke(Stroke::new(1.0_f32, palette.border))
-                            .show(ui, |ui| {
-                                ui.set_width(col2_w);
-                                ui.set_height(col_h);
-                                egui::ScrollArea::vertical().auto_shrink([false; 2]).show(
-                                    ui,
-                                    |ui| {
-                                        let sub_name = sub_path
-                                            .file_name()
-                                            .map(|n| n.to_string_lossy().to_string())
-                                            .unwrap_or_else(|| "Folder".into());
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            ui.add_space(6.0);
-                                            ui.label(
-                                                egui::RichText::new(&sub_name)
-                                                    .size(13.0)
-                                                    .strong()
-                                                    .color(palette.text_muted),
-                                            );
-                                        });
-                                        ui.separator();
-
-                                        for sub_item in sub_items {
-                                            let is_sel =
-                                                self.selected_paths.contains(&sub_item.path);
-                                            let icon_spec = resolve_file_icon(
-                                                &sub_item.name,
-                                                &sub_item.extension,
-                                                sub_item.is_dir,
-                                            );
-
-                                            let symlink_suffix =
-                                                if sub_item.is_symlink { " ->" } else { "" };
-                                            let display_name = truncate_middle(
-                                                &format!("{}{}", sub_item.name, symlink_suffix),
-                                                (col2_w / 7.0) as usize,
-                                            );
-                                            let name_text = if sub_item.is_dir {
-                                                format!("{}  >", display_name)
-                                            } else {
-                                                display_name
-                                            };
-
-                                            let (row_rect, resp) = ui.allocate_exact_size(
-                                                Vec2::new(col2_w - 8.0, 24.0),
-                                                egui::Sense::click_and_drag(),
-                                            );
-                                            // Drag source + folder-row drop
-                                            // targets (subfolder column has
-                                            // the same parity as column 1).
-                                            if resp.drag_started_by(egui::PointerButton::Primary) {
-                                                if !is_sel {
-                                                    self.selected_paths.clear();
-                                                    self.selected_paths
-                                                        .insert(sub_item.path.clone());
-                                                }
-                                                let paths: Vec<PathBuf> = self
-                                                    .selected_paths
-                                                    .iter()
-                                                    .cloned()
-                                                    .collect::<Vec<_>>();
-                                                egui::DragAndDrop::set_payload(
-                                                    ui.ctx(),
-                                                    FileDragPayload { paths },
-                                                );
-                                            }
-                                            if sub_item.is_dir {
-                                                let drop_hl = drop_highlight_id(&sub_item.path);
-                                                if let Some(payload) =
-                                                    resp.dnd_hover_payload::<FileDragPayload>()
-                                                {
-                                                    let legal = payload.paths.iter().all(|p| {
-                                                        !same_or_within(&sub_item.path, p)
-                                                    });
-                                                    if legal {
-                                                        let a = self.hover_anims.drive(
-                                                            drop_hl,
-                                                            1.0,
-                                                            self.animations.hover,
-                                                            crate::gui::anim::frame_dt(ui.ctx()),
+                                                    let (row_rect, resp) = ui.allocate_exact_size(
+                                                        Vec2::new(col1_w - 6.0, 30.0),
+                                                        egui::Sense::click_and_drag(),
+                                                    );
+                                                    // Drag source + folder-row drop targets
+                                                    if resp.drag_started_by(
+                                                        egui::PointerButton::Primary,
+                                                    ) {
+                                                        if !is_selected {
+                                                            self.selected_paths.clear();
+                                                            self.selected_paths
+                                                                .insert(item.path.clone());
+                                                        }
+                                                        let paths: Vec<PathBuf> = self
+                                                            .selected_paths
+                                                            .iter()
+                                                            .cloned()
+                                                            .collect::<Vec<_>>();
+                                                        egui::DragAndDrop::set_payload(
+                                                            ui.ctx(),
+                                                            FileDragPayload { paths },
                                                         );
+                                                    }
+                                                    if item.is_dir {
+                                                        let drop_hl = drop_highlight_id(&item.path);
+                                                        if let Some(payload) = resp
+                                                            .dnd_hover_payload::<FileDragPayload>()
+                                                        {
+                                                            let legal =
+                                                                payload.paths.iter().all(|p| {
+                                                                    !same_or_within(&item.path, p)
+                                                                });
+                                                            if legal {
+                                                                let a = self.hover_anims.drive(
+                                                                    drop_hl,
+                                                                    1.0,
+                                                                    self.animations.hover,
+                                                                    crate::gui::anim::frame_dt(
+                                                                        ui.ctx(),
+                                                                    ),
+                                                                );
+                                                                ui.painter().rect_filled(
+                                                            row_rect,
+                                                            Rounding::same(5.0),
+                                                            Color32::from_rgba_premultiplied(
+                                                                palette.accent.r(),
+                                                                palette.accent.g(),
+                                                                palette.accent.b(),
+                                                                (a * 80.0) as u8,
+                                                            ),
+                                                        );
+                                                            }
+                                                        } else {
+                                                            self.hover_anims.drive(
+                                                                drop_hl,
+                                                                0.0,
+                                                                self.animations.hover,
+                                                                crate::gui::anim::frame_dt(
+                                                                    ui.ctx(),
+                                                                ),
+                                                            );
+                                                        }
+                                                        if let Some(payload) = resp
+                                                            .dnd_release_payload::<FileDragPayload>(
+                                                            )
+                                                        {
+                                                            let copy = ui.input(|i| {
+                                                                i.modifiers.ctrl
+                                                                    || i.modifiers.command
+                                                            });
+                                                            column_drop = Some((
+                                                                item.path.clone(),
+                                                                payload.paths.to_vec(),
+                                                                copy,
+                                                            ));
+                                                        }
+                                                    }
+                                                    // Row band: hover/selected
+                                                    if is_selected {
                                                         ui.painter().rect_filled(
                                                             row_rect,
                                                             Rounding::same(5.0),
@@ -5404,142 +5483,392 @@ impl ExplorerView {
                                                                 palette.accent.r(),
                                                                 palette.accent.g(),
                                                                 palette.accent.b(),
-                                                                (a * 70.0) as u8,
+                                                                38,
+                                                            ),
+                                                        );
+                                                    } else if resp.hovered() {
+                                                        ui.painter().rect_filled(
+                                                            row_rect,
+                                                            Rounding::same(5.0),
+                                                            Color32::from_rgba_premultiplied(
+                                                                palette.accent.r(),
+                                                                palette.accent.g(),
+                                                                palette.accent.b(),
+                                                                18,
                                                             ),
                                                         );
                                                     }
-                                                } else {
-                                                    self.hover_anims.drive(
-                                                        drop_hl,
-                                                        0.0,
-                                                        self.animations.hover,
-                                                        crate::gui::anim::frame_dt(ui.ctx()),
+                                                    // Pack vector icon on left
+                                                    let (icon_glyph, accent_rgb) =
+                                                        crate::core::icon_packs::IconGlyph::resolve(
+                                                            &item.name,
+                                                            &item.extension,
+                                                            item.is_dir,
+                                                            icon_spec.is_image,
+                                                            icon_spec.is_media,
+                                                            icon_spec.is_archive,
+                                                            icon_spec.is_document,
+                                                            icon_spec.is_code,
+                                                            icon_spec.color_rgb,
+                                                        );
+                                                    let icon_rect = Rect::from_center_size(
+                                                        Pos2::new(
+                                                            row_rect.left() + 16.0,
+                                                            row_rect.center().y,
+                                                        ),
+                                                        Vec2::splat(22.0),
                                                     );
+                                                    crate::core::icon_packs::paint_icon(
+                                                        ui,
+                                                        self.icon_pack,
+                                                        icon_glyph,
+                                                        icon_rect,
+                                                        accent_rgb,
+                                                    );
+                                                    // Name text right of icon
+                                                    let name_color = if is_selected {
+                                                        palette.text_primary
+                                                    } else if item.is_hidden {
+                                                        palette.text_muted
+                                                    } else {
+                                                        palette.text_primary
+                                                    };
+                                                    let col_tags =
+                                                        crate::core::tags::read_tags_cache(
+                                                            &item.path,
+                                                        );
+                                                    let col_dots_w = tag_dots_width(&col_tags);
+                                                    let col_name_x =
+                                                        row_rect.left() + 34.0 + col_dots_w;
+                                                    ui.painter().text(
+                                                        Pos2::new(col_name_x, row_rect.center().y),
+                                                        egui::Align2::LEFT_CENTER,
+                                                        &display_name,
+                                                        egui::FontId::proportional(13.5),
+                                                        name_color,
+                                                    );
+                                                    if !col_tags.is_empty() {
+                                                        paint_tag_dots(
+                                                            ui,
+                                                            &col_tags,
+                                                            col_name_x - 4.0,
+                                                            row_rect.center().y,
+                                                        );
+                                                    }
+                                                    // Folder chevron on far right (Finder style)
+                                                    if item.is_dir {
+                                                        ui.painter().text(
+                                                            Pos2::new(
+                                                                row_rect.right() - 8.0,
+                                                                row_rect.center().y,
+                                                            ),
+                                                            egui::Align2::RIGHT_CENTER,
+                                                            ">",
+                                                            egui::FontId::proportional(14.0),
+                                                            if is_selected {
+                                                                palette.accent
+                                                            } else {
+                                                                palette.text_muted
+                                                            },
+                                                        );
+                                                    }
+                                                    if resp.clicked() {
+                                                        self.focused_row = idx;
+                                                        self.selected_paths.clear();
+                                                        self.selected_paths
+                                                            .insert(item.path.clone());
+                                                        if item.is_dir {
+                                                            subfolder_to_load =
+                                                                Some((0, item.path.clone()));
+                                                            self.column_preview_item = None;
+                                                            preview_to_set = None;
+                                                        } else {
+                                                            preview_to_set = Some(item.clone());
+                                                            self.column_stack.clear();
+                                                            self.column_subfolder = None;
+                                                        }
+                                                    }
+                                                    if resp.double_clicked() {
+                                                        if item.is_dir {
+                                                            nav_into_dir = Some(item.path.clone());
+                                                        } else {
+                                                            open_in_default_app(&item.path);
+                                                        }
+                                                    }
                                                 }
-                                                if let Some(payload) =
-                                                    resp.dnd_release_payload::<FileDragPayload>()
-                                                {
-                                                    let copy = ui.input(|i| {
-                                                        i.modifiers.ctrl || i.modifiers.command
-                                                    });
-                                                    column_drop = Some((
-                                                        sub_item.path.clone(),
-                                                        payload.paths.to_vec(),
-                                                        copy,
-                                                    ));
-                                                }
-                                            }
-                                            if is_sel {
-                                                ui.painter().rect_filled(
-                                                    row_rect,
-                                                    Rounding::same(5.0),
-                                                    Color32::from_rgba_premultiplied(
-                                                        palette.accent.r(),
-                                                        palette.accent.g(),
-                                                        palette.accent.b(),
-                                                        38,
-                                                    ),
-                                                );
-                                            } else if resp.hovered() {
-                                                ui.painter().rect_filled(
-                                                    row_rect,
-                                                    Rounding::same(5.0),
-                                                    Color32::from_rgba_premultiplied(
-                                                        palette.accent.r(),
-                                                        palette.accent.g(),
-                                                        palette.accent.b(),
-                                                        18,
-                                                    ),
-                                                );
-                                            }
-                                            let (cglyph, caccent) =
-                                                crate::core::icon_packs::IconGlyph::resolve(
-                                                    &sub_item.name,
-                                                    &sub_item.extension,
-                                                    sub_item.is_dir,
-                                                    icon_spec.is_image,
-                                                    icon_spec.is_media,
-                                                    icon_spec.is_archive,
-                                                    icon_spec.is_document,
-                                                    icon_spec.is_code,
-                                                    icon_spec.color_rgb,
-                                                );
-                                            let icon_rect = Rect::from_center_size(
-                                                Pos2::new(
-                                                    row_rect.left() + 10.0,
-                                                    row_rect.center().y,
-                                                ),
-                                                Vec2::splat(17.0),
-                                            );
-                                            crate::core::icon_packs::paint_icon(
-                                                ui,
-                                                self.icon_pack,
-                                                cglyph,
-                                                icon_rect,
-                                                caccent,
-                                            );
-                                            let name_color = if is_sel {
-                                                palette.text_primary
-                                            } else if sub_item.is_hidden {
-                                                palette.text_muted
-                                            } else {
-                                                palette.text_primary
-                                            };
-                                            ui.painter().text(
-                                                Pos2::new(
-                                                    row_rect.left() + 24.0,
-                                                    row_rect.center().y,
-                                                ),
-                                                egui::Align2::LEFT_CENTER,
-                                                name_text,
-                                                egui::FontId::proportional(13.0),
-                                                name_color,
-                                            );
-                                            if resp.clicked() {
-                                                self.selected_paths.clear();
-                                                self.selected_paths.insert(sub_item.path.clone());
-                                                preview_to_set = Some(sub_item.clone());
-                                            }
-                                            if resp.double_clicked() {
-                                                if sub_item.is_dir {
-                                                    nav_into_dir = Some(sub_item.path.clone());
-                                                } else {
-                                                    open_in_default_app(&sub_item.path);
-                                                }
-                                            }
-                                        }
-                                    },
-                                );
-                            });
+                                            });
+                                        });
+                                });
+                        },
+                    );
+
+                    // ==========================================
+                    // MULTI-COLUMN STACK: Nested Subfolders (macOS Finder Parity)
+                    // ==========================================
+                    for (col_idx, (_sub_path, sub_items)) in
+                        self.column_stack.clone().into_iter().enumerate()
+                    {
+                        ui.allocate_ui_with_layout(
+                            Vec2::new(col_w, full_h),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                egui::Frame::none()
+                                    .fill(palette.card_bg)
+                                    .stroke(Stroke::new(1.0_f32, palette.border))
+                                    .show(ui, |ui| {
+                                        ui.set_min_size(Vec2::new(col_w, full_h));
+                                        egui::ScrollArea::vertical()
+                                            .id_salt(("miller_col_scroll_child", col_idx))
+                                            .auto_shrink([false, false])
+                                            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                                            .show(ui, |ui| {
+                                                ui.vertical(|ui| {
+                                                    for sub_item in &sub_items {
+                                                        let is_sel = self
+                                                            .selected_paths
+                                                            .contains(&sub_item.path);
+                                                        let icon_spec = resolve_file_icon(
+                                                            &sub_item.name,
+                                                            &sub_item.extension,
+                                                            sub_item.is_dir,
+                                                        );
+
+                                                        let symlink_suffix = if sub_item.is_symlink
+                                                        {
+                                                            " ->"
+                                                        } else {
+                                                            ""
+                                                        };
+                                                        let display_name = truncate_middle(
+                                                            &format!(
+                                                                "{}{}",
+                                                                sub_item.name, symlink_suffix
+                                                            ),
+                                                            (col_w / 8.5) as usize,
+                                                        );
+
+                                                        let (row_rect, resp) = ui
+                                                            .allocate_exact_size(
+                                                                Vec2::new(col_w - 6.0, 30.0),
+                                                                egui::Sense::click_and_drag(),
+                                                            );
+                                                        // Drag source + folder-row drop targets
+                                                        if resp.drag_started_by(
+                                                            egui::PointerButton::Primary,
+                                                        ) {
+                                                            if !is_sel {
+                                                                self.selected_paths.clear();
+                                                                self.selected_paths
+                                                                    .insert(sub_item.path.clone());
+                                                            }
+                                                            let paths: Vec<PathBuf> = self
+                                                                .selected_paths
+                                                                .iter()
+                                                                .cloned()
+                                                                .collect::<Vec<_>>();
+                                                            egui::DragAndDrop::set_payload(
+                                                                ui.ctx(),
+                                                                FileDragPayload { paths },
+                                                            );
+                                                        }
+                                                        if sub_item.is_dir {
+                                                            let drop_hl =
+                                                                drop_highlight_id(&sub_item.path);
+                                                            if let Some(payload) =
+                                                        resp.dnd_hover_payload::<FileDragPayload>()
+                                                    {
+                                                        let legal = payload.paths.iter().all(|p| {
+                                                            !same_or_within(&sub_item.path, p)
+                                                        });
+                                                        if legal {
+                                                            let a = self.hover_anims.drive(
+                                                                drop_hl,
+                                                                1.0,
+                                                                self.animations.hover,
+                                                                crate::gui::anim::frame_dt(
+                                                                    ui.ctx(),
+                                                                ),
+                                                            );
+                                                            ui.painter().rect_filled(
+                                                                row_rect,
+                                                                Rounding::same(5.0),
+                                                                Color32::from_rgba_premultiplied(
+                                                                    palette.accent.r(),
+                                                                    palette.accent.g(),
+                                                                    palette.accent.b(),
+                                                                    (a * 70.0) as u8,
+                                                                ),
+                                                            );
+                                                        }
+                                                    } else {
+                                                        self.hover_anims.drive(
+                                                            drop_hl,
+                                                            0.0,
+                                                            self.animations.hover,
+                                                            crate::gui::anim::frame_dt(ui.ctx()),
+                                                        );
+                                                    }
+                                                            if let Some(payload) = resp
+                                                        .dnd_release_payload::<FileDragPayload>()
+                                                    {
+                                                        let copy = ui.input(|i| {
+                                                            i.modifiers.ctrl || i.modifiers.command
+                                                        });
+                                                        column_drop = Some((
+                                                            sub_item.path.clone(),
+                                                            payload.paths.to_vec(),
+                                                            copy,
+                                                        ));
+                                                    }
+                                                        }
+                                                        if is_sel {
+                                                            ui.painter().rect_filled(
+                                                                row_rect,
+                                                                Rounding::same(5.0),
+                                                                Color32::from_rgba_premultiplied(
+                                                                    palette.accent.r(),
+                                                                    palette.accent.g(),
+                                                                    palette.accent.b(),
+                                                                    38,
+                                                                ),
+                                                            );
+                                                        } else if resp.hovered() {
+                                                            ui.painter().rect_filled(
+                                                                row_rect,
+                                                                Rounding::same(5.0),
+                                                                Color32::from_rgba_premultiplied(
+                                                                    palette.accent.r(),
+                                                                    palette.accent.g(),
+                                                                    palette.accent.b(),
+                                                                    18,
+                                                                ),
+                                                            );
+                                                        }
+                                                        let (cglyph, caccent) =
+                                                    crate::core::icon_packs::IconGlyph::resolve(
+                                                        &sub_item.name,
+                                                        &sub_item.extension,
+                                                        sub_item.is_dir,
+                                                        icon_spec.is_image,
+                                                        icon_spec.is_media,
+                                                        icon_spec.is_archive,
+                                                        icon_spec.is_document,
+                                                        icon_spec.is_code,
+                                                        icon_spec.color_rgb,
+                                                    );
+                                                        let icon_rect = Rect::from_center_size(
+                                                            Pos2::new(
+                                                                row_rect.left() + 16.0,
+                                                                row_rect.center().y,
+                                                            ),
+                                                            Vec2::splat(22.0),
+                                                        );
+                                                        crate::core::icon_packs::paint_icon(
+                                                            ui,
+                                                            self.icon_pack,
+                                                            cglyph,
+                                                            icon_rect,
+                                                            caccent,
+                                                        );
+                                                        let name_color = if is_sel {
+                                                            palette.text_primary
+                                                        } else if sub_item.is_hidden {
+                                                            palette.text_muted
+                                                        } else {
+                                                            palette.text_primary
+                                                        };
+                                                        ui.painter().text(
+                                                            Pos2::new(
+                                                                row_rect.left() + 34.0,
+                                                                row_rect.center().y,
+                                                            ),
+                                                            egui::Align2::LEFT_CENTER,
+                                                            &display_name,
+                                                            egui::FontId::proportional(13.5),
+                                                            name_color,
+                                                        );
+                                                        // Folder chevron on far right
+                                                        if sub_item.is_dir {
+                                                            ui.painter().text(
+                                                                Pos2::new(
+                                                                    row_rect.right() - 8.0,
+                                                                    row_rect.center().y,
+                                                                ),
+                                                                egui::Align2::RIGHT_CENTER,
+                                                                ">",
+                                                                egui::FontId::proportional(14.0),
+                                                                if is_sel {
+                                                                    palette.accent
+                                                                } else {
+                                                                    palette.text_muted
+                                                                },
+                                                            );
+                                                        }
+                                                        if resp.clicked() {
+                                                            self.selected_paths.clear();
+                                                            self.selected_paths
+                                                                .insert(sub_item.path.clone());
+                                                            if sub_item.is_dir {
+                                                                subfolder_to_load = Some((
+                                                                    col_idx + 1,
+                                                                    sub_item.path.clone(),
+                                                                ));
+                                                                self.column_preview_item = None;
+                                                                preview_to_set = None;
+                                                            } else {
+                                                                preview_to_set =
+                                                                    Some(sub_item.clone());
+                                                                let new_len = col_idx + 1;
+                                                                self.column_stack.truncate(new_len);
+                                                            }
+                                                        }
+                                                        if resp.double_clicked() {
+                                                            if sub_item.is_dir {
+                                                                nav_into_dir =
+                                                                    Some(sub_item.path.clone());
+                                                            } else {
+                                                                open_in_default_app(&sub_item.path);
+                                                            }
+                                                        }
+                                                    }
+                                                });
+                                            });
+                                    });
+                            },
+                        );
                     }
 
                     // ==========================================
-                    // COLUMN 3: macOS Inspector Card / File Preview
+                    // macOS Inspector Card / File Preview (Files Only!)
                     // ==========================================
-                    let active_preview = self
-                        .column_preview_item
-                        .clone()
-                        .or_else(|| entries.get(self.focused_row).cloned());
-
                     if let Some(ref item) = active_preview {
-                        let inspector_w = 280.0_f32;
-                        self.render_inspector_card(
-                            ui,
-                            palette,
-                            item,
-                            inspector_w,
-                            col_h,
-                            on_transcode_target,
-                            on_pack_archive,
-                            &mut peek_to_open,
-                        );
+                        if !item.is_dir {
+                            ui.allocate_ui_with_layout(
+                                Vec2::new(inspector_w, full_h),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    self.render_inspector_card(
+                                        ui,
+                                        palette,
+                                        item,
+                                        inspector_w,
+                                        full_h,
+                                        on_transcode_target,
+                                        on_pack_archive,
+                                        &mut peek_to_open,
+                                    );
+                                },
+                            );
+                        }
                     }
                 });
             });
 
-        if let Some(sub_path) = subfolder_to_load {
-            let sub_entries = list_directory_sync(&sub_path);
-            self.column_subfolder = Some((sub_path, sub_entries));
+        if let Some((insert_idx, sub_path)) = subfolder_to_load {
+            let sub_entries = self.get_column_entries(&sub_path);
+            self.column_stack.truncate(insert_idx);
+            self.column_stack.push((sub_path, sub_entries));
+            self.column_subfolder = self.column_stack.first().cloned();
         }
         if let Some(preview_item) = preview_to_set {
             self.column_preview_item = Some(preview_item);
@@ -5570,19 +5899,14 @@ impl ExplorerView {
         let item_clone = item.clone();
 
         egui::Frame::none()
-            .fill(Color32::from_rgba_premultiplied(
-                palette.card_bg.r(),
-                palette.card_bg.g(),
-                palette.card_bg.b(),
-                220,
-            ))
+            .fill(palette.card_bg)
             .stroke(Stroke::new(1.0_f32, palette.border))
             .inner_margin(egui::Margin::same(12.0))
             .show(ui, |ui| {
-                ui.set_width(inspector_w);
-                ui.set_height(col_h);
+                ui.set_min_size(Vec2::new(inspector_w, col_h));
                 egui::ScrollArea::vertical()
-                    .auto_shrink([false; 2])
+                    .id_salt("miller_col_scroll_inspector")
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let icon_spec = resolve_file_icon(
                             &item_clone.name,
@@ -5590,22 +5914,21 @@ impl ExplorerView {
                             item_clone.is_dir,
                         );
 
-                        // Image Live Thumbnail or Media Scrubber or Icon
-                        if icon_spec.is_image {
+                        // Image or PDF Live Thumbnail or Media Scrubber or Icon
+                        if icon_spec.is_image || item_clone.extension == "PDF" {
                             let thumb_tex =
                                 self.get_or_load_thumbnail(ui.ctx(), &item_clone.path, 320);
                             if let Some(tex) = thumb_tex {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(6.0);
                                     let tex_size = tex.size_vec2();
-                                    let aspect = (tex_size.x / tex_size.y.max(1.0)).clamp(0.2, 5.0);
-                                    let max_w = inspector_w - 24.0;
-                                    let max_h = 160.0;
-                                    let (draw_w, draw_h) = if aspect >= (max_w / max_h) {
-                                        (max_w, (max_w / aspect).round())
-                                    } else {
-                                        ((max_h * aspect).round(), max_h)
-                                    };
+                                    let max_w = (inspector_w - 24.0).max(64.0);
+                                    let max_h = 220.0_f32;
+                                    // Aspect-ratio fitting: never blow up small icons past native 1.0x scale
+                                    let scale =
+                                        (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
+                                    let draw_w = (tex_size.x * scale).round().max(16.0);
+                                    let draw_h = (tex_size.y * scale).round().max(16.0);
                                     ui.add(
                                         egui::Image::new(&tex)
                                             .fit_to_exact_size(Vec2::new(draw_w, draw_h))
@@ -6191,15 +6514,10 @@ impl ExplorerView {
                     self.current_dir.clone(),
                 )
             };
-            for src in &src_paths {
-                if let Some(fname) = src.file_name() {
-                    let dest = dest_dir.join(fname);
-                    let unique = resolve_unique_paste_path(&dest);
-                    log_result("Copy", src, copy_entry_recursive(src, &unique));
-                }
-            }
-            self.navigate_to(self.current_dir.clone());
-            self.secondary_navigate_to(self.secondary_dir.clone());
+            let _ = self.fs_worker_tx.send(FsOperation::Copy {
+                sources: src_paths,
+                dest_dir,
+            });
         }
 
         if trigger_move {
@@ -6217,14 +6535,10 @@ impl ExplorerView {
                     self.current_dir.clone(),
                 )
             };
-            for src in &src_paths {
-                if let Some(fname) = src.file_name() {
-                    let dest = dest_dir.join(fname);
-                    log_result("Move", src, move_entry(src, &dest));
-                }
-            }
-            self.navigate_to(self.current_dir.clone());
-            self.secondary_navigate_to(self.secondary_dir.clone());
+            let _ = self.fs_worker_tx.send(FsOperation::Move {
+                sources: src_paths,
+                dest_dir,
+            });
         }
 
         if let Some(target) = primary_nav_target {
@@ -6423,10 +6737,6 @@ impl ExplorerView {
                 ui.add_space(8.0);
 
                 // 2. Category-Specific Deep Preview
-                let is_image = matches!(
-                    item.extension.as_str(),
-                    "JPG" | "JPEG" | "PNG" | "WEBP" | "GIF" | "AVIF" | "TIFF" | "BMP" | "ICO"
-                );
                 let is_text = matches!(
                     item.extension.as_str(),
                     "TXT"
@@ -6449,7 +6759,23 @@ impl ExplorerView {
                         | "TS"
                 );
 
-                if is_image {
+                let is_image = matches!(
+                    item.extension.as_str(),
+                    "JPG"
+                        | "JPEG"
+                        | "PNG"
+                        | "WEBP"
+                        | "GIF"
+                        | "AVIF"
+                        | "TIFF"
+                        | "BMP"
+                        | "ICO"
+                        | "HEIC"
+                        | "RAW"
+                );
+                let is_pdf = item.extension == "PDF";
+
+                if is_image || is_pdf {
                     if self.peek_texture.as_ref().map(|(p, _)| p) != Some(&item.path) {
                         self.peek_texture = load_image_thumbnail(ctx, &item.path)
                             .map(|tex| (item.path.clone(), tex));
@@ -6457,25 +6783,45 @@ impl ExplorerView {
 
                     if let Some((_, ref tex)) = self.peek_texture {
                         ui.vertical_centered(|ui| {
+                            let tex_size = tex.size_vec2();
+                            let max_w = 560.0_f32;
+                            let max_h = 320.0_f32;
+                            let scale = (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
+                            let draw_w = (tex_size.x * scale).round().max(16.0);
+                            let draw_h = (tex_size.y * scale).round().max(16.0);
                             ui.add(
                                 egui::Image::new(tex)
-                                    .max_size(Vec2::new(560.0, 260.0))
+                                    .fit_to_exact_size(Vec2::new(draw_w, draw_h))
                                     .rounding(Rounding::same(8.0)),
+                            );
+                            ui.add_space(4.0);
+                            let kind_label = if is_pdf {
+                                "PDF Document Page"
+                            } else {
+                                "Image Dimensions"
+                            };
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{}: {} x {} px  |  {:.1} KB",
+                                    kind_label,
+                                    tex_size.x as u32,
+                                    tex_size.y as u32,
+                                    item.size_bytes as f64 / 1024.0
+                                ))
+                                .size(11.0)
+                                .color(palette.text_muted),
                             );
                         });
                     } else {
                         ui.label(
-                            egui::RichText::new(
-                                "Image preview not available or unsupported raw format.",
-                            )
-                            .color(palette.text_muted),
+                            egui::RichText::new("Preview not available or unsupported raw format.")
+                                .color(palette.text_muted),
                         );
                     }
                 } else if is_text
                     || matches!(
                         item.extension.as_str(),
-                        "PDF"
-                            | "DOCX"
+                        "DOCX"
                             | "ODT"
                             | "XLSX"
                             | "XLS"
@@ -6522,8 +6868,15 @@ impl ExplorerView {
                     );
 
                     if self.peek_hash_cache.as_ref().map(|(p, _)| p) != Some(&item.path) {
-                        let hash = crate::codec::calculate_sha256(&item.path)
-                            .unwrap_or_else(|_| "Unavailable".to_string());
+                        let hash = if item.size_bytes <= 8 * 1024 * 1024 {
+                            crate::codec::calculate_sha256(&item.path)
+                                .unwrap_or_else(|_| "Unavailable".to_string())
+                        } else {
+                            format!(
+                                "{:.1} MB binary (SHA-256 deferred to avoid UI freeze)",
+                                item.size_bytes as f64 / (1024.0 * 1024.0)
+                            )
+                        };
                         self.peek_hash_cache = Some((item.path.clone(), hash));
                     }
 
@@ -6799,9 +7152,36 @@ fn rotate_image_file_90(path: &Path) -> Result<(), String> {
 }
 
 fn load_image_thumbnail(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_uppercase();
+
+    if ext == "PDF" {
+        if let Ok(rgba) = crate::codec::render_pdf_first_page_thumbnail(path, 640) {
+            let (w, h) = rgba.dimensions();
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                [w as usize, h as usize],
+                &rgba.into_raw(),
+            );
+            return Some(ctx.load_texture(
+                path.to_string_lossy(),
+                color_image,
+                egui::TextureOptions::LINEAR,
+            ));
+        }
+    }
+
     if let Ok(bytes) = std::fs::read(path) {
         if let Ok(img) = image::load_from_memory(&bytes) {
-            let thumb = img.thumbnail(520, 320).to_rgba8();
+            let (orig_w, orig_h) = (img.width(), img.height());
+            let thumb = if orig_w <= 520 && orig_h <= 320 {
+                img.to_rgba8()
+            } else {
+                img.resize(520, 320, image::imageops::FilterType::Lanczos3)
+                    .to_rgba8()
+            };
             let (w, h) = thumb.dimensions();
             let color_image = egui::ColorImage::from_rgba_unmultiplied(
                 [w as usize, h as usize],
@@ -6821,15 +7201,48 @@ fn load_image_thumbnail(ctx: &egui::Context, path: &Path) -> Option<egui::Textur
 fn is_image_extension(ext: &str) -> bool {
     matches!(
         ext,
-        "JPG" | "JPEG" | "PNG" | "WEBP" | "GIF" | "AVIF" | "TIFF" | "BMP" | "ICO" | "HEIC" | "RAW"
+        "JPG"
+            | "JPEG"
+            | "PNG"
+            | "WEBP"
+            | "GIF"
+            | "AVIF"
+            | "TIFF"
+            | "BMP"
+            | "ICO"
+            | "HEIC"
+            | "RAW"
+            | "PDF"
     )
 }
 
-/// Decode an image file down to a `max_px` thumbnail ColorImage
+/// Decode an image or document file down to a `max_px` thumbnail ColorImage
 fn decode_thumbnail(path: &Path, max_px: u32) -> Option<egui::ColorImage> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_uppercase();
+
+    if ext == "PDF" {
+        if let Ok(rgba) = crate::codec::render_pdf_first_page_thumbnail(path, max_px) {
+            let (w, h) = rgba.dimensions();
+            return Some(egui::ColorImage::from_rgba_unmultiplied(
+                [w as usize, h as usize],
+                &rgba.into_raw(),
+            ));
+        }
+    }
+
     let bytes = std::fs::read(path).ok()?;
     let img = image::load_from_memory(&bytes).ok()?;
-    let thumb = img.thumbnail(max_px, max_px).to_rgba8();
+    let (orig_w, orig_h) = (img.width(), img.height());
+    let thumb = if orig_w <= max_px && orig_h <= max_px {
+        img.to_rgba8()
+    } else {
+        img.resize(max_px, max_px, image::imageops::FilterType::Lanczos3)
+            .to_rgba8()
+    };
     let (w, h) = thumb.dimensions();
     Some(egui::ColorImage::from_rgba_unmultiplied(
         [w as usize, h as usize],
@@ -6929,11 +7342,6 @@ fn open_in_file_manager(path: &Path) {
     {
         let _ = std::process::Command::new("xdg-open").arg(path).spawn();
     }
-}
-
-/// Text-only fallback for a segmented switcher while rasterization warms up.
-fn menu_fallback_button(label: &str) -> egui::Button<'static> {
-    egui::Button::new(label.to_string())
 }
 
 /// Observability floor for file operations: every filesystem side effect is
@@ -7361,8 +7769,6 @@ impl ExplorerView {
         if paths.is_empty() || dest_dir.as_os_str().is_empty() {
             return;
         }
-        // Explorer rule: dropping a dir into itself, its subtree, or directly
-        // into its parent does nothing (plate already holds it there).
         let illegal = paths.iter().any(|p| {
             same_or_within(&dest_dir, p) || p.parent().map(|q| q == dest_dir).unwrap_or(false)
         });
@@ -7373,37 +7779,31 @@ impl ExplorerView {
             );
             return;
         }
-        let mut moved = false;
-        for src in paths {
-            let Some(name) = src.file_name() else {
-                continue;
-            };
-            let dest = dest_dir.join(name);
-            if copy {
-                let unique = resolve_unique_paste_path(&dest);
-                log_result(
-                    "Drag copy",
-                    src,
-                    copy_entry_recursive(src, &unique).map(|_| ()),
-                );
-                crate::core::action_journal::record_copy(src.clone(), unique.clone());
-            } else {
-                log_result("Drag move", src, move_entry(src, &dest));
-                crate::core::action_journal::record_move(src.clone(), dest.clone());
-                self.selected_paths.remove(src);
-            }
-            moved = true;
-        }
-        if moved {
+
+        let sources = paths.to_vec();
+        if copy {
             log::info!(
-                "Drop: {} file(s) {} -> {}",
-                paths.len(),
-                if copy { "copied" } else { "moved" },
+                "Dispatching async copy of {} item(s) to {}",
+                sources.len(),
                 dest_dir.display()
             );
-            self.navigate_to(self.current_dir.clone());
-            self.selection_anchor = None;
+            let _ = self
+                .fs_worker_tx
+                .send(FsOperation::Copy { sources, dest_dir });
+        } else {
+            for src in &sources {
+                self.selected_paths.remove(src);
+            }
+            log::info!(
+                "Dispatching async move of {} item(s) to {}",
+                sources.len(),
+                dest_dir.display()
+            );
+            let _ = self
+                .fs_worker_tx
+                .send(FsOperation::Move { sources, dest_dir });
         }
+        self.selection_anchor = None;
     }
 
     /// Applies one item menu's intents. All filesystem side effects are
@@ -7507,18 +7907,24 @@ impl ExplorerView {
             self.properties_item = Some(item);
         }
         if let Some(paths) = intent.deleted {
-            if cm::delete_to_trash(&paths) {
-                log::info!("Moved {} item(s) to Recycle Bin/Trash", paths.len());
-            } else {
-                for p in &paths {
-                    log_result("Delete (permanent fallback)", p, remove_entry_recursive(p));
+            let paths: Vec<PathBuf> = paths
+                .into_iter()
+                .filter(|p| !crate::core::is_protected_os_file(p))
+                .collect();
+            if !paths.is_empty() {
+                if cm::delete_to_trash(&paths) {
+                    log::info!("Moved {} item(s) to Recycle Bin/Trash", paths.len());
+                } else {
+                    for p in &paths {
+                        log_result("Delete (permanent fallback)", p, remove_entry_recursive(p));
+                    }
                 }
+                for p in &paths {
+                    self.selected_paths.remove(p);
+                }
+                self.selection_anchor = None;
+                self.navigate_to(self.current_dir.clone());
             }
-            for p in &paths {
-                self.selected_paths.remove(p);
-            }
-            self.selection_anchor = None;
-            self.navigate_to(self.current_dir.clone());
         }
         if let Some(paths) = intent.cut {
             self.clipboard_paths = paths.clone();
@@ -7680,24 +8086,23 @@ impl ExplorerView {
     }
 
     pub fn paste_from_clipboard(&mut self) {
-        let srcs: Vec<PathBuf> = self.clipboard_paths.clone();
-        let cut = self.clipboard_is_cut;
-        for src in &srcs {
-            if let Some(name) = src.file_name() {
-                let dest = self.current_dir.join(name);
-                if cut {
-                    log_result("Paste move", src, move_entry(src, &dest));
-                } else {
-                    let unique = resolve_unique_paste_path(&dest);
-                    log_result("Paste copy", src, copy_entry_recursive(src, &unique));
-                }
-            }
+        let sources: Vec<PathBuf> = self.clipboard_paths.clone();
+        if sources.is_empty() {
+            return;
         }
+        let cut = self.clipboard_is_cut;
+        let dest_dir = self.current_dir.clone();
         if cut {
+            let _ = self
+                .fs_worker_tx
+                .send(FsOperation::Move { sources, dest_dir });
             self.clipboard_paths.clear();
             self.clipboard_is_cut = false;
+        } else {
+            let _ = self
+                .fs_worker_tx
+                .send(FsOperation::Copy { sources, dest_dir });
         }
-        self.navigate_to(self.current_dir.clone());
     }
 
     /// Shared empty-canvas context menu for the Details and Grid canvases.
@@ -8248,7 +8653,7 @@ impl ExplorerView {
         intent
     }
 
-    /// Finder-style selection checkbox (checkbox-only selection disclosure).
+    /// Delicate Apple HIG selection checkbox with authentic vector checkmark path.
     fn paint_selection_checkbox(
         ui: &Ui,
         rect: Rect,
@@ -8257,32 +8662,65 @@ impl ExplorerView {
         palette: &ThemePalette,
     ) {
         let alpha = alpha.clamp(0.0, 1.0);
-        let rounding = Rounding::same(4.5);
-        let stroke_col = if checked {
-            palette.accent
-        } else {
-            palette.text_muted
-        };
-        let stroke_col = Color32::from_rgba_premultiplied(
-            (stroke_col.r() as f32 * alpha) as u8,
-            (stroke_col.g() as f32 * alpha) as u8,
-            (stroke_col.b() as f32 * alpha) as u8,
-            (stroke_col.a() as f32 * alpha) as u8,
-        );
-        ui.painter()
-            .rect_stroke(rect, rounding, Stroke::new(1.4_f32, stroke_col));
+        if alpha < 0.01 {
+            return;
+        }
+        let rounding = Rounding::same(4.0);
+        let cx = rect.center().x;
+        let cy = rect.center().y;
+
         if checked {
             let fill = Color32::from_rgba_premultiplied(
                 (palette.accent.r() as f32 * alpha) as u8,
                 (palette.accent.g() as f32 * alpha) as u8,
                 (palette.accent.b() as f32 * alpha) as u8,
-                235,
+                (245.0 * alpha) as u8,
             );
             ui.painter().rect_filled(rect, rounding, fill);
-            let dot = rect.center();
-            let dot_r = (rect.width() * 0.20).max(1.5);
+            ui.painter().rect_stroke(
+                rect,
+                rounding,
+                Stroke::new(
+                    1.0_f32,
+                    Color32::from_rgba_premultiplied(
+                        (palette.accent.r() as f32 * alpha) as u8,
+                        (palette.accent.g() as f32 * alpha) as u8,
+                        (palette.accent.b() as f32 * alpha) as u8,
+                        (255.0 * alpha) as u8,
+                    ),
+                ),
+            );
+
+            // Vector checkmark path: 3 points (p1 -> p2 -> p3)
+            let p1 = Pos2::new(cx - 3.2, cy + 0.1);
+            let p2 = Pos2::new(cx - 0.7, cy + 2.7);
+            let p3 = Pos2::new(cx + 3.4, cy - 2.5);
+            let check_color = Color32::from_rgba_premultiplied(
+                (255.0 * alpha) as u8,
+                (255.0 * alpha) as u8,
+                (255.0 * alpha) as u8,
+                (255.0 * alpha) as u8,
+            );
+            let stroke = Stroke::new(1.3_f32, check_color);
+            ui.painter().line_segment([p1, p2], stroke);
+            ui.painter().line_segment([p2, p3], stroke);
+        } else {
+            let bg_alpha = (14.0 * alpha) as u8;
+            let bg_col = if palette.is_dark {
+                Color32::from_rgba_premultiplied(255, 255, 255, bg_alpha)
+            } else {
+                Color32::from_rgba_premultiplied(0, 0, 0, bg_alpha)
+            };
+            ui.painter().rect_filled(rect, rounding, bg_col);
+
+            let border_alpha = (55.0 * alpha) as u8;
+            let border_col = if palette.is_dark {
+                Color32::from_rgba_premultiplied(160, 165, 175, border_alpha)
+            } else {
+                Color32::from_rgba_premultiplied(110, 115, 125, border_alpha)
+            };
             ui.painter()
-                .circle_filled(dot, dot_r, Color32::WHITE.gamma_multiply(alpha.max(0.15)));
+                .rect_stroke(rect, rounding, Stroke::new(0.85_f32, border_col));
         }
     }
 }

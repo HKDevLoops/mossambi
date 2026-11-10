@@ -209,6 +209,13 @@ pub fn stage_delete(paths: &[PathBuf]) -> Result<(), String> {
 
     let mut trashed = Vec::new();
     for p in paths {
+        if crate::core::fs_utils::is_protected_os_file(p) {
+            log::warn!(
+                "Refusing to stage OS-protected file for deletion: {}",
+                p.display()
+            );
+            continue;
+        }
         let name = p
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())

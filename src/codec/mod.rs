@@ -11,6 +11,7 @@ pub mod email;
 pub mod fonts;
 pub mod geo;
 pub mod models_3d;
+pub mod pdf_image;
 pub mod pdf_tables;
 pub mod pdf_vector;
 pub mod remux;
@@ -28,6 +29,7 @@ pub use email::transcode_email;
 pub use fonts::transcode_font;
 pub use geo::transcode_geo;
 pub use models_3d::transcode_3d_model;
+pub use pdf_image::{render_pdf_first_page_thumbnail, transcode_pdf_to_images};
 pub use pdf_tables::transcode_pdf_tables;
 pub use pdf_vector::{
     convert_image_to_pdf_vector, convert_text_to_pdf_vector, render_text_to_pdf, TextPdfSettings,
@@ -143,80 +145,25 @@ pub fn transcode_file(
         target_upper
     );
 
-    let outcome: Result<()> = match category {
-        FileCategory::Image => {
-            if target_upper == "PDF" {
-                convert_image_to_pdf_vector(input, &work_path, None)
-            } else if matches!(
-                target_upper.as_str(),
-                "STL" | "OBJ" | "PLY" | "GLTF" | "GLB"
-            ) {
-                models_3d::transcode_3d_model(input, &work_path)
-            } else {
-                convert_image_zero_loss(input, &work_path, &target_upper, mode)
+    let outcome: Result<()> = transcode_single_step(input, &work_path, &target_upper, mode)
+        .or_else(|direct_err| {
+            // If single-step conversion failed, attempt to find a multi-hop route
+            if let Some(route) =
+                crate::core::route_planner::find_conversion_route(&in_ext, &target_upper)
+            {
+                if route.hop_count() > 1 {
+                    log::info!(
+                        "Attempting {}-hop fallback route for {} -> {}: {}",
+                        route.hop_count(),
+                        in_ext,
+                        target_upper,
+                        route.display_path()
+                    );
+                    return execute_multi_hop_route(input, &work_path, &route, mode);
+                }
             }
-        }
-        FileCategory::Document => {
-            if in_ext == "PDF" && matches!(target_upper.as_str(), "XLSX" | "CSV") {
-                pdf_tables::transcode_pdf_tables(input, &work_path)
-            } else if matches!(in_ext.as_str(), "EML" | "MSG" | "MHTML") {
-                email::transcode_email(input, &work_path)
-            } else {
-                convert_document_native(input, &work_path, &in_ext, &target_upper)
-            }
-        }
-        FileCategory::Spreadsheet => {
-            convert_spreadsheet_native(input, &work_path, &in_ext, &target_upper)
-        }
-        FileCategory::Presentation => {
-            convert_presentation_native(input, &work_path, &in_ext, &target_upper)
-        }
-        FileCategory::Archive => {
-            let arch_type = ArchiveType::from_extension(&target_upper).unwrap_or(ArchiveType::Zip);
-            pack_archive(&[input.to_path_buf()], &work_path, arch_type)
-        }
-        FileCategory::Audio => convert_audio_zero_loss(input, &work_path, &target_upper, mode),
-        FileCategory::Video => convert_video_zero_loss(input, &work_path, &target_upper, mode),
-        FileCategory::Subtitle => subtitles::transcode_subtitles(input, &work_path),
-        FileCategory::Unknown => {
-            if matches!(in_ext.as_str(), "GEOJSON" | "KML" | "KMZ" | "GPX")
-                || matches!(target_upper.as_str(), "GEOJSON" | "KML" | "KMZ" | "GPX")
-            {
-                geo::transcode_geo(input, &work_path, false)
-            } else if matches!(in_ext.as_str(), "JSON" | "JSONL" | "XML" | "VCF" | "ICS")
-                || matches!(
-                    target_upper.as_str(),
-                    "JSON" | "JSONL" | "XML" | "VCF" | "ICS"
-                )
-            {
-                data_exchange::transcode_data_exchange(input, &work_path)
-            } else if matches!(in_ext.as_str(), "DWG" | "DXF")
-                || matches!(target_upper.as_str(), "DXF")
-            {
-                cad::transcode_cad(input, &work_path)
-            } else if matches!(in_ext.as_str(), "STL" | "OBJ" | "PLY" | "GLTF" | "GLB")
-                || matches!(
-                    target_upper.as_str(),
-                    "STL" | "OBJ" | "PLY" | "GLTF" | "GLB"
-                )
-            {
-                models_3d::transcode_3d_model(input, &work_path)
-            } else if matches!(in_ext.as_str(), "TTF" | "OTF" | "WOFF" | "WOFF2" | "EOT")
-                || matches!(
-                    target_upper.as_str(),
-                    "TTF" | "OTF" | "WOFF" | "WOFF2" | "EOT"
-                )
-            {
-                fonts::transcode_font(input, &work_path)
-            } else if matches!(in_ext.as_str(), "EML" | "MSG" | "MHTML") {
-                email::transcode_email(input, &work_path)
-            } else if is_text_file(input) {
-                convert_document_native(input, &work_path, &in_ext, &target_upper)
-            } else {
-                convert_image_zero_loss(input, &work_path, &target_upper, mode)
-            }
-        }
-    };
+            Err(direct_err)
+        });
 
     // Finalize: sanity-check the scratch payload, then atomically rename it
     // onto the final name. Any failure removes the scratch file.
@@ -226,7 +173,13 @@ pub fn transcode_file(
         | FileCategory::Document
         | FileCategory::Spreadsheet
         | FileCategory::Video
-        | FileCategory::Presentation => 64,
+        | FileCategory::Presentation
+        | FileCategory::Cad
+        | FileCategory::Models3D
+        | FileCategory::Geo
+        | FileCategory::Fonts
+        | FileCategory::Data
+        | FileCategory::Email => 16,
         // Subtitles and unknown/text-like inputs may legitimately be tiny.
         _ => 1,
     };
@@ -303,6 +256,153 @@ pub fn transcode_to_all_formats(
     }
 
     Ok(successful)
+}
+
+/// Executes a single conversion step across any registered codec.
+pub fn transcode_single_step(
+    input: &Path,
+    output: &Path,
+    target_format: &str,
+    mode: LosslessMode,
+) -> Result<()> {
+    let (category, in_ext) = UniversalRegistry::classify_file(input);
+    let target_upper = target_format.to_ascii_uppercase();
+
+    match category {
+        FileCategory::Image => {
+            if target_upper == "PDF" {
+                convert_image_to_pdf_vector(input, output, None)
+            } else if matches!(
+                target_upper.as_str(),
+                "STL" | "OBJ" | "PLY" | "GLTF" | "GLB"
+            ) {
+                models_3d::transcode_3d_model(input, output)
+            } else {
+                convert_image_zero_loss(input, output, &target_upper, mode)
+            }
+        }
+        FileCategory::Document => {
+            if in_ext == "PDF" && matches!(target_upper.as_str(), "XLSX" | "CSV") {
+                pdf_tables::transcode_pdf_tables(input, output)
+            } else if in_ext == "PDF"
+                && matches!(
+                    target_upper.as_str(),
+                    "JPG" | "JPEG" | "PNG" | "WEBP" | "TIFF" | "TIF" | "BMP"
+                )
+            {
+                pdf_image::transcode_pdf_to_images(input, output, &target_upper)
+            } else if matches!(in_ext.as_str(), "EML" | "MSG" | "MHTML") {
+                email::transcode_email(input, output)
+            } else {
+                convert_document_native(input, output, &in_ext, &target_upper)
+            }
+        }
+        FileCategory::Spreadsheet => {
+            convert_spreadsheet_native(input, output, &in_ext, &target_upper)
+        }
+        FileCategory::Presentation => {
+            convert_presentation_native(input, output, &in_ext, &target_upper)
+        }
+        FileCategory::Archive => {
+            let arch_type = ArchiveType::from_extension(&target_upper).unwrap_or(ArchiveType::Zip);
+            pack_archive(&[input.to_path_buf()], output, arch_type)
+        }
+        FileCategory::Audio => convert_audio_zero_loss(input, output, &target_upper, mode),
+        FileCategory::Video => convert_video_zero_loss(input, output, &target_upper, mode),
+        FileCategory::Subtitle => subtitles::transcode_subtitles(input, output),
+        FileCategory::Cad => cad::transcode_cad(input, output),
+        FileCategory::Models3D => models_3d::transcode_3d_model(input, output),
+        FileCategory::Geo => geo::transcode_geo(input, output, false),
+        FileCategory::Fonts => fonts::transcode_font(input, output),
+        FileCategory::Data => data_exchange::transcode_data_exchange(input, output),
+        FileCategory::Email => email::transcode_email(input, output),
+        FileCategory::Unknown => {
+            if is_text_file(input) {
+                convert_document_native(input, output, &in_ext, &target_upper)
+            } else {
+                convert_image_zero_loss(input, output, &target_upper, mode)
+            }
+        }
+    }
+}
+
+/// Executes a multi-hop shortest path conversion route step-by-step.
+pub fn execute_multi_hop_route(
+    input: &Path,
+    output_path: &Path,
+    route: &crate::core::route_planner::ConversionRoute,
+    mode: LosslessMode,
+) -> Result<()> {
+    if route.steps.is_empty() {
+        bail!("Empty conversion route specified");
+    }
+
+    let staging_dir = std::env::temp_dir().join(".mossambi_staging");
+    let _ = fs::create_dir_all(&staging_dir);
+
+    let run_id = format!(
+        "hop_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+
+    let mut current_input = input.to_path_buf();
+    let mut intermediate_files: Vec<PathBuf> = Vec::new();
+
+    let total_steps = route.steps.len();
+    for (i, step) in route.steps.iter().enumerate() {
+        let is_last = i == total_steps - 1;
+        let step_out = if is_last {
+            output_path.to_path_buf()
+        } else {
+            let ext = step.to.to_lowercase();
+            staging_dir.join(format!("{}_step_{}.{}", run_id, i, ext))
+        };
+
+        log::info!(
+            "Route execution step {}/{}: {} -> {} ({})",
+            i + 1,
+            total_steps,
+            current_input.display(),
+            step_out.display(),
+            step.description
+        );
+
+        let step_result = transcode_single_step(&current_input, &step_out, &step.to, mode);
+        if let Err(e) = step_result {
+            // Clean up all intermediates immediately on failure
+            for tmp in &intermediate_files {
+                let _ = fs::remove_file(tmp);
+            }
+            if !is_last {
+                let _ = fs::remove_file(&step_out);
+            }
+            return Err(e).with_context(|| {
+                format!(
+                    "Multi-hop conversion failed at step {} ({} -> {}): {}",
+                    i + 1,
+                    step.from,
+                    step.to,
+                    step.description
+                )
+            });
+        }
+
+        if !is_last {
+            intermediate_files.push(step_out.clone());
+            current_input = step_out;
+        }
+    }
+
+    // Clean up temporary files on successful completion
+    for tmp in &intermediate_files {
+        let _ = fs::remove_file(tmp);
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -577,6 +677,15 @@ fn convert_document_native(
             fs::write(output, rtf.as_bytes())?;
         }
         _ => {
+            if matches!(
+                target_format,
+                "JPG" | "JPEG" | "PNG" | "WEBP" | "TIFF" | "TIF" | "BMP" | "ICO"
+            ) {
+                bail!(
+                    "Cannot write raw document text to image format '{}'; routing error",
+                    target_format
+                );
+            }
             fs::write(output, document_text.as_bytes())?;
         }
     }

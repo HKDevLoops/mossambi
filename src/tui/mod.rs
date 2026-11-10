@@ -592,7 +592,7 @@ impl AppState {
                     id: task_id,
                     output: None,
                     message: format!(
-                        "✓ Transcoded {} file(s) to {}",
+                        "[v] Transcoded {} file(s) to {}",
                         total,
                         target_ext.to_uppercase()
                     ),
@@ -788,6 +788,21 @@ pub fn run() -> Result<()> {
     run_with_path(None)
 }
 
+struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let mut stdout = io::stdout();
+        let _ = execute!(
+            stdout,
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            crossterm::cursor::Show
+        );
+    }
+}
+
 pub fn run_with_path(initial_path: Option<PathBuf>) -> Result<()> {
     // Logging must initialise at the TUI entrypoint (before raw mode, so any
     // startup failures are still visible in the normal terminal).
@@ -795,28 +810,23 @@ pub fn run_with_path(initial_path: Option<PathBuf>) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let _guard = TerminalGuard;
+
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     let mut state = AppState::new_with_path(initial_path);
-    let loop_res = run_app(&mut terminal, &mut state);
-
-    let _ = disable_raw_mode();
-    let _ = execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    );
-    let _ = terminal.show_cursor();
-
-    loop_res
+    run_app(&mut terminal, &mut state)
 }
 
 fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut AppState,
 ) -> Result<()> {
-    const SPINNER_CHARS: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    const SPINNER_CHARS: &[&str] = &[
+        "\u{280B}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283C}", "\u{2834}", "\u{2826}",
+        "\u{2827}", "\u{2807}", "\u{280F}",
+    ];
 
     while !state.should_quit {
         // 1. Process asynchronous directory scan results
@@ -867,7 +877,7 @@ fn run_app(
         if event::poll(Duration::from_millis(16))? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    handle_key_event(state, key.code);
+                    handle_key_event(state, key);
                 }
                 Event::Mouse(mouse) => {
                     handle_mouse_event(state, mouse);
@@ -880,7 +890,21 @@ fn run_app(
     Ok(())
 }
 
-fn handle_key_event(state: &mut AppState, code: KeyCode) {
+fn handle_key_event(state: &mut AppState, key: crossterm::event::KeyEvent) {
+    use crossterm::event::KeyModifiers;
+
+    // Fast global quit on Ctrl+C or Ctrl+Q
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && (key.code == KeyCode::Char('c')
+            || key.code == KeyCode::Char('C')
+            || key.code == KeyCode::Char('q'))
+    {
+        state.should_quit = true;
+        return;
+    }
+
+    let code = key.code;
+
     // 1. Drive Modal Active
     if state.show_drive_modal {
         match code {

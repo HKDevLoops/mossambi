@@ -177,32 +177,10 @@ fn run_listener_loop(
 
                 match msg {
                     WM_LBUTTONDOWN => {
-                        // FILE-UNDER-CURSOR GATE (hard requirement): the hold
-                        // gesture arms ONLY when actual files sit beneath the
-                        // press. Plain mouse holds (text selection in browsers,
-                        // window moves, canvas drags) must never summon the
-                        // conversion wheel or replay stale clipboard paths.
-                        //
-                        // UNIVERSAL SYSTEM-LEVEL FILE PROBE, in order:
-                        // 1. clipboard/OLE drag data (Total Commander, Directory
-                        //    Opus, OneCommander, FreeCommander, 7-Zip and most
-                        //    browsers populate CF_HDROP at drag start)
-                        // 2. Explorer/Desktop shell COM selection
-                        // 3. active-file-under-cursor fallback probe
+                        // Fast reset on mouse press - do not block hook with COM/UIA probes
                         ctx.tracker.reset();
-                        let mut files = extract_clipboard_files();
-                        if files.is_empty() {
-                            files = query_active_explorer_files(pt);
-                        }
-                        if files.is_empty() {
-                            if let Some(pp) =
-                                crate::gui::active_file::get_active_file_under_cursor(pt.x, pt.y)
-                            {
-                                files.push(pp);
-                            }
-                        }
-                        ctx.is_holding_files = !files.is_empty();
-                        ctx.cached_files = files;
+                        ctx.is_holding_files = true;
+                        ctx.cached_files.clear();
                     }
                     WM_LBUTTONUP => {
                         // User dropped or released button - reset drag state immediately
@@ -215,21 +193,30 @@ fn run_listener_loop(
                         // Only active when user is dragging mouse with button pressed!
                         let now_ms = current_timestamp_ms();
                         if let Some(gesture) = ctx.tracker.feed(pt.x as f32, pt.y as f32, now_ms) {
-                            // HARD GATE: no files under the hold → no event.
-                            // (Mid-drag re-probe kept ONLY to catch async
-                            // drag-source population, never to synthesize files.)
-                            if ctx.cached_files.is_empty() {
-                                ctx.cached_files = extract_clipboard_files();
+                            // File probe ONLY executes when an intentional kinematic gesture
+                            // (shake / circle) has actually been recognized!
+                            let mut files = extract_clipboard_files();
+                            if files.is_empty() {
+                                files = query_active_explorer_files(pt);
                             }
-                            if ctx.cached_files.is_empty() {
-                                ctx.is_holding_files = false;
-                                return CallNextHookEx(null_mut(), n_code, w_param, l_param);
+                            if files.is_empty() {
+                                if let Some(pp) =
+                                    crate::gui::active_file::get_active_file_under_cursor(
+                                        pt.x, pt.y,
+                                    )
+                                {
+                                    files.push(pp);
+                                }
                             }
-                            maybe_event = Some(DragGestureEvent {
-                                gesture,
-                                cursor_pos: (pt.x as f32, pt.y as f32),
-                                files: ctx.cached_files.clone(),
-                            });
+                            if !files.is_empty() {
+                                maybe_event = Some(DragGestureEvent {
+                                    gesture,
+                                    cursor_pos: (pt.x as f32, pt.y as f32),
+                                    files,
+                                });
+                            }
+                            ctx.is_holding_files = false;
+                            ctx.tracker.reset();
                         }
                     }
                     _ => {}
@@ -257,6 +244,16 @@ fn run_listener_loop(
 
         let mut msg: MSG = std::mem::zeroed();
         while !shutdown.load(Ordering::Relaxed) {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                MsgWaitForMultipleObjectsEx, MWMO_INPUTAVAILABLE, QS_ALLINPUT,
+            };
+            let _ = MsgWaitForMultipleObjectsEx(
+                0,
+                std::ptr::null(),
+                100,
+                QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE,
+            );
             while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
                 if msg.message == WM_QUIT {
                     break;
@@ -264,7 +261,6 @@ fn run_listener_loop(
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
-            std::thread::sleep(std::time::Duration::from_millis(16));
         }
     }
 }

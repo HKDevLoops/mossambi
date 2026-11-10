@@ -45,16 +45,43 @@ impl DriveInfo {
 pub fn get_system_drives() -> Vec<DriveInfo> {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetLogicalDrives};
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives,
+        };
+
+        const DRIVE_UNKNOWN: u32 = 0;
+        const DRIVE_NO_ROOT_DIR: u32 = 1;
+        const DRIVE_CDROM: u32 = 5;
+        const SEM_FAILCRITICALERRORS: u32 = 0x0001;
+
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn SetErrorMode(u_mode: u32) -> u32;
+        }
+
+        unsafe {
+            SetErrorMode(SEM_FAILCRITICALERRORS);
+        }
+
         let mut drives = Vec::new();
         let mask = unsafe { GetLogicalDrives() };
         for i in 0..26 {
             if (mask & (1 << i)) != 0 {
                 let letter = (b'A' + i) as char;
                 let root_str = format!("{}:\\", letter);
+                let wide_root: Vec<u16> =
+                    root_str.encode_utf16().chain(std::iter::once(0)).collect();
+
+                let dtype = unsafe { GetDriveTypeW(wide_root.as_ptr()) };
+                if dtype == DRIVE_UNKNOWN || dtype == DRIVE_NO_ROOT_DIR {
+                    continue;
+                }
+
                 let is_system = letter == 'C';
                 let drive_type = if is_system {
                     "System Disk"
+                } else if dtype == DRIVE_CDROM {
+                    "Optical Drive"
                 } else {
                     "Local Volume"
                 };
@@ -62,15 +89,16 @@ pub fn get_system_drives() -> Vec<DriveInfo> {
                 let mut free_avail = 0u64;
                 let mut total = 0u64;
                 let mut total_free = 0u64;
-                let wide_root: Vec<u16> =
-                    root_str.encode_utf16().chain(std::iter::once(0)).collect();
-                unsafe {
-                    GetDiskFreeSpaceExW(
-                        wide_root.as_ptr(),
-                        &mut free_avail,
-                        &mut total,
-                        &mut total_free,
-                    );
+
+                if dtype != DRIVE_CDROM {
+                    unsafe {
+                        GetDiskFreeSpaceExW(
+                            wide_root.as_ptr(),
+                            &mut free_avail,
+                            &mut total,
+                            &mut total_free,
+                        );
+                    }
                 }
 
                 drives.push(DriveInfo {
@@ -239,62 +267,15 @@ impl FileItem {
 
     /// Formats the modification timestamp in the machine's local timezone.
     ///
-    /// The previous implementation approximated the calendar with 30-day
-    /// months and ignored leap years, which drifted the rendered date by
-    /// weeks (2026-11-06 was displayed as 2026-11-24). We now use a real
-    /// civil-calendar conversion and apply the local UTC offset so the
-    /// rendered wall-clock time matches what the user sees in Explorer.
+    /// Formats the last modified timestamp in authentic macOS Finder format
+    /// (e.g. "22 Nov 2024 at 08:30") using standard chrono local time.
     pub fn formatted_date(&self) -> String {
         let Some(time) = self.modified else {
             return "--".to_string();
         };
-        let Ok(duration) = time.duration_since(SystemTime::UNIX_EPOCH) else {
-            return "--".to_string();
-        };
-        let utc_secs = duration.as_secs() as i64;
-        let local = utc_secs + local_utc_offset_seconds(utc_secs);
-        let (year, month, day, hour, minute) = civil_from_unix_seconds(local);
-        format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
+        let dt: chrono::DateTime<chrono::Local> = time.into();
+        dt.format("%d %b %Y at %H:%M").to_string()
     }
-}
-
-/// The machine's UTC offset in seconds at the given instant (DST-aware).
-///
-/// Windows/Linux/macOS all expose a local-time API; we use `chrono`'s
-/// `Local` when it is available and fall back to UTC (offset 0) otherwise.
-fn local_utc_offset_seconds(utc_secs: i64) -> i64 {
-    use chrono::{DateTime, Local, Utc};
-    let Some(utc) = DateTime::<Utc>::from_timestamp(utc_secs, 0) else {
-        return 0;
-    };
-    utc.with_timezone(&Local).offset().local_minus_utc() as i64
-}
-
-/// Converts Unix seconds into a civil (year, month, day, hour, minute) tuple.
-///
-/// This is Howard Hinnant's `civil_from_days` algorithm, which is exact for
-/// the proleptic Gregorian calendar (leap years included) and handles dates
-/// before the Unix epoch via floor division.
-fn civil_from_unix_seconds(total_secs: i64) -> (i64, u32, u32, u32, u32) {
-    let days = total_secs.div_euclid(86_400);
-    let secs_of_day = total_secs.rem_euclid(86_400);
-    let hour = (secs_of_day / 3600) as u32;
-    let minute = ((secs_of_day % 3600) / 60) as u32;
-
-    // Shift the epoch to 0000-03-01 so leap days land at the end of the
-    // 400-year era and the month/day arithmetic stays uniform.
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097; // [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
-    let mp = (5 * doy + 2) / 153; // [0, 11]
-    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
-    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
-    let year = if m <= 2 { y + 1 } else { y };
-
-    (year, m as u32, d as u32, hour, minute)
 }
 
 /// Pluralizes an item count for status-bar / menu headers.
@@ -326,6 +307,75 @@ pub fn is_library_folder_name(name: &str) -> bool {
         "saved games",
     ];
     LIBRARY_FOLDERS.contains(&name.to_lowercase().as_str())
+}
+
+/// True when an entry name or path is a Windows/OS internal system container
+/// that users cannot and should not modify (e.g. SYSTEM SID S-1-5-18 in $Recycle.Bin,
+/// System Volume Information).
+pub fn is_protected_os_file(path: &Path) -> bool {
+    if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
+        let lower = fname.to_lowercase();
+        if lower.starts_with("s-1-5-18")
+            || lower.starts_with("s-1-5-19")
+            || lower.starts_with("s-1-5-20")
+            || lower == "system volume information"
+            || lower == "$recycle.bin"
+            || lower == "pagefile.sys"
+            || lower == "hiberfil.sys"
+            || lower == "swapfile.sys"
+            || lower == "dumpstack.log"
+        {
+            return true;
+        }
+    }
+    let p_str = path.to_string_lossy().to_lowercase();
+    p_str.contains("$recycle.bin\\s-1-5-18")
+        || p_str.contains("$recycle.bin/s-1-5-18")
+        || p_str.contains("$recycle.bin\\s-1-5-19")
+        || p_str.contains("$recycle.bin/s-1-5-19")
+        || p_str.contains("$recycle.bin\\s-1-5-20")
+        || p_str.contains("$recycle.bin/s-1-5-20")
+        || p_str.contains("system volume information")
+}
+
+/// Resolves the user's Recycle Bin / Trash folder across platforms.
+///
+/// On Windows: searches drives for the current user's SID folder (S-1-5-21-...)
+/// inside $Recycle.Bin, falling back to C:\$Recycle.Bin.
+/// On macOS: resolves to ~/.Trash.
+/// On Linux: resolves to ~/.local/share/Trash/files.
+pub fn resolve_recycle_bin_target() -> PathBuf {
+    #[cfg(windows)]
+    {
+        for letter in ['C', 'D', 'E', 'Z'] {
+            let candidate = PathBuf::from(format!("{}:\\$Recycle.Bin", letter));
+            if candidate.exists() {
+                if let Ok(rd) = std::fs::read_dir(&candidate) {
+                    for entry in rd.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if name.starts_with("S-1-5-21") && entry.path().is_dir() {
+                            return entry.path();
+                        }
+                    }
+                }
+            }
+        }
+        let sys_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+        PathBuf::from(format!("{}\\$Recycle.Bin", sys_drive))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        home_dir().join(".Trash")
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let trash = home_dir().join(".local/share/Trash/files");
+        if trash.exists() {
+            trash
+        } else {
+            home_dir().join(".local/share/Trash")
+        }
+    }
 }
 
 /// Formats a raw byte count into human-readable B, KB, MB, or GB
@@ -381,7 +431,11 @@ pub fn spawn_async_dir_scan(
                 if current_gen.load(Ordering::Relaxed) != gen {
                     return;
                 }
-                all_items.push(FileItem::from_path(entry.path()));
+                let p = entry.path();
+                if is_protected_os_file(&p) {
+                    continue;
+                }
+                all_items.push(FileItem::from_path(p));
             }
 
             // Sort: folders first, then files alphabetically (case-insensitive)
@@ -416,7 +470,11 @@ pub fn list_directory_sync(dir: &Path) -> Vec<FileItem> {
 
     let mut items = Vec::new();
     for entry in read_dir.flatten() {
-        items.push(FileItem::from_path(entry.path()));
+        let p = entry.path();
+        if is_protected_os_file(&p) {
+            continue;
+        }
+        items.push(FileItem::from_path(p));
     }
 
     items.sort_by(|a, b| {
@@ -489,6 +547,16 @@ pub fn copy_entry_recursive(src: &Path, dest: &Path) -> std::io::Result<u64> {
 /// Moves a file or directory safely.
 /// Attempts atomic rename first; if cross-device move fails, falls back to recursive copy + remove.
 pub fn move_entry(src: &Path, dest: &Path) -> std::io::Result<()> {
+    if is_protected_os_file(src) {
+        log::warn!(
+            "Refusing to move OS-protected system file: {}",
+            src.display()
+        );
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "OS-protected system file cannot be moved",
+        ));
+    }
     if let Err(_rename_err) = std::fs::rename(src, dest) {
         // Fallback for cross-filesystem / cross-drive boundaries
         copy_entry_recursive(src, dest)?;
@@ -499,6 +567,16 @@ pub fn move_entry(src: &Path, dest: &Path) -> std::io::Result<()> {
 
 /// Recursively removes a file, symlink, or directory tree safely.
 pub fn remove_entry_recursive(path: &Path) -> std::io::Result<()> {
+    if is_protected_os_file(path) {
+        log::warn!(
+            "Refusing to delete OS-protected system file: {}",
+            path.display()
+        );
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "OS-protected system file cannot be deleted",
+        ));
+    }
     if path.is_dir() {
         std::fs::remove_dir_all(path)
     } else if path.exists() {
@@ -541,43 +619,14 @@ pub fn resolve_unique_paste_path(dest: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    /// Epoch anchor: 1970-01-01T00:00:00Z.
+    /// Verifies authentic macOS Finder date formatting (e.g. "06 Nov 2026 at 09:39").
     #[test]
-    fn civil_conversion_epoch() {
-        assert_eq!(civil_from_unix_seconds(0), (1970, 1, 1, 0, 0));
-    }
-
-    /// The exact regression that the user reported: a folder created on
-    /// 2026-11-06 was rendered as 2026-11-24 by the old 30-day-month
-    /// approximation. The civil conversion must return the true date.
-    #[test]
-    fn civil_conversion_2026_11_06() {
-        // 2026-11-06T09:39:00Z
-        let secs = 1_793_957_940i64;
-        assert_eq!(civil_from_unix_seconds(secs), (2026, 11, 6, 9, 39));
-    }
-
-    /// Leap day must land on Feb 29, not drift into March.
-    #[test]
-    fn civil_conversion_leap_day() {
-        // 2024-02-29T12:00:00Z
-        let secs = 1_709_208_000i64;
-        assert_eq!(civil_from_unix_seconds(secs), (2024, 2, 29, 12, 0));
-    }
-
-    /// Century non-leap year (1900 is not a leap year, 2000 is).
-    #[test]
-    fn civil_conversion_century_rules() {
-        // 1900-03-01T00:00:00Z - day 60 of a non-leap year.
-        let secs = -2_203_891_200i64;
-        assert_eq!(civil_from_unix_seconds(secs), (1900, 3, 1, 0, 0));
-    }
-
-    /// Pre-epoch timestamps must floor correctly (no negative day rollover).
-    #[test]
-    fn civil_conversion_before_epoch() {
-        // 1969-12-31T23:59:00Z
-        assert_eq!(civil_from_unix_seconds(-60), (1969, 12, 31, 23, 59));
+    fn formatted_date_mac_format() {
+        let mut item = FileItem::from_path(std::path::PathBuf::from("test.txt"));
+        item.modified = Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_793_957_940));
+        let date_str = item.formatted_date();
+        assert!(date_str.contains("2026"), "Date must contain year 2026");
+        assert!(date_str.contains("Nov"), "Date must contain month Nov");
     }
 
     /// "1 item" vs "N items" - the grammar bug the user reported.

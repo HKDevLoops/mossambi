@@ -17,8 +17,6 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 #[cfg(target_os = "windows")]
 use std::thread;
-#[cfg(target_os = "windows")]
-use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WakeupReason {
@@ -113,7 +111,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
         SetForegroundWindow, TrackPopupMenu, TranslateMessage, UnregisterClassW, CS_HREDRAW,
         CS_VREDRAW, IDI_APPLICATION, MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED,
         MSG, PM_REMOVE, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD,
-        TPM_RIGHTBUTTON, WM_HOTKEY, WM_USER, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+        TPM_RIGHTBUTTON, WM_HOTKEY, WM_USER, WNDCLASSEXW,
     };
 
     const MOD_CONTROL: u32 = 0x0002;
@@ -167,12 +165,16 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
         RegisterClassExW(&wnd_class);
     }
 
+    // Create tool popup window (WS_EX_TOOLWINDOW | WS_POPUP) so it never
+    // competes as a main window with the primary winit/eframe surface in shell or WM
+    const WS_EX_TOOLWINDOW: u32 = 0x00000080;
+    const WS_POPUP: u32 = 0x80000000;
     let hwnd = unsafe {
         CreateWindowExW(
-            0,
+            WS_EX_TOOLWINDOW,
             class_name.as_ptr(),
             class_name.as_ptr(),
-            WS_OVERLAPPEDWINDOW,
+            WS_POPUP,
             0,
             0,
             0,
@@ -498,7 +500,18 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
             }
         }
 
-        std::thread::sleep(Duration::from_millis(30)); // Responsive event loop
+        unsafe {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                MsgWaitForMultipleObjectsEx, MWMO_INPUTAVAILABLE, QS_ALLINPUT,
+            };
+            let _ = MsgWaitForMultipleObjectsEx(
+                0,
+                std::ptr::null(),
+                30,
+                QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE,
+            );
+        }
     }
 
     if let Some(mut l) = drag_listener.take() {

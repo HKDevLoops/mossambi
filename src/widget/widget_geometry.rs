@@ -505,11 +505,23 @@ impl RadialWidgetGeometry {
         self.render_petal_icon(painter, icon_pos, label, icon_color);
 
         // 5. Draw Format Label Text (e.g. "JPG", "WEBP", "HEIC", "PDF")
+        let (display_label, font_size) = if label.len() > 6 {
+            if label.contains(' ') {
+                (label.replacen(' ', "\n", 1), 9.5)
+            } else if label.len() > 8 {
+                (label[..8].to_string(), 10.0)
+            } else {
+                (label.to_string(), 10.0)
+            }
+        } else {
+            (label.to_string(), 12.0)
+        };
+
         painter.text(
             text_pos,
             egui::Align2::CENTER_CENTER,
-            label,
-            FontId::proportional(12.0),
+            display_label,
+            FontId::proportional(font_size),
             text_color,
         );
     }
@@ -669,7 +681,7 @@ impl RadialWidgetGeometry {
         let ext_u = ext.to_uppercase();
 
         match ext_u.as_str() {
-            "JPG" | "JPEG" | "PNG" | "WEBP" | "BMP" => {
+            "JPG" | "JPEG" | "PNG" | "WEBP" | "BMP" | "GIF" => {
                 // Picture / Photo frame with sun & mountain peak
                 let frame_w = 17.0;
                 let frame_h = 13.0;
@@ -777,7 +789,7 @@ impl RadialWidgetGeometry {
                     line_stroke,
                 );
             }
-            "WAV" | "FLAC" | "MP3" | "M4A" | "OGG" | "AAC" => {
+            "WAV" | "FLAC" | "MP3" | "M4A" | "OGG" | "AAC" | "EXTRACT AUDIO" | "AUDIO" => {
                 // Audio waveform equalizer bars
                 let x = pos.x;
                 let y = pos.y;

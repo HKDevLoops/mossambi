@@ -236,14 +236,16 @@ impl ThemeStyle {
                 }
             }
             crate::core::GlassEffect::FrostedGlass => {
-                let win_a = (clamped_opacity * 235.0) as u8;
-                let side_a = (clamped_opacity * 245.0) as u8;
-                let card_a = (clamped_opacity * 215.0) as u8;
-                let hover_a = (clamped_opacity * 230.0) as u8;
-                let bord_a = (clamped_opacity * 160.0).clamp(50.0, 255.0) as u8;
+                let effective_op = clamped_opacity.clamp(0.92, 1.00);
+                let _win_a = (effective_op * 252.0) as u8;
+                let side_a = (effective_op * 240.0) as u8;
+                let card_a = (effective_op * 250.0) as u8;
+                let hover_a = (effective_op * 252.0) as u8;
+                let bord_a = (effective_op * 170.0).clamp(60.0, 255.0) as u8;
 
                 ThemePalette {
-                    window_bg: Color32::from_rgba_premultiplied(bg_r, bg_g, bg_b, win_a),
+                    // Solid, crisp window canvas (Apple HIG: main content canvas never bleeds through)
+                    window_bg: Color32::from_rgb(bg_r, bg_g, bg_b),
                     sidebar_bg: Color32::from_rgba_premultiplied(
                         bg_r.saturating_add(6),
                         bg_g.saturating_add(6),
@@ -279,14 +281,16 @@ impl ThemeStyle {
                 }
             }
             crate::core::GlassEffect::LiquidGlass => {
-                let win_a = (clamped_opacity * 180.0) as u8;
-                let side_a = (clamped_opacity * 195.0) as u8;
-                let card_a = (clamped_opacity * 160.0) as u8;
-                let hover_a = (clamped_opacity * 185.0) as u8;
-                let bord_a = (clamped_opacity * 200.0).clamp(60.0, 255.0) as u8;
+                let effective_op = clamped_opacity.clamp(0.90, 1.00);
+                let _win_a = (effective_op * 250.0) as u8;
+                let side_a = (effective_op * 236.0) as u8;
+                let card_a = (effective_op * 248.0) as u8;
+                let hover_a = (effective_op * 250.0) as u8;
+                let bord_a = (effective_op * 190.0).clamp(70.0, 255.0) as u8;
 
                 ThemePalette {
-                    window_bg: Color32::from_rgba_premultiplied(bg_r, bg_g, bg_b, win_a),
+                    // Solid, crisp window canvas (Apple HIG: main content canvas never bleeds through)
+                    window_bg: Color32::from_rgb(bg_r, bg_g, bg_b),
                     sidebar_bg: Color32::from_rgba_premultiplied(
                         bg_r.saturating_add(4),
                         bg_g.saturating_add(4),
@@ -676,7 +680,7 @@ pub fn render_segmented_switch(
                         theme.text_muted
                     }))
                     .fill(if is_active {
-                        PANTONE_FLAVEDO
+                        theme.accent
                     } else {
                         Color32::TRANSPARENT
                     })

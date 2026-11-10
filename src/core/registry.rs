@@ -14,6 +14,12 @@ pub enum FileCategory {
     Presentation,
     Archive,
     Subtitle,
+    Cad,
+    Models3D,
+    Geo,
+    Fonts,
+    Data,
+    Email,
     Unknown,
 }
 
@@ -95,18 +101,36 @@ impl UniversalRegistry {
             | "WMA" | "ALAC" | "DSD" | "DSF" | "APE" | "MID" | "MIDI" | "AC3" | "DTS" | "AMR"
             | "MKA" => FileCategory::Audio,
 
-            // Documents, Korean Hangul, Ebooks, CAD, 3D, Geospatial, Fonts, & Code (100+ formats)
+            // CAD Drawings (DWG, DXF, DWF, STEP, STP, IGES, IGS)
+            "DXF" | "DWG" | "DWF" | "STEP" | "STP" | "IGES" | "IGS" => FileCategory::Cad,
+
+            // 3D Models (GLB, GLTF, STL, OBJ, 3MF, PLY, FBX, DAE, BLEND, OFF, X3D, VRML, WRL)
+            "GLB" | "GLTF" | "STL" | "OBJ" | "3MF" | "PLY" | "FBX" | "DAE" | "BLEND" | "OFF"
+            | "X3D" | "VRML" | "WRL" => FileCategory::Models3D,
+
+            // Geospatial Vector Data (GEOJSON, KML, KMZ, GPX, SHP, TOPOJSON)
+            "GEOJSON" | "KML" | "KMZ" | "GPX" | "SHP" | "TOPOJSON" => FileCategory::Geo,
+
+            // Fonts & Typography (TTF, OTF, WOFF, WOFF2, EOT, PFA, PFB)
+            "TTF" | "OTF" | "WOFF" | "WOFF2" | "EOT" | "PFA" | "PFB" => FileCategory::Fonts,
+
+            // Data Exchange (JSON, JSONL, XML, YAML, YML, TOML, VCF, ICS)
+            "JSON" | "JSONL" | "XML" | "YAML" | "YML" | "TOML" | "VCF" | "ICS" => {
+                FileCategory::Data
+            }
+
+            // Email & MIME (EML, MSG, MHTML, P7M)
+            "EML" | "MSG" | "MHTML" | "P7M" => FileCategory::Email,
+
+            // Documents, Korean Hangul, Ebooks, & Code (50+ formats)
             "PDF" | "DOCX" | "DOC" | "TXT" | "MD" | "MARKDOWN" | "HTML" | "HTM" | "XHTML"
-            | "MHTML" | "RTF" | "ORG" | "TEX" | "EPUB" | "MOBI" | "AZW" | "AZW3" | "FB2"
-            | "CBZ" | "CBR" | "DJVU" | "DJV" | "HWP" | "HWPX" | "OFD" | "ODT" | "PAGES" | "WPS"
-            | "WPD" | "RST" | "ASCIIDOC" | "ADOC" | "EML" | "MSG" | "P7M" | "DXF" | "DWG"
-            | "DWF" | "STEP" | "STP" | "IGES" | "IGS" | "GLB" | "GLTF" | "STL" | "OBJ" | "3MF"
-            | "PLY" | "FBX" | "DAE" | "BLEND" | "OFF" | "X3D" | "VRML" | "WRL" | "GEOJSON"
-            | "KML" | "KMZ" | "GPX" | "SHP" | "TOPOJSON" | "TTF" | "OTF" | "WOFF" | "WOFF2"
-            | "EOT" | "PFA" | "PFB" | "TOML" | "JSON" | "YAML" | "YML" | "XML" | "RS" | "PY"
-            | "JS" | "TSX" | "C" | "CPP" | "H" | "HPP" | "CS" | "GO" | "JAVA" | "KT" | "RB"
-            | "PHP" | "SH" | "PS1" | "SWIFT" | "LUA" | "LOG" | "INI" | "CONF" | "PROPERTIES"
-            | "ENV" | "SQL" | "PROTO" => FileCategory::Document,
+            | "RTF" | "ORG" | "TEX" | "EPUB" | "MOBI" | "AZW" | "AZW3" | "FB2" | "CBZ" | "CBR"
+            | "DJVU" | "DJV" | "HWP" | "HWPX" | "OFD" | "ODT" | "PAGES" | "WPS" | "WPD" | "RST"
+            | "ASCIIDOC" | "ADOC" | "RS" | "PY" | "JS" | "TSX" | "C" | "CPP" | "H" | "HPP"
+            | "CS" | "GO" | "JAVA" | "KT" | "RB" | "PHP" | "SH" | "PS1" | "SWIFT" | "LUA"
+            | "LOG" | "INI" | "CONF" | "PROPERTIES" | "ENV" | "SQL" | "PROTO" => {
+                FileCategory::Document
+            }
 
             // Spreadsheets (14 formats)
             "XLSX" | "XLS" | "XLSB" | "XLSM" | "XLT" | "XLTX" | "CSV" | "TSV" | "ODS" | "OTS"
@@ -166,6 +190,12 @@ impl UniversalRegistry {
             FileCategory::Subtitle => {
                 vec!["VTT", "SRT", "TXT", "ASS", "SSA", "JSON", "MORE", "ALL"]
             }
+            FileCategory::Cad => vec!["SVG", "PDF", "PNG", "DXF", "DWG", "MORE", "ALL"],
+            FileCategory::Models3D => vec!["OBJ", "STL", "GLTF", "GLB", "PLY", "MORE", "ALL"],
+            FileCategory::Geo => vec!["GEOJSON", "KML", "KMZ", "GPX", "CSV", "MORE", "ALL"],
+            FileCategory::Fonts => vec!["WOFF", "WOFF2", "TTF", "OTF", "EOT", "MORE", "ALL"],
+            FileCategory::Data => vec!["CSV", "JSON", "JSONL", "XML", "VCF", "ICS", "MORE", "ALL"],
+            FileCategory::Email => vec!["HTML", "TXT", "ZIP", "PDF", "EML", "MORE", "ALL"],
             FileCategory::Unknown => vec!["PDF", "ZIP", "PNG", "MP4", "MP3", "TXT", "MORE", "ALL"],
         }
     }
@@ -198,7 +228,7 @@ impl UniversalRegistry {
             }
             FileCategory::Document => {
                 if ext == "PDF" {
-                    vec!["TXT", "DOCX", "HTML", "MD", "RTF", "PDF", "MORE", "ALL"]
+                    vec!["JPG", "PNG", "WEBP", "TXT", "DOCX", "XLSX", "MORE", "ALL"]
                 } else if ext == "DOCX" {
                     vec!["PDF", "TXT", "HTML", "MD", "RTF", "DOCX", "MORE", "ALL"]
                 } else {
@@ -1155,13 +1185,19 @@ impl UniversalRegistry {
                 "MP4", "MOV", "MKV", "WEBM", "AVI", "GIF", "MP3", "WAV", "FLAC", "M4A",
             ],
             FileCategory::Audio => vec!["WAV", "FLAC", "MP3", "M4A", "AAC", "OGG", "OPUS", "AIFF"],
-            FileCategory::Document => vec!["PDF", "TXT", "MD", "HTML", "RTF"],
+            FileCategory::Document => vec!["PDF", "TXT", "MD", "HTML", "RTF", "JPG", "PNG", "WEBP"],
             FileCategory::Spreadsheet => vec!["XLSX", "CSV", "TSV", "PDF", "HTML"],
             FileCategory::Presentation => vec!["PDF", "TXT", "HTML"],
             FileCategory::Archive => vec![
                 "ZIP", "TAR", "TAR.GZ", "TAR.BZ2", "TAR.XZ", "TAR.ZST", "EXTRACT",
             ],
             FileCategory::Subtitle => vec!["VTT", "SRT", "TXT"],
+            FileCategory::Cad => vec!["SVG", "PDF", "PNG", "DXF"],
+            FileCategory::Models3D => vec!["OBJ", "STL", "GLTF", "GLB", "PLY"],
+            FileCategory::Geo => vec!["GEOJSON", "KML", "KMZ", "GPX", "CSV"],
+            FileCategory::Fonts => vec!["WOFF", "WOFF2", "TTF", "OTF"],
+            FileCategory::Data => vec!["CSV", "JSON", "JSONL", "XML", "VCF", "ICS"],
+            FileCategory::Email => vec!["HTML", "TXT", "ZIP", "PDF"],
             FileCategory::Unknown => vec!["PDF", "TXT", "HTML", "ZIP"],
         }
     }

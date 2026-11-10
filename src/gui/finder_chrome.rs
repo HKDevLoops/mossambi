@@ -12,6 +12,7 @@
 
 use crate::core::icon_packs::{IconGlyph, IconPack};
 use crate::gui::design::{self, layout, radius, space, type_scale};
+use crate::gui::explorer_view::ViewMode;
 use crate::gui::macos_theme::ThemePalette;
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2};
 
@@ -144,7 +145,7 @@ pub fn toolbar_icon_button(
     tooltip: &str,
     active: bool,
 ) -> bool {
-    let side = layout::TOOLBAR_H - space::MD * 2.0;
+    let side = 29.0;
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(side), Sense::click());
     let painter = ui.painter_at(rect);
 
@@ -163,7 +164,8 @@ pub fn toolbar_icon_button(
         );
     }
 
-    crate::core::icon_packs::paint_icon(ui, pack, glyph, rect, accent_rgb);
+    let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(22.0));
+    crate::core::icon_packs::paint_icon(ui, pack, glyph, icon_rect, accent_rgb);
 
     let clicked = resp.clicked();
     resp.on_hover_ui(|ui| show_tooltip(ui, tooltip.to_owned()));
@@ -229,6 +231,116 @@ pub fn toolbar_row(ui: &mut Ui, build: impl FnOnce(&mut Ui)) {
         ui.spacing_mut().item_spacing = Vec2::new(space::XS, 0.0);
         build(ui);
     });
+}
+
+/// Renders an authentic macOS Finder connected segmented view switcher control:
+/// [ Icons | List | Columns ] in a unified pill container with active highlight.
+pub fn render_segmented_view_switcher(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    pack: IconPack,
+    current_mode: ViewMode,
+    mut on_select: impl FnMut(ViewMode),
+) {
+    let height = 28.0_f32;
+    let seg_w = 34.0_f32;
+    let total_w = seg_w * 3.0;
+    let (container_rect, _) = ui.allocate_exact_size(Vec2::new(total_w, height), Sense::hover());
+    let painter = ui.painter_at(container_rect);
+
+    // Subtle background pill & border
+    let bg_col = if palette.is_dark {
+        Color32::from_rgba_premultiplied(255, 255, 255, 14)
+    } else {
+        Color32::from_rgba_premultiplied(0, 0, 0, 10)
+    };
+    painter.rect_filled(container_rect, Rounding::same(radius::MD), bg_col);
+    painter.rect_stroke(
+        container_rect,
+        Rounding::same(radius::MD),
+        Stroke::new(1.0_f32, palette.border),
+    );
+
+    let modes = [
+        (
+            ViewMode::Grid,
+            IconGlyph::ActionView,
+            "Icon Grid View (Cmd+1)",
+        ),
+        (
+            ViewMode::Details,
+            IconGlyph::ActionList,
+            "Details List View (Cmd+2)",
+        ),
+        (
+            ViewMode::Columns,
+            IconGlyph::ActionColumns,
+            "Miller Columns View (Cmd+3)",
+        ),
+    ];
+
+    for (idx, (mode, glyph, tip)) in modes.into_iter().enumerate() {
+        let seg_rect = Rect::from_min_size(
+            Pos2::new(
+                container_rect.min.x + idx as f32 * seg_w,
+                container_rect.min.y,
+            ),
+            Vec2::new(seg_w, height),
+        );
+        let resp = ui.interact(
+            seg_rect,
+            ui.make_persistent_id(("view_switcher_seg", idx)),
+            Sense::click(),
+        );
+        let is_active = current_mode == mode;
+
+        if is_active {
+            let active_rect = seg_rect.shrink2(Vec2::new(2.0, 2.0));
+            painter.rect_filled(active_rect, Rounding::same(radius::SM), palette.accent);
+        } else if resp.hovered() {
+            let hover_rect = seg_rect.shrink2(Vec2::new(2.0, 2.0));
+            painter.rect_filled(
+                hover_rect,
+                Rounding::same(radius::SM),
+                Color32::from_rgba_premultiplied(
+                    palette.text_primary.r(),
+                    palette.text_primary.g(),
+                    palette.text_primary.b(),
+                    18,
+                ),
+            );
+        }
+
+        // Dividers between inactive items
+        if idx > 0 && !is_active && current_mode != modes[idx - 1].0 {
+            let div_x = seg_rect.min.x;
+            painter.line_segment(
+                [
+                    Pos2::new(div_x, container_rect.min.y + 6.0),
+                    Pos2::new(div_x, container_rect.max.y - 6.0),
+                ],
+                Stroke::new(1.0_f32, palette.border),
+            );
+        }
+
+        let icon_rect = Rect::from_center_size(seg_rect.center(), Vec2::splat(18.0));
+        let tint = if is_active {
+            [255, 255, 255]
+        } else {
+            [
+                palette.text_secondary.r(),
+                palette.text_secondary.g(),
+                palette.text_secondary.b(),
+            ]
+        };
+        crate::core::icon_packs::paint_icon(ui, pack, glyph, icon_rect, tint);
+
+        let clicked = resp.clicked();
+        resp.on_hover_text(tip);
+        if clicked {
+            on_select(mode);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -443,7 +555,7 @@ pub struct SidebarRowSpec<'a> {
 /// The label elides to the available width instead of overflowing into the
 /// next column, which is the "Custom Conforme" truncation bug fixed at source.
 pub fn render_sidebar_row(ui: &mut Ui, palette: &ThemePalette, spec: &SidebarRowSpec<'_>) -> bool {
-    let row_h = 26.0;
+    let row_h = 30.0;
     let desired_size = Vec2::new(ui.available_width(), row_h);
     let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
     let is_hovered = response.hovered();
@@ -474,8 +586,8 @@ pub fn render_sidebar_row(ui: &mut Ui, palette: &ThemePalette, spec: &SidebarRow
         painter.rect_filled(bar_rect, Rounding::same(1.5), palette.accent);
     }
 
-    let icon_side = 16.0;
-    let pin_side = if spec.show_pin { 14.0 } else { 0.0 };
+    let icon_side = 24.0;
+    let pin_side = if spec.show_pin { 16.0 } else { 0.0 };
     let icon_rect = Rect::from_center_size(
         Pos2::new(rect.min.x + 10.0 + icon_side / 2.0, rect.center().y),
         Vec2::splat(icon_side),
@@ -484,7 +596,7 @@ pub fn render_sidebar_row(ui: &mut Ui, palette: &ThemePalette, spec: &SidebarRow
 
     let label_x = rect.min.x + 10.0 + icon_side + space::MD;
     let label_max_w = (rect.max.x - label_x - pin_side - space::SM).max(space::LG);
-    let font_id = FontId::proportional(type_scale::BODY_SM);
+    let font_id = FontId::proportional(14.0);
     let display_label = design::elide_end(ui, spec.label, &font_id, label_max_w);
     let text_color = if spec.selected {
         if palette.is_dark {

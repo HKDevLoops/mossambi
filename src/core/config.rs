@@ -230,6 +230,34 @@ pub enum CheckboxMode {
     Off,
 }
 
+/// Explorer chrome style: macOS Finder vs Windows Explorer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExplorerStyle {
+    /// Authentic macOS Finder layout: traffic lights on left, unified single toolbar,
+    /// dynamic path ribbon at the bottom with item status.
+    #[default]
+    #[serde(alias = "macos", alias = "mac", alias = "finder")]
+    MacOS,
+    /// Windows Explorer layout: top navigation buttons with breadcrumb address bar
+    /// and quick edit mode, status bar at bottom.
+    #[serde(alias = "windows", alias = "win")]
+    Windows,
+}
+
+impl ExplorerStyle {
+    pub fn all() -> &'static [ExplorerStyle] {
+        &[ExplorerStyle::MacOS, ExplorerStyle::Windows]
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::MacOS => "macOS Finder",
+            Self::Windows => "Windows Explorer",
+        }
+    }
+}
+
 impl CheckboxMode {
     pub fn all() -> &'static [CheckboxMode] {
         &[CheckboxMode::Always, CheckboxMode::Hover, CheckboxMode::Off]
@@ -258,10 +286,13 @@ impl CheckboxMode {
 pub enum MenuStyle {
     /// Windows 11 Explorer shell layout and wording.
     #[default]
+    #[serde(alias = "windows", alias = "win")]
     Windows,
     /// macOS Finder layout and wording.
+    #[serde(alias = "finder", alias = "macos", alias = "mac")]
     Finder,
     /// Linux / Nautilus layout and wording.
+    #[serde(alias = "linux", alias = "nautilus")]
     Linux,
 }
 
@@ -506,6 +537,9 @@ pub struct MossambiConfig {
     /// `show_custom_pinned` is on.
     #[serde(default)]
     pub pinned_custom: Vec<String>,
+    /// Explorer style: macOS Finder vs Windows Explorer.
+    #[serde(default)]
+    pub explorer_style: ExplorerStyle,
     /// Keybinding profile: 0 = macOS Finder, 1 = Windows Explorer
     #[serde(default = "default_keybinding_profile")]
     pub keybinding_profile: u8,
@@ -681,6 +715,7 @@ impl Default for MossambiConfig {
             show_tags_section: false,
             show_custom_pinned: false,
             pinned_custom: Vec::new(),
+            explorer_style: ExplorerStyle::default(),
             keybinding_profile: default_keybinding_profile(),
             local_ai_enabled: false,
             local_ai_endpoint: default_local_ai_endpoint(),

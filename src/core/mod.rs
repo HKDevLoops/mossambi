@@ -37,7 +37,7 @@ pub use action_journal::{
     undo_last,
 };
 pub use async_worker::{AsyncWorkerPool, TaskUpdate};
-pub use config::{GlassEffect, MossambiConfig, OutputMode, ThemeMode};
+pub use config::{ExplorerStyle, GlassEffect, MossambiConfig, OutputMode, ThemeMode};
 pub use dir_watcher::DirWatcher;
 pub use donut_config::{DonutAppearance, DonutConfig, DonutProfile, DonutSlicePreset};
 #[cfg(target_os = "windows")]
@@ -48,9 +48,9 @@ pub use fields_config::{FieldItemSpec, FieldsConfig};
 pub use file_icons::{resolve_file_icon, FileIconSpec};
 pub use fs_utils::{
     copy_entry_recursive, format_file_size, get_system_drives, is_library_folder_name,
-    list_directory_sync, move_entry, parse_breadcrumbs, pluralize_items, remove_entry_recursive,
-    resolve_unique_paste_path, spawn_async_dir_scan, BreadcrumbSegment, DriveInfo, FileItem,
-    ScanBatch,
+    is_protected_os_file, list_directory_sync, move_entry, parse_breadcrumbs, pluralize_items,
+    remove_entry_recursive, resolve_recycle_bin_target, resolve_unique_paste_path,
+    spawn_async_dir_scan, BreadcrumbSegment, DriveInfo, FileItem, ScanBatch,
 };
 pub use fuzzy::{fuzzy_match, sort_by_fuzzy_match};
 pub use gesture::{GestureKind, GesturePoint, KinematicGestureTracker};

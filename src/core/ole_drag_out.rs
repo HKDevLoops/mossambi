@@ -497,6 +497,19 @@ impl IDropSource_Impl for DropSourceDefault_Impl {
         if grfkeystate.0 & DRAG_BUTTON_MASK == 0 {
             return DRAGDROP_S_DROP;
         }
+        // Hardware failsafe: if physical mouse buttons are no longer depressed,
+        // complete the drop immediately so DoDragDrop never hangs the UI thread.
+        unsafe {
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+                GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
+            };
+            let l_down = (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0;
+            let m_down = (GetAsyncKeyState(VK_MBUTTON as i32) as u16 & 0x8000) != 0;
+            let r_down = (GetAsyncKeyState(VK_RBUTTON as i32) as u16 & 0x8000) != 0;
+            if !l_down && !m_down && !r_down {
+                return DRAGDROP_S_DROP;
+            }
+        }
         HR_S_OK
     }
 
