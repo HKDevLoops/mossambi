@@ -381,3 +381,50 @@ says otherwise. Ordered by the phase that must satisfy it.
    noob user) with hover + click screenshots on every interaction.
 6. The user notes "lots of updates happened to the code" - never trust checklist marks
    alone; verify each ledger item visually against the current tree.
+
+## THEME SYSTEM OVERHAUL (est. 2026-11-10, user directive)
+
+1. **Contrast mandate:** blue highlighting on text labels AND on hover makes text
+   invisible or overpowered. Fix for ALL themes - proper alpha discipline and
+   high-contrast selected/hover label colors in every surface (sidebar rows, grid tiles,
+   table rows, menus, tabs, buttons).
+2. **Themes are not accent swaps.** Today's themes only change the accent color - not
+   accepted. Implement real premium themes as FULL palettes (background, sidebar/panel,
+   cards, borders, text tiers, accent families): the best VIM themes, the best Emacs
+   themes, and the best VS Code themes, faithfully ported.
+3. **Signature theme: "Mossambi Punch"** - Mossambi's True Fruit colour theme (sweet
+   lime / citrus punch identity), designed to Apple HIG standards.
+4. **Cross-check** the whole wave with the **impeccable** skill and UI/frontend design
+   guidance, and verify visually with **computer use** (OCU + PrintWindow).
+5. Everything integrates with the **macOS Finder explorer design**; follow macOS design
+   principles throughout.
+
+### Alpha-discipline wave - live sweep (complete, est. 2026-11-10)
+
+All queued surfaces verified with OCU + PrintWindow scrub-hover harness (teleport
+cursor moves never register in egui/winit; scrub motion does - harness gained
+shover/fhover/probe/fore modes plus region-diff and hash checks):
+
+- [verified] row hover band R38 G38 B40 with text R229 readable; row selection band
+  R22 G53 B99, icon zone R20 G72 B138, neighbor rows idle R24 G24 B26 - unmul
+  arithmetic live (the old premul path would flood (16,138,255)).
+- [verified] sidebar, Quick Access + drive cards hover lift R24 -> R38 with a shared
+  accent hairline top edge (consistent design); capacity track lifts R40 -> R47.
+- [verified-fixed] "System Disk (C:)" midline overlay: not reproducible - uniform
+  bounded accent band, text readable; the wave cleared it.
+- [verified-fixed] F: card "Capacity unknown" fallback; Recent Files mtime-desc +
+  hidden-file filtering hold.
+- [style note] toolbar icon hover disc R101: brighter than the R38 row family, still
+  neutral + glyph readable; retune during the theme wave.
+
+[new defects from the live audit]
+- D-G1 grid view renders 0 tiles for the populated Desktop folder (list shows ~19);
+  tile hover verification blocked until fixed.
+- D-S2 status bar "0 items" while rows render; Home counts correctly ("101 items
+  (111 hidden)") - Desktop-folder-specific, likely shared root with D-G1.
+- D-P3 Desktop browse resolves the wrong path: shell Desktop is OneDrive-redirected
+  (C:/Users/haris/OneDrive/Desktop, 32 real items; raw profile Desktop is empty);
+  app renders Miniconda-root contents under a "C: > Users > haris > Desktop"
+  breadcrumb and the render pane + status bar read different sources. Fix via
+  SHGetKnownFolderPath + a single browser-model source of truth. Column-view
+  dead-zone left half noted for the A2/A3 layout audit.
