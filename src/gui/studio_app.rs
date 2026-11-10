@@ -782,6 +782,7 @@ impl eframe::App for MossambiApp {
         self.studio_view.render(
             ctx,
             &mut self.theme,
+            &mut self.config,
             &cur_file,
             &mut qs,
             || file_to_pick = true,

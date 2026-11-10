@@ -10,6 +10,7 @@
 //! - Hardware & AI telemetry (NVENC, AMF, QSV, DirectML NPU)
 //! - Certified Pantone Citrus Palette tokens
 
+use crate::core::config::MossambiConfig;
 use crate::core::icon_packs::IconGlyph;
 use crate::core::{FileCategory, UniversalRegistry};
 use crate::exam::{optimize_exam_media, ExamConstraint};
@@ -104,6 +105,7 @@ impl StudioView {
         &mut self,
         ctx: &egui::Context,
         current_theme: &mut ThemeStyle,
+        config: &mut MossambiConfig,
         current_file: &Option<PathBuf>,
         quick_settings: &mut QuickSettingsState,
         mut on_pick_file: impl FnMut(),
@@ -1221,7 +1223,13 @@ impl StudioView {
                     }
                 }
                 StudioTab::Preferences => {
-                    self.render_preferences_tab(ui, &palette, current_theme, quick_settings);
+                    self.render_preferences_tab(
+                        ui,
+                        &palette,
+                        current_theme,
+                        quick_settings,
+                        config,
+                    );
                 }
                 other => {
                     egui::ScrollArea::vertical()
@@ -2824,9 +2832,18 @@ impl StudioView {
         palette: &ThemePalette,
         current_theme: &mut ThemeStyle,
         _settings: &mut QuickSettingsState,
+        config: &mut MossambiConfig,
     ) {
+        // Single source of truth: PreferencesView must render against the LIVE
+        // app config, not the construction-time snapshot stored in prefs_view.cfg.
+        // Swap the live config in for the frame so every self.cfg mutation below
+        // lands in studio_app.config, then swap the mutated config back out. The
+        // stale snapshot is discarded in both directions. Safe because
+        // PreferencesView::render has no early returns (verified 2026-11-10).
+        std::mem::swap(&mut self.prefs_view.cfg, config);
         self.prefs_view
             .render(ui, palette, current_theme, _settings);
+        std::mem::swap(&mut self.prefs_view.cfg, config);
     }
 
     fn render_quality_inspector_tab(

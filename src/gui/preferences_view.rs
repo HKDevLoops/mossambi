@@ -358,13 +358,21 @@ impl PreferencesView {
                             ui.spacing_mut().item_spacing =
                                 Vec2::new(design::space::MD, design::space::SM);
                             if self.selected == 1 {
-                                // Donut toolbar: fluid 3-column layout centered with safety padding
-                                let donut_w = 680.0_f32.min(ui.available_width() - 32.0);
+                                // Donut toolbar: fluid 3-column layout centered with safety
+                                // padding. Uncapped to 1280 so maximized windows use the
+                                // width instead of leaving a large centering void.
+                                let donut_w = 1280.0_f32.min(ui.available_width() - 32.0);
                                 let pad_x = ((ui.available_width() - donut_w) * 0.5).max(16.0);
                                 ui.horizontal(|ui| {
                                     ui.add_space(pad_x);
                                     ui.vertical(|ui| {
                                         ui.set_width(donut_w);
+                                        // Bound the max rect too: set_width alone only
+                                        // raises the minimum, so the inner 3-column
+                                        // layout would still see the full pane width
+                                        // and run past the right window edge when
+                                        // maximized.
+                                        ui.set_max_width(donut_w);
                                         ui.add_space(design::space::SM);
                                         let title = CATEGORIES[self.selected];
                                         ui.label(
