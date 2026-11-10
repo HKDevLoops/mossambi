@@ -500,3 +500,46 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   switches, rows breathing inside cards, sidebar rows separated; Donut tab
   extension pills true-pill themed with 8px gaps, Front/Back + category
   pills separated, columns gap-reserved.
+
+[Live settings save wave: fixed-code 2026-11-10, commit 352ae82]
+- User mandate: "saving new changes to settings completes without any
+  errors" - live persistence proven with computer use.
+- Defects: preferences_view.rs discarded the frame-local dirty flag (let _
+  = dirty) so the save never fired from the Preferences page; the save
+  site swallowed all errors (let _ = self.cfg.save()); studio_app.rs had
+  three more silent saves (theme change, autostart, explorer/quick prefs).
+- Fix: dirty propagates into self.dirty; save errors surface in a pinned
+  danger banner at the top of the pane (visible regardless of scroll) and
+  keep the flag set so the next frame retries transient locks; new
+  save_error field; banner uses a theme-independent danger red because
+  macos_theme::ThemePalette carries no error role (clippy caught 4x E0609
+  when first written against design.rs's separate palette); studio_app
+  saves converted to the house log::warn! precedent (explorer_view.rs).
+- Gates GREEN: fmt, clippy -D warnings, cargo test (19 suites 0 failed),
+  ASCII sweep (66 added lines), release build (49.87s).
+- Live verification: toggling "Start Mossambi when I sign in" flipped
+  launch_at_login false->true on disk within a frame (config.json mtime
+  16:34:27.921 -> 16:50:33.046; JSON diff shows only that key plus the
+  theme_mode render-sync); the value survived an app restart; success-path
+  capture shows the switch On with no banner.
+- New defects discovered during verification (queued for next waves):
+  (1) Settings do not APPLY to the running app: PreferencesView owns a
+  detached MossambiConfig copy (loads its own at construction,
+  studio_view.rs:91) while the live app reads studio_app.config; nothing
+  syncs them, so every cfg-backed change persists to disk but takes effect
+  only on restart - the user-reported "nothing I change works".
+  (2) Theme round-trip clobber: ThemeMode::LiquidGlass maps to
+  ThemeStyle::DarkAnthracite in both From impls (macos_theme.rs:332-396),
+  so the preferences render-sync (preferences_view.rs:152) rewrites the
+  persisted theme to dark_anthracite on first save.
+  (3) Maximized-mode layout: donut toolbar column 3 ("Available presets")
+  clips at the window edge and pane content is offset ~370px from the
+  sidebar (user screenshot); the toolbar Search box clips too.
+  (4) App died spontaneously once after a settings save (no Windows Error
+  Reporting record; monitoring for recurrence).
+- Protocol note: an earlier attempt clicked against a window whose
+  geometry had shifted mid-test (capture ~1920x1050 vs launch 1120x720
+  @(400,196)) and hit the wrong control; resolved by relaunching to
+  standard geometry and confirming the tab via capture before the decisive
+  click; keep a config baseline snapshot and Compare-Object the JSON for
+  exact key-level proof.
