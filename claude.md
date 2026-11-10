@@ -345,3 +345,39 @@ says otherwise. Ordered by the phase that must satisfy it.
    - `cargo test`: 128 tests pass (66 unit + 62 integration across all 15 suites), 0 failed, 0 ignored.
    - `cargo audit`: Clean (0 security vulnerabilities across 588 dependencies).
    - Knowledge Graph sync via `/gsd-graphify`: 2,258 nodes, 4,256 edges, 115 communities in `.planning/graphs/`.
+
+## Mandatory Quality & Engineering Discipline (Karpathy Guidelines & Strict Execution)
+
+1. **Mandatory Post-Task Formatting, Linting, and Debugging:**
+   - After EVERY task or modification, formatting (`cargo fmt`), linting (`cargo clippy --all-targets -- -D warnings`), and debugging/verifying program execution are **strictly mandatory**.
+   - Never consider any task complete without passing all verification gates cleanly.
+
+2. **Surgical Changes Only (Anti-Rewrite Doctrine):**
+   - **Never rewrite entire files or replace working code blocks wholesale.**
+   - Make precise, surgical modifications that touch ONLY the exact lines required to solve the problem.
+   - Do not "improve" or reformat adjacent unrelated code or comments.
+   - Every changed line must trace directly to the user's explicit request.
+
+3. **Karpathy Coding Guidelines (multica-ai/andrej-karpathy-skills):**
+   - **Think Before Coding:** Don't assume. Don't hide confusion. Surface tradeoffs explicitly.
+   - **Simplicity First:** Minimum code that solves the problem. Nothing speculative. No unnecessary abstractions.
+   - **Surgical Changes:** Touch only what you must. Clean up only your own mess. Match existing codebase style.
+   - **Goal-Driven Execution:** Define measurable success criteria, write tests, and loop until verified.
+
+## Session contract - AUDIT WAVE (est. 2026-11-10, from user interview)
+
+1. **Ownership confirmed:** this session is the only active harness in the repo. The
+   phase-21 uncommitted wave is owned here and may be fixed + committed freely.
+2. **Order of work (user-mandated):** fix the clippy RED (3 unused vars `glass`/`ms`/`cm`
+   in preferences_view.rs) and finish the resting Glass-effect refactor -> all five gates
+   GREEN -> commit the wave in clean commits -> FULL AUDIT of every ledger item against
+   real behavior -> verify with computer use (OCU + PrintWindow) -> fix UI defects and any
+   red gate -> verify all phases (16-21) surfaces.
+3. **Security testing** comes after the UI round: use **security-mcp** and the user's
+   **Kali Linux WSL** to perform the security tests.
+4. **Process level (user picked both):** gsd planning + autonomous execution for major
+   work; lightweight direct execution for small fixes.
+5. **QA depth:** full 4-role computer-use QA (developer, real user, pessimistic tester,
+   noob user) with hover + click screenshots on every interaction.
+6. The user notes "lots of updates happened to the code" - never trust checklist marks
+   alone; verify each ledger item visually against the current tree.
