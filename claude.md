@@ -444,7 +444,33 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
 - Gates GREEN: cargo fmt, clippy -D warnings (26s), cargo test (67 lib tests
   0 failed 0 ignored + full integration suites), ASCII sweep (74 added lines
   all pure ASCII), release build (1m00s).
-- Pending live verification on the rebuilt release (fix order contract):
-  Desktop lists the 32 OneDrive items, status count correct, grid tiles render
-  (D-G1), status count honest (D-S2), tile hover unblocked. Conda-root listing
-  mechanism under the Desktop breadcrumb to be observed during that pass.
+- VERIFIED LIVE on the rebuilt release: Desktop lists the 32 OneDrive items,
+  status count honest ("32 items (1 hidden)"), grid tiles render with hover
+  lift, tooltip, and selection (accent card + checkbox + "1 selected
+  (2.3 KB)").
+- Conda-root mechanism SOLVED: the phantom column was the columns auto-preview
+  dir auto-push firing against stale entries (see Miller wave below).
+
+[Miller wave: fixed-code 2026-11-10, commit 9d078ca]
+- User-reported defect: Miller columns 3rd/4th keep stale content after
+  navigating upward. Root cause: go_back/go_forward set current_dir directly
+  and spawned the async scan without the column-state resets navigate_to
+  performs (column_stack, column_subfolder, column_preview_item,
+  focused_row, is_home_view, tab metadata, dir watcher) - column 1
+  re-rendered while the old subfolder columns stayed on screen.
+- Fix: go_back/go_forward route through navigate_to; its history-push guard
+  is a no-op when the target sits at history_idx, so back/forward positions
+  are preserved. Same wave: the columns auto-preview dir auto-push branch
+  removed (it pushed entries.first() while the async scan was in flight,
+  pushing the anaconda3 root as a phantom second column on first navigation
+  after launch) and the file auto-preview guarded by a parent-match check.
+- Gates GREEN: fmt, clippy -D warnings, cargo test (19 suites 0 failed 0
+  ignored), ASCII sweep (17 added lines), release build (46.98s).
+- Live verification (pid 4952): first navigation into columns view shows the
+  real Desktop listing + inspector with NO phantom column; 3-column stack
+  (C: > Users > haris) then Back wiped the whole stack to the single Desktop
+  listing; Forward landed clean on the C:\ single column.
+- Follow-up defect noted for the audit wave: Miller columns 2+ render raw
+  unfiltered listings via get_column_entries (desktop.ini, hidden junctions
+  like "All Users ->", dot-dirs) while column 1 renders the filtered view -
+  hidden-item visibility inconsistent across columns.
