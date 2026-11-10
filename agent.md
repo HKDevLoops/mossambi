@@ -428,3 +428,23 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   breadcrumb and the render pane + status bar read different sources. Fix via
   SHGetKnownFolderPath + a single browser-model source of truth. Column-view
   dead-zone left half noted for the A2/A3 layout audit.
+
+[D-P3 wave: fixed-code 2026-11-10, commit 1c59776]
+- Root cause confirmed: all known-folder navigation was built from raw
+  USERPROFILE joins that bypassed platform_paths (8 sites in explorer_view:
+  constructor, navigate_to, add_tab, is_home_directory, navigate_to_home,
+  dashboard base; 2 sites in studio_view: sidebar Home row + the Favorites
+  pinned pointers that the Desktop row resolves through).
+- Fix: every navigation target now routes through the SHGetKnownFolderPath
+  helpers in platform_paths (desktop_dir, downloads_dir, documents_dir,
+  pictures_dir, music_dir, videos_dir); added home_dir_opt() for Option-shaped
+  call sites plus a helper-agreement test. The command palette was already
+  routed through platform_paths and needed no change. OneDrive row and
+  config/journal storage paths left raw by design (not known folders).
+- Gates GREEN: cargo fmt, clippy -D warnings (26s), cargo test (67 lib tests
+  0 failed 0 ignored + full integration suites), ASCII sweep (74 added lines
+  all pure ASCII), release build (1m00s).
+- Pending live verification on the rebuilt release (fix order contract):
+  Desktop lists the 32 OneDrive items, status count correct, grid tiles render
+  (D-G1), status count honest (D-S2), tile hover unblocked. Conda-root listing
+  mechanism under the Desktop breadcrumb to be observed during that pass.
