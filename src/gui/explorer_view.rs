@@ -1186,12 +1186,6 @@ impl ExplorerView {
                     }
                 }
 
-                // F5: Refresh directory
-                if i.key_pressed(egui::Key::F5) {
-                    let dir = self.current_dir.clone();
-                    self.navigate_to(dir);
-                }
-
                 // Vim `gg` / Emacs `Alt+<`: Jump to First Item
                 if (i.key_pressed(egui::Key::G)
                     && !i.modifiers.shift
@@ -1464,23 +1458,9 @@ impl ExplorerView {
             {
                 spawn_new_explorer_window(Some(&self.current_dir));
             }
-            // Ctrl+T / Cmd+T: Open New Tab
-            if (i.modifiers.ctrl || i.modifiers.command)
-                && !i.modifiers.shift
-                && !i.modifiers.alt
-                && i.key_pressed(egui::Key::T)
-            {
-                self.add_tab(self.current_dir.clone());
-            }
-            // Ctrl+W / Cmd+W: Close Current Tab
-            if (i.modifiers.ctrl || i.modifiers.command)
-                && !i.modifiers.shift
-                && !i.modifiers.alt
-                && i.key_pressed(egui::Key::W)
-                && self.tabs.len() > 1
-            {
-                self.close_tab(self.active_tab_index);
-            }
+            // Ctrl+T / Cmd+T and Ctrl+W / Cmd+W are handled once globally in
+            // StudioView::render (where they also switch to the explorer tab);
+            // duplicating them here fired each keystroke's action twice.
             // Ctrl+Tab / Ctrl+Shift+Tab: Cycle Next/Previous Tab
             if (i.modifiers.ctrl || i.modifiers.command)
                 && i.key_pressed(egui::Key::Tab)
@@ -1498,11 +1478,6 @@ impl ExplorerView {
                 if let Some(tab) = self.tabs.get(self.active_tab_index) {
                     let target = tab.path.clone();
                     self.navigate_to(target);
-                }
-            }
-            if i.key_pressed(egui::Key::F2) {
-                if let Some(item) = nav_entries.get(self.focused_row) {
-                    self.renaming_path = Some((item.path.clone(), item.name.clone()));
                 }
             }
             if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::L) {
