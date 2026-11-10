@@ -474,3 +474,29 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   unfiltered listings via get_column_entries (desktop.ini, hidden junctions
   like "All Users ->", dot-dirs) while column 1 renders the filtered view -
   hidden-item visibility inconsistent across columns.
+
+[Settings spacing wave: fixed-code 2026-11-10, commit 4255481]
+- User-reported defect: settings page pills/toggles/switches "sticking to
+  each other" with no differentiation gaps; full audit of margins, padding,
+  layout, borders, radius requested via the impeccable skill + computer-use
+  MCP.
+- Root cause: preferences_view.rs:157 set item_spacing = Vec2::ZERO across
+  the whole sidebar|divider|pane partition, so egui inserted no widget gaps;
+  all separation was hand-typed add_space(XS) = 4px (monotone, cramped).
+  Pills used radius::SM (5px) not PILL; toggle_row's On/Off label sat flush
+  against the switch; extension pills were bare default-styled buttons.
+- Assessment: mechanical detector (impeccable detect --scope layout) zero
+  findings pre- and post-fix; rendered evidence from live captures of the
+  General and Donut tabs identified the cramming set.
+- Fix (9 edits, +30/-8): automatic rhythm restored inside both partitions
+  (item_spacing 8x6, outer partition stays flush); section headings more
+  space above than below (LG/XS); card inner margin 16x12; Front/Back +
+  category pills true radius::PILL; extension pills themed (card fill,
+  hairline border, PILL radius); donut narrow fallback reserves the two
+  8px inter-column gaps (165/284/215).
+- Gates GREEN: fmt, clippy -D warnings, cargo test (19 suites 0 failed),
+  ASCII sweep (31 added lines), release build (49.31s).
+- Live verification (pid 27548): General tab On/Off labels separated from
+  switches, rows breathing inside cards, sidebar rows separated; Donut tab
+  extension pills true-pill themed with 8px gaps, Front/Back + category
+  pills separated, columns gap-reserved.
