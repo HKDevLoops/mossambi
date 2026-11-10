@@ -657,7 +657,9 @@ impl eframe::App for MossambiApp {
                     self.theme = new_theme;
                     let mut cfg = crate::core::MossambiConfig::load();
                     cfg.theme_mode = new_theme.into();
-                    let _ = cfg.save();
+                    if let Err(e) = cfg.save() {
+                        log::warn!("Could not persist theme change: {e}");
+                    }
                 }
                 AppControlEvent::ChangeExamPreset(preset_name) => {
                     self.quick_settings.exam_mode_enabled = true;
@@ -681,7 +683,9 @@ impl eframe::App for MossambiApp {
                 AppControlEvent::ToggleAutostart(enabled) => {
                     let mut cfg = crate::core::MossambiConfig::load();
                     cfg.launch_at_login = enabled;
-                    let _ = cfg.save();
+                    if let Err(e) = cfg.save() {
+                        log::warn!("Could not persist autostart change: {e}");
+                    }
                 }
                 AppControlEvent::QuitApp => {
                     ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -848,7 +852,9 @@ impl MossambiApp {
                 self.config.explorer_zoom,
                 self.config.icon_pack
             );
-            let _ = self.config.save();
+            if let Err(e) = self.config.save() {
+                log::warn!("Could not persist explorer prefs: {e}");
+            }
         }
     }
 }

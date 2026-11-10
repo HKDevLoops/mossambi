@@ -113,6 +113,7 @@ pub struct PreferencesView {
     pub new_ext_input: String,
     pub new_profile_name: String,
     pub exclusion_input: String,
+    pub save_error: Option<String>,
 }
 
 impl Default for PreferencesView {
@@ -130,6 +131,7 @@ impl Default for PreferencesView {
             new_ext_input: String::new(),
             new_profile_name: String::new(),
             exclusion_input: String::new(),
+            save_error: None,
         }
     }
 }
@@ -308,6 +310,44 @@ impl PreferencesView {
                 Layout::top_down(Align::Min),
                 |ui| {
                     let mut dirty = false;
+                    if let Some(err) = self.save_error.clone() {
+                        // Pinned save-status banner: visible regardless of
+                        // scroll, because silent persistence failures are how
+                        // settings get lost without the user ever knowing.
+                        // Danger red is theme-independent on purpose:
+                        // ThemePalette carries no error role, and a failed save
+                        // must read as a failure in every theme.
+                        let danger = Color32::from_rgb(196, 74, 66);
+                        let tint = if palette.is_dark { 42 } else { 22 };
+                        Frame::none()
+                            .fill(Color32::from_rgba_unmultiplied(
+                                danger.r(),
+                                danger.g(),
+                                danger.b(),
+                                tint,
+                            ))
+                            .stroke(Stroke::new(1.0_f32, danger))
+                            .rounding(Rounding::same(design::radius::MD))
+                            .inner_margin(Margin::symmetric(12.0, 8.0))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Settings were NOT saved: {err}"
+                                    ))
+                                    .size(design::type_scale::BODY_SM)
+                                    .strong()
+                                    .color(palette.text_primary),
+                                );
+                                ui.label(
+                                    egui::RichText::new(
+                                        "Saving retries automatically; if this banner stays, check disk space or folder permissions.",
+                                    )
+                                    .size(design::type_scale::CAPTION)
+                                    .color(palette.text_secondary),
+                                );
+                            });
+                        ui.add_space(design::space::SM);
+                    }
                     ScrollArea::vertical()
                         .id_salt("prefs_detail_scroll")
                         .auto_shrink([false; 2])
@@ -379,15 +419,27 @@ impl PreferencesView {
                                     });
                                 });
                             }
-                            let _ = dirty;
+                            // Propagate the frame-local dirty flag to the live
+                            // persistence check below; the per-tab renders borrow
+                            // a local because they already hold &mut self.
+                            if dirty {
+                                self.dirty = true;
+                            }
                         });
                 },
             );
         });
 
         if self.dirty {
-            let _ = self.cfg.save();
-            self.dirty = false;
+            // Live persistence: every change writes immediately. A failure is
+            // surfaced in the pane instead of being swallowed silently, and the
+            // flag stays set so the next frame retries (transient locks heal).
+            if let Err(e) = self.cfg.save() {
+                self.save_error = Some(e.to_string());
+            } else {
+                self.dirty = false;
+                self.save_error = None;
+            }
         }
     }
 
