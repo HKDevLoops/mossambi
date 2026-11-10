@@ -810,10 +810,7 @@ impl StudioView {
                         };
                         if render_sidebar_row(ui, &palette, &home_spec) {
                             self.current_tab = StudioTab::FileExplorer;
-                            let home_opt = std::env::var("USERPROFILE")
-                                .or_else(|_| std::env::var("HOME"))
-                                .ok()
-                                .map(PathBuf::from);
+                            let home_opt = crate::core::platform_paths::home_dir_opt();
                             let target = home_opt.unwrap_or_else(|| PathBuf::from("."));
                             self.explorer_view.navigate_to(target);
                             self.explorer_view.is_home_view = true;
@@ -823,48 +820,45 @@ impl StudioView {
                         render_sidebar_section_header(ui, &palette, "Favorites");
 
                         let cfg = crate::core::MossambiConfig::load();
-                        let home_opt = std::env::var("USERPROFILE")
-                            .or_else(|_| std::env::var("HOME"))
-                            .ok();
-                        if let Some(home_str) = home_opt {
-                            let base = PathBuf::from(home_str);
+                        let home_opt = crate::core::platform_paths::home_dir_opt();
+                        if home_opt.is_some() {
                             let recycle_target = crate::core::resolve_recycle_bin_target();
                             let pinned: [(&str, IconGlyph, [u8; 3], PathBuf); 7] = [
                                 (
                                     "Desktop",
                                     IconGlyph::FolderDesktop,
                                     [70, 130, 240],
-                                    base.join("Desktop"),
+                                    crate::core::platform_paths::desktop_dir(),
                                 ),
                                 (
                                     "Downloads",
                                     IconGlyph::FolderDownloads,
                                     [40, 180, 220],
-                                    base.join("Downloads"),
+                                    crate::core::platform_paths::downloads_dir(),
                                 ),
                                 (
                                     "Documents",
                                     IconGlyph::FolderDocuments,
                                     [79, 168, 255],
-                                    base.join("Documents"),
+                                    crate::core::platform_paths::documents_dir(),
                                 ),
                                 (
                                     "Pictures",
                                     IconGlyph::FolderPictures,
                                     [255, 100, 150],
-                                    base.join("Pictures"),
+                                    crate::core::platform_paths::pictures_dir(),
                                 ),
                                 (
                                     "Music",
                                     IconGlyph::FolderMusic,
                                     [255, 140, 30],
-                                    base.join("Music"),
+                                    crate::core::platform_paths::music_dir(),
                                 ),
                                 (
                                     "Videos",
                                     IconGlyph::FolderVideos,
                                     [170, 90, 240],
-                                    base.join("Videos"),
+                                    crate::core::platform_paths::videos_dir(),
                                 ),
                                 (
                                     "Recycle Bin",

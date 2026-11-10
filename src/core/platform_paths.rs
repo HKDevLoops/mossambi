@@ -36,6 +36,19 @@ pub fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Home directory as an `Option` for call sites that must distinguish a
+/// resolved profile directory from the "." placeholder. Returns `None` when
+/// only the placeholder is available (no USERPROFILE / HOME in the
+/// environment).
+pub fn home_dir_opt() -> Option<PathBuf> {
+    let home = home_dir();
+    if home.as_os_str() == "." {
+        None
+    } else {
+        Some(home)
+    }
+}
+
 pub fn desktop_dir() -> PathBuf {
     #[cfg(windows)]
     if let Some(p) = get_known_folder(&FOLDERID_Desktop) {
@@ -144,5 +157,13 @@ mod tests {
 
         let downloads = downloads_dir();
         assert!(downloads.is_absolute());
+    }
+
+    #[test]
+    fn test_home_dir_opt_agrees_with_home_dir() {
+        match home_dir_opt() {
+            Some(home) => assert_eq!(home, home_dir()),
+            None => assert_eq!(home_dir().as_os_str(), "."),
+        }
     }
 }

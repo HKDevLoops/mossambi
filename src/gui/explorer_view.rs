@@ -482,10 +482,7 @@ impl Default for ExplorerView {
             })
             .ok();
 
-        let home_opt = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .ok()
-            .map(PathBuf::from);
+        let home_opt = crate::core::platform_paths::home_dir_opt();
         let current_dir = home_opt
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -667,10 +664,7 @@ impl ExplorerView {
         self.column_subfolder = None;
         self.column_preview_item = None;
 
-        let home_opt = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .ok()
-            .map(PathBuf::from);
+        let home_opt = crate::core::platform_paths::home_dir_opt();
         self.is_home_view = Some(&dir) == home_opt.as_ref();
 
         // Update active tab metadata
@@ -713,10 +707,7 @@ impl ExplorerView {
     }
 
     pub fn add_tab(&mut self, path: PathBuf) {
-        let home_opt = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .ok()
-            .map(PathBuf::from);
+        let home_opt = crate::core::platform_paths::home_dir_opt();
         let is_home = Some(&path) == home_opt.as_ref();
         let title = if is_home {
             "Home".to_string()
@@ -771,10 +762,7 @@ impl ExplorerView {
     }
 
     pub fn is_home_directory(&self) -> bool {
-        let home_opt = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .ok()
-            .map(PathBuf::from);
+        let home_opt = crate::core::platform_paths::home_dir_opt();
         Some(&self.current_dir) == home_opt.as_ref()
     }
 
@@ -848,10 +836,7 @@ impl ExplorerView {
     }
 
     pub fn navigate_to_home(&mut self) {
-        let home_opt = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .ok()
-            .map(PathBuf::from);
+        let home_opt = crate::core::platform_paths::home_dir_opt();
         let target = home_opt.unwrap_or_else(|| PathBuf::from("."));
         self.navigate_to(target);
         self.is_home_view = true;
@@ -3116,12 +3101,6 @@ impl ExplorerView {
         _on_pack_archive: &mut impl FnMut(Vec<PathBuf>),
         _on_inspect_file: &mut impl FnMut(PathBuf),
     ) {
-        let home_opt = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .ok()
-            .map(PathBuf::from);
-        let base = home_opt.unwrap_or_else(|| PathBuf::from("."));
-
         let mut nav_to: Option<PathBuf> = None;
         let mut new_dash_hover: Option<(FileItem, Pos2)> = None;
 
@@ -3139,12 +3118,42 @@ impl ExplorerView {
                 ui.add_space(8.0);
 
                 let mut pinned_folders = vec![
-                    ("Desktop".to_string(), "Desktop", [0, 122, 255], base.join("Desktop")),
-                    ("Downloads".to_string(), "Downloads", [20, 184, 166], base.join("Downloads")),
-                    ("Documents".to_string(), "Documents", [59, 130, 246], base.join("Documents")),
-                    ("Pictures".to_string(), "Pictures", [14, 165, 233], base.join("Pictures")),
-                    ("Music".to_string(), "Music", [244, 63, 94], base.join("Music")),
-                    ("Videos".to_string(), "Videos", [139, 92, 246], base.join("Videos")),
+                    (
+                        "Desktop".to_string(),
+                        "Desktop",
+                        [0, 122, 255],
+                        crate::core::platform_paths::desktop_dir(),
+                    ),
+                    (
+                        "Downloads".to_string(),
+                        "Downloads",
+                        [20, 184, 166],
+                        crate::core::platform_paths::downloads_dir(),
+                    ),
+                    (
+                        "Documents".to_string(),
+                        "Documents",
+                        [59, 130, 246],
+                        crate::core::platform_paths::documents_dir(),
+                    ),
+                    (
+                        "Pictures".to_string(),
+                        "Pictures",
+                        [14, 165, 233],
+                        crate::core::platform_paths::pictures_dir(),
+                    ),
+                    (
+                        "Music".to_string(),
+                        "Music",
+                        [244, 63, 94],
+                        crate::core::platform_paths::music_dir(),
+                    ),
+                    (
+                        "Videos".to_string(),
+                        "Videos",
+                        [139, 92, 246],
+                        crate::core::platform_paths::videos_dir(),
+                    ),
                 ];
 
                 // Only real library folders belong in Quick access. The
