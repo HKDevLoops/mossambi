@@ -165,6 +165,11 @@ impl PreferencesView {
                         .fill(palette.sidebar_bg)
                         .inner_margin(Margin::symmetric(10.0, 12.0))
                         .show(ui, |ui| {
+                            // Restore automatic widget rhythm inside the sidebar
+                            // partition; the outer horizontal keeps ZERO spacing so
+                            // the sidebar, divider, and pane stay flush.
+                            ui.spacing_mut().item_spacing =
+                                Vec2::new(design::space::MD, design::space::SM);
                             ui.label(
                                 egui::RichText::new("Settings")
                                     .size(design::type_scale::TITLE)
@@ -307,6 +312,11 @@ impl PreferencesView {
                         .id_salt("prefs_detail_scroll")
                         .auto_shrink([false; 2])
                         .show(ui, |ui| {
+                            // Restore automatic widget rhythm inside the detail
+                            // pane; the outer horizontal keeps ZERO spacing so the
+                            // sidebar, divider, and pane stay flush.
+                            ui.spacing_mut().item_spacing =
+                                Vec2::new(design::space::MD, design::space::SM);
                             if self.selected == 1 {
                                 // Donut toolbar: fluid 3-column layout centered with safety padding
                                 let donut_w = 680.0_f32.min(ui.available_width() - 32.0);
@@ -808,7 +818,8 @@ impl PreferencesView {
             let c3 = (avail_w - c1 - c2 - 36.0).max(210.0);
             (c1, c2, c3)
         } else {
-            (165.0, 300.0, 215.0)
+            // Narrow fallback: reserve 16px for the two 8px inter-column gaps.
+            (165.0, 284.0, 215.0)
         };
 
         ScrollArea::horizontal()
@@ -969,7 +980,7 @@ impl PreferencesView {
                             )
                             .fill(if !self.donut_view_back { palette.card_hover } else { palette.card_bg })
                             .stroke(Stroke::new(1.0_f32, if !self.donut_view_back { palette.accent } else { palette.border }))
-                            .rounding(Rounding::same(design::radius::SM));
+                            .rounding(Rounding::same(design::radius::PILL));
                             if ui.add(front_btn).clicked() {
                                 self.donut_view_back = false;
                             }
@@ -981,7 +992,7 @@ impl PreferencesView {
                             )
                             .fill(if self.donut_view_back { palette.card_hover } else { palette.card_bg })
                             .stroke(Stroke::new(1.0_f32, if self.donut_view_back { palette.accent } else { palette.border }))
-                            .rounding(Rounding::same(design::radius::SM));
+                            .rounding(Rounding::same(design::radius::PILL));
                             if ui.add(back_btn).clicked() {
                                 self.donut_view_back = true;
                             }
@@ -1084,8 +1095,18 @@ impl PreferencesView {
                                 .show(ui, |ui| {
                                     ui.horizontal_wrapped(|ui| {
                                         for (ext_idx, ext) in prof.extensions.iter().enumerate() {
-                                            let pill_resp = ui.button(format!("{} x", ext));
-                                            if pill_resp.clicked() {
+                                            // Theme-styled removal pill: true pill
+                                            // radius, card fill, hairline border, and
+                                            // automatic gaps from the restored spacing.
+                                            let pill_btn = egui::Button::new(
+                                                egui::RichText::new(format!("{} x", ext))
+                                                    .size(design::type_scale::BODY_SM)
+                                                    .color(palette.text_secondary),
+                                            )
+                                            .fill(palette.card_bg)
+                                            .stroke(Stroke::new(1.0_f32, palette.border))
+                                            .rounding(Rounding::same(design::radius::PILL));
+                                            if ui.add(pill_btn).clicked() {
                                                 ext_to_remove = Some(ext_idx);
                                             }
                                         }
@@ -1213,7 +1234,7 @@ impl PreferencesView {
                                 )
                                 .fill(if active { palette.card_hover } else { palette.card_bg })
                                 .stroke(Stroke::new(1.0_f32, if active { palette.accent } else { palette.border }))
-                                .rounding(Rounding::same(design::radius::SM));
+                                .rounding(Rounding::same(design::radius::PILL));
                                 if ui.add(btn).clicked() {
                                     self.donut_preset_category = cat.to_string();
                                 }
@@ -3095,7 +3116,8 @@ impl PreferencesView {
 // ---- helpers ----
 
 fn section(ui: &mut Ui, palette: &ThemePalette, title: &str) {
-    ui.add_space(design::space::SM);
+    // More space above a heading than below it keeps groups reading as groups.
+    ui.add_space(design::space::LG);
     ui.label(
         egui::RichText::new(title)
             .size(design::type_scale::TITLE_SM)
@@ -3110,7 +3132,7 @@ fn card<R>(ui: &mut Ui, palette: &ThemePalette, add_contents: impl FnOnce(&mut U
         .fill(palette.card_bg)
         .stroke(Stroke::new(1.0_f32, palette.border))
         .rounding(Rounding::same(10.0))
-        .inner_margin(Margin::symmetric(16.0, 10.0))
+        .inner_margin(Margin::symmetric(16.0, 12.0))
         .show(ui, add_contents)
         .inner
 }
