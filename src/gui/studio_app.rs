@@ -118,6 +118,12 @@ impl MossambiApp {
         style.spacing.item_spacing = Vec2::new(8.0, 6.0);
         style.spacing.button_padding = Vec2::new(10.0, 5.0);
         style.spacing.indent = 16.0;
+        // Cursor discipline (strict rule): the I-beam text cursor is allowed
+        // ONLY in text-editing widgets. egui 0.29 defaults both flags to true,
+        // which paints CursorIcon::Text over every static label app-wide
+        // (context menus included).
+        style.interaction.selectable_labels = false;
+        style.interaction.multi_widget_text_select = false;
         cc.egui_ctx.set_style(style);
 
         // Configure Embedded Agave Nerd Font
