@@ -645,3 +645,32 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   Ctrl+W close single-fire, donut live-apply, maximized capture,
   Search-clip diagnosis; then context-menu wave, theme wave, icon
   blur + Miller 2+, A4 security, A5 fixes, A6 QA.
+
+[Pill ring live verification: 2026-11-11, post-commit 9cf27e4]
+
+- Method: atomic pwsh (foreground -> CopyFromScreen idle baseline ->
+  SetCursorPos hover -> capture -> revert -> mouse_event hold-press ->
+  release -> active capture -> restore click), region-scoped pixel diffs
+  (tolerance 14) around the switcher (738,38 132x44) and nav (8,42 76x32)
+  in window coordinates.
+- Coordinate correction: the legacy verified coordinate map is SCREEN
+  coords (window 1120x720 @(400,196)); window-relative = map minus origin.
+  An earlier pass treated the map as window-relative and hovered/clicked
+  ~400px right of the window - harmless, the app stayed in its mode.
+- Results (window-relative): baseline 0 px in both regions; hover(List)
+  890 px bbox (784,42)-(817,70); revert 0 px (idle untouched);
+  hover(Back) 798 px; pressed(List) 1007 px bbox (782,40)-(819,72) -
+  exactly +/-2px beyond the hover bbox on all four sides, matching the
+  concentric buffer ring design (expand 2.0 vs 1.0); active(List) 1864 px
+  (accent fill + ring, mode switch); restore click returned the original
+  mode (1902 px across the switcher).
+- Visual: 4x nearest-neighbor crops of idle/hover/pressed/active
+  switcher and idle/hover nav confirm the thin accent ring on hover, a
+  stronger ring while pressed, accent fill when active, and nothing at
+  idle.
+- App-death anomaly: pid 28976 died silently between runs (window gone;
+  no Event Log Id-1000 record surfaced in the 3h window queried);
+  relaunched as pid 27548 for the successful pass. Monitoring continues.
+- Still queued: Ctrl+W close single-fire, donut live-apply, maximized
+  capture, Search-clip diagnosis; context-menu wave; theme wave; icon
+  blur + Miller 2+; A4 security, A5 fixes, A6 QA.
