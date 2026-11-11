@@ -5354,9 +5354,9 @@ impl ExplorerView {
         palette: &ThemePalette,
         _on_stage_file: &mut impl FnMut(PathBuf),
         on_transcode_target: &mut impl FnMut(PathBuf, String),
-        _on_exam_conform: &mut impl FnMut(PathBuf),
+        on_exam_conform: &mut impl FnMut(PathBuf),
         on_pack_archive: &mut impl FnMut(Vec<PathBuf>),
-        _on_inspect_file: &mut impl FnMut(PathBuf),
+        on_inspect_file: &mut impl FnMut(PathBuf),
     ) {
         let entries: Vec<FileItem> = self
             .filtered_and_sorted_entries()
@@ -5368,6 +5368,15 @@ impl ExplorerView {
         let mut preview_to_set: Option<FileItem> = None;
         let mut peek_to_open: Option<FileItem> = None;
         let mut column_drop: Option<DropOp> = None;
+
+        // Context-menu intents (same wiring as the list/grid views).
+        let mut item_intents: Vec<ItemMenuIntents> = Vec::new();
+        let mut canvas_intents = CanvasMenuIntents::default();
+        let selection_snapshot: Vec<PathBuf> =
+            self.selected_paths.iter().cloned().collect::<Vec<_>>();
+        let icon_pack = self.icon_pack;
+        let menu_style = self.menu_style;
+        let has_clipboard = !self.clipboard_paths.is_empty();
 
         // Auto-preview: open the inspector for the first file when the columns
         // view shows a folder with nothing selected yet. Directory rows are
@@ -5391,6 +5400,30 @@ impl ExplorerView {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_height(full_h);
+
+                // Canvas interact registered FIRST so column rows (registered
+                // after it) keep pointer priority - same pattern as the
+                // list/grid empty-canvas menus.
+                let canvas_resp = ui.interact(
+                    ui.available_rect_before_wrap(),
+                    ui.make_persistent_id("explorer_miller_canvas_bg"),
+                    egui::Sense::click_and_drag(),
+                );
+                canvas_resp.context_menu(|menu_ui| {
+                    let dir_desc = self.sort_direction == SortDirection::Descending;
+                    canvas_intents = Self::run_canvas_context_menu(
+                        menu_ui,
+                        icon_pack,
+                        menu_style,
+                        palette.accent,
+                        has_clipboard,
+                        !entries.is_empty(),
+                        self.sort_column,
+                        dir_desc,
+                        self.view_mode,
+                    );
+                });
+
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(1.0, 0.0);
 
@@ -5644,6 +5677,26 @@ impl ExplorerView {
                                                             open_in_default_app(&item.path);
                                                         }
                                                     }
+
+                                                    // Right-click menu (same wiring as list/grid rows).
+                                                    resp.context_menu(|menu_ui| {
+                                                        let targets = if selection_snapshot.len() > 1
+                                                            && selection_snapshot.contains(&item.path)
+                                                        {
+                                                            selection_snapshot.clone()
+                                                        } else {
+                                                            vec![item.path.clone()]
+                                                        };
+                                                        item_intents.clear();
+                                                        item_intents.push(Self::run_item_context_menu(
+                                                            menu_ui,
+                                                            icon_pack,
+                                                            menu_style,
+                                                            palette.accent,
+                                                            item,
+                                                            &targets,
+                                                        ));
+                                                    });
                                                 }
                                             });
                                         });
@@ -5881,6 +5934,30 @@ impl ExplorerView {
                                                                 open_in_default_app(&sub_item.path);
                                                             }
                                                         }
+
+                                                        // Right-click menu (same wiring as list/grid rows).
+                                                        resp.context_menu(|menu_ui| {
+                                                            let targets =
+                                                                if selection_snapshot.len() > 1
+                                                                    && selection_snapshot
+                                                                        .contains(&sub_item.path)
+                                                                {
+                                                                    selection_snapshot.clone()
+                                                                } else {
+                                                                    vec![sub_item.path.clone()]
+                                                                };
+                                                            item_intents.clear();
+                                                            item_intents.push(
+                                                                Self::run_item_context_menu(
+                                                                    menu_ui,
+                                                                    icon_pack,
+                                                                    menu_style,
+                                                                    palette.accent,
+                                                                    sub_item,
+                                                                    &targets,
+                                                                ),
+                                                            );
+                                                        });
                                                     }
                                                 });
                                             });
@@ -5932,6 +6009,76 @@ impl ExplorerView {
         }
         if let Some(new_dir) = nav_into_dir {
             self.navigate_to(new_dir);
+        }
+
+        // Context-menu intents (mirrors the list view consumption).
+        if canvas_intents.new_folder {
+            self.show_new_folder_dialog = true;
+        }
+        if canvas_intents.new_window {
+            spawn_new_explorer_window(Some(&self.current_dir));
+        }
+        if canvas_intents.new_tab {
+            self.add_tab(self.current_dir.clone());
+        }
+        if canvas_intents.refresh {
+            self.navigate_to(self.current_dir.clone());
+        }
+        if canvas_intents.go_up {
+            if let Some(parent) = self.current_dir.parent() {
+                let p = parent.to_path_buf();
+                if !p.as_os_str().is_empty() {
+                    self.navigate_to(p);
+                }
+            }
+        }
+        if canvas_intents.select_all {
+            for e in &entries {
+                self.selected_paths.insert(e.path.clone());
+            }
+        }
+        if canvas_intents.clear_selection {
+            self.selected_paths.clear();
+        }
+        if canvas_intents.paste.is_some() {
+            self.paste_from_clipboard();
+        }
+        if let Some(col) = canvas_intents.sort_by {
+            if self.sort_column == col {
+                self.sort_direction = self.sort_direction.toggle();
+            } else {
+                self.sort_column = col;
+                self.sort_direction = SortDirection::Ascending;
+            }
+        }
+        if let Some(vm) = canvas_intents.view_mode {
+            self.view_mode = vm;
+        }
+        if canvas_intents.invert_selection {
+            let listed: std::collections::HashSet<PathBuf> =
+                entries.iter().map(|e| e.path.clone()).collect();
+            let currently: std::collections::HashSet<PathBuf> =
+                self.selected_paths.intersection(&listed).cloned().collect();
+            self.selected_paths = listed.difference(&currently).cloned().collect();
+        }
+        if canvas_intents.terminal {
+            open_terminal_in_dir(&self.current_dir);
+        }
+        if canvas_intents.open_in_file_manager {
+            open_in_file_manager(&self.current_dir);
+        }
+        if canvas_intents.properties_dir {
+            self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
+        }
+        for intent in item_intents {
+            self.apply_item_intent(
+                ui,
+                intent,
+                on_transcode_target,
+                on_exam_conform,
+                on_pack_archive,
+                on_inspect_file,
+            );
         }
     }
 
