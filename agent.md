@@ -613,3 +613,35 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   Miller 2+ unfiltered listings; explorer icon blur; app-death anomaly
   monitoring; live verification of keybinding single-fire + settings-
   apply + maximized layout next; context-menu wave then theme wave.
+
+[Pill ring highlight wave: fixed-code 2026-11-11, commit 9cf27e4]
+
+- Wave: user-directed pill-ring system - highlight the ring of every
+  pill-shaped control on hover, active, and buffer states; idle keeps
+  the regular border. Scope confirmed by interview: ALL pill controls
+  app-wide; buffer = pressed OR keyboard focus, the strongest ring
+  (Apple focus-ring style).
+- Implementation: shared ring system in design.rs - PillState
+  (Idle/Hover/Active/Buffer), pill_state_from (pure priority ladder,
+  unit-tested: buffer > active > hover > idle), pill_ring (Idle=none,
+  Hover=1.0px accent at low alpha, Active=1.5px full accent,
+  Buffer=2.0px strong accent; every ring drawn expanded concentrically
+  so it stays visible over accent fills and hairline borders),
+  paint_pill_ring (grows corner radii with the expansion).
+- Applied at 14 call sites: finder_chrome segmented view switcher;
+  macos_theme sidebar pill items + segmented switch; preferences_view
+  Front/Back pills, extension removal pills, category filter pills,
+  Apple HIG toggle switch; explorer_view Back/Forward nav pill,
+  Home Dashboard/Folder Files pills, Dual/Preview pills, ghost-pill
+  action row (rings suppressed on disabled pills).
+- Gates GREEN: fmt; clippy -D warnings (zero warnings after suffixing
+  3 Stroke float literals _f32); cargo test (all suites pass; a
+  transient usvg/rusqlite rlib clash right after clippy resolved on
+  re-run); ASCII sweep on the diff (clean); release build (9.66s
+  incremental; app killed first). Diff +303/-42 across design.rs,
+  finder_chrome.rs, macos_theme.rs, preferences_view.rs,
+  explorer_view.rs.
+- Still queued: live ring verification (atomic hover/click captures);
+  Ctrl+W close single-fire, donut live-apply, maximized capture,
+  Search-clip diagnosis; then context-menu wave, theme wave, icon
+  blur + Miller 2+, A4 security, A5 fixes, A6 QA.
