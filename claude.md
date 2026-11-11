@@ -674,3 +674,33 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
 - Still queued: Ctrl+W close single-fire, donut live-apply, maximized
   capture, Search-clip diagnosis; context-menu wave; theme wave; icon
   blur + Miller 2+; A4 security, A5 fixes, A6 QA.
+
+[Ctrl+W close single-fire verification: 2026-11-11, on pid 27548]
+
+- Route findings: PostMessage WM_KEYDOWN/WM_KEYUP chords are no-ops on
+  this app instance even with system foreground verified True
+  (GetForegroundWindow()==hwnd; all four posts returned TRUE; tab-strip
+  diff 0 for Ctrl+T and Ctrl+W alike). PostMessage had worked on an
+  earlier instance, so it is instance-dependent - do not trust it alone.
+  The reliable route is keybd_event real-input synthesis (system input
+  queue) with foreground acquired and re-verified immediately before
+  every injection (ALT-unlock + AttachThreadInput fallback; abort if
+  lost) so synthetic keys can never land in another app.
+- Proof: with 2 tabs, one real Ctrl+T added exactly one tab (2->3,
+  866 px changed in tab region 0,0 440x36); one real Ctrl+W closed
+  exactly one tab (3->2, 866 px); a second Ctrl+W closed exactly one
+  more (2->1, 1094 px). 2x crops count the tabs visually per frame
+  (3/2/1). The close fires exactly once per press - no double-fire.
+  Last-tab guard not exercised (2 tabs existed at each close).
+- "+" coordinate dependency: the + button sits AFTER the last tab, so
+  its position depends on tab count: ~(405,18) with 2 tabs, ~(255,18)
+  with 1 tab. The legacy map's (255,16) is the 1-tab layout; clicking
+  it with 2 tabs hits the active tab (no visual change, diff 0).
+  Always re-locate "+" from a fresh capture.
+- State hygiene: the proof consumed the tab count to 1; one real
+  Ctrl+T restored the baseline (1->2, 1094 px, crop-verified). App
+  left as found: 2 "Music" tabs, second active, window 1120x720
+  @(323,124), pid 27548.
+- Still queued: donut live-apply, maximized capture, Search-clip
+  diagnosis; context-menu wave; theme wave; icon blur + Miller 2+;
+  A4 security, A5 fixes, A6 QA.
