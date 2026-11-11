@@ -704,3 +704,31 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
 - Still queued: donut live-apply, maximized capture, Search-clip
   diagnosis; context-menu wave; theme wave; icon blur + Miller 2+;
   A4 security, A5 fixes, A6 QA.
+
+[Donut live-apply verification: 2026-11-11, on pid 3444]
+
+- Setup: Preferences (gear at (910,56)) -> "Donut toolbar" category
+  pill at (320,182); right pane scrolled to the Appearance card; Size
+  slider track y=627, x~700-864, value box right of the track.
+- Baseline: config.json donut.appearance.size = 430 (mtime
+  11:55:10.711).
+- Change: click on the track at (715,627) -> size flipped to 340 in
+  config.json, mtime 12:03:59.984. Slider changes persist to disk
+  immediately - the live-apply save path works.
+- Slider region (660,605 290x45) diff 289 px (handle move plus value
+  text "430 px" -> "340 px"; crop_gs1_slider.png).
+- Live category label (240,176 190x22) diff 0 px - the subtitle
+  updates lazily (on rebuild), not per-frame; cosmetic, not a blocker.
+- Negative control: preview donut region (640,40 280x200) diff 0 px -
+  code-accurate: the preferences preview is canvas-fixed
+  (preferences_view.rs:1085-1093) and does not consume
+  appearance.size; the real widget consumes it at widget_app.rs:617-618.
+- Restore: calibrated track clicks x=780->427, x=782->432, x=781->430
+  (slope ~1.338 value/px). Final size=430 - RESTORED TO 430.
+- Harness notes: the first unguarded run was invalidated by window
+  occlusion (fg-before False; capture showed 0 traffic-light red
+  dots). The guarded harness (per-action RefreshRect + traffic-light
+  guard + ForceForeground with ALT-unlock / AttachThreadInput) is
+  mandatory - it caught the occlusion on the immediate retry.
+- Still queued: maximized capture, Search-clip diagnosis; context-menu
+  wave; theme wave; icon blur + Miller 2+; A4 security, A5 fixes, A6 QA.
