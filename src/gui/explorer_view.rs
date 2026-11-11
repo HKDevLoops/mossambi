@@ -21,6 +21,7 @@ use crate::core::{
     resolve_file_icon, resolve_unique_paste_path, spawn_async_dir_scan, DriveInfo, FileItem,
     GestureKind, KinematicGestureTracker, ScanBatch,
 };
+use crate::gui::design;
 use crate::gui::macos_theme::ThemePalette;
 use eframe::egui::{self, Color32, Pos2, Rect, Rounding, Stroke, Ui, Vec2};
 use std::collections::HashSet;
@@ -2250,6 +2251,12 @@ impl ExplorerView {
             palette.text_primary.b(),
         ];
         let can_back = self.can_go_back();
+        let back_rounding = Rounding {
+            nw: 6.0,
+            sw: 6.0,
+            ne: 0.0,
+            se: 0.0,
+        };
         let back_btn = match crate::core::icon_packs::icon_texture(
             ui.ctx(),
             pack,
@@ -2267,21 +2274,30 @@ impl ExplorerView {
         } else {
             Color32::TRANSPARENT
         })
-        .rounding(Rounding {
-            nw: 6.0,
-            sw: 6.0,
-            ne: 0.0,
-            se: 0.0,
-        });
-        if ui
+        .rounding(back_rounding);
+        let back_resp = ui
             .add_enabled(can_back, back_btn)
-            .on_hover_text("Back (Alt+Left / h)")
-            .clicked()
-        {
+            .on_hover_text("Back (Alt+Left / h)");
+        if can_back {
+            design::paint_pill_ring(
+                ui.painter(),
+                back_resp.rect,
+                back_rounding,
+                design::pill_state(&back_resp, false),
+                palette.accent,
+            );
+        }
+        if back_resp.clicked() {
             self.go_back();
         }
 
         let can_fwd = self.can_go_forward();
+        let fwd_rounding = Rounding {
+            nw: 0.0,
+            sw: 0.0,
+            ne: 6.0,
+            se: 6.0,
+        };
         let fwd_btn = match crate::core::icon_packs::icon_texture(
             ui.ctx(),
             pack,
@@ -2299,17 +2315,20 @@ impl ExplorerView {
         } else {
             Color32::TRANSPARENT
         })
-        .rounding(Rounding {
-            nw: 0.0,
-            sw: 0.0,
-            ne: 6.0,
-            se: 6.0,
-        });
-        if ui
+        .rounding(fwd_rounding);
+        let fwd_resp = ui
             .add_enabled(can_fwd, fwd_btn)
-            .on_hover_text("Forward (Alt+Right)")
-            .clicked()
-        {
+            .on_hover_text("Forward (Alt+Right)");
+        if can_fwd {
+            design::paint_pill_ring(
+                ui.painter(),
+                fwd_resp.rect,
+                fwd_rounding,
+                design::pill_state(&fwd_resp, false),
+                palette.accent,
+            );
+        }
+        if fwd_resp.clicked() {
             self.go_forward();
         }
 
@@ -2662,11 +2681,17 @@ impl ExplorerView {
                             palette.card_bg
                         })
                         .rounding(Rounding::same(6.0));
-                        if ui
+                        let dash_resp = ui
                             .add(btn_dash)
-                            .on_hover_text("Show Quick Access & System Drives Dashboard")
-                            .clicked()
-                        {
+                            .on_hover_text("Show Quick Access & System Drives Dashboard");
+                        design::paint_pill_ring(
+                            ui.painter(),
+                            dash_resp.rect,
+                            Rounding::same(6.0),
+                            design::pill_state(&dash_resp, self.is_home_view),
+                            palette.accent,
+                        );
+                        if dash_resp.clicked() {
                             self.is_home_view = true;
                         }
 
@@ -2686,11 +2711,17 @@ impl ExplorerView {
                             palette.card_bg
                         })
                         .rounding(Rounding::same(6.0));
-                        if ui
+                        let files_resp = ui
                             .add(btn_files)
-                            .on_hover_text("Browse all raw files in folder")
-                            .clicked()
-                        {
+                            .on_hover_text("Browse all raw files in folder");
+                        design::paint_pill_ring(
+                            ui.painter(),
+                            files_resp.rect,
+                            Rounding::same(6.0),
+                            design::pill_state(&files_resp, !self.is_home_view),
+                            palette.accent,
+                        );
+                        if files_resp.clicked() {
                             self.is_home_view = false;
                         }
 
@@ -2732,11 +2763,17 @@ impl ExplorerView {
                     palette.card_bg
                 })
                 .rounding(Rounding::same(6.0));
-                if ui
+                let split_resp = ui
                     .add(split_btn)
-                    .on_hover_text("Toggle Dual-Pane Split View (F3)")
-                    .clicked()
-                {
+                    .on_hover_text("Toggle Dual-Pane Split View (F3)");
+                design::paint_pill_ring(
+                    ui.painter(),
+                    split_resp.rect,
+                    Rounding::same(6.0),
+                    design::pill_state(&split_resp, split_active),
+                    palette.accent,
+                );
+                if split_resp.clicked() {
                     self.toggle_split_view();
                 }
 
@@ -2757,11 +2794,17 @@ impl ExplorerView {
                     palette.card_bg
                 })
                 .rounding(Rounding::same(6.0));
-                if ui
+                let prev_resp = ui
                     .add(prev_btn)
-                    .on_hover_text("Toggle Inspector Preview Pane (Ctrl+Shift+P)")
-                    .clicked()
-                {
+                    .on_hover_text("Toggle Inspector Preview Pane (Ctrl+Shift+P)");
+                design::paint_pill_ring(
+                    ui.painter(),
+                    prev_resp.rect,
+                    Rounding::same(6.0),
+                    design::pill_state(&prev_resp, prev_active),
+                    palette.accent,
+                );
+                if prev_resp.clicked() {
                     self.toggle_inspector_pane();
                 }
 
@@ -4203,7 +4246,17 @@ impl ExplorerView {
                             Color32::TRANSPARENT
                         })
                         .rounding(Rounding::same(6.0));
-                    ui.add_enabled(enabled, btn)
+                    let pill_resp = ui.add_enabled(enabled, btn);
+                    if enabled {
+                        design::paint_pill_ring(
+                            ui.painter(),
+                            pill_resp.rect,
+                            Rounding::same(6.0),
+                            design::pill_state(&pill_resp, false),
+                            palette.accent,
+                        );
+                    }
+                    pill_resp
                 };
 
                 // -- CONVERT (Tools & Converters first group) --

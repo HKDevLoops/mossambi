@@ -314,6 +314,18 @@ pub fn render_segmented_view_switcher(
             );
         }
 
+        // Ring highlight system: soft accent on hover, full accent on the
+        // active segment, strongest while pressed or keyboard-focused. Painted
+        // with the full ui painter so the ring may breathe past the container.
+        let ring_state = design::pill_state(&resp, is_active);
+        design::paint_pill_ring(
+            ui.painter(),
+            seg_rect.shrink2(Vec2::new(2.0, 2.0)),
+            Rounding::same(radius::SM),
+            ring_state,
+            palette.accent,
+        );
+
         // Dividers between inactive items
         if idx > 0 && !is_active && current_mode != modes[idx - 1].0 {
             let div_x = seg_rect.min.x;

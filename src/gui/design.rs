@@ -11,7 +11,7 @@
 //!
 //! All content is pure ASCII.
 
-use eframe::egui::{Color32, FontId, Ui};
+use eframe::egui::{Color32, FontId, Painter, Rect, Response, Rounding, Stroke, Ui};
 
 // ---------------------------------------------------------------------------
 // Spacing: 4px base grid
@@ -94,6 +94,107 @@ pub mod radius {
     pub const XXL: f32 = 18.0;
     /// 999px - pill (traffic lights, segmented indicator).
     pub const PILL: f32 = 999.0;
+}
+
+// ---------------------------------------------------------------------------
+// Pill ring highlights
+// ---------------------------------------------------------------------------
+
+/// Interaction state of a pill control inside the ring highlight system.
+///
+/// Every pill-shaped control in the app derives its ring from these states so
+/// hover, active, and buffered surfaces read consistently across themes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PillState {
+    /// Untouched: no ring; the regular hairline border stays as-is.
+    Idle,
+    /// Pointer rests on the control: soft, low-alpha accent ring.
+    Hover,
+    /// The control is the current selection: full-accent ring.
+    Active,
+    /// Pressed or keyboard-focused: strongest ring, Apple focus-ring style.
+    Buffer,
+}
+
+/// A ring stroke plus the outward expansion applied before stroking, so the
+/// highlight stays visible over accent fills and hairline borders alike.
+#[derive(Clone, Copy, Debug)]
+pub struct PillRing {
+    /// Stroke drawn around the expanded control rect.
+    pub stroke: Stroke,
+    /// Pixels the control rect grows before stroking (concentric ring).
+    pub expand: f32,
+}
+
+/// Pure form of [`pill_state`] over raw interaction flags, so the priority
+/// ladder is unit-testable without an egui context.
+///
+/// Buffer (pressed or keyboard focus) outranks active; active outranks hover.
+pub fn pill_state_from(hovered: bool, pressed: bool, focused: bool, is_active: bool) -> PillState {
+    if pressed || focused {
+        PillState::Buffer
+    } else if is_active {
+        PillState::Active
+    } else if hovered {
+        PillState::Hover
+    } else {
+        PillState::Idle
+    }
+}
+
+/// Derives the pill state from a response and the control's selection flag.
+pub fn pill_state(resp: &Response, is_active: bool) -> PillState {
+    pill_state_from(
+        resp.hovered(),
+        resp.is_pointer_button_down_on(),
+        resp.has_focus(),
+        is_active,
+    )
+}
+
+/// Maps a pill state to its ring, or `None` while idle (regular border stands).
+pub fn pill_ring(state: PillState, accent: Color32) -> Option<PillRing> {
+    let tinted =
+        |alpha: u8| Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), alpha);
+    match state {
+        PillState::Idle => None,
+        PillState::Hover => Some(PillRing {
+            stroke: Stroke::new(1.0_f32, tinted(100)),
+            expand: 1.0,
+        }),
+        PillState::Active => Some(PillRing {
+            stroke: Stroke::new(1.5_f32, accent),
+            expand: 1.0,
+        }),
+        PillState::Buffer => Some(PillRing {
+            stroke: Stroke::new(2.0_f32, tinted(190)),
+            expand: 2.0,
+        }),
+    }
+}
+
+/// Paints the ring for a pill control whenever it is not idle.
+///
+/// The ring grows concentrically with the control: every corner radius gains
+/// the ring's expansion so the highlight hugs the original silhouette.
+pub fn paint_pill_ring(
+    painter: &Painter,
+    rect: Rect,
+    rounding: Rounding,
+    state: PillState,
+    accent: Color32,
+) {
+    let Some(ring) = pill_ring(state, accent) else {
+        return;
+    };
+    let grow = ring.expand;
+    let rounding = Rounding {
+        nw: rounding.nw + grow,
+        ne: rounding.ne + grow,
+        sw: rounding.sw + grow,
+        se: rounding.se + grow,
+    };
+    painter.rect_stroke(rect.expand(grow), rounding, ring.stroke);
 }
 
 // ---------------------------------------------------------------------------
@@ -488,5 +589,39 @@ mod tests {
         assert!((motion::ease_out(1.0) - 1.0).abs() < 1e-6);
         assert!(motion::ease_in_out(0.0).abs() < 1e-6);
         assert!((motion::ease_in_out(1.0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pill_state_prioritizes_buffer_then_active_then_hover() {
+        assert_eq!(pill_state_from(false, false, false, false), PillState::Idle);
+        assert_eq!(pill_state_from(true, false, false, false), PillState::Hover);
+        assert_eq!(
+            pill_state_from(false, false, false, true),
+            PillState::Active
+        );
+        assert_eq!(pill_state_from(true, false, false, true), PillState::Active);
+        assert_eq!(pill_state_from(true, true, false, true), PillState::Buffer);
+        assert_eq!(
+            pill_state_from(false, false, true, false),
+            PillState::Buffer
+        );
+        assert_eq!(pill_state_from(false, false, true, true), PillState::Buffer);
+    }
+
+    #[test]
+    fn pill_ring_covers_highlighted_states_and_is_none_when_idle() {
+        let accent = Color32::from_rgb(0, 122, 255);
+        assert!(pill_ring(PillState::Idle, accent).is_none());
+
+        let hover = pill_ring(PillState::Hover, accent).expect("hover ring");
+        let active = pill_ring(PillState::Active, accent).expect("active ring");
+        let buffer = pill_ring(PillState::Buffer, accent).expect("buffer ring");
+
+        // The buffer ring is the strongest: widest stroke, outermost.
+        assert!(hover.stroke.width < active.stroke.width);
+        assert!(active.stroke.width < buffer.stroke.width);
+        assert!(buffer.expand > active.expand);
+        // Hover is the softest: low-alpha accent tint.
+        assert!(hover.stroke.color.a() < active.stroke.color.a());
     }
 }

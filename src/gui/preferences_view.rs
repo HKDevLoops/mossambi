@@ -1041,7 +1041,15 @@ impl PreferencesView {
                             .fill(if !self.donut_view_back { palette.card_hover } else { palette.card_bg })
                             .stroke(Stroke::new(1.0_f32, if !self.donut_view_back { palette.accent } else { palette.border }))
                             .rounding(Rounding::same(design::radius::PILL));
-                            if ui.add(front_btn).clicked() {
+                            let front_resp = ui.add(front_btn);
+                            design::paint_pill_ring(
+                                ui.painter(),
+                                front_resp.rect,
+                                Rounding::same(design::radius::PILL),
+                                design::pill_state(&front_resp, !self.donut_view_back),
+                                palette.accent,
+                            );
+                            if front_resp.clicked() {
                                 self.donut_view_back = false;
                             }
 
@@ -1053,7 +1061,15 @@ impl PreferencesView {
                             .fill(if self.donut_view_back { palette.card_hover } else { palette.card_bg })
                             .stroke(Stroke::new(1.0_f32, if self.donut_view_back { palette.accent } else { palette.border }))
                             .rounding(Rounding::same(design::radius::PILL));
-                            if ui.add(back_btn).clicked() {
+                            let back_resp = ui.add(back_btn);
+                            design::paint_pill_ring(
+                                ui.painter(),
+                                back_resp.rect,
+                                Rounding::same(design::radius::PILL),
+                                design::pill_state(&back_resp, self.donut_view_back),
+                                palette.accent,
+                            );
+                            if back_resp.clicked() {
                                 self.donut_view_back = true;
                             }
                         });
@@ -1166,7 +1182,15 @@ impl PreferencesView {
                                             .fill(palette.card_bg)
                                             .stroke(Stroke::new(1.0_f32, palette.border))
                                             .rounding(Rounding::same(design::radius::PILL));
-                                            if ui.add(pill_btn).clicked() {
+                                            let pill_resp = ui.add(pill_btn);
+                                            design::paint_pill_ring(
+                                                ui.painter(),
+                                                pill_resp.rect,
+                                                Rounding::same(design::radius::PILL),
+                                                design::pill_state(&pill_resp, false),
+                                                palette.accent,
+                                            );
+                                            if pill_resp.clicked() {
                                                 ext_to_remove = Some(ext_idx);
                                             }
                                         }
@@ -1295,7 +1319,15 @@ impl PreferencesView {
                                 .fill(if active { palette.card_hover } else { palette.card_bg })
                                 .stroke(Stroke::new(1.0_f32, if active { palette.accent } else { palette.border }))
                                 .rounding(Rounding::same(design::radius::PILL));
-                                if ui.add(btn).clicked() {
+                                let cat_resp = ui.add(btn);
+                                design::paint_pill_ring(
+                                    ui.painter(),
+                                    cat_resp.rect,
+                                    Rounding::same(design::radius::PILL),
+                                    design::pill_state(&cat_resp, active),
+                                    palette.accent,
+                                );
+                                if cat_resp.clicked() {
                                     self.donut_preset_category = cat.to_string();
                                 }
                             }
@@ -3254,6 +3286,17 @@ fn toggle_row(
                 let thumb_center = egui::pos2(thumb_x, rect.center().y);
                 ui.painter()
                     .circle_filled(thumb_center, 8.5, Color32::from_rgb(255, 255, 255));
+
+                // Ring highlight: soft on hover, full accent while on,
+                // strongest while pressed or keyboard-focused.
+                let ring_state = design::pill_state(&resp, *val);
+                design::paint_pill_ring(
+                    ui.painter(),
+                    rect,
+                    Rounding::same(track_radius),
+                    ring_state,
+                    palette.accent,
+                );
 
                 let text = if *val { "On" } else { "Off" };
                 ui.label(

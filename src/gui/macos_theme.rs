@@ -477,6 +477,17 @@ pub fn render_sidebar_item_with_pin(
 
     painter.rect_filled(rect, Rounding::same(6.0), bg_color);
 
+    // Ring highlight system: soft accent on hover, full accent while
+    // selected, strongest while pressed or keyboard-focused.
+    let ring_state = crate::gui::design::pill_state(&response, is_selected);
+    crate::gui::design::paint_pill_ring(
+        ui.painter(),
+        rect,
+        Rounding::same(6.0),
+        ring_state,
+        theme.accent,
+    );
+
     if is_selected {
         // Active vertical indicator bar in accent color
         let bar_rect = Rect::from_min_size(rect.min + Vec2::new(2.0, 5.0), Vec2::new(3.0, 16.0));
@@ -687,6 +698,13 @@ pub fn render_segmented_switch(
                         Color32::TRANSPARENT
                     })
                     .rounding(Rounding::same(6.0)),
+                );
+                crate::gui::design::paint_pill_ring(
+                    ui.painter(),
+                    btn.rect,
+                    Rounding::same(6.0),
+                    crate::gui::design::pill_state(&btn, is_active),
+                    theme.accent,
                 );
                 if btn.clicked() {
                     *selected = val.to_string();
