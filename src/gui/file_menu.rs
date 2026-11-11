@@ -260,7 +260,8 @@ pub fn rgb(c: Color32) -> [u8; 3] {
     [c.r(), c.g(), c.b()]
 }
 
-/// Render a menu entry: vector glyph + platform wording.
+/// Render a menu entry with the platform wording (row rendering is
+/// text-first and iconless in every style - see menu_row_text).
 pub fn menu_item(
     ui: &mut Ui,
     pack: IconPack,
@@ -273,86 +274,71 @@ pub fn menu_item(
 
 /// Render a menu entry with an explicit override label (e.g. "Transcode to JPG").
 ///
-/// Apple HIG (Finder style): menus are text-only - no icon chips, 15 px type,
-/// generous row padding. Windows/Linux keep the glyph + label layout.
+/// Phase 3 Finder conformance: every wording style renders the same
+/// text-first, iconless row (macOS Finder design directive - the wording
+/// style only controls row order/sets at the call sites).
 pub fn menu_item_labeled(
     ui: &mut Ui,
-    pack: IconPack,
-    action: MenuAction,
+    _pack: IconPack,
+    _action: MenuAction,
     label: &str,
-    style: MenuStyle,
-    tint: Color32,
+    _style: MenuStyle,
+    _tint: Color32,
 ) -> Response {
-    let rgb = [tint.r(), tint.g(), tint.b()];
-    if style == MenuStyle::Finder {
-        let container = ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
-            ui.add_space(6.0);
-            ui.label(
-                eframe::egui::RichText::new(label)
-                    .size(15.0)
-                    .color(eframe::egui::Color32::WHITE),
-            );
-        });
-        let resp = ui.interact(
-            container.response.rect,
-            container.response.id.with("mossambi_menu_click"),
-            Sense::click(),
-        );
-        return resp;
-    }
-    let container = ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(9.0, 9.0);
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(19.0), Sense::hover());
-        crate::core::icon_packs::paint_icon(ui, pack, action.glyph(), rect, rgb);
-        ui.label(egui_label(label));
-    });
-    ui.interact(
-        container.response.rect,
-        container.response.id.with("mossambi_menu_click"),
-        Sense::click(),
-    )
+    menu_row_text(ui, label)
 }
 
 /// Render a menu entry with an arbitrary glyph and explicit label - used by
 /// entries that are not plain [`MenuAction`] verbs (counters, plugs, app IDs...).
+///
+/// The glyph is retained in the signature for call-site compatibility but is
+/// never painted: rows are text-first and iconless in every wording style
+/// (Phase 3 Finder conformance, resolves the G-1 doc conflict).
 pub fn menu_item_glyph(
     ui: &mut Ui,
-    pack: IconPack,
-    glyph: IconGlyph,
+    _pack: IconPack,
+    _glyph: IconGlyph,
     label: &str,
-    style: MenuStyle,
-    tint: Color32,
+    _style: MenuStyle,
+    _tint: Color32,
 ) -> Response {
-    let rgb = [tint.r(), tint.g(), tint.b()];
-    if style == MenuStyle::Finder {
-        let container = ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
-            ui.add_space(6.0);
-            ui.label(
-                eframe::egui::RichText::new(label)
-                    .size(15.0)
-                    .color(eframe::egui::Color32::WHITE),
-            );
-        });
-        let resp = ui.interact(
-            container.response.rect,
-            container.response.id.with("mossambi_menu_click"),
-            Sense::click(),
-        );
-        return resp;
+    menu_row_text(ui, label)
+}
+
+/// One Finder-style menu row: full-width, text-first, iconless.
+///
+/// The row is a single click-sensed widget (allocation-native fresh id, the
+/// 95cc29a click-registration fix refined), paints the egui widget-state
+/// accent fill behind the label on hover/press (SubMenuButton idiom), and
+/// uses 15 px white type per the macOS Finder design directive.
+fn menu_row_text(ui: &mut Ui, label: &str) -> Response {
+    let font = eframe::egui::FontId::proportional(15.0);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font, eframe::egui::Color32::WHITE);
+    let row_h = galley.size().y + 8.0;
+    let (rect, resp) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::click());
+    let visuals = &ui.style().visuals.widgets;
+    let state = if resp.is_pointer_button_down_on() {
+        Some(&visuals.active)
+    } else if resp.hovered() {
+        Some(&visuals.hovered)
+    } else {
+        None
+    };
+    if let Some(v) = state {
+        ui.painter()
+            .rect_filled(rect.expand(v.expansion), v.rounding, v.weak_bg_fill);
     }
-    let container = ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(9.0, 9.0);
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(19.0), Sense::hover());
-        crate::core::icon_packs::paint_icon(ui, pack, glyph, rect, rgb);
-        ui.label(egui_label(label));
-    });
-    ui.interact(
-        container.response.rect,
-        container.response.id.with("mossambi_menu_click"),
-        Sense::click(),
-    )
+    let pos = eframe::egui::Align2::LEFT_CENTER
+        .align_size_within_rect(galley.size(), rect.shrink2(Vec2::new(6.0, 0.0)))
+        .min;
+    ui.painter()
+        .galley(pos, galley, eframe::egui::Color32::WHITE);
+    // Cursor discipline: menu rows always show the default arrow, never the
+    // text pointer (I-beam only in text-editing widgets, per standing rule).
+    resp.on_hover_cursor(eframe::egui::CursorIcon::Default)
 }
 
 /// Bold header line for the selected item's name (Apple principle: the only
@@ -366,8 +352,4 @@ pub fn menu_header(ui: &mut Ui, name: &str, tint: Color32) {
             .color(tint),
     );
     ui.add_space(1.0);
-}
-
-fn egui_label(text: &str) -> eframe::egui::WidgetText {
-    eframe::egui::WidgetText::RichText(eframe::egui::RichText::new(text))
 }
