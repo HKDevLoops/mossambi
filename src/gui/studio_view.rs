@@ -711,7 +711,7 @@ impl StudioView {
                             let search_resp = ui.add(
                                 egui::TextEdit::singleline(&mut self.explorer_view.search_query)
                                     .id_source("mossambi_global_search_input")
-                                    .hint_text("Search (/)...")
+                                    .hint_text("Search (/)")
                                     .desired_width(search_w),
                             );
                             if self.explorer_view.focus_search_requested {
