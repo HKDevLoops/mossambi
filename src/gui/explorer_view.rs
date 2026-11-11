@@ -7827,6 +7827,8 @@ pub struct ItemMenuIntents {
     pub open_default: Option<PathBuf>,
     pub open_in_editor: Option<PathBuf>,
     pub open_with: Option<PathBuf>,
+    /// Launch directly with an enumerated Open With command line.
+    pub open_with_launch: Option<(String, PathBuf)>,
     pub play: Option<PathBuf>,
     pub print: Option<Vec<PathBuf>>,
     pub transcode: Option<(Vec<PathBuf>, String)>,
@@ -8046,6 +8048,11 @@ impl ExplorerView {
         if let Some(p) = intent.open_with {
             if !cm::open_with_choose(&p) {
                 log::warn!("Open With chooser unavailable for {}", p.display());
+            }
+        }
+        if let Some((cmd, p)) = intent.open_with_launch {
+            if !cm::launch_open_with_cmd(&cmd, &p) {
+                log::warn!("Open With launch failed for {}", p.display());
             }
         }
         if let Some(p) = intent.play {
@@ -8658,9 +8665,42 @@ impl ExplorerView {
                 intent.inspect = Some(file_targets.clone());
                 menu_ui.close_menu();
             }
-            if menu_row(menu_ui, !multi, pack, fm::MenuAction::OpenWith, style, tint).clicked() {
-                intent.open_with = Some(path.clone());
-                menu_ui.close_menu();
+            if !multi {
+                let candidates = crate::gui::context_menu::open_with_candidates(&path);
+                menu_ui.menu_button(fm::MenuAction::OpenWith.label(style), |sub_ui| {
+                    sub_ui.set_min_width(170.0);
+                    for (label, command) in candidates.iter() {
+                        if fm::menu_item_labeled(
+                            sub_ui,
+                            pack,
+                            fm::MenuAction::OpenWith,
+                            label,
+                            style,
+                            tint,
+                        )
+                        .clicked()
+                        {
+                            intent.open_with_launch = Some((command.clone(), path.clone()));
+                            sub_ui.close_menu();
+                        }
+                    }
+                    if !candidates.is_empty() {
+                        sub_ui.separator();
+                    }
+                    if fm::menu_item_labeled(
+                        sub_ui,
+                        pack,
+                        fm::MenuAction::OpenWith,
+                        "Choose another app...",
+                        style,
+                        tint,
+                    )
+                    .clicked()
+                    {
+                        intent.open_with = Some(path.clone());
+                        sub_ui.close_menu();
+                    }
+                });
             }
         }
         if menu_row(menu_ui, true, pack, fm::MenuAction::Duplicate, style, tint).clicked() {

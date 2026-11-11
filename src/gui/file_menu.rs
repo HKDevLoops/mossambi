@@ -285,25 +285,33 @@ pub fn menu_item_labeled(
 ) -> Response {
     let rgb = [tint.r(), tint.g(), tint.b()];
     if style == MenuStyle::Finder {
-        return ui
-            .horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
-                ui.add_space(6.0);
-                ui.label(
-                    eframe::egui::RichText::new(label)
-                        .size(15.0)
-                        .color(eframe::egui::Color32::WHITE),
-                );
-            })
-            .response;
+        let container = ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+            ui.add_space(6.0);
+            ui.label(
+                eframe::egui::RichText::new(label)
+                    .size(15.0)
+                    .color(eframe::egui::Color32::WHITE),
+            );
+        });
+        let resp = ui.interact(
+            container.response.rect,
+            container.response.id.with("mossambi_menu_click"),
+            Sense::click(),
+        );
+        return resp;
     }
-    ui.horizontal(|ui| {
+    let container = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(9.0, 9.0);
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(19.0), Sense::hover());
         crate::core::icon_packs::paint_icon(ui, pack, action.glyph(), rect, rgb);
         ui.label(egui_label(label));
-    })
-    .response
+    });
+    ui.interact(
+        container.response.rect,
+        container.response.id.with("mossambi_menu_click"),
+        Sense::click(),
+    )
 }
 
 /// Render a menu entry with an arbitrary glyph and explicit label - used by
@@ -318,25 +326,33 @@ pub fn menu_item_glyph(
 ) -> Response {
     let rgb = [tint.r(), tint.g(), tint.b()];
     if style == MenuStyle::Finder {
-        return ui
-            .horizontal(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
-                ui.add_space(6.0);
-                ui.label(
-                    eframe::egui::RichText::new(label)
-                        .size(15.0)
-                        .color(eframe::egui::Color32::WHITE),
-                );
-            })
-            .response;
+        let container = ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+            ui.add_space(6.0);
+            ui.label(
+                eframe::egui::RichText::new(label)
+                    .size(15.0)
+                    .color(eframe::egui::Color32::WHITE),
+            );
+        });
+        let resp = ui.interact(
+            container.response.rect,
+            container.response.id.with("mossambi_menu_click"),
+            Sense::click(),
+        );
+        return resp;
     }
-    ui.horizontal(|ui| {
+    let container = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(9.0, 9.0);
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(19.0), Sense::hover());
         crate::core::icon_packs::paint_icon(ui, pack, glyph, rect, rgb);
         ui.label(egui_label(label));
-    })
-    .response
+    });
+    ui.interact(
+        container.response.rect,
+        container.response.id.with("mossambi_menu_click"),
+        Sense::click(),
+    )
 }
 
 /// Bold header line for the selected item's name (Apple principle: the only

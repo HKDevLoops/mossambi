@@ -59,7 +59,14 @@ pub fn open_with_choose(path: &Path) -> bool {
         use windows_sys::Win32::UI::Shell::ShellExecuteW;
         use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-        // rundll32 shell32.dll,OpenAs_RunDLL <file> is the classic openas picker
+        // The openas verb is the modern Win10+ route to the "How do you
+        // want to open this file?" picker and is tried first: the classic
+        // rundll32 OpenAs_RunDLL spawn below returns success on Win11 but
+        // exits without showing any dialog (verified live via pid delta).
+        if shell_verb(path, "openas") {
+            return true;
+        }
+        // rundll32 shell32.dll,OpenAs_RunDLL <file> is the classic fallback
         let args = format!("shell32.dll,OpenAs_RunDLL \"{}\"", path.to_string_lossy());
         let wide: Vec<u16> = std::ffi::OsStr::new("rundll32")
             .encode_wide()
@@ -78,17 +85,407 @@ pub fn open_with_choose(path: &Path) -> bool {
             std::ptr::null(),
             SW_SHOWNORMAL,
         );
-        // openas verb on Win10+ also works:
+        // rundll32 OpenAs_RunDLL is only a fallback: if it spawned but the
+        // dialog never appeared, report failure.
         if (res as usize) > 32 {
             return true;
         }
-        shell_verb(path, "openas")
+        false
     }
     #[cfg(not(target_os = "windows"))]
     {
         // No openas picker through xdg on Linux yet: report unsupported.
         let _ = path;
         false
+    }
+}
+
+/// One enumerated "Open with" application: (display label, raw
+/// shell\open\command line). Mirrors send_to_targets' tuple style.
+/// Static-registry route only (research decision D-1) - read-only,
+/// no COM, capped at 8, default app first.
+pub fn open_with_candidates(path: &Path) -> Vec<(String, String)> {
+    #[cfg(target_os = "windows")]
+    {
+        open_with::candidates(path)
+            .into_iter()
+            .map(|c| (c.label, c.command))
+            .collect()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = path;
+        Vec::new()
+    }
+}
+
+/// Launch `path` with an enumerated Open With command line: %1 / %L are
+/// substituted with the quoted path and environment strings expanded
+/// before CreateProcessW.
+pub fn launch_open_with_cmd(command: &str, path: &Path) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        open_with::launch(command, path)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (command, path);
+        false
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod open_with {
+    //! Static-registry Open With enumeration (research D-1).
+    //!
+    //! Sources, in Explorer's priority order:
+    //! 1. HKCU FileExts\<ext>\UserChoice "Progid" (the default app)
+    //! 2. HKCU FileExts\<ext>\OpenWithProgids value names
+    //! 3. HKCR <.ext>\OpenWithProgids value names
+    //! 4. Bounded HKCR\Applications\* scan via SupportedTypes
+    //!
+    //! Reading only - never writes, never touches UserChoice.
+
+    use std::path::Path;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW, HKEY, KEY_READ,
+    };
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
+    };
+
+    // Root handles defined locally (same idiom as core::default_explorer)
+    // so we never depend on windows-sys re-exporting them.
+    const HKEY_CLASSES_ROOT: isize = 0x8000_0000_isize;
+    const HKCU: isize = 0x8000_0001_isize;
+    const ERROR_SUCCESS: u32 = 0;
+    // Registry value type codes (avoid importing half the feature).
+    const REG_SZ: u32 = 1;
+    const REG_EXPAND_SZ: u32 = 2;
+    const MAX_CANDIDATES: usize = 8;
+
+    /// One resolved candidate.
+    pub struct Candidate {
+        pub label: String,
+        pub command: String,
+    }
+
+    fn open_key_read(root: isize, subkey: &str) -> Option<HKEY> {
+        let wide: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut hk: HKEY = std::ptr::null_mut();
+        let res = unsafe { RegOpenKeyExW(root as _, wide.as_ptr(), 0, KEY_READ, &mut hk) };
+        if res == ERROR_SUCCESS {
+            Some(hk)
+        } else {
+            None
+        }
+    }
+
+    fn close(hk: HKEY) {
+        unsafe { RegCloseKey(hk) };
+    }
+
+    /// Reads a string value accepting both REG_SZ and REG_EXPAND_SZ.
+    fn get_string(hk: HKEY, value: Option<&str>) -> Option<String> {
+        let vname: Vec<u16> = value
+            .map(|v| v.encode_utf16().chain(std::iter::once(0)).collect())
+            .unwrap_or_default();
+        let mut buf = [0u16; 512];
+        let mut len = (buf.len() * 2) as u32;
+        let mut kind = 0u32;
+        let res = unsafe {
+            RegQueryValueExW(
+                hk,
+                if vname.is_empty() {
+                    std::ptr::null()
+                } else {
+                    vname.as_ptr()
+                },
+                std::ptr::null_mut(),
+                &mut kind,
+                buf.as_mut_ptr() as *mut u8,
+                &mut len,
+            )
+        };
+        if res != ERROR_SUCCESS || (kind != REG_SZ && kind != REG_EXPAND_SZ) {
+            return None;
+        }
+        let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        Some(String::from_utf16_lossy(&buf[..n]))
+    }
+
+    /// Enumerates VALUE names under `hk`, bounded by `cap`.
+    fn enum_value_names(hk: HKEY, cap: usize) -> Vec<String> {
+        let mut out = Vec::new();
+        for idx in 0..cap as u32 {
+            let mut name = [0u16; 128];
+            let mut name_len = name.len() as u32;
+            let mut kind = 0u32;
+            let mut data = [0u8; 8];
+            let mut data_len = data.len() as u32;
+            let res = unsafe {
+                RegEnumValueW(
+                    hk,
+                    idx,
+                    name.as_mut_ptr(),
+                    &mut name_len,
+                    std::ptr::null_mut(),
+                    &mut kind,
+                    data.as_mut_ptr(),
+                    &mut data_len,
+                )
+            };
+            if res != ERROR_SUCCESS {
+                break;
+            }
+            out.push(String::from_utf16_lossy(&name[..name_len as usize]));
+        }
+        out
+    }
+
+    /// Enumerates SUBKEY names under `hk`, bounded by `cap`.
+    fn enum_subkeys(hk: HKEY, cap: usize) -> Vec<String> {
+        let mut out = Vec::new();
+        for idx in 0..cap as u32 {
+            let mut name = [0u16; 128];
+            let mut name_len = name.len() as u32;
+            let res = unsafe {
+                RegEnumKeyExW(
+                    hk,
+                    idx,
+                    name.as_mut_ptr(),
+                    &mut name_len,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            };
+            if res != ERROR_SUCCESS {
+                break;
+            }
+            out.push(String::from_utf16_lossy(&name[..name_len as usize]));
+        }
+        out
+    }
+
+    fn push_unique(progids: &mut Vec<String>, p: String) {
+        if !p.is_empty() && !progids.iter().any(|x| x.eq_ignore_ascii_case(&p)) {
+            progids.push(p);
+        }
+    }
+
+    /// Best-effort display label from a command line's executable basename.
+    /// ALL-CAPS stems are title-cased (NOTEPAD -> Notepad) for menu rows.
+    fn exe_label_from_command(command: &str) -> Option<String> {
+        let s = command.trim();
+        let exe = if let Some(rest) = s.strip_prefix('"') {
+            rest.split('"').next()?.to_string()
+        } else {
+            let no_args = s.split('%').next().unwrap_or(s).trim_end();
+            match no_args.find(' ') {
+                Some(i) => no_args[..i].to_string(),
+                None => no_args.to_string(),
+            }
+        };
+        let stem = Path::new(&exe).file_stem()?.to_string_lossy().to_string();
+        if stem.is_empty() {
+            return None;
+        }
+        let has_alpha = stem.chars().any(|c| c.is_ascii_alphabetic());
+        let all_caps = stem
+            .chars()
+            .all(|c| !c.is_ascii_alphabetic() || c.is_ascii_uppercase());
+        if has_alpha && all_caps {
+            let lower = stem.to_ascii_lowercase();
+            let mut cs = lower.chars();
+            match cs.next() {
+                Some(f) => Some(f.to_ascii_uppercase().to_string() + cs.as_str()),
+                None => Some(stem),
+            }
+        } else {
+            Some(stem)
+        }
+    }
+
+    /// Expands %VAR% via the process environment (REG_EXPAND_SZ values).
+    /// Unknown variables are left verbatim.
+    fn expand_env_vars(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut rest = s;
+        while let Some(i) = rest.find('%') {
+            out.push_str(&rest[..i]);
+            let after = &rest[i + 1..];
+            match after.find('%') {
+                Some(j) => {
+                    match std::env::var(&after[..j]) {
+                        Ok(v) => out.push_str(&v),
+                        Err(_) => out.push_str(&format!("%{}%", &after[..j])),
+                    }
+                    rest = &after[j + 1..];
+                }
+                None => {
+                    out.push('%');
+                    rest = after;
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    pub fn candidates(path: &Path) -> Vec<Candidate> {
+        let ext = path
+            .extension()
+            .map(|e| format!(".{}", e.to_string_lossy().to_ascii_lowercase()))
+            .unwrap_or_default();
+        if ext.is_empty() {
+            return Vec::new();
+        }
+
+        // 1) ProgIDs in priority order (default first, deduped).
+        let mut progids: Vec<String> = Vec::new();
+        let uc = format!(
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\{}\UserChoice",
+            ext
+        );
+        if let Some(hk) = open_key_read(HKCU, &uc) {
+            if let Some(p) = get_string(hk, Some("Progid")) {
+                push_unique(&mut progids, p);
+            }
+            close(hk);
+        }
+        let owp = format!(
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\{}\OpenWithProgids",
+            ext
+        );
+        if let Some(hk) = open_key_read(HKCU, &owp) {
+            for name in enum_value_names(hk, 16) {
+                push_unique(&mut progids, name);
+            }
+            close(hk);
+        }
+        let hkcr_owp = format!("{}\\OpenWithProgids", ext);
+        if let Some(hk) = open_key_read(HKEY_CLASSES_ROOT, &hkcr_owp) {
+            for name in enum_value_names(hk, 16) {
+                push_unique(&mut progids, name);
+            }
+            close(hk);
+        }
+
+        // 2) Resolve ProgIDs to label + command (cap 8).
+        let mut out: Vec<Candidate> = Vec::new();
+        for progid in &progids {
+            if out.len() >= MAX_CANDIDATES {
+                break;
+            }
+            let cmd_key = format!("{}\\shell\\open\\command", progid);
+            let command = open_key_read(HKEY_CLASSES_ROOT, &cmd_key).and_then(|hk| {
+                let c = get_string(hk, None);
+                close(hk);
+                c
+            });
+            let Some(command) = command.filter(|c| !c.trim().is_empty()) else {
+                continue;
+            };
+
+            let mut label = open_key_read(HKEY_CLASSES_ROOT, progid).and_then(|hk| {
+                let l = get_string(hk, Some("FriendlyTypeName"));
+                close(hk);
+                l
+            });
+            // Indirect strings (@dll,-res) are not resolved in v1: fall
+            // through to the executable basename from the command line.
+            if label.as_deref().map(|l| l.starts_with('@')).unwrap_or(true) {
+                label = None;
+            }
+            let label = label
+                .filter(|l| !l.trim().is_empty())
+                .or_else(|| exe_label_from_command(&command))
+                .unwrap_or_else(|| progid.clone());
+            out.push(Candidate { label, command });
+        }
+
+        // 3) Supplement with HKCR\Applications whose SupportedTypes lists
+        //    the extension (bounded scan, cap 200 subkeys).
+        if out.len() < MAX_CANDIDATES {
+            if let Some(hk) = open_key_read(HKEY_CLASSES_ROOT, "Applications") {
+                for name in enum_subkeys(hk, 200) {
+                    if out.len() >= MAX_CANDIDATES {
+                        break;
+                    }
+                    let st_key = format!("{}\\SupportedTypes", name);
+                    let hit = open_key_read(HKEY_CLASSES_ROOT, &st_key).map(|sthk| {
+                        let hit = enum_value_names(sthk, 64)
+                            .iter()
+                            .any(|v| v.eq_ignore_ascii_case(&ext));
+                        close(sthk);
+                        hit
+                    });
+                    if !hit.unwrap_or(false) {
+                        continue;
+                    }
+                    let cmd_key = format!("{}\\shell\\open\\command", name);
+                    let command = open_key_read(HKEY_CLASSES_ROOT, &cmd_key).and_then(|ck| {
+                        let c = get_string(ck, None);
+                        close(ck);
+                        c
+                    });
+                    let Some(command) = command.filter(|c| !c.trim().is_empty()) else {
+                        continue;
+                    };
+                    if out.iter().any(|c| c.command.eq_ignore_ascii_case(&command)) {
+                        continue;
+                    }
+                    let label = exe_label_from_command(&command).unwrap_or_else(|| name.clone());
+                    out.push(Candidate { label, command });
+                }
+                close(hk);
+            }
+        }
+        out
+    }
+
+    pub fn launch(command: &str, path: &Path) -> bool {
+        let quoted = format!("\"{}\"", path.to_string_lossy());
+        let cmdline = command.replace("%1", &quoted).replace("%L", &quoted);
+        let cmdline = if cmdline.contains(&quoted) {
+            cmdline
+        } else {
+            format!("{cmdline} {quoted}")
+        };
+        let cmdline = expand_env_vars(&cmdline);
+        // CreateProcessW may write into the command buffer: keep a mutable copy.
+        let mut buf: Vec<u16> = cmdline.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            let mut si: STARTUPINFOW = std::mem::zeroed();
+            si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+            let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+            let ok = CreateProcessW(
+                std::ptr::null(),
+                buf.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                0,
+                std::ptr::null(),
+                std::ptr::null(),
+                &si,
+                &mut pi,
+            ) != 0;
+            if ok {
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+            } else {
+                log::warn!(
+                    target: "mossambi::context_menu",
+                    "CreateProcessW failed for Open With command: {}",
+                    command
+                );
+            }
+            ok
+        }
     }
 }
 
