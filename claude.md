@@ -761,3 +761,34 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
 - Still queued: Search-clip diagnosis (needs explorer tab); context-
   menu wave; theme wave; icon blur + Miller 2+; A4 security, A5
   fixes, A6 QA.
+
+[Search-clip diagnosis: 2026-11-11, on pid 3444]
+
+- Symptom under investigation: toolbar search box suspected to clip
+  (search_w=170, studio_view.rs:705-715).
+- Method: explorer Home view captured windowed (1120x720) and
+  maximized (1936x1064; ShowWindow 3 -> guarded capture -> ShowWindow
+  9). Window restored cleanly to 412,167 1120x720 both times.
+- Findings (crop_sc_win_search.png, crop_sc_max_search.png):
+  1. The TextEdit is a fixed 170px box in a right_to_left toolbar
+     cluster. In maximized mode the box sits well inside the window
+     (right edge ~1920 of 1928) and nothing in the cluster is
+     clipped: segmented view switcher, new-window, gear, and search
+     all fully visible. In windowed mode the box ends ~3px from the
+     window edge (flush-right Finder-style placement) but is not cut.
+  2. The placeholder renders elided as "Search (/..." in BOTH
+     layouts (code hint is "Search (/)...", studio_view.rs:714). The
+     elision is width-independent: the hint does not fit the 170px
+     TextEdit inner text area at the toolbar font. It is a cosmetic
+     single-control defect, not a layout clip.
+- VERDICT: no layout clipping in either mode. Queued 1-line fix
+  (widen search_w to ~190 or shorten the hint to "Search (/)") for
+  the next code-touching wave; not blocking.
+- Incidental live proof: the maximized crop shows the active
+  "Columns" segment of the view switcher wearing the new pill ring -
+  the 9cf27e4 ring system rendering live.
+- Live-verification batch COMPLETE: Ctrl+T single-fire (chain),
+  Ctrl+W single-fire (93cb097), donut live-apply (c046bed), maximized
+  settings layout (6435f76), Search-clip diagnosed (this entry).
+- Next: context-menu wave - deep research first (Finder menu model +
+  Windows shell integration), then plan, then implementation.
