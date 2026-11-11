@@ -904,3 +904,65 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   (config context_menu.custom_items + Preferences "Context Menu"
   section), then Phase 5 Search-clip hint fix ("Search (/)") at
   studio_view.rs:714.
+
+[Phase 3 Finder conformance + cursor discipline + search hint: 2026-11-11, on pid 9244]
+
+- Wave: context-menu (plan 4578ba8) Phase 3, plus two strict user
+  directives received mid-cycle (cursor shape; no zebra).
+- Phase 3 changes (file_menu.rs): menu_item_labeled and
+  menu_item_glyph collapsed into one allocation-native renderer
+  menu_row_text - a full-width click-sensed row
+  (allocate_exact_size(available_width, galley_height + 8),
+  Sense::click()), egui widget-state hover/active accent fill painted
+  behind the label before the 15 px white galley (SubMenuButton
+  idiom, LEFT_CENTER with 6 px inset). Glyph/pack/action/style/tint
+  params retained underscored for call-site compatibility; egui_label
+  helper removed; G-1 doc conflict resolved (glyph kept in
+  signatures, never painted; module doc updated). Visuals are
+  Finder-always in every wording style (design directive decouples
+  visuals from wording).
+- Click mechanism refined: the allocation-native allocation IS the
+  fresh click-sensed widget - it replaces the 95cc29a
+  ui.interact(fresh id) form. Live re-proof on the release binary
+  (pid 9244): right-click setup.log (400,606) -> hover Open with ->
+  flyout -> click Notepad row center (760,275) -> notepad process
+  delta 0 -> 2, menu closed, stderr clean. New menu geometry:
+  panel x 402-795, rows ~30 px pitch (iconless rows are taller than
+  the old 19 px icon rows); flyout x 722-1085 (Notepad ~y275,
+  Code ~y307, Choose another app... ~y349). Captures: p3a_menu_open,
+  p3b_menu, p3b_flyout (hover accent fill visible on the Open with
+  row), p3c_after_click.
+- Cursor discipline (strict rule, new standing rule): the I-beam
+  text cursor is allowed ONLY in text-editing widgets. Root cause in
+  egui 0.29.1: defaults selectable_labels=true AND
+  multi_widget_text_select=true make static labels paint
+  CursorIcon::Text on hover app-wide (label_text_selection.rs
+  :163/:488). Fix: style.interaction.selectable_labels=false +
+  style.interaction.multi_widget_text_select=false in studio_app.rs
+  style setup; menu_row_text additionally returns
+  resp.on_hover_cursor(CursorIcon::Default). TextEdit keeps its own
+  I-beam (text_edit/builder.rs:596). Empirical census via
+  GetCursorInfo hCursor compared against LoadCursor(IDC_ARROW=32512)/
+  LoadCursor(IDC_IBEAM=32513) (screenshots cannot show cursors):
+  file list row ARROW, menu row ARROW, flyout row ARROW, search box
+  IBEAM. Probe: p3b_verify.ps1.
+- Phase 5 (search hint): "Search (/)..." -> "Search (/)" at
+  studio_view.rs:714; windowed captures show the hint fully rendered,
+  elision gone.
+- Zebra check: grep (% 2, alternating, even_row, odd_row) found no
+  alternating-row shading in the codebase; p3b_listview capture shows
+  uniform row backgrounds. The user's "no alternative line
+  highlighting" directive is recorded as a spec constraint for the
+  upcoming list-view columns wave (no zebra, ever).
+- Gates: cargo fmt clean; clippy -D warnings exit 0 (6.42s); test
+  exit 0; ASCII sweep 0; release build 58.39s exit 0.
+- VERDICT: PASS - Phase 3 Finder conformance, cursor discipline, and
+  the Phase 5 hint fix are live-proven in the release binary.
+- Next: Phase 4 menu customization (config context_menu.custom_items
+  {label, kind: command|script|app|link, value, args?, show_in} +
+  run_custom_item with %p/%1 substitution + Preferences "Context
+  Menu" section), then the THEME wave (user priority: 12 palettes +
+  Rangalipi at the theme-picker gate, macOS Finder principles), then
+  the list-view columns wave (all file parameters as add/remove
+  columns, resizable, sortable, filterable - NO zebra), then icon
+  blur fix, Miller 2+ fix, breadcrumb horizontal scroll, A4/A5/A6 QA.
