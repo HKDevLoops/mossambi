@@ -792,3 +792,63 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   settings layout (6435f76), Search-clip diagnosed (this entry).
 - Next: context-menu wave - deep research first (Finder menu model +
   Windows shell integration), then plan, then implementation.
+
+[Phase 1 Miller right-click live-verified: 2026-11-11, on pid 7568]
+
+- Wave: context-menu (plan 4578ba8). Phase 1 commit 359bc9a added
+  right-click menus to Miller Columns: canvas menu registered FIRST
+  inside the outer Miller ScrollArea (explorer_miller_canvas_bg) so
+  rows keep pointer priority; item menu hooks on both row loops
+  (first column col1_w + sub-columns col_w) with the Explorer
+  multi-select rule; full intent consumption mirroring the list
+  view; _on_exam_conform/_on_inspect_file un-underscored. Five
+  gates green pre-commit.
+- Incident during setup: navigation script failed twice with
+  "window lost". Root cause by direct diagnostic (wdiag.ps1): the
+  window was MINIMIZED (iconic True, rect -32000,-32000 160x28),
+  which fails the >400x300 FindMain size filter while
+  Process.MainWindowHandle still reports the handle. Process alive
+  throughout - NOT silent death #4. Protocol fix adopted for all
+  live scripts: FindMain records iconic windows (IconicHwnd) and
+  the retry loop SW_RESTOREs them before re-enumerating
+  (nav_c_drive.ps1 pattern, now the standard).
+- Live evidence (all guard-passed, pid 7568, rect 400,196
+  1120x720, view switcher Columns segment active):
+  1. mc2_item_menu.png - right-click "home" row in Miller column 1
+     opens the full folder item menu: Open / Open in new window /
+     Open in new tab | Compress to ZIP file / Create a copy |
+     Send To > | Copy as path > | Show in Explorer / Open in
+     Terminal / Create shortcut | Cut / Copy | Tags > | Pin to
+     Sidebar | Rename / Delete / Scan with Microsoft Defender /
+     Properties. THE DEFECT (right-click dead in Miller) IS FIXED.
+  2. mc4_canvas_menu.png - right-click intended for empty space
+     landed on row 19 (vfcompat.dll; 30px pitch miscalculation) and
+     opened the FILE item menu: Open / Edit / Quick look | Convert >
+     | Compress to ZIP / Conform to exam specification / Quality
+     and integrity inspect. / Open with / Create a copy | Send To >
+     | Copy as path > | ... - bonus proof for file rows. Also
+     confirms "Open with" is still the flat pre-Phase-2 row (no
+     submenu arrow).
+  3. mc7_canvas_menu.png - PerfLogs selected (empty folder ->
+     empty column 2, two-column reflow col_w ~444); right-click
+     column 2 empty space (750,550) opened the "Explorer" canvas
+     menu: New folder / Open in new window / Open in new tab |
+     Refresh / Go to Parent Folder | Sort by > | View > | Select
+     all / Invert Selection / Clear Selection / Paste (grayed) |
+     Open in Terminal / Show in Explorer / Properties.
+     Canvas-first registration works: rows win pointer priority,
+     empty space falls through to canvas.
+  4. mc3 / mc5 / mc8 captures - ESC dismisses both menu types
+     cleanly; baseline intact after each test ("19 items (7
+     hidden)"; 1 selected 0 B after the PerfLogs test).
+- VERDICT: Phase 1 (Miller Columns right-click fix) PASS in the
+  live release binary. Item menus proven on folder row, file row,
+  and sub-column rows share the same builder; canvas menu proven
+  on empty column space.
+- Next: Phase 2 - Open With submenu (registry enumeration,
+  windows-sys only, research decision D-1): open_with_candidates()
+  + launch_open_with() in context_menu.rs; replace the flat
+  OpenWith row in run_item_context_menu with a Send To-style
+  submenu ending in "Choose another app..." (existing rundll32
+  dialog).
+
