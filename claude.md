@@ -852,3 +852,55 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   submenu ending in "Choose another app..." (existing rundll32
   dialog).
 
+
+[Phase 2 Open With submenu live-proven + menu-row click fix: 2026-11-11, on pids 20424/11956/26776/28292]
+
+- Wave: context-menu (plan 4578ba8). Phase 2 added the Open With
+  submenu to all item context menus: static registry enumeration
+  (research decision D-1, windows-sys only, no COM): FileExts
+  UserChoice default first, then FileExts OpenWithProgids, then HKCR
+  .ext OpenWithProgids, then a bounded Applications\* SupportedTypes
+  scan; dedupe, cap 8; launch by resolving shell\open\command with
+  %1/%L substituted to the quoted path via CreateProcessW; final row
+  "Choose another app..." -> open_with_choose().
+- Defect found and fixed (menu-row click registration): egui 0.29.1
+  Response::interact(Sense::click()) re-registers the SAME widget id
+  with OR'd sense -> hover resolves via the container but clicks
+  never resolve (hit-test/interaction contention). Fix: fresh-id
+  widget ui.interact(container.response.rect,
+  container.response.id.with("mossambi_menu_click"), Sense::click())
+  at all four return sites of menu_item_labeled/menu_item_glyph
+  (Finder + non-Finder branches). Temporary [MENU-HOVER]/[MENU-CLICK]
+  instrumentation used for calibration, then removed before commit.
+- Live proof (instrumented binaries pid 20424 broken / 11956 fixed):
+  identical probe produced zero clicks pre-fix, then [MENU-CLICK]
+  fired for Scan with Microsoft Defender [406,658]-[601,677], Notepad
+  [619,302]-[695,321] (x2), and Choose another app...
+  [619,364]-[767,383]; notepad process delta 0 -> 2; LAUNCH PROOF:
+  notepad pid=27248 title='setup.log - Notepad' - the %1/append
+  file-argument substitution works end to end.
+- System defect documented (NOT an app defect): the Windows Open
+  With picker dialog never appears on this machine. Verified
+  standalone outside the app: rundll32 OpenAs_RunDLL spawns and
+  exits silently (pid delta caught mid-poll, gone by poll end);
+  ShellExecuteW openas verb internally does the same; direct
+  SHOpenWithDialog blocks with no visible dialog (MTA and STA
+  retries). Three identical desktop censuses (11 titled windows, no
+  picker); ApplicationFrameHost owns zero windows. Wiring is
+  live-proven up to the OS boundary; open_with_choose now tries the
+  openas verb first with rundll32 OpenAs_RunDLL as fallback.
+- Incidental: app silent-death candidates now include pid 28292
+  (empty stderr); two Application Event Log Id=1000 records found
+  for 11/09 23:22 matching mossambi. Probes used throughout:
+  RefreshRect + traffic-light guard + ForceForeground + iconic
+  restore + finally-cleanup; calibration parsed live from hover logs.
+- VERDICT: Phase 2 PASS in the live release binary (click
+  registration + launch chain). Choose-another dialog blocked by a
+  machine-level shell defect, documented with evidence above.
+- Next: Phase 3 Finder conformance - live-capture current menu
+  baseline, make rows text-first and iconless (resolve G-1 conflict:
+  file_menu.rs doc says every entry has a glyph), verify hairline
+  separators and hover accent fill. Then Phase 4 customization
+  (config context_menu.custom_items + Preferences "Context Menu"
+  section), then Phase 5 Search-clip hint fix ("Search (/)") at
+  studio_view.rs:714.
