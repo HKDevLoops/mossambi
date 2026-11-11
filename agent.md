@@ -732,3 +732,32 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   mandatory - it caught the occlusion on the immediate retry.
 - Still queued: maximized capture, Search-clip diagnosis; context-menu
   wave; theme wave; icon blur + Miller 2+; A4 security, A5 fixes, A6 QA.
+
+[Maximized capture verification: 2026-11-11, on pid 3444]
+
+- Method: ShowWindow(hwnd,3) -> guarded capture -> ShowWindow(hwnd,9).
+  First attempt aborted safely: the capture guard tripped (0 traffic-
+  light red dots) because the user's maximized File Explorer was on
+  top in z-order; the saved frame proved the maximize itself worked.
+  The retry re-asserted foreground immediately before capture and
+  passed the guard; the script restores the window in a finally block.
+- Captured at rect (-8,24) 1936x1064 (standard maximized border
+  overhang); window restored cleanly to 1120x720 @(412,167),
+  zoomed=False (mx1b_settings_max.png).
+- Result: the Settings -> Donut toolbar page lays out correctly in
+  maximized mode. All three columns render (settings categories,
+  profile editor, Available presets). The presets column, clipped at
+  the right edge in the 1120px windowed layout ("Edit Gr...", "Pages
+  per sh..."), is fully visible maximized (full labels: "Edit Group of
+  6", "Pages per sheet Group of 5", "Crop video Group of 6",
+  "Grayscale Same format", "Trim transparent borders") - consistent
+  with the 1280px toolbar-width uncapping in 4de5917. No overlapping
+  panels, no rendering garbage. The band below the content divider is
+  trailing scroll space, not a defect.
+- Appearance card shows Size 430 px (restored value), Hole 52.0 px,
+  Opacity 0.680 - config state intact through the maximize cycle.
+- VERDICT: maximized-mode settings layout PASS; the 4de5917 fix is
+  confirmed live.
+- Still queued: Search-clip diagnosis (needs explorer tab); context-
+  menu wave; theme wave; icon blur + Miller 2+; A4 security, A5
+  fixes, A6 QA.
