@@ -1037,3 +1037,62 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   columns, resizable, sortable, filterable - NO zebra), then icon
   blur fix, Miller 2+ fix, breadcrumb horizontal scroll, A4
   security, A5 fixes, A6 QA.
+- Wave: THEME - the 20 Pantone themes replaced with 13 named
+  palettes (Rangalipi signature dark default + Mossambi Punch
+  true-fruit light; 11 canonical editor palettes between them);
+  all five gates green; live theme-picker review queued to the
+  post-wave computer-use phase per user directive (finish all
+  code waves first, then verify everything and fix what it finds).
+- Commit e69518b feat (11 files +610/-753). pantone.rs: one
+  THEMES: [PantoneTheme; 13] catalog (gruvbox, tokyo_night,
+  catppuccin_mocha, modus_vivendi, nord, dracula, kanagawa,
+  one_dark, atom, dark_plus, synthwave, rangalipi #default dark,
+  mossambi_punch #the one light); PantoneColor.code now records
+  source provenance (research + verified values in
+  docs/superpowers/plans/2026-11-12-theme-research.md); fruit
+  consts and CitrusShade preserved verbatim; get_pantone_theme
+  fallback -> MossambiPunch for light-ish queries, else Rangalipi.
+- Migration: stacked #[serde(alias)] on Rangalipi covers all 20
+  old dark ids/names plus liquid_glass/liquidglass/frosted_glass/
+  frostedglass/dark/system; MossambiPunch covers all 10 old light
+  ids/names plus light/light_aqua/lightaqua; from_id_or_name
+  remaps every legacy string by darkness (20-id dark table ->
+  Rangalipi, 20-id light table -> MossambiPunch), so an existing
+  config.json "liquid_glass" loads as Rangalipi.
+- ThemeMode and ThemeStyle: 13-variant enums with identical alias
+  sets, From impls 13-way 1:1, all() 13, dark_themes()=[0..12],
+  light_themes()=[12..13], toggle_dark_light() Rangalipi <->
+  MossambiPunch; MossambiConfig::default theme_mode = Rangalipi.
+  GlassEffect (FrostedGlass/LiquidGlass) is the orthogonal glass
+  system and was NOT touched (config.rs, dwm_helper.rs,
+  colors_with_glass in macos_theme.rs, preferences_view.rs).
+- Stragglers swept: tray.rs quick-picks remapped to Rangalipi /
+  Gruvbox / CatppuccinMocha / MossambiPunch (CMD_THEME_* renamed,
+  ids 2010-2013 kept, submenu title "Themes (13 Named Palettes)");
+  tui [T] status "11 Dark Themes"/"1 Light Theme", [t] hint
+  "13 named themes", "Active Theme:"; main.rs handle_themes
+  rewritten ASCII (2611 -> 2142 chars, PowerShell regex surgery;
+  prints 13 themes with provenance, --json kept); config set
+  theme dark/light -> Rangalipi/MossambiPunch; widget toggle
+  same; test_cli asserts "Rangalipi"; Preferences label
+  "Pick a theme."
+- tests/test_pantone.rs rewritten: 6 tests (counts 13/12/1;
+  integrity with hex format, RGB roundtrip, provenance; lookup
+  incl. legacy fallbacks; 13-step ThemeMode cycling + toggle;
+  serde aliases incl. liquid_glass -> Rangalipi; defaults incl.
+  ThemeStyle::default() = Rangalipi).
+- Clippy catch: doc_lazy_continuation on "//! Light (1):" (parsed
+  as a lazy continuation of list item 12) -> blank //! line
+  before it.
+- Gates: cargo fmt clean; clippy -D warnings exit 0 (5.29s);
+  cargo test exit 0 (69 lib, test_pantone 6/6, test_cli 9/9,
+  ASCII gate ok); release build 48.74s exit 0 (mossambi.exe not
+  running); git status exactly the 11 edited files, no strays.
+- VERDICT: THEME wave CODE-PASS. Live theme-picker gate (13
+  palettes incl. Rangalipi applied and captured for review)
+  QUEUED to the post-wave computer-use phase.
+- Next: list-view columns wave (all file parameters as add/remove
+  columns, resizable, sortable, filterable - NO zebra), then icon
+  blur fix, Miller 2+ fix, breadcrumb horizontal scroll, A4
+  security, A5 fixes, A6 QA, then the post-wave computer-use
+  verification phase (theme-picker gate + all queued probes).
