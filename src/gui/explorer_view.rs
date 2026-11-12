@@ -2652,7 +2652,7 @@ impl ExplorerView {
             ui.ctx(),
             pack,
             IconGlyph::ActionBack,
-            24.0,
+            20.0,
             nav_tint,
         ) {
             Some(t) => {
@@ -2693,7 +2693,7 @@ impl ExplorerView {
             ui.ctx(),
             pack,
             IconGlyph::ActionForward,
-            24.0,
+            20.0,
             nav_tint,
         ) {
             Some(t) => {
@@ -2728,7 +2728,7 @@ impl ExplorerView {
             ui.ctx(),
             pack,
             IconGlyph::ActionUp,
-            24.0,
+            20.0,
             nav_tint,
         ) {
             Some(t) => {
@@ -2754,7 +2754,7 @@ impl ExplorerView {
             ui.ctx(),
             pack,
             IconGlyph::ActionRefresh,
-            24.0,
+            20.0,
             nav_tint,
         ) {
             Some(t) => {
@@ -2775,7 +2775,7 @@ impl ExplorerView {
             ui.ctx(),
             pack,
             IconGlyph::ActionNewFolder,
-            24.0,
+            20.0,
             nav_tint,
         ) {
             Some(t) => {
@@ -3246,7 +3246,7 @@ impl ExplorerView {
             ui.ctx(),
             self.icon_pack,
             IconGlyph::ActionFilter,
-            16.0,
+            14.0,
             tint,
         ) {
             Some(tex) => egui::Button::image_and_text(
@@ -4741,7 +4741,7 @@ impl ExplorerView {
                         palette.text_muted
                     });
                     let tex = glyph.and_then(|g| {
-                        crate::core::icon_packs::icon_texture(ui.ctx(), pack, g, 16.0, tint_rgb)
+                        crate::core::icon_packs::icon_texture(ui.ctx(), pack, g, 14.0, tint_rgb)
                     });
                     let mut btn = match tex {
                         Some(t) => egui::Button::image_and_text(

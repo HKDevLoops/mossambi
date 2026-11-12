@@ -1210,8 +1210,8 @@ fn rasterize(
     let tree = resvg::usvg::Tree::from_str(svg, &opt).map_err(|e| format!("svg parse: {e:?}"))?;
     let size = tree.size();
     let scale = (phys_px as f32).max(1.0) / size.width().max(1.0);
-    let scaled_w = (size.width() * scale) as u32;
-    let scaled_h = (size.height() * scale) as u32;
+    let scaled_w = (size.width() * scale).round() as u32;
+    let scaled_h = (size.height() * scale).round() as u32;
     let mut pixmap =
         resvg::tiny_skia::Pixmap::new(scaled_w.max(1), scaled_h.max(1)).ok_or("pixmap alloc")?;
     resvg::render(
@@ -1262,9 +1262,26 @@ pub fn paint_icon_with(
     let Some(tex) = icon_texture(ctx, pack, glyph, size, accent_rgb) else {
         return;
     };
-    let sq = Rect::from_center_size(rect.center(), eframe::egui::Vec2::splat(size));
+    let sq = snapped_icon_quad(ctx, rect, size);
     let uv = Rect::from_min_max(eframe::egui::pos2(0.0, 0.0), eframe::egui::pos2(1.0, 1.0));
     painter.image(tex.id(), sq, uv, Color32::WHITE);
+}
+
+/// Device-exact paint geometry: the returned square matches the
+/// icon_texture rasterization of css_px (same formula and clamp) and
+/// its min corner lies on integer device pixels, so the texture blits
+/// 1:1 with no resampling or edge smear.
+pub fn snapped_icon_quad(
+    ctx: &eframe::egui::Context,
+    rect: eframe::egui::Rect,
+    css_px: f32,
+) -> eframe::egui::Rect {
+    let ppp = ctx.pixels_per_point();
+    let phys = ((css_px * ppp).round() as u32).clamp(12, 512) as f32;
+    let css = phys / ppp;
+    let min = rect.center() - eframe::egui::Vec2::splat(css * 0.5);
+    let min = eframe::egui::Pos2::new((min.x * ppp).round() / ppp, (min.y * ppp).round() / ppp);
+    eframe::egui::Rect::from_min_size(min, eframe::egui::Vec2::splat(css))
 }
 
 /// Convenience: paint with a slightly padded rect
