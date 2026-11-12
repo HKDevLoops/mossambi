@@ -1272,3 +1272,42 @@ align implemented via scroll_to_cursor(Align::Max) after the inspector
 (not scroll_to_rect on the deepest column); tags now also painted in
 stack columns; drop alpha unified 70/80 -> 80; focused_row highlight
 kept only in the Current role.
+
+2026-11-12 BREADCRUMB HORIZONTAL SCROLL WAVE CLOSED (feat(gui) d54b335,
++165/-129 over src/gui/explorer_view.rs only; plan doc committed e41c440
+first): the Finder-style bottom path bar now scrolls horizontally
+instead of clipping deep paths. (1) Defect pinned in research:
+render_bottom_path_bar painted the segment trail in a plain
+ui.horizontal - NO ScrollArea - so ancestor segments beyond the
+available width were unreachable by mouse and the current segment
+could sit out of view. Research also established the top bar carries
+NO trail (nav pill + Finder-style current-folder title + search box;
+its own comment says the full ancestor chain lives in the bottom path
+bar) and parse_breadcrumbs (src/core/fs_utils.rs:514, unit-tested in
+tests/test_fs_utils.rs) has exactly two consumers: explorer_view.rs
+(this wave) and studio_view.rs:578 (separate view, out of scope).
+(2) Fix: the segment row is wrapped in
+egui::ScrollArea::horizontal().id_salt("breadcrumb_hscroll")
+.auto_shrink([false, true]) (full width, content height)
+.scroll_bar_visibility(VisibleWhenNeeded) - the scrollbar appears
+only when the trail actually overflows, wheel scrolling always works,
+item_spacing (3.0, 0.0) preserved. DnD drop targets, child-folder
+popups and hover anims work inside the scroll area (pattern proven
+live in the Miller wave). (3) One-shot alignment: new field
+needs_breadcrumb_scroll_align: bool next to needs_miller_scroll_align
+(ctor init false), set in navigate_to ONLY inside the
+lineage != MillerLineage::KeepStack branch so a refresh (fs-op
+completion) preserves the user manual scroll position; consumed
+inside the ScrollArea closure after the row via
+ui.scroll_to_cursor(Some(egui::Align::Max)) - right alignment reveals
+the current (right-most) segment after every navigation; clicking an
+ancestor re-roots the trail so the clicked segment becomes the
+right-most, correct in both directions. Signature proven live in the
+Miller wave (egui 0.29.1). (4) Gates green: fmt, clippy -D warnings,
+full test suite (incl ASCII sweep over src/gui), release build 1m08s,
+porcelain exactly src/gui/explorer_view.rs. Commit style
+feat(gui)/docs(plan)/docs(audit), ASCII-only new content.
+Out of scope (recorded in the plan): studio_view.rs breadcrumb
+consumer, Finder-style segment collapse ("..." root elision) - scope
+was scrolling, not elision - and the pre-existing synchronous
+list_directory_sync inside the child-folder dropdown popup.
