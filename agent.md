@@ -1350,3 +1350,47 @@ is_protected_os_file with trash-first + logged permanent fallback;
 reg/ffmpeg/daemon/widget spawns all Command::args([...]) argv-array
 form; expand_env_vars preserves unknown %VAR% pairs literally.
 Deviations from the plan doc: none.
+
+2026-11-12 A5 FIXES WAVE CLOSED (docs(plan) 96d03df 94 lines, fix(gui)
+a2f1132 +79/-7 over explorer_view.rs (+34) and studio_view.rs (+45)):
+scope came from the breadcrumb wave plan recorded out-of-scope items -
+no A-series definition exists in any doc or ledger.
+F-1 STUDIO RIBBON CLIPPING (FIXED): the Explorer Path Ribbon rendered
+the breadcrumb segment loop and the Edit button inside ONE plain
+ui.horizontal over a bounded bc_rect, so deep trails clipped silently
+- the same defect the breadcrumb wave fixed on the explorer side.
+Fix: segment loop wrapped in
+egui::ScrollArea::horizontal().id_salt("studio_breadcrumb_hscroll")
+.auto_shrink([false,true])
+.scroll_bar_visibility(VisibleWhenNeeded) inside a fixed
+allocate_ui_with_layout child (trail_w = (ribbon_w - 8.0 -
+edit_reserve).max(120.0), edit_reserve 52.0) so the Edit button stays
+pinned right while the trail scrolls.
+F-2 PER-FRAME SYNC LISTINGS (FIXED): egui re-renders open popups and
+context menus every frame; both deferred closures re-ran
+list_directory_sync on the UI thread each frame while open (explorer
+child dropdown, studio sibling menu), blocking the frame loop on
+slow/deep/network directories. Bounded fix without new async infra:
+once-per-open caches - ExplorerView.breadcrumb_popup_cache with method
+popup_child_dirs (load once, filter is_dir, clone out) swapped into
+the popup closure; StudioView.sibling_menu_cache with method
+sibling_dirs swapped into the context-menu closure; caches cleared
+UNCONDITIONALLY in navigate_to (explorer) and the nav_target block
+(studio) so every navigation AND refresh (KeepStack fs-op completions)
+invalidates listings - never stale after copy/move/rename/delete.
+First open still performs one synchronous read by design.
+PROCESS NOTE: the method insertions anchored on fn signature lines
+stranded attributes above them - render lost its
+#[allow(clippy::too_many_arguments)] (first clippy run failed 10/7 at
+studio_view.rs:128) and navigate_to lost its doc comment; both
+restored before commit. Lesson: when inserting a method before an
+existing one, anchor oldString below any attributes/doc comments of
+the following item, or verify the junction after insertion.
+Gates green: fmt, clippy -D warnings, full test suite (incl ASCII
+sweep over src/gui), release build 50.24s, porcelain exactly
+src/gui/explorer_view.rs + src/gui/studio_view.rs.
+Out of scope (recorded): full async directory-listing infrastructure
+(first-open read stays synchronous), navigation-time synchronous bulk
+loads (explorer :1049 :1070 :1169 :1312 :5107 - deliberate navigation
+flow, not per-frame re-entry), Finder-style segment collapse (root
+elision) still open from the breadcrumb wave.
