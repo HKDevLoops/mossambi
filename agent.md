@@ -966,3 +966,74 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   the list-view columns wave (all file parameters as add/remove
   columns, resizable, sortable, filterable - NO zebra), then icon
   blur fix, Miller 2+ fix, breadcrumb horizontal scroll, A4/A5/A6 QA.
+
+- Wave: context-menu Phase 4 (user-configurable custom entries) plus
+  the menu-width + acrylic material wave; Phase 4 is live-proven,
+  the width/acrylic wave is gate-green with live verification
+  deferred to the post-wave computer-use phase per user directive
+  (finish all code waves first, then verify everything and fix
+  corrections/mistakes/bugs found).
+- Phase 4 (e2d91fe feat, 5 files +388): config CustomMenuItem
+  {label, kind command|script|app|link, value, args, show_in
+  files|folders|background|all} serde snake_case; intent carries
+  Option<(CustomMenuItem, Option<PathBuf>)>; builders read
+  MossambiConfig::load() inline; context_menu.rs dispatch =
+  run_custom_item / run_command_line / shell_execute_open with %p
+  file-path substitution via CreateProcessW. Preferences editor
+  added (preferences_view.rs dirty-flag pattern); E0716 fixed by
+  binding config loaders to locals; E0433 fixed by absolute paths in
+  canvas menus. Custom group renders between Shortcut and Clipboard
+  groups in item and canvas menus. NOTE: the recurring "run_line
+  helper" claim in injected summaries is FALSE - grep finds zero
+  matches; no such refactor exists.
+- Phase 4 LIVE-VERIFIED (release binary): custom group in item +
+  canvas + folder menus (p4a_item, p4b_canvas, p4c_canvas2); notepad
+  launch via %p, process delta 0 -> 2, setup.log opened
+  (p4b_after_item); scope filtering per show_in; PerfLogs empty-dir
+  navigation for the canvas menu (p4c_nav1, p4c_nav2,
+  p4c_empty_folder); ARROW cursor census on custom rows; stderr
+  clean.
+- Menu width + acrylic wave (8009be8 feat, 2 files +52/-2). ROOT
+  CAUSE of the ~395 px menus: egui Spacing::default menu_width =
+  400.0 (style.rs:1256). Mechanism proven from egui 0.29.1 source:
+  menu.rs menu_popup (:159-219) is the single Area constructor for
+  ALL menus (root, submenu, context) - fixed_pos(menu_state.rect.min)
+  (pointer pos for context menus) + default_width(spacing.menu_width);
+  the anchor response rect is NEVER consulted, and popup.rs
+  inner_width logic (popup_above_or_below_widget :408-410) is not in
+  the menu path, so the earlier anchor-clone plan was REFUTED and
+  dropped (no helper, no call-site wrapping). Frame::menu
+  (containers/frame.rs:118-127): rounding = visuals.menu_rounding,
+  fill = visuals.window_fill(), inner_margin = spacing.menu_margin;
+  set_menu_style (menu.rs:77-83) touches only button_padding and
+  widget strokes.
+- Fix (macos_theme.rs apply_theme_visuals): one global line
+  ctx.style_mut(|style| style.spacing.menu_width = 230.0) narrows
+  root menus AND every submenu level (all Areas share the spacing
+  value); guarded acrylic material: palette.is_translucent and
+  window_bg.a() == 255 -> window_fill =
+  Color32::from_rgba_unmultiplied(r,g,b,232) and visuals.menu_rounding
+  = Rounding::same(10.0); else solid window_fill. Menus and popups
+  paint window_fill via Frame::menu / Frame::popup; the main window
+  canvas stays solid (Apple HIG).
+- Elision (file_menu.rs): elide_to_width helper (measure-chop with
+  the SAME font as the render, ASCII "..." ellipsis) applied to
+  menu_row_text (budget = available_width - 12) and menu_header
+  (13.5 px font, same budget) - Finder truncation style for long
+  file names and user-configured custom labels; single line, no
+  wrap.
+- Clippy catch fixed: absurd_extreme_comparisons on window_bg.a()
+  >= 255 (255 is the u8 max) -> == 255.
+- Gates (menu wave): cargo fmt clean; clippy -D warnings exit 0
+  (4.45s); cargo test exit 0 (69 lib + all integration suites +
+  ASCII gate); release build 1m 09s exit 0 (running app pid 24940
+  killed first - exe lock, it held the old pre-wave binary).
+- VERDICT: Phase 4 PASS (live-proven). Menu width + acrylic wave
+  CODE-PASS (all gates green) with live verification QUEUED to the
+  post-wave computer-use phase.
+- Next: THEME wave (user priority: 12 palettes + agent-designed
+  Rangalipi at the theme-picker gate, macOS Finder principles), then
+  the list-view columns wave (all file parameters as add/remove
+  columns, resizable, sortable, filterable - NO zebra), then icon
+  blur fix, Miller 2+ fix, breadcrumb horizontal scroll, A4
+  security, A5 fixes, A6 QA.
