@@ -1394,3 +1394,44 @@ Out of scope (recorded): full async directory-listing infrastructure
 loads (explorer :1049 :1070 :1169 :1312 :5107 - deliberate navigation
 flow, not per-frame re-entry), Finder-style segment collapse (root
 elision) still open from the breadcrumb wave.
+
+2026-11-12 A6 QA WAVE CLOSED (docs(plan) d433f06 63 lines, QA report
+2026-11-12-a6-qa-report.md committed with this entry): static
+evidence-based audit of the seven closed waves plus standing user
+rules - ALL 10 CHECKS PASS, zero defects, no fix commit needed.
+QA-1 census: every wave plan+feat+ledger (theme 564e751/e69518b/a495070;
+columns 6af4ada/8f9cf20/1aa9a87; icon blur b45cb48/8610a83/0dc3c9c;
+Miller 4589f87/8c33689/0b03bd7; breadcrumb e41c440/d54b335/1c5dc6c; A4
+5c446e9/01d8e60/7dec35f; A5 96d03df/a2f1132/41dc448; context-menu
+phases 1-4 also ledgered).
+QA-2 fresh cargo test exit 0: lib 69/69, gui_ascii_gate 1/1, columns
+16/16, miller 10/10, pantone 6/6, fs_utils 4/4 - all 22 suites green.
+QA-3 cursor discipline: exactly 3 CursorIcon sites in src/gui
+(file_menu.rs:343 Default arrow on menu rows per the 2d96f8a contract;
+explorer_view.rs:4223 ResizeHorizontal column-resize handle;
+studio_app.rs:123 comment only) - zero CursorIcon::Text in code, no
+leakage from post-2d96f8a waves.
+QA-4 ASCII gate green over src/gui.
+QA-5 no zebra: only unrelated TUI/NTFS/CLI alternate strings.
+QA-6 menu_row_text sole allocation-native constructor;
+menu_item_labeled/menu_item_glyph are thin wrappers delegating to it;
+egui_label zero matches (Phase 3 removal holds).
+QA-7 exactly 13 named palettes confirmed by grep census in pantone.rs
+(Gruvbox :138 through Rangalipi :285 and Mossambi Punch :298),
+Rangalipi default (config.rs:121 default, :95 => &THEMES[11]),
+test_pantone 6/6.
+QA-8 S-1 fix present verbatim: explorer_view.rs:8282 ps_path
+single-quote doubling + :8286 Set-Location interpolation.
+QA-9 A5 mechanisms: breadcrumb_popup_cache (field :723, ctor :990,
+popup_child_dirs :1083-1096, popup call site :3113, unconditional
+clear in navigate_to :1106); sibling_menu_cache (field :73, ctor
+:101, sibling_dirs :111-122, context-menu call site :691, nav clear
+:742).
+QA-10 mirrors byte-identical SHA256 42DDEE0B6A3A73AC2C1047768158CD25E8
+7BBF17EF03A108B81B965A9EBCAD2C x3 at QA time.
+CLOSING: the code wave queue is EMPTY; next per user directive: the
+post-wave computer-use verification phase (theme picker 13 palettes,
+columns interactions, icon crispness, Miller chains, breadcrumb
+scroll, A5 popup/menu behavior, Probe D stamp). Out-of-scope items
+remain: Finder segment collapse root elision, async directory listing
+infrastructure.
