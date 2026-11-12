@@ -1798,7 +1798,7 @@ impl PreferencesView {
     ) {
         section(ui, palette, "Theme");
         ui.label(
-            egui::RichText::new("Pick a certified Pantone theme.")
+            egui::RichText::new("Pick a theme.")
                 .size(design::type_scale::BODY_SM)
                 .color(palette.text_secondary),
         );

@@ -1164,56 +1164,54 @@ fn handle_tui(initial_path: Option<PathBuf>) -> Result<()> {
 }
 
 fn handle_themes(as_json: bool) -> Result<()> {
-    use mossambi::core::{DARK_THEMES, LIGHT_THEMES};
+    use mossambi::core::THEMES;
 
     if as_json {
         let all = mossambi::core::all_pantone_themes();
         println!("{}", serde_json::to_string_pretty(all)?);
     } else {
-        println!("╔══════════════════════════════════════════════════════════════════════════════════════════════╗");
-        println!("║                      🎨 20 CERTIFIED PANTONE THEMES (10 DARK & 10 LIGHT)                     ║");
-        println!("║          100% Pantone-Certified Matching System (PMS) & FHI Standards Architecture           ║");
-        println!("╚══════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+        println!("13 NAMED THEMES (11 DARK & 1 LIGHT)");
+        println!("Catalog order; each color records its source provenance.\n");
 
-        println!("🌙 10 CERTIFIED DARK PANTONE THEMES:");
-        println!("────────────────────────────────────────────────────────────────────────────────────────────────");
-        for (idx, theme) in DARK_THEMES.iter().enumerate() {
+        println!("11 DARK THEMES:");
+        println!("--------------------------------------------------------------");
+        for (idx, theme) in THEMES.iter().take(12).enumerate() {
             println!("  {:2}. {:<24} [ID: {:<16}]", idx + 1, theme.name, theme.id);
             println!(
-                "      BG:      {:<18} ({:<20}) [{}]",
+                "      BG:      {:<18} ({:<24}) [{}]",
                 theme.bg.name, theme.bg.code, theme.bg.hex
             );
             println!(
-                "      Surface: {:<18} ({:<20}) [{}]",
+                "      Surface: {:<18} ({:<24}) [{}]",
                 theme.surface.name, theme.surface.code, theme.surface.hex
             );
             println!(
-                "      Accent:  {:<18} ({:<20}) [{}]",
+                "      Accent:  {:<18} ({:<24}) [{}]",
                 theme.accent.name, theme.accent.code, theme.accent.hex
             );
             println!();
         }
 
-        println!("☀️ 10 CERTIFIED LIGHT PANTONE THEMES:");
-        println!("────────────────────────────────────────────────────────────────────────────────────────────────");
-        for (idx, theme) in LIGHT_THEMES.iter().enumerate() {
+        println!("1 LIGHT THEME:");
+        println!("--------------------------------------------------------------");
+        for (idx, theme) in THEMES.iter().skip(12).enumerate() {
             println!("  {:2}. {:<24} [ID: {:<16}]", idx + 1, theme.name, theme.id);
             println!(
-                "      BG:      {:<18} ({:<20}) [{}]",
+                "      BG:      {:<18} ({:<24}) [{}]",
                 theme.bg.name, theme.bg.code, theme.bg.hex
             );
             println!(
-                "      Surface: {:<18} ({:<20}) [{}]",
+                "      Surface: {:<18} ({:<24}) [{}]",
                 theme.surface.name, theme.surface.code, theme.surface.hex
             );
             println!(
-                "      Accent:  {:<18} ({:<20}) [{}]",
+                "      Accent:  {:<18} ({:<24}) [{}]",
                 theme.accent.name, theme.accent.code, theme.accent.hex
             );
             println!();
         }
-        println!("💡 Tip: Switch themes in CLI using 'mossambi config set theme <id_or_name>'");
-        println!("        or press [t] in TUI / select from Preferences tab in Desktop Studio.\n");
+        println!("Tip: Switch themes in CLI using 'mossambi config set theme <id_or_name>'");
+        println!("     or press [t] in TUI / select from Preferences tab in Desktop Studio.\n");
     }
     Ok(())
 }
@@ -1257,8 +1255,8 @@ fn handle_config(
                             config.theme_mode = mode;
                         } else {
                             match v.to_lowercase().as_str() {
-                                "dark" => config.theme_mode = ThemeMode::DarkAnthracite,
-                                "light" => config.theme_mode = ThemeMode::LightBrilliant,
+                                "dark" => config.theme_mode = ThemeMode::Rangalipi,
+                                "light" => config.theme_mode = ThemeMode::MossambiPunch,
                                 _ => bail!("Unknown Pantone theme: '{}'. Use 'mossambi themes' to see all 20 certified Pantone themes.", v),
                             }
                         }

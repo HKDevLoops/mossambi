@@ -1048,9 +1048,9 @@ fn handle_key_event(state: &mut AppState, key: crossterm::event::KeyEvent) {
                 "🎨 Toggled Set: {} ({})",
                 state.config.theme_mode.name(),
                 if state.config.theme_mode.is_dark() {
-                    "10 Dark Themes"
+                    "11 Dark Themes"
                 } else {
-                    "10 Light Themes"
+                    "1 Light Theme"
                 }
             );
         }
@@ -1745,7 +1745,7 @@ fn draw_hardware_tab(f: &mut Frame, area: Rect, palette: TuiThemePalette) {
 fn draw_settings_tab(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThemePalette) {
     let pt = state.config.theme_mode.to_pantone_theme();
     let p = Paragraph::new(format!(
-        "⚙️ Appearance & Persistent Settings\n\n🎨 Active Pantone Theme: {} ({})\n   • Background: {} ({}, {})\n   • Surface:    {} ({}, {})\n   • Accent:     {} ({}, {})\n   • Highlight:  {} ({}, {})\n\n💡 Hotkeys:\n   • [t] Cycle sequentially across all 20 certified Pantone themes\n   • [T] Switch between 10 Dark Themes and 10 Light Themes\n   • [g] Toggle Terminal Glass / Transparency (Current: {})\n\nCitrus Shade: {}\nZero-Loss Enforcement: {}\nGesture Wakeup: {}\n\nPress [Enter] to toggle zero-loss.",
+        "⚙️ Appearance & Persistent Settings\n\n🎨 Active Theme: {} ({})\n   • Background: {} ({}, {})\n   • Surface:    {} ({}, {})\n   • Accent:     {} ({}, {})\n   • Highlight:  {} ({}, {})\n\n💡 Hotkeys:\n   • [t] Cycle sequentially across all 13 named themes\n   • [T] Switch between the 11 Dark Themes and 1 Light Theme\n   • [g] Toggle Terminal Glass / Transparency (Current: {})\n\nCitrus Shade: {}\nZero-Loss Enforcement: {}\nGesture Wakeup: {}\n\nPress [Enter] to toggle zero-loss.",
         pt.name,
         if pt.is_dark { "Certified Dark Theme" } else { "Certified Light Theme" },
         pt.bg.name, pt.bg.code, pt.bg.hex,

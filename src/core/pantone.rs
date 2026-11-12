@@ -1,28 +1,29 @@
-//! 100% Pantone-Certified Color System for Mossambi
+//! Theme System for Mossambi - 13 Named Palettes
 //!
-//! Provides 20 Certified Pantone Themes:
-//! - 10 Certified Dark Themes:
-//!   1. Anthracite Obsidian (Default Dark)
-//!   2. Deep Forest Emerald
-//!   3. Midnight Eclipse
-//!   4. Pewter Slate
-//!   5. Tangerine Nightfall
-//!   6. Citrus Caviar
-//!   7. Abyssal Indigo
-//!   8. Carbon Noir
-//!   9. Vintage Merlot
-//!   10. Gunmetal Steel
-//! - 10 Certified Light Themes:
-//!   1. Brilliant Lime (Default Light)
-//!   2. Sweet Zest Sunlight
-//!   3. Blanc de Blanc
-//!   4. Glacier Aqua
-//!   5. Tangerine Sorbet
-//!   6. Albedo Pure Ivory
-//!   7. Cool Quartz
-//!   8. Pistachio Cream
-//!   9. Vanilla Amber
-//!   10. Silver Pearl
+//! A curated launch set of 13 named themes (11 canonical editor palettes
+//! plus 2 original Mossambi designs), in catalog order:
+//!
+//! Dark (11):
+//!   1. Gruvbox          (morhetz/gruvbox)
+//!   2. Tokyo Night      (folke/tokyonight.nvim, night style)
+//!   3. Catppuccin Mocha (catppuccin)
+//!   4. Modus Vivendi    (protesilaos modus-themes)
+//!   5. Nord             (nordtheme)
+//!   6. Dracula          (dracula spec)
+//!   7. Kanagawa         (rebelot/kanagawa.nvim)
+//!   8. One Dark         (atom/one-dark-syntax)
+//!   9. Atom             (Atom editor chrome variant)
+//!  10. VS Code Dark+    (microsoft/vscode default themes)
+//!  11. Synthwave        (robb0wen/synthwave-vscode)
+//!  12. Rangalipi        (Mossambi original; the default theme)
+//!
+//! Light (1):
+//!  13. Mossambi Punch   (Mossambi original true-fruit light palette)
+//!
+//! The `code` field of each PantoneColor records the source provenance of
+//! the value (for example "tokyonight blue"). The full research report
+//! with upstream sources lives at:
+//! docs/superpowers/plans/2026-11-12-theme-research.md
 
 use serde::{Deserialize, Serialize};
 
@@ -112,7 +113,7 @@ impl CitrusShade {
     }
 }
 
-/// Certified Pantone Theme Model
+/// Named Theme Model (one entry per catalog theme)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PantoneTheme {
     pub id: &'static str,
@@ -129,307 +130,187 @@ pub struct PantoneTheme {
 }
 
 // -----------------------------------------------------------------------------
-// 10 CERTIFIED DARK PANTONE THEMES
+// THE 13 NAMED THEMES (catalog order: 11 dark, then 1 light)
 // -----------------------------------------------------------------------------
-pub static DARK_THEMES: [PantoneTheme; 10] = [
-    // 1. Anthracite Obsidian (Default Dark)
+pub static THEMES: [PantoneTheme; 13] = [
     PantoneTheme {
-        id: "dark_anthracite",
-        name: "Anthracite Obsidian",
+        id: "gruvbox",
+        name: "Gruvbox",
         is_dark: true,
-        bg: PantoneColor::new("Deep Black", "Pantone 19-3911 TPG", "#121214"),
-        surface: PantoneColor::new("Anthracite Dark", "Pantone 19-4007 TPG", "#18181A"),
-        border: PantoneColor::new("Pewter Slate", "Pantone 18-5203 TPG", "#2A2A2E"),
-        text_primary: PantoneColor::new("Brilliant White", "Pantone 11-4001 TPG", "#F4F5F7"),
-        text_secondary: PantoneColor::new("Cool Gray 6", "Pantone Cool Gray 6 C", "#A1A1A6"),
-        text_muted: PantoneColor::new("Glacier Gray", "Pantone 14-4102 TPG", "#787880"),
-        accent: PantoneColor::new("Classic Blue", "Pantone 19-4052 TPG", "#007AFF"),
-        highlight: PantoneColor::new("Citrus Gold", "Pantone 1235 C", "#FFB81C"),
+        bg: PantoneColor::new("Dark0", "gruvbox bg0", "#282828"),
+        surface: PantoneColor::new("Dark1", "gruvbox bg1", "#3c3836"),
+        border: PantoneColor::new("Dark2", "gruvbox bg2", "#504945"),
+        text_primary: PantoneColor::new("Foreground", "gruvbox fg1", "#ebdbb2"),
+        text_secondary: PantoneColor::new("Foreground2", "gruvbox fg2", "#d5c4a1"),
+        text_muted: PantoneColor::new("Gray", "gruvbox gray", "#928374"),
+        accent: PantoneColor::new("Blue", "gruvbox blue", "#83a598"),
+        highlight: PantoneColor::new("Yellow", "gruvbox yellow", "#fabd2f"),
     },
-    // 2. Deep Forest Emerald
     PantoneTheme {
-        id: "dark_forest",
-        name: "Deep Forest Emerald",
+        id: "tokyo_night",
+        name: "Tokyo Night",
         is_dark: true,
-        bg: PantoneColor::new("Burlwood Noir", "Pantone 19-3911 TPG", "#131415"),
-        surface: PantoneColor::new("Forest Slate", "Pantone 19-4007 TPG", "#1A1C1D"),
-        border: PantoneColor::new("Pine Border", "Pantone 18-5203 TPG", "#292C2E"),
-        text_primary: PantoneColor::new("Blanc de Blanc", "Pantone 11-4800 TPG", "#F4F5F7"),
-        text_secondary: PantoneColor::new("Willow Mist", "Pantone 14-0115 TPG", "#A3AAB0"),
-        text_muted: PantoneColor::new("Tea Bush", "Pantone 16-0213 TPG", "#767D84"),
-        accent: PantoneColor::new("Sage Green", "Pantone 16-5917 TPG", "#4A855A"),
-        highlight: PantoneColor::new("Citrus Gold", "Pantone 1235 C", "#78BE20"),
+        bg: PantoneColor::new("Night", "tokyonight bg", "#1a1b26"),
+        surface: PantoneColor::new("Highlight", "tokyonight bg_highlight", "#292e42"),
+        border: PantoneColor::new("Gutter", "tokyonight fg_gutter", "#3b4261"),
+        text_primary: PantoneColor::new("Foreground", "tokyonight fg", "#c0caf5"),
+        text_secondary: PantoneColor::new("Foreground Dark", "tokyonight fg_dark", "#a9b1d6"),
+        text_muted: PantoneColor::new("Comment", "tokyonight comment", "#565f89"),
+        accent: PantoneColor::new("Blue", "tokyonight blue", "#7aa2f7"),
+        highlight: PantoneColor::new("Yellow", "tokyonight yellow", "#e0af68"),
     },
-    // 3. Midnight Eclipse
     PantoneTheme {
-        id: "dark_eclipse",
-        name: "Midnight Eclipse",
+        id: "catppuccin_mocha",
+        name: "Catppuccin Mocha",
         is_dark: true,
-        bg: PantoneColor::new("Total Eclipse", "Pantone 19-4010 TPG", "#111215"),
-        surface: PantoneColor::new("Eclipse Slate", "Pantone 19-4024 TPG", "#181A1F"),
-        border: PantoneColor::new("Black Iris", "Pantone 19-4035 TPG", "#272A33"),
-        text_primary: PantoneColor::new("Albedo White", "Pantone 11-0601 TPG", "#F4F5F7"),
-        text_secondary: PantoneColor::new("Silver Cloud", "Pantone 15-4008 TPG", "#A2ABBA"),
-        text_muted: PantoneColor::new("Infinity Slate", "Pantone 17-4015 TPG", "#6B778D"),
-        accent: PantoneColor::new("Eclipse Blue", "Pantone 19-4052 TPG", "#388BFD"),
-        highlight: PantoneColor::new("Amber Glow", "Pantone 137 C", "#FFA300"),
+        bg: PantoneColor::new("Base", "catppuccin base", "#1e1e2e"),
+        surface: PantoneColor::new("Surface0", "catppuccin surface0", "#313244"),
+        border: PantoneColor::new("Surface1", "catppuccin surface1", "#45475a"),
+        text_primary: PantoneColor::new("Text", "catppuccin text", "#cdd6f4"),
+        text_secondary: PantoneColor::new("Subtext0", "catppuccin subtext0", "#a6adc8"),
+        text_muted: PantoneColor::new("Overlay0", "catppuccin overlay0", "#6c7086"),
+        accent: PantoneColor::new("Blue", "catppuccin blue", "#89b4fa"),
+        highlight: PantoneColor::new("Yellow", "catppuccin yellow", "#f9e2af"),
     },
-    // 4. Pewter Slate
     PantoneTheme {
-        id: "dark_pewter",
-        name: "Pewter Slate",
+        id: "modus_vivendi",
+        name: "Modus Vivendi",
         is_dark: true,
-        bg: PantoneColor::new("Vulcan Noir", "Pantone 19-3908 TPG", "#141517"),
-        surface: PantoneColor::new("Pewter Slate", "Pantone 18-5203 TPG", "#1C1D20"),
-        border: PantoneColor::new("Ultimate Gray", "Pantone 17-5104 TPG", "#2A2B30"),
-        text_primary: PantoneColor::new("Brilliant White", "Pantone 11-4001 TPG", "#F4F5F7"),
-        text_secondary: PantoneColor::new("Glacier Gray", "Pantone 14-4102 TPG", "#B0B2B6"),
-        text_muted: PantoneColor::new("Cool Gray 6", "Pantone Cool Gray 6 C", "#7C7E83"),
-        accent: PantoneColor::new("Ripe Pulp", "Pantone 389 C", "#78BE20"),
-        highlight: PantoneColor::new("Citrus Gold", "Pantone 1235 C", "#FFB81C"),
+        bg: PantoneColor::new("Main", "modus-vivendi bg-main", "#000000"),
+        surface: PantoneColor::new("Dim", "modus-vivendi bg-dim", "#1e1e1e"),
+        border: PantoneColor::new("Inactive", "modus-vivendi bg-inactive", "#303030"),
+        text_primary: PantoneColor::new("Main", "modus-vivendi fg-main", "#ffffff"),
+        text_secondary: PantoneColor::new("Dim", "modus-vivendi fg-dim", "#989898"),
+        text_muted: PantoneColor::new("Border", "modus-vivendi border", "#646464"),
+        accent: PantoneColor::new("Blue", "modus-vivendi blue", "#2fafff"),
+        highlight: PantoneColor::new("Yellow", "modus-vivendi yellow", "#d0bc00"),
     },
-    // 5. Tangerine Nightfall
     PantoneTheme {
-        id: "dark_tangerine",
-        name: "Tangerine Nightfall",
+        id: "nord",
+        name: "Nord",
         is_dark: true,
-        bg: PantoneColor::new("Dark Earth", "Pantone 19-1518 TPG", "#141314"),
-        surface: PantoneColor::new("Tangerine Slate", "Pantone 19-1220 TPG", "#1E1C1D"),
-        border: PantoneColor::new("Russet Suede", "Pantone 18-1248 TPG", "#2E2A2B"),
-        text_primary: PantoneColor::new("Snow White", "Pantone 11-0602 TPG", "#F8F5F2"),
-        text_secondary: PantoneColor::new("Shifting Sand", "Pantone 14-1210 TPG", "#BCAAA2"),
-        text_muted: PantoneColor::new("Toasted Nut", "Pantone 16-1412 TPG", "#857570"),
-        accent: PantoneColor::new("Tangerine Sun", "Pantone 15-1247", "#F88F58"),
-        highlight: PantoneColor::new("Citrus Amber", "Pantone 137 C", "#FFA300"),
+        bg: PantoneColor::new("Polar Night 0", "nord nord0", "#2e3440"),
+        surface: PantoneColor::new("Polar Night 1", "nord nord1", "#3b4252"),
+        border: PantoneColor::new("Polar Night 2", "nord nord2", "#434c5e"),
+        text_primary: PantoneColor::new("Snow Storm 2", "nord nord6", "#eceff4"),
+        text_secondary: PantoneColor::new("Snow Storm 1", "nord nord4", "#d8dee9"),
+        text_muted: PantoneColor::new("Polar Night 3", "nord nord3", "#4c566a"),
+        accent: PantoneColor::new("Frost", "nord nord8", "#88c0d0"),
+        highlight: PantoneColor::new("Aurora Yellow", "nord nord13", "#ebcb8b"),
     },
-    // 6. Citrus Caviar
     PantoneTheme {
-        id: "dark_caviar",
-        name: "Citrus Caviar",
+        id: "dracula",
+        name: "Dracula",
         is_dark: true,
-        bg: PantoneColor::new("Jet Caviar", "Pantone 19-0303 TPG", "#131413"),
-        surface: PantoneColor::new("Caviar Slate", "Pantone 19-0515 TPG", "#1B1C1B"),
-        border: PantoneColor::new("Dried Herb", "Pantone 18-0527 TPG", "#2B2D2B"),
-        text_primary: PantoneColor::new("Pristine", "Pantone 11-0606 TPG", "#F4F4EB"),
-        text_secondary: PantoneColor::new("Tender Greens", "Pantone 14-0418 TPG", "#AEB5A4"),
-        text_muted: PantoneColor::new("Sagebrush", "Pantone 16-0421 TPG", "#788072"),
-        accent: PantoneColor::new("Columella Core", "Pantone 102 C", "#E4F024"),
-        highlight: PantoneColor::new("Citrus Gold", "Pantone 1235 C", "#FFB81C"),
+        bg: PantoneColor::new("Background", "dracula background", "#282a36"),
+        surface: PantoneColor::new("Current Line", "dracula current-line", "#44475a"),
+        border: PantoneColor::new("Comment", "dracula comment", "#6272a4"),
+        text_primary: PantoneColor::new("Foreground", "dracula fg", "#f8f8f2"),
+        text_secondary: PantoneColor::new("Comment", "dracula comment", "#6272a4"),
+        text_muted: PantoneColor::new("Comment", "dracula comment", "#6272a4"),
+        accent: PantoneColor::new("Purple", "dracula purple", "#bd93f9"),
+        highlight: PantoneColor::new("Yellow", "dracula yellow", "#f1fa8c"),
     },
-    // 7. Abyssal Indigo
     PantoneTheme {
-        id: "dark_indigo",
-        name: "Abyssal Indigo",
+        id: "kanagawa",
+        name: "Kanagawa",
         is_dark: true,
-        bg: PantoneColor::new("Insignia Blue", "Pantone 19-4028 TPG", "#121318"),
-        surface: PantoneColor::new("Indigo Slate", "Pantone 19-3921 TPG", "#1A1B24"),
-        border: PantoneColor::new("Patriot Blue", "Pantone 19-3925 TPG", "#292C38"),
-        text_primary: PantoneColor::new("Cloud Dancer", "Pantone 11-4201 TPG", "#F2F4F7"),
-        text_secondary: PantoneColor::new("Gray Lilac", "Pantone 14-4110 TPG", "#A3ACB9"),
-        text_muted: PantoneColor::new("Blue Granite", "Pantone 17-4023 TPG", "#6B7587"),
-        accent: PantoneColor::new("Indigo Vivid", "Pantone 19-4052 TPG", "#6366F1"),
-        highlight: PantoneColor::new("Citrus Gold", "Pantone 1235 C", "#FFB81C"),
+        bg: PantoneColor::new("Sumi Ink 3", "kanagawa sumiInk3", "#1f1f28"),
+        surface: PantoneColor::new("Sumi Ink 4", "kanagawa sumiInk4", "#2a2a37"),
+        border: PantoneColor::new("Sumi Ink 5", "kanagawa sumiInk5", "#363646"),
+        text_primary: PantoneColor::new("Fuji White", "kanagawa fujiWhite", "#dcd7ba"),
+        text_secondary: PantoneColor::new("Old White", "kanagawa oldWhite", "#c8c093"),
+        text_muted: PantoneColor::new("Fuji Gray", "kanagawa fujiGray", "#727169"),
+        accent: PantoneColor::new("Crystal Blue", "kanagawa crystalBlue", "#7e9cd8"),
+        highlight: PantoneColor::new("Carp Yellow", "kanagawa carpYellow", "#e6c384"),
     },
-    // 8. Carbon Noir
     PantoneTheme {
-        id: "dark_carbon",
-        name: "Carbon Noir",
+        id: "one_dark",
+        name: "One Dark",
         is_dark: true,
-        bg: PantoneColor::new("Peat Charcoal", "Pantone 19-3901 TPG", "#101012"),
-        surface: PantoneColor::new("Dark Shadow", "Pantone 19-3906 TPG", "#1A1A1E"),
-        border: PantoneColor::new("Pewter", "Pantone 18-5203 TPG", "#2D2E33"),
-        text_primary: PantoneColor::new("Brilliant White", "Pantone 11-4001 TPG", "#F4F5F7"),
-        text_secondary: PantoneColor::new("Cool Gray 5 C", "Pantone Cool Gray 5 C", "#A8A9AD"),
-        text_muted: PantoneColor::new("Cool Gray 8 C", "Pantone Cool Gray 8 C", "#707175"),
-        accent: PantoneColor::new("Raw Peel Green", "Pantone 376 C", "#78BE20"),
-        highlight: PantoneColor::new("Lemon Star", "Pantone 102 C", "#FCE300"),
+        bg: PantoneColor::new("Editor", "one-dark syntax-bg", "#282c34"),
+        surface: PantoneColor::new("Selection", "one-dark selection", "#3e4451"),
+        border: PantoneColor::new("Panel", "one-dark panel", "#21252b"),
+        text_primary: PantoneColor::new("Mono 1", "one-dark mono-1", "#abb2bf"),
+        text_secondary: PantoneColor::new("Mono 2", "one-dark mono-2", "#828997"),
+        text_muted: PantoneColor::new("Mono 3", "one-dark mono-3", "#5c6370"),
+        accent: PantoneColor::new("Blue", "one-dark hue-2", "#61afef"),
+        highlight: PantoneColor::new("Yellow", "one-dark hue-6-2", "#e5c07b"),
     },
-    // 9. Vintage Merlot
     PantoneTheme {
-        id: "dark_merlot",
-        name: "Vintage Merlot",
+        id: "atom",
+        name: "Atom",
         is_dark: true,
-        bg: PantoneColor::new("Port Royale", "Pantone 19-1617 TPG", "#141214"),
-        surface: PantoneColor::new("Merlot Slate", "Pantone 19-1725 TPG", "#1E191D"),
-        border: PantoneColor::new("Tibetan Red", "Pantone 19-1934 TPG", "#2F272D"),
-        text_primary: PantoneColor::new("Albedo White", "Pantone 11-0601 TPG", "#F6F3F4"),
-        text_secondary: PantoneColor::new("Quartz Pink", "Pantone 14-1905 TPG", "#B9AAB2"),
-        text_muted: PantoneColor::new("Dry Rose", "Pantone 17-1516 TPG", "#81707A"),
-        accent: PantoneColor::new("Merlot Rose", "Pantone 19-1934 TPG", "#E11D48"),
-        highlight: PantoneColor::new("Citrus Gold", "Pantone 1235 C", "#FFB81C"),
+        bg: PantoneColor::new("Chrome", "atom tab-bar", "#21252b"),
+        surface: PantoneColor::new("Editor", "atom syntax-bg", "#282c34"),
+        border: PantoneColor::new("Deep", "atom deep chrome", "#181a1f"),
+        text_primary: PantoneColor::new("Mono 1", "atom mono-1", "#abb2bf"),
+        text_secondary: PantoneColor::new("Mono 2", "atom mono-2", "#828997"),
+        text_muted: PantoneColor::new("Mono 3", "atom mono-3", "#5c6370"),
+        accent: PantoneColor::new("Cursor Blue", "atom syntax-accent", "#528bff"),
+        highlight: PantoneColor::new("Orange", "atom hue-6", "#d19a66"),
     },
-    // 10. Gunmetal Steel
     PantoneTheme {
-        id: "dark_gunmetal",
-        name: "Gunmetal Steel",
+        id: "dark_plus",
+        name: "VS Code Dark+",
         is_dark: true,
-        bg: PantoneColor::new("Raven Jet", "Pantone 19-0000 TPG", "#141517"),
-        surface: PantoneColor::new("Gunmetal Slate", "Pantone 18-0306 TPG", "#1D1E22"),
-        border: PantoneColor::new("Castlerock", "Pantone 17-4402 TPG", "#2B2D33"),
-        text_primary: PantoneColor::new("Brilliant White", "Pantone 11-4001 TPG", "#F4F5F7"),
-        text_secondary: PantoneColor::new("Vapor Blue", "Pantone 14-4203 TPG", "#A5AAAE"),
-        text_muted: PantoneColor::new("Flintstone", "Pantone 16-4402 TPG", "#71767A"),
-        accent: PantoneColor::new("Steel Cyan", "Pantone 388 C", "#0EA5E9"),
-        highlight: PantoneColor::new("Raw Peel", "Pantone 376 C", "#78BE20"),
+        bg: PantoneColor::new("Editor", "vscode editor.background", "#1e1e1e"),
+        surface: PantoneColor::new("Menu", "vscode menu.background", "#252526"),
+        border: PantoneColor::new("Widget", "vscode widget border", "#303031"),
+        text_primary: PantoneColor::new("Editor Fg", "vscode editor.foreground", "#d4d4d4"),
+        text_secondary: PantoneColor::new(
+            "Tab Inactive",
+            "vscode tab.inactiveForeground",
+            "#a6a6a6",
+        ),
+        text_muted: PantoneColor::new("Line Numbers", "vscode line numbers", "#858585"),
+        accent: PantoneColor::new("Keyword Blue", "vscode keyword blue", "#569cd6"),
+        highlight: PantoneColor::new("Function Yellow", "vscode function yellow", "#dcdcaa"),
+    },
+    PantoneTheme {
+        id: "synthwave",
+        name: "Synthwave '84",
+        is_dark: true,
+        bg: PantoneColor::new("Neon Grid", "synthwave editor.background", "#262335"),
+        surface: PantoneColor::new("Chrome", "synthwave sideBar.background", "#241b2f"),
+        border: PantoneColor::new("Gridline", "synthwave editorGroup.border", "#495495"),
+        text_primary: PantoneColor::new("White", "synthwave foreground", "#ffffff"),
+        text_secondary: PantoneColor::new("Punctuation", "synthwave punctuation", "#b6b1b1"),
+        text_muted: PantoneColor::new("Comment", "synthwave comment", "#848bbd"),
+        accent: PantoneColor::new("Neon Pink", "synthwave neon pink", "#ff7edb"),
+        highlight: PantoneColor::new("Neon Yellow", "synthwave neon yellow", "#fede5d"),
+    },
+    PantoneTheme {
+        id: "rangalipi",
+        name: "Rangalipi",
+        is_dark: true,
+        bg: PantoneColor::new("Jamuni Night", "mossambi original alpona", "#1e1726"),
+        surface: PantoneColor::new("Alpona Tray", "mossambi original alpona", "#271d33"),
+        border: PantoneColor::new("Sindoor Dust", "mossambi original alpona", "#3c2b49"),
+        text_primary: PantoneColor::new("Bidi Parchment", "mossambi original alpona", "#f2e9dc"),
+        text_secondary: PantoneColor::new("Madder Rose", "mossambi original alpona", "#c7aec3"),
+        text_muted: PantoneColor::new("Dusty Orchid", "mossambi original alpona", "#8e7699"),
+        accent: PantoneColor::new("Sindoor Vermilion", "mossambi original alpona", "#e4584f"),
+        highlight: PantoneColor::new("Holud Turmeric", "mossambi original alpona", "#e9a23b"),
+    },
+    PantoneTheme {
+        id: "mossambi_punch",
+        name: "Mossambi Punch",
+        is_dark: false,
+        bg: PantoneColor::new("Rind Cream", "mossambi original fruit", "#f8f7e6"),
+        surface: PantoneColor::new("Pulp Ivory", "mossambi original fruit", "#ffffff"),
+        border: PantoneColor::new("Rind Veil", "mossambi original fruit", "#e4e4c9"),
+        text_primary: PantoneColor::new("Leaf Noir", "mossambi original fruit", "#26301c"),
+        text_secondary: PantoneColor::new("Sprout Olive", "mossambi original fruit", "#5a6a44"),
+        text_muted: PantoneColor::new("Pith Grey", "mossambi original fruit", "#97a183"),
+        accent: PantoneColor::new("Zest Green", "mossambi original fruit", "#5c8b2f"),
+        highlight: PantoneColor::new("Sun Ripe", "mossambi original fruit", "#e5b92c"),
     },
 ];
 
-// -----------------------------------------------------------------------------
-// 10 CERTIFIED LIGHT PANTONE THEMES
-// -----------------------------------------------------------------------------
-pub static LIGHT_THEMES: [PantoneTheme; 10] = [
-    // 1. Brilliant Lime (Default Light)
-    PantoneTheme {
-        id: "light_brilliant",
-        name: "Brilliant Lime",
-        is_dark: false,
-        bg: PantoneColor::new("Brilliant White", "Pantone 11-4001 TPG", "#F4F5F7"),
-        surface: PantoneColor::new("Albedo Pith", "Pantone 11-0601 TPG", "#FFFFFF"),
-        border: PantoneColor::new("Illusion Blue", "Pantone 13-4103 TPG", "#D3D7DE"),
-        text_primary: PantoneColor::new("Peat Charcoal", "Pantone 19-3901 TPG", "#15171C"),
-        text_secondary: PantoneColor::new("Castlerock", "Pantone 17-4402 TPG", "#5A606B"),
-        text_muted: PantoneColor::new("Silver Cloud", "Pantone 15-4008 TPG", "#8D94A0"),
-        accent: PantoneColor::new("Apple Blue", "Pantone 18-4034 TPG", "#0071E3"),
-        highlight: PantoneColor::new("Glacier Aqua", "Pantone 14-4102 TPG", "#0A8F82"),
-    },
-    // 2. Sweet Zest Sunlight
-    PantoneTheme {
-        id: "light_zest",
-        name: "Sweet Zest Sunlight",
-        is_dark: false,
-        bg: PantoneColor::new("Snow White", "Pantone 11-0602 TPG", "#F6F6F7"),
-        surface: PantoneColor::new("Gardenia", "Pantone 11-0604 TPG", "#FFFFFF"),
-        border: PantoneColor::new("Vanilla Cream", "Pantone 12-0710 TPG", "#E2E4E8"),
-        text_primary: PantoneColor::new("Black Olive", "Pantone 19-0508 TPG", "#1C1E16"),
-        text_secondary: PantoneColor::new("Willow", "Pantone 17-0613 TPG", "#5C6150"),
-        text_muted: PantoneColor::new("Eucalyptus", "Pantone 15-0513 TPG", "#8F9683"),
-        accent: PantoneColor::new("Apple Amber", "Pantone 14-1064 TPG", "#D97706"),
-        highlight: PantoneColor::new("Gold Sand", "Pantone 1235 C", "#D4930E"),
-    },
-    // 3. Blanc de Blanc
-    PantoneTheme {
-        id: "light_blanc",
-        name: "Blanc de Blanc",
-        is_dark: false,
-        bg: PantoneColor::new("Blanc de Blanc", "Pantone 11-4800 TPG", "#F5F5F7"),
-        surface: PantoneColor::new("Egret White", "Pantone 11-0103 TPG", "#FFFFFF"),
-        border: PantoneColor::new("Turtledove", "Pantone 12-5202 TPG", "#E2E4E8"),
-        text_primary: PantoneColor::new("Turkish Coffee", "Pantone 19-0812 TPG", "#201A18"),
-        text_secondary: PantoneColor::new("Chinchilla", "Pantone 17-1109 TPG", "#625A55"),
-        text_muted: PantoneColor::new("Humus", "Pantone 15-1304 TPG", "#948B85"),
-        accent: PantoneColor::new("Citrus Gold", "Pantone 1235 C", "#C48300"),
-        highlight: PantoneColor::new("Tangerine", "Pantone 15-1247", "#D96E32"),
-    },
-    // 4. Glacier Aqua
-    PantoneTheme {
-        id: "light_glacier",
-        name: "Glacier Aqua",
-        is_dark: false,
-        bg: PantoneColor::new("Glacier Mist", "Pantone 14-4102 TPG", "#F4F6F8"),
-        surface: PantoneColor::new("Vaporous Gray", "Pantone 11-4601 TPG", "#FFFFFF"),
-        border: PantoneColor::new("Dawn Blue", "Pantone 13-4303 TPG", "#E0E4E8"),
-        text_primary: PantoneColor::new("Dress Blues", "Pantone 19-4024 TPG", "#121A26"),
-        text_secondary: PantoneColor::new("Citadel", "Pantone 17-4412 TPG", "#525F6F"),
-        text_muted: PantoneColor::new("Quarry", "Pantone 15-4306 TPG", "#8694A4"),
-        accent: PantoneColor::new("Turquoise Bay", "Pantone 15-5519 TPG", "#0284C7"),
-        highlight: PantoneColor::new("Peel Green", "Pantone 376 C", "#5E9E15"),
-    },
-    // 5. Tangerine Sorbet
-    PantoneTheme {
-        id: "light_tangerine",
-        name: "Tangerine Sorbet",
-        is_dark: false,
-        bg: PantoneColor::new("Jet Stream", "Pantone 11-0605 TPG", "#F6F6F7"),
-        surface: PantoneColor::new("Pearled Ivory", "Pantone 11-0907 TPG", "#FFFFFF"),
-        border: PantoneColor::new("Brandied Apricot", "Pantone 12-1008 TPG", "#E2E4E8"),
-        text_primary: PantoneColor::new("Cappuccino", "Pantone 19-1220 TPG", "#241916"),
-        text_secondary: PantoneColor::new("Adobe", "Pantone 17-1320 TPG", "#6E564E"),
-        text_muted: PantoneColor::new("Moccasin", "Pantone 15-1314 TPG", "#9E857C"),
-        accent: PantoneColor::new("Tangerine Sun", "Pantone 15-1247", "#EA580C"),
-        highlight: PantoneColor::new("Amber", "Pantone 137 C", "#D98500"),
-    },
-    // 6. Albedo Pure Ivory
-    PantoneTheme {
-        id: "light_albedo",
-        name: "Albedo Pure Ivory",
-        is_dark: false,
-        bg: PantoneColor::new("Albedo White", "Pantone 11-0601 TPG", "#F5F5F7"),
-        surface: PantoneColor::new("Buttercream", "Pantone 11-0507 TPG", "#FFFFFF"),
-        border: PantoneColor::new("Bone White", "Pantone 12-0704 TPG", "#E2E4E8"),
-        text_primary: PantoneColor::new("Jet Caviar", "Pantone 19-0303 TPG", "#1A1C16"),
-        text_secondary: PantoneColor::new("Elephant Skin", "Pantone 17-0205 TPG", "#5E6157"),
-        text_muted: PantoneColor::new("Rock Ridge", "Pantone 15-0503 TPG", "#8E9287"),
-        accent: PantoneColor::new("Columella Core", "Pantone 102 C", "#CA8A04"),
-        highlight: PantoneColor::new("Raw Peel", "Pantone 376 C", "#5E9E15"),
-    },
-    // 7. Cool Quartz
-    PantoneTheme {
-        id: "light_quartz",
-        name: "Cool Quartz",
-        is_dark: false,
-        bg: PantoneColor::new("Cool Gray 1 C", "Pantone Cool Gray 1 C", "#F2F4F7"),
-        surface: PantoneColor::new("Brilliant White", "Pantone 11-4001 TPG", "#FFFFFF"),
-        border: PantoneColor::new("Cool Gray 3 C", "Pantone Cool Gray 3 C", "#D5D9E0"),
-        text_primary: PantoneColor::new("Peat Charcoal", "Pantone 19-3901 TPG", "#16171A"),
-        text_secondary: PantoneColor::new("Cool Gray 8 C", "Pantone Cool Gray 8 C", "#585A60"),
-        text_muted: PantoneColor::new("Cool Gray 5 C", "Pantone Cool Gray 5 C", "#8A8D94"),
-        accent: PantoneColor::new("Quartz Emerald", "Pantone 376 C", "#10B981"),
-        highlight: PantoneColor::new("Citrus Gold", "Pantone 1235 C", "#C48300"),
-    },
-    // 8. Pistachio Cream
-    PantoneTheme {
-        id: "light_pistachio",
-        name: "Pistachio Cream",
-        is_dark: false,
-        bg: PantoneColor::new("Celery Cream", "Pantone 12-0312 TPG", "#F5F6F8"),
-        surface: PantoneColor::new("White Asparagus", "Pantone 11-0304 TPG", "#FFFFFF"),
-        border: PantoneColor::new("Lily Pad", "Pantone 13-0317 TPG", "#E2E5E8"),
-        text_primary: PantoneColor::new("Olive Branch", "Pantone 19-0511 TPG", "#182014"),
-        text_secondary: PantoneColor::new("Dusty Green", "Pantone 17-0312 TPG", "#54634E"),
-        text_muted: PantoneColor::new("Sage", "Pantone 15-0318 TPG", "#83947C"),
-        accent: PantoneColor::new("Pistachio Green", "Pantone 389 C", "#4A855A"),
-        highlight: PantoneColor::new("Sweet Zest", "Pantone 388 C", "#75990B"),
-    },
-    // 9. Vanilla Amber
-    PantoneTheme {
-        id: "light_amber",
-        name: "Vanilla Amber",
-        is_dark: false,
-        bg: PantoneColor::new("Antique White", "Pantone 11-0105 TPG", "#F5F5F7"),
-        surface: PantoneColor::new("Buttercup Frost", "Pantone 11-0617 TPG", "#FFFFFF"),
-        border: PantoneColor::new("Alabaster Gleam", "Pantone 12-0812 TPG", "#E2E4E8"),
-        text_primary: PantoneColor::new("Blackened Pearl", "Pantone 19-1015 TPG", "#221E14"),
-        text_secondary: PantoneColor::new("Kelp", "Pantone 17-1022 TPG", "#675F4C"),
-        text_muted: PantoneColor::new("Falcon", "Pantone 15-1010 TPG", "#99907C"),
-        accent: PantoneColor::new("Citrus Mandarin", "Pantone 137 C", "#D97706"),
-        highlight: PantoneColor::new("Citrus Gold", "Pantone 1235 C", "#C48300"),
-    },
-    // 10. Silver Pearl
-    PantoneTheme {
-        id: "light_silver",
-        name: "Silver Pearl",
-        is_dark: false,
-        bg: PantoneColor::new("Turtledove Cloud", "Pantone 12-5202 TPG", "#F4F5F7"),
-        surface: PantoneColor::new("Cloud White", "Pantone 11-4201 TPG", "#FFFFFF"),
-        border: PantoneColor::new("Silver Sconce", "Pantone 13-4403 TPG", "#D1D5DB"),
-        text_primary: PantoneColor::new("Charcoal Text", "Pantone 19-3901 TPG", "#181A1C"),
-        text_secondary: PantoneColor::new("Castlerock", "Pantone 17-4402 TPG", "#5A5F64"),
-        text_muted: PantoneColor::new("Quarry Gray", "Pantone 15-4305 TPG", "#888E94"),
-        accent: PantoneColor::new("Obsidian Blue", "Pantone 19-3901 TPG", "#2563EB"),
-        highlight: PantoneColor::new("Peel Green", "Pantone 376 C", "#5E9E15"),
-    },
-];
-
-/// Returns all 20 certified Pantone themes (10 Dark, 10 Light)
+/// Returns all 13 named themes (11 Dark, 1 Light) in catalog order
 pub fn all_pantone_themes() -> &'static [PantoneTheme] {
-    static ALL: std::sync::OnceLock<Vec<PantoneTheme>> = std::sync::OnceLock::new();
-    ALL.get_or_init(|| {
-        let mut v = Vec::with_capacity(20);
-        v.extend_from_slice(&DARK_THEMES);
-        v.extend_from_slice(&LIGHT_THEMES);
-        v
-    })
-    .as_slice()
+    &THEMES
 }
 
 /// Resolves a PantoneTheme by its identifier or human-readable name
@@ -444,8 +325,8 @@ pub fn get_pantone_theme(id_or_name: &str) -> &'static PantoneTheme {
     }
     // Backwards compatibility fallbacks
     if query.contains("light") || query.contains("aqua") || query.contains("white") {
-        &LIGHT_THEMES[0] // Brilliant Lime
+        &THEMES[12] // Mossambi Punch - the one light theme
     } else {
-        &DARK_THEMES[0] // Anthracite Obsidian
+        &THEMES[11] // Rangalipi - the default dark theme
     }
 }

@@ -974,9 +974,9 @@ impl eframe::App for MossambiWidgetApp {
                                         let mut cfg = crate::core::MossambiConfig::load();
                                         cfg.theme_mode = if self.geometry.theme == WidgetTheme::Dark
                                         {
-                                            crate::core::ThemeMode::DarkAnthracite
+                                            crate::core::ThemeMode::Rangalipi
                                         } else {
-                                            crate::core::ThemeMode::LightBrilliant
+                                            crate::core::ThemeMode::MossambiPunch
                                         };
                                         let _ = cfg.save();
                                         let mut visuals =

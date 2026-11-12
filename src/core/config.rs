@@ -1,6 +1,6 @@
 //! Persistent Configuration System for Mossambi
 
-use crate::core::pantone::{PantoneTheme, DARK_THEMES, LIGHT_THEMES};
+use crate::core::pantone::{PantoneTheme, THEMES};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -8,84 +8,92 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ThemeMode {
-    // 10 Certified Dark Themes
+    // 11 Named Dark Themes (10 canonical + Rangalipi, the Mossambi signature)
+    Gruvbox,
+    TokyoNight,
+    CatppuccinMocha,
+    ModusVivendi,
+    Nord,
+    Dracula,
+    Kanagawa,
+    OneDark,
+    Atom,
+    DarkPlus,
+    Synthwave,
+    // Rangalipi: the default theme. Every legacy dark config id migrates
+    // onto it so old config.json files keep loading.
     #[default]
-    #[serde(alias = "dark", alias = "system", alias = "anthracite_obsidian")]
-    DarkAnthracite,
-    #[serde(alias = "dark_forest", alias = "deep_forest_emerald")]
-    DarkForest,
-    #[serde(alias = "dark_eclipse", alias = "midnight_eclipse")]
-    DarkEclipse,
-    #[serde(alias = "dark_pewter", alias = "pewter_slate")]
-    DarkPewter,
-    #[serde(alias = "dark_tangerine", alias = "tangerine_nightfall")]
-    DarkTangerine,
-    #[serde(alias = "dark_caviar", alias = "citrus_caviar")]
-    DarkCaviar,
-    #[serde(alias = "dark_indigo", alias = "abyssal_indigo")]
-    DarkIndigo,
-    #[serde(alias = "dark_carbon", alias = "carbon_noir")]
-    DarkCarbon,
-    #[serde(alias = "dark_merlot", alias = "vintage_merlot")]
-    DarkMerlot,
-    #[serde(alias = "dark_gunmetal", alias = "gunmetal_steel")]
-    DarkGunmetal,
-
-    // 10 Certified Light Themes
-    #[serde(alias = "light", alias = "light_brilliant", alias = "brilliant_lime")]
-    LightBrilliant,
-    #[serde(alias = "light_zest", alias = "sweet_zest_sunlight")]
-    LightZest,
-    #[serde(alias = "light_blanc", alias = "blanc_de_blanc")]
-    LightBlanc,
-    #[serde(alias = "light_glacier", alias = "glacier_aqua")]
-    LightGlacier,
-    #[serde(alias = "light_tangerine", alias = "tangerine_sorbet")]
-    LightTangerine,
-    #[serde(alias = "light_albedo", alias = "albedo_pure_ivory")]
-    LightAlbedo,
-    #[serde(alias = "light_quartz", alias = "cool_quartz")]
-    LightQuartz,
-    #[serde(alias = "light_pistachio", alias = "pistachio_cream")]
-    LightPistachio,
-    #[serde(alias = "light_amber", alias = "vanilla_amber")]
-    LightAmber,
-    #[serde(alias = "light_silver", alias = "silver_pearl")]
-    LightSilver,
-
-    // Legacy variants for code compatibility
+    #[serde(alias = "dark")]
+    #[serde(alias = "system")]
+    #[serde(alias = "liquid_glass")]
     #[serde(alias = "liquidglass")]
-    LiquidGlass,
+    #[serde(alias = "frosted_glass")]
     #[serde(alias = "frostedglass")]
-    FrostedGlass,
+    #[serde(alias = "dark_anthracite")]
+    #[serde(alias = "anthracite_obsidian")]
+    #[serde(alias = "dark_forest")]
+    #[serde(alias = "deep_forest_emerald")]
+    #[serde(alias = "dark_eclipse")]
+    #[serde(alias = "midnight_eclipse")]
+    #[serde(alias = "dark_pewter")]
+    #[serde(alias = "pewter_slate")]
+    #[serde(alias = "dark_tangerine")]
+    #[serde(alias = "tangerine_nightfall")]
+    #[serde(alias = "dark_caviar")]
+    #[serde(alias = "citrus_caviar")]
+    #[serde(alias = "dark_indigo")]
+    #[serde(alias = "abyssal_indigo")]
+    #[serde(alias = "dark_carbon")]
+    #[serde(alias = "carbon_noir")]
+    #[serde(alias = "dark_merlot")]
+    #[serde(alias = "vintage_merlot")]
+    #[serde(alias = "dark_gunmetal")]
+    #[serde(alias = "gunmetal_steel")]
+    Rangalipi,
+    // Mossambi Punch: the true sweet-lime fruit light theme. Every legacy
+    // light config id migrates onto it.
+    #[serde(alias = "light")]
+    #[serde(alias = "light_brilliant")]
+    #[serde(alias = "brilliant_lime")]
+    #[serde(alias = "light_zest")]
+    #[serde(alias = "sweet_zest_sunlight")]
+    #[serde(alias = "light_blanc")]
+    #[serde(alias = "blanc_de_blanc")]
+    #[serde(alias = "light_glacier")]
+    #[serde(alias = "glacier_aqua")]
+    #[serde(alias = "light_tangerine")]
+    #[serde(alias = "tangerine_sorbet")]
+    #[serde(alias = "light_albedo")]
+    #[serde(alias = "albedo_pure_ivory")]
+    #[serde(alias = "light_quartz")]
+    #[serde(alias = "cool_quartz")]
+    #[serde(alias = "light_pistachio")]
+    #[serde(alias = "pistachio_cream")]
+    #[serde(alias = "light_amber")]
+    #[serde(alias = "vanilla_amber")]
+    #[serde(alias = "light_silver")]
+    #[serde(alias = "silver_pearl")]
+    #[serde(alias = "light_aqua")]
     #[serde(alias = "lightaqua")]
-    LightAqua,
+    MossambiPunch,
 }
 
 impl ThemeMode {
     pub fn to_pantone_theme(&self) -> &'static PantoneTheme {
         match self {
-            Self::DarkAnthracite | Self::LiquidGlass => &DARK_THEMES[0],
-            Self::DarkForest => &DARK_THEMES[1],
-            Self::DarkEclipse => &DARK_THEMES[2],
-            Self::DarkPewter | Self::FrostedGlass => &DARK_THEMES[3],
-            Self::DarkTangerine => &DARK_THEMES[4],
-            Self::DarkCaviar => &DARK_THEMES[5],
-            Self::DarkIndigo => &DARK_THEMES[6],
-            Self::DarkCarbon => &DARK_THEMES[7],
-            Self::DarkMerlot => &DARK_THEMES[8],
-            Self::DarkGunmetal => &DARK_THEMES[9],
-
-            Self::LightBrilliant => &LIGHT_THEMES[0],
-            Self::LightZest => &LIGHT_THEMES[1],
-            Self::LightBlanc => &LIGHT_THEMES[2],
-            Self::LightGlacier | Self::LightAqua => &LIGHT_THEMES[3],
-            Self::LightTangerine => &LIGHT_THEMES[4],
-            Self::LightAlbedo => &LIGHT_THEMES[5],
-            Self::LightQuartz => &LIGHT_THEMES[6],
-            Self::LightPistachio => &LIGHT_THEMES[7],
-            Self::LightAmber => &LIGHT_THEMES[8],
-            Self::LightSilver => &LIGHT_THEMES[9],
+            Self::Gruvbox => &THEMES[0],
+            Self::TokyoNight => &THEMES[1],
+            Self::CatppuccinMocha => &THEMES[2],
+            Self::ModusVivendi => &THEMES[3],
+            Self::Nord => &THEMES[4],
+            Self::Dracula => &THEMES[5],
+            Self::Kanagawa => &THEMES[6],
+            Self::OneDark => &THEMES[7],
+            Self::Atom => &THEMES[8],
+            Self::DarkPlus => &THEMES[9],
+            Self::Synthwave => &THEMES[10],
+            Self::Rangalipi => &THEMES[11],
+            Self::MossambiPunch => &THEMES[12],
         }
     }
 
@@ -98,37 +106,30 @@ impl ThemeMode {
     }
 
     pub fn all() -> &'static [ThemeMode] {
-        static ALL: [ThemeMode; 20] = [
-            ThemeMode::DarkAnthracite,
-            ThemeMode::DarkForest,
-            ThemeMode::DarkEclipse,
-            ThemeMode::DarkPewter,
-            ThemeMode::DarkTangerine,
-            ThemeMode::DarkCaviar,
-            ThemeMode::DarkIndigo,
-            ThemeMode::DarkCarbon,
-            ThemeMode::DarkMerlot,
-            ThemeMode::DarkGunmetal,
-            ThemeMode::LightBrilliant,
-            ThemeMode::LightZest,
-            ThemeMode::LightBlanc,
-            ThemeMode::LightGlacier,
-            ThemeMode::LightTangerine,
-            ThemeMode::LightAlbedo,
-            ThemeMode::LightQuartz,
-            ThemeMode::LightPistachio,
-            ThemeMode::LightAmber,
-            ThemeMode::LightSilver,
+        static ALL: [ThemeMode; 13] = [
+            ThemeMode::Gruvbox,
+            ThemeMode::TokyoNight,
+            ThemeMode::CatppuccinMocha,
+            ThemeMode::ModusVivendi,
+            ThemeMode::Nord,
+            ThemeMode::Dracula,
+            ThemeMode::Kanagawa,
+            ThemeMode::OneDark,
+            ThemeMode::Atom,
+            ThemeMode::DarkPlus,
+            ThemeMode::Synthwave,
+            ThemeMode::Rangalipi,
+            ThemeMode::MossambiPunch,
         ];
         &ALL
     }
 
     pub fn dark_themes() -> &'static [ThemeMode] {
-        &Self::all()[0..10]
+        &Self::all()[0..12]
     }
 
     pub fn light_themes() -> &'static [ThemeMode] {
-        &Self::all()[10..20]
+        &Self::all()[12..13]
     }
 
     pub fn next(&self) -> Self {
@@ -139,28 +140,74 @@ impl ThemeMode {
 
     pub fn toggle_dark_light(&self) -> Self {
         if self.is_dark() {
-            Self::LightBrilliant
+            Self::MossambiPunch
         } else {
-            Self::DarkAnthracite
+            Self::Rangalipi
         }
     }
 
     pub fn from_id_or_name(query: &str) -> Option<Self> {
         let q = query.to_lowercase().replace([' ', '-', '_'], "");
-        if q == "liquidglass" || q == "system" {
-            return Some(Self::LiquidGlass);
+        // Legacy glass strings and generic dark resolve to the dark default
+        if matches!(
+            q.as_str(),
+            "liquidglass" | "frostedglass" | "frosted" | "sonoma" | "dark" | "system"
+        ) {
+            return Some(Self::Rangalipi);
         }
-        if q == "frostedglass" || q == "frosted" || q == "sonoma" {
-            return Some(Self::FrostedGlass);
+        if matches!(q.as_str(), "lightaqua" | "aqua" | "light") {
+            return Some(Self::MossambiPunch);
         }
-        if q == "lightaqua" || q == "aqua" {
-            return Some(Self::LightAqua);
+        // Retired 20-theme ids keep resolving, mapped by darkness
+        if matches!(
+            q.as_str(),
+            "darkanthracite"
+                | "anthraciteobsidian"
+                | "darkforest"
+                | "deepforestemerald"
+                | "darkeclipse"
+                | "midnighteclipse"
+                | "darkpewter"
+                | "pewterslate"
+                | "darktangerine"
+                | "tangerinenightfall"
+                | "darkcaviar"
+                | "citruscaviar"
+                | "darkindigo"
+                | "abyssalindigo"
+                | "darkcarbon"
+                | "carbonnoir"
+                | "darkmerlot"
+                | "vintagemerlot"
+                | "darkgunmetal"
+                | "gunmetalsteel"
+        ) {
+            return Some(Self::Rangalipi);
         }
-        if q == "dark" {
-            return Some(Self::DarkAnthracite);
-        }
-        if q == "light" {
-            return Some(Self::LightBrilliant);
+        if matches!(
+            q.as_str(),
+            "lightbrilliant"
+                | "brilliantlime"
+                | "lightzest"
+                | "sweetzestsunlight"
+                | "lightblanc"
+                | "blancdeblanc"
+                | "lightglacier"
+                | "glacieraqua"
+                | "lighttangerine"
+                | "tangerinesorbet"
+                | "lightalbedo"
+                | "albedopureivory"
+                | "lightquartz"
+                | "coolquartz"
+                | "lightpistachio"
+                | "pistachiocream"
+                | "lightamber"
+                | "vanillaamber"
+                | "lightsilver"
+                | "silverpearl"
+        ) {
+            return Some(Self::MossambiPunch);
         }
         for mode in Self::all() {
             let id = mode
@@ -772,7 +819,7 @@ fn default_window_opacity() -> f32 {
 impl Default for MossambiConfig {
     fn default() -> Self {
         Self {
-            theme_mode: ThemeMode::LightGlacier,
+            theme_mode: ThemeMode::Rangalipi,
             glass_effect: GlassEffect::FrostedGlass,
             window_opacity: 0.92,
             citrus_shade: "classicblue".to_string(),

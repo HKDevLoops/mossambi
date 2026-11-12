@@ -1,14 +1,12 @@
 //! Apple macOS Design System & Theme Engine for Mossambi
 //! Implements:
-//! - 4 Distinct Apple-Inspired Themes:
-//!   1. Liquid Glass (macOS Sequoia / VisionOS refraction, high translucency, specular highlights)
-//!   2. Transparent Frosted Glass (macOS Sonoma / Aqua acrylic blur, matte frosted finish)
-//!   3. Dark Anthracite (macOS Pro Dark #161618)
-//!   4. Light Aqua (macOS Crisp Light #F5F5F7)
+//! - 13 Named Palettes (11 canonical editor palettes + 2 Mossambi originals):
+//!   Rangalipi is the signature default dark theme, Mossambi Punch is the
+//!   true-fruit light theme. Glass remains config-driven via GlassEffect.
 //! - Authentic Traffic Light window controls (Close, Minimize, Zoom) with subtle inner borders and hover glyphs
 //! - Translucent frosted sidebar with pill navigation items
 //! - Segmented capsule controls and clean Apple system typography
-//! - Certified Pantone Citrus Palette tokens (Flavedo 376 C, Gold 1235 C, Core 102 C)
+//! - Citrus Shade fruit tokens (CitrusShade -> PantonePalette) for accents
 
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2};
 use serde::{Deserialize, Serialize};
@@ -34,118 +32,119 @@ pub const TRAFFIC_MAX: Color32 = Color32::from_rgb(39, 201, 63); // #27C93F
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ThemeStyle {
-    // 10 Certified Dark Themes
-    #[serde(alias = "dark", alias = "system", alias = "anthracite_obsidian")]
-    DarkAnthracite,
-    #[serde(alias = "dark_forest", alias = "deep_forest_emerald")]
-    DarkForest,
-    #[serde(alias = "dark_eclipse", alias = "midnight_eclipse")]
-    DarkEclipse,
-    #[serde(alias = "dark_pewter", alias = "pewter_slate")]
-    DarkPewter,
-    #[serde(alias = "dark_tangerine", alias = "tangerine_nightfall")]
-    DarkTangerine,
-    #[serde(alias = "dark_caviar", alias = "citrus_caviar")]
-    DarkCaviar,
-    #[serde(alias = "dark_indigo", alias = "abyssal_indigo")]
-    DarkIndigo,
-    #[serde(alias = "dark_carbon", alias = "carbon_noir")]
-    DarkCarbon,
-    #[serde(alias = "dark_merlot", alias = "vintage_merlot")]
-    DarkMerlot,
-    #[serde(alias = "dark_gunmetal", alias = "gunmetal_steel")]
-    DarkGunmetal,
-
-    // 10 Certified Light Themes
-    #[serde(alias = "light_brilliant", alias = "brilliant_lime")]
-    LightBrilliant,
-    #[serde(alias = "light_zest", alias = "sweet_zest_sunlight")]
-    LightZest,
-    #[serde(alias = "light_blanc", alias = "blanc_de_blanc")]
-    LightBlanc,
+    // 11 Named Dark Themes (10 canonical + Rangalipi, the Mossambi signature)
+    Gruvbox,
+    TokyoNight,
+    CatppuccinMocha,
+    ModusVivendi,
+    Nord,
+    Dracula,
+    Kanagawa,
+    OneDark,
+    Atom,
+    DarkPlus,
+    Synthwave,
+    // Rangalipi: the default theme. Every legacy dark config id migrates
+    // onto it so old config.json files keep loading.
     #[default]
-    #[serde(alias = "light", alias = "light_glacier", alias = "glacier_aqua")]
-    LightGlacier,
-    #[serde(alias = "light_tangerine", alias = "tangerine_sorbet")]
-    LightTangerine,
-    #[serde(alias = "light_albedo", alias = "albedo_pure_ivory")]
-    LightAlbedo,
-    #[serde(alias = "light_quartz", alias = "cool_quartz")]
-    LightQuartz,
-    #[serde(alias = "light_pistachio", alias = "pistachio_cream")]
-    LightPistachio,
-    #[serde(alias = "light_amber", alias = "vanilla_amber")]
-    LightAmber,
-    #[serde(alias = "light_silver", alias = "silver_pearl")]
-    LightSilver,
-
-    // Code compatibility variants
+    #[serde(alias = "dark")]
+    #[serde(alias = "system")]
+    #[serde(alias = "liquid_glass")]
     #[serde(alias = "liquidglass")]
-    LiquidGlass,
+    #[serde(alias = "frosted_glass")]
     #[serde(alias = "frostedglass")]
-    FrostedGlass,
+    #[serde(alias = "dark_anthracite")]
+    #[serde(alias = "anthracite_obsidian")]
+    #[serde(alias = "dark_forest")]
+    #[serde(alias = "deep_forest_emerald")]
+    #[serde(alias = "dark_eclipse")]
+    #[serde(alias = "midnight_eclipse")]
+    #[serde(alias = "dark_pewter")]
+    #[serde(alias = "pewter_slate")]
+    #[serde(alias = "dark_tangerine")]
+    #[serde(alias = "tangerine_nightfall")]
+    #[serde(alias = "dark_caviar")]
+    #[serde(alias = "citrus_caviar")]
+    #[serde(alias = "dark_indigo")]
+    #[serde(alias = "abyssal_indigo")]
+    #[serde(alias = "dark_carbon")]
+    #[serde(alias = "carbon_noir")]
+    #[serde(alias = "dark_merlot")]
+    #[serde(alias = "vintage_merlot")]
+    #[serde(alias = "dark_gunmetal")]
+    #[serde(alias = "gunmetal_steel")]
+    Rangalipi,
+    // Mossambi Punch: the true sweet-lime fruit light theme. Every legacy
+    // light config id migrates onto it.
+    #[serde(alias = "light")]
+    #[serde(alias = "light_brilliant")]
+    #[serde(alias = "brilliant_lime")]
+    #[serde(alias = "light_zest")]
+    #[serde(alias = "sweet_zest_sunlight")]
+    #[serde(alias = "light_blanc")]
+    #[serde(alias = "blanc_de_blanc")]
+    #[serde(alias = "light_glacier")]
+    #[serde(alias = "glacier_aqua")]
+    #[serde(alias = "light_tangerine")]
+    #[serde(alias = "tangerine_sorbet")]
+    #[serde(alias = "light_albedo")]
+    #[serde(alias = "albedo_pure_ivory")]
+    #[serde(alias = "light_quartz")]
+    #[serde(alias = "cool_quartz")]
+    #[serde(alias = "light_pistachio")]
+    #[serde(alias = "pistachio_cream")]
+    #[serde(alias = "light_amber")]
+    #[serde(alias = "vanilla_amber")]
+    #[serde(alias = "light_silver")]
+    #[serde(alias = "silver_pearl")]
+    #[serde(alias = "light_aqua")]
     #[serde(alias = "lightaqua")]
-    LightAqua,
+    MossambiPunch,
 }
 
 impl ThemeStyle {
     pub fn all() -> &'static [ThemeStyle] {
-        static ALL: [ThemeStyle; 20] = [
-            ThemeStyle::DarkAnthracite,
-            ThemeStyle::DarkForest,
-            ThemeStyle::DarkEclipse,
-            ThemeStyle::DarkPewter,
-            ThemeStyle::DarkTangerine,
-            ThemeStyle::DarkCaviar,
-            ThemeStyle::DarkIndigo,
-            ThemeStyle::DarkCarbon,
-            ThemeStyle::DarkMerlot,
-            ThemeStyle::DarkGunmetal,
-            ThemeStyle::LightBrilliant,
-            ThemeStyle::LightZest,
-            ThemeStyle::LightBlanc,
-            ThemeStyle::LightGlacier,
-            ThemeStyle::LightTangerine,
-            ThemeStyle::LightAlbedo,
-            ThemeStyle::LightQuartz,
-            ThemeStyle::LightPistachio,
-            ThemeStyle::LightAmber,
-            ThemeStyle::LightSilver,
+        static ALL: [ThemeStyle; 13] = [
+            ThemeStyle::Gruvbox,
+            ThemeStyle::TokyoNight,
+            ThemeStyle::CatppuccinMocha,
+            ThemeStyle::ModusVivendi,
+            ThemeStyle::Nord,
+            ThemeStyle::Dracula,
+            ThemeStyle::Kanagawa,
+            ThemeStyle::OneDark,
+            ThemeStyle::Atom,
+            ThemeStyle::DarkPlus,
+            ThemeStyle::Synthwave,
+            ThemeStyle::Rangalipi,
+            ThemeStyle::MossambiPunch,
         ];
         &ALL
     }
 
     pub fn dark_themes() -> &'static [ThemeStyle] {
-        &Self::all()[0..10]
+        &Self::all()[0..12]
     }
 
     pub fn light_themes() -> &'static [ThemeStyle] {
-        &Self::all()[10..20]
+        &Self::all()[12..13]
     }
 
     pub fn to_pantone(&self) -> &'static crate::core::pantone::PantoneTheme {
         match self {
-            Self::DarkAnthracite | Self::LiquidGlass => &crate::core::pantone::DARK_THEMES[0],
-            Self::DarkForest => &crate::core::pantone::DARK_THEMES[1],
-            Self::DarkEclipse => &crate::core::pantone::DARK_THEMES[2],
-            Self::DarkPewter | Self::FrostedGlass => &crate::core::pantone::DARK_THEMES[3],
-            Self::DarkTangerine => &crate::core::pantone::DARK_THEMES[4],
-            Self::DarkCaviar => &crate::core::pantone::DARK_THEMES[5],
-            Self::DarkIndigo => &crate::core::pantone::DARK_THEMES[6],
-            Self::DarkCarbon => &crate::core::pantone::DARK_THEMES[7],
-            Self::DarkMerlot => &crate::core::pantone::DARK_THEMES[8],
-            Self::DarkGunmetal => &crate::core::pantone::DARK_THEMES[9],
-
-            Self::LightBrilliant => &crate::core::pantone::LIGHT_THEMES[0],
-            Self::LightZest => &crate::core::pantone::LIGHT_THEMES[1],
-            Self::LightBlanc => &crate::core::pantone::LIGHT_THEMES[2],
-            Self::LightGlacier | Self::LightAqua => &crate::core::pantone::LIGHT_THEMES[3],
-            Self::LightTangerine => &crate::core::pantone::LIGHT_THEMES[4],
-            Self::LightAlbedo => &crate::core::pantone::LIGHT_THEMES[5],
-            Self::LightQuartz => &crate::core::pantone::LIGHT_THEMES[6],
-            Self::LightPistachio => &crate::core::pantone::LIGHT_THEMES[7],
-            Self::LightAmber => &crate::core::pantone::LIGHT_THEMES[8],
-            Self::LightSilver => &crate::core::pantone::LIGHT_THEMES[9],
+            Self::Gruvbox => &crate::core::pantone::THEMES[0],
+            Self::TokyoNight => &crate::core::pantone::THEMES[1],
+            Self::CatppuccinMocha => &crate::core::pantone::THEMES[2],
+            Self::ModusVivendi => &crate::core::pantone::THEMES[3],
+            Self::Nord => &crate::core::pantone::THEMES[4],
+            Self::Dracula => &crate::core::pantone::THEMES[5],
+            Self::Kanagawa => &crate::core::pantone::THEMES[6],
+            Self::OneDark => &crate::core::pantone::THEMES[7],
+            Self::Atom => &crate::core::pantone::THEMES[8],
+            Self::DarkPlus => &crate::core::pantone::THEMES[9],
+            Self::Synthwave => &crate::core::pantone::THEMES[10],
+            Self::Rangalipi => &crate::core::pantone::THEMES[11],
+            Self::MossambiPunch => &crate::core::pantone::THEMES[12],
         }
     }
 
@@ -332,33 +331,19 @@ impl ThemeStyle {
 impl From<crate::core::ThemeMode> for ThemeStyle {
     fn from(m: crate::core::ThemeMode) -> Self {
         match m {
-            crate::core::ThemeMode::DarkAnthracite | crate::core::ThemeMode::LiquidGlass => {
-                ThemeStyle::DarkAnthracite
-            }
-            crate::core::ThemeMode::DarkForest => ThemeStyle::DarkForest,
-            crate::core::ThemeMode::DarkEclipse => ThemeStyle::DarkEclipse,
-            crate::core::ThemeMode::DarkPewter | crate::core::ThemeMode::FrostedGlass => {
-                ThemeStyle::DarkPewter
-            }
-            crate::core::ThemeMode::DarkTangerine => ThemeStyle::DarkTangerine,
-            crate::core::ThemeMode::DarkCaviar => ThemeStyle::DarkCaviar,
-            crate::core::ThemeMode::DarkIndigo => ThemeStyle::DarkIndigo,
-            crate::core::ThemeMode::DarkCarbon => ThemeStyle::DarkCarbon,
-            crate::core::ThemeMode::DarkMerlot => ThemeStyle::DarkMerlot,
-            crate::core::ThemeMode::DarkGunmetal => ThemeStyle::DarkGunmetal,
-
-            crate::core::ThemeMode::LightBrilliant => ThemeStyle::LightBrilliant,
-            crate::core::ThemeMode::LightZest => ThemeStyle::LightZest,
-            crate::core::ThemeMode::LightBlanc => ThemeStyle::LightBlanc,
-            crate::core::ThemeMode::LightGlacier | crate::core::ThemeMode::LightAqua => {
-                ThemeStyle::LightGlacier
-            }
-            crate::core::ThemeMode::LightTangerine => ThemeStyle::LightTangerine,
-            crate::core::ThemeMode::LightAlbedo => ThemeStyle::LightAlbedo,
-            crate::core::ThemeMode::LightQuartz => ThemeStyle::LightQuartz,
-            crate::core::ThemeMode::LightPistachio => ThemeStyle::LightPistachio,
-            crate::core::ThemeMode::LightAmber => ThemeStyle::LightAmber,
-            crate::core::ThemeMode::LightSilver => ThemeStyle::LightSilver,
+            crate::core::ThemeMode::Gruvbox => ThemeStyle::Gruvbox,
+            crate::core::ThemeMode::TokyoNight => ThemeStyle::TokyoNight,
+            crate::core::ThemeMode::CatppuccinMocha => ThemeStyle::CatppuccinMocha,
+            crate::core::ThemeMode::ModusVivendi => ThemeStyle::ModusVivendi,
+            crate::core::ThemeMode::Nord => ThemeStyle::Nord,
+            crate::core::ThemeMode::Dracula => ThemeStyle::Dracula,
+            crate::core::ThemeMode::Kanagawa => ThemeStyle::Kanagawa,
+            crate::core::ThemeMode::OneDark => ThemeStyle::OneDark,
+            crate::core::ThemeMode::Atom => ThemeStyle::Atom,
+            crate::core::ThemeMode::DarkPlus => ThemeStyle::DarkPlus,
+            crate::core::ThemeMode::Synthwave => ThemeStyle::Synthwave,
+            crate::core::ThemeMode::Rangalipi => ThemeStyle::Rangalipi,
+            crate::core::ThemeMode::MossambiPunch => ThemeStyle::MossambiPunch,
         }
     }
 }
@@ -366,31 +351,19 @@ impl From<crate::core::ThemeMode> for ThemeStyle {
 impl From<ThemeStyle> for crate::core::ThemeMode {
     fn from(s: ThemeStyle) -> Self {
         match s {
-            ThemeStyle::DarkAnthracite | ThemeStyle::LiquidGlass => {
-                crate::core::ThemeMode::DarkAnthracite
-            }
-            ThemeStyle::DarkForest => crate::core::ThemeMode::DarkForest,
-            ThemeStyle::DarkEclipse => crate::core::ThemeMode::DarkEclipse,
-            ThemeStyle::DarkPewter | ThemeStyle::FrostedGlass => crate::core::ThemeMode::DarkPewter,
-            ThemeStyle::DarkTangerine => crate::core::ThemeMode::DarkTangerine,
-            ThemeStyle::DarkCaviar => crate::core::ThemeMode::DarkCaviar,
-            ThemeStyle::DarkIndigo => crate::core::ThemeMode::DarkIndigo,
-            ThemeStyle::DarkCarbon => crate::core::ThemeMode::DarkCarbon,
-            ThemeStyle::DarkMerlot => crate::core::ThemeMode::DarkMerlot,
-            ThemeStyle::DarkGunmetal => crate::core::ThemeMode::DarkGunmetal,
-
-            ThemeStyle::LightBrilliant => crate::core::ThemeMode::LightBrilliant,
-            ThemeStyle::LightZest => crate::core::ThemeMode::LightZest,
-            ThemeStyle::LightBlanc => crate::core::ThemeMode::LightBlanc,
-            ThemeStyle::LightGlacier | ThemeStyle::LightAqua => {
-                crate::core::ThemeMode::LightGlacier
-            }
-            ThemeStyle::LightTangerine => crate::core::ThemeMode::LightTangerine,
-            ThemeStyle::LightAlbedo => crate::core::ThemeMode::LightAlbedo,
-            ThemeStyle::LightQuartz => crate::core::ThemeMode::LightQuartz,
-            ThemeStyle::LightPistachio => crate::core::ThemeMode::LightPistachio,
-            ThemeStyle::LightAmber => crate::core::ThemeMode::LightAmber,
-            ThemeStyle::LightSilver => crate::core::ThemeMode::LightSilver,
+            ThemeStyle::Gruvbox => crate::core::ThemeMode::Gruvbox,
+            ThemeStyle::TokyoNight => crate::core::ThemeMode::TokyoNight,
+            ThemeStyle::CatppuccinMocha => crate::core::ThemeMode::CatppuccinMocha,
+            ThemeStyle::ModusVivendi => crate::core::ThemeMode::ModusVivendi,
+            ThemeStyle::Nord => crate::core::ThemeMode::Nord,
+            ThemeStyle::Dracula => crate::core::ThemeMode::Dracula,
+            ThemeStyle::Kanagawa => crate::core::ThemeMode::Kanagawa,
+            ThemeStyle::OneDark => crate::core::ThemeMode::OneDark,
+            ThemeStyle::Atom => crate::core::ThemeMode::Atom,
+            ThemeStyle::DarkPlus => crate::core::ThemeMode::DarkPlus,
+            ThemeStyle::Synthwave => crate::core::ThemeMode::Synthwave,
+            ThemeStyle::Rangalipi => crate::core::ThemeMode::Rangalipi,
+            ThemeStyle::MossambiPunch => crate::core::ThemeMode::MossambiPunch,
         }
     }
 }

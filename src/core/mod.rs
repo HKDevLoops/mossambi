@@ -60,7 +60,7 @@ pub use linux_dna::{
 pub use mouse_nav::MouseNavListener;
 pub use pantone::{
     all_pantone_themes, get_pantone_theme, CitrusShade, PantoneColor, PantonePalette, PantoneTheme,
-    DARK_THEMES, LIGHT_THEMES,
+    THEMES,
 };
 pub use registry::{
     DynamicWheelSector, FileCategory, FormatInfo, FormatNature, FormatSpecification,

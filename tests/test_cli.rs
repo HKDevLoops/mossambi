@@ -59,7 +59,7 @@ fn test_cli_config_commands() {
         .unwrap();
     assert!(get_out.status.success());
     let stdout = String::from_utf8_lossy(&get_out.stdout);
-    assert!(stdout.contains("LiquidGlass"));
+    assert!(stdout.contains("Rangalipi"));
 }
 
 #[test]

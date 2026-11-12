@@ -128,10 +128,10 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
     const CMD_OPEN_STUDIO: u32 = 2001;
     const CMD_SUMMON_WIDGET: u32 = 2002;
     const CMD_TOGGLE_AUTOSTART: u32 = 2003;
-    const CMD_THEME_LIQUID_GLASS: u32 = 2010;
-    const CMD_THEME_FROSTED_GLASS: u32 = 2011;
-    const CMD_THEME_DARK_ANTHRACITE: u32 = 2012;
-    const CMD_THEME_LIGHT_AQUA: u32 = 2013;
+    const CMD_THEME_RANGALIPI: u32 = 2010;
+    const CMD_THEME_MOSSAMBI_PUNCH: u32 = 2011;
+    const CMD_THEME_GRUVBOX: u32 = 2012;
+    const CMD_THEME_CATPPUCCIN: u32 = 2013;
     const CMD_TOGGLE_ZERO_LOSS: u32 = 2030;
     const CMD_QUIT: u32 = 2099;
 
@@ -314,46 +314,46 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                         AppendMenuW(
                             hmenu_themes,
                             MF_STRING
-                                | if current_theme == ThemeStyle::LiquidGlass {
+                                | if current_theme == ThemeStyle::Rangalipi {
                                     MF_CHECKED
                                 } else {
                                     MF_UNCHECKED
                                 },
-                            CMD_THEME_LIQUID_GLASS as usize,
-                            to_u16("Liquid Glass (macOS Sequoia Specular)").as_ptr(),
+                            CMD_THEME_RANGALIPI as usize,
+                            to_u16("Rangalipi (Signature Dark)").as_ptr(),
                         );
                         AppendMenuW(
                             hmenu_themes,
                             MF_STRING
-                                | if current_theme == ThemeStyle::FrostedGlass {
+                                | if current_theme == ThemeStyle::Gruvbox {
                                     MF_CHECKED
                                 } else {
                                     MF_UNCHECKED
                                 },
-                            CMD_THEME_FROSTED_GLASS as usize,
-                            to_u16("Frosted Glass (macOS Sonoma Acrylic)").as_ptr(),
+                            CMD_THEME_MOSSAMBI_PUNCH as usize,
+                            to_u16("Gruvbox (Canonical Dark)").as_ptr(),
                         );
                         AppendMenuW(
                             hmenu_themes,
                             MF_STRING
-                                | if current_theme == ThemeStyle::DarkAnthracite {
+                                | if current_theme == ThemeStyle::CatppuccinMocha {
                                     MF_CHECKED
                                 } else {
                                     MF_UNCHECKED
                                 },
-                            CMD_THEME_DARK_ANTHRACITE as usize,
-                            to_u16("Dark Anthracite (Pro #161618)").as_ptr(),
+                            CMD_THEME_GRUVBOX as usize,
+                            to_u16("Catppuccin Mocha (Canonical Dark)").as_ptr(),
                         );
                         AppendMenuW(
                             hmenu_themes,
                             MF_STRING
-                                | if current_theme == ThemeStyle::LightAqua {
+                                | if current_theme == ThemeStyle::MossambiPunch {
                                     MF_CHECKED
                                 } else {
                                     MF_UNCHECKED
                                 },
-                            CMD_THEME_LIGHT_AQUA as usize,
-                            to_u16("Light Aqua (Clean Light #F5F5F7)").as_ptr(),
+                            CMD_THEME_CATPPUCCIN as usize,
+                            to_u16("Mossambi Punch (True-Fruit Light)").as_ptr(),
                         );
 
                         // Root Menu
@@ -381,7 +381,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                             hmenu,
                             MF_POPUP,
                             hmenu_themes as usize,
-                            to_u16("[Palette] Themes (Liquid & Frosted Glass)").as_ptr(),
+                            to_u16("[Palette] Themes (13 Named Palettes)").as_ptr(),
                         );
                         AppendMenuW(
                             hmenu,
@@ -440,25 +440,26 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                                 let _ = crate::core::MossambiConfig::set_autostart(new_setting);
                                 let _ = sender.send(AppControlEvent::ToggleAutostart(new_setting));
                             }
-                            CMD_THEME_LIQUID_GLASS => {
-                                current_theme = ThemeStyle::LiquidGlass;
+                            CMD_THEME_RANGALIPI => {
+                                current_theme = ThemeStyle::Rangalipi;
                                 let _ = sender
-                                    .send(AppControlEvent::ChangeTheme(ThemeStyle::LiquidGlass));
+                                    .send(AppControlEvent::ChangeTheme(ThemeStyle::Rangalipi));
                             }
-                            CMD_THEME_FROSTED_GLASS => {
-                                current_theme = ThemeStyle::FrostedGlass;
-                                let _ = sender
-                                    .send(AppControlEvent::ChangeTheme(ThemeStyle::FrostedGlass));
+                            CMD_THEME_MOSSAMBI_PUNCH => {
+                                current_theme = ThemeStyle::Gruvbox;
+                                let _ =
+                                    sender.send(AppControlEvent::ChangeTheme(ThemeStyle::Gruvbox));
                             }
-                            CMD_THEME_DARK_ANTHRACITE => {
-                                current_theme = ThemeStyle::DarkAnthracite;
-                                let _ = sender
-                                    .send(AppControlEvent::ChangeTheme(ThemeStyle::DarkAnthracite));
+                            CMD_THEME_GRUVBOX => {
+                                current_theme = ThemeStyle::CatppuccinMocha;
+                                let _ = sender.send(AppControlEvent::ChangeTheme(
+                                    ThemeStyle::CatppuccinMocha,
+                                ));
                             }
-                            CMD_THEME_LIGHT_AQUA => {
-                                current_theme = ThemeStyle::LightAqua;
+                            CMD_THEME_CATPPUCCIN => {
+                                current_theme = ThemeStyle::MossambiPunch;
                                 let _ = sender
-                                    .send(AppControlEvent::ChangeTheme(ThemeStyle::LightAqua));
+                                    .send(AppControlEvent::ChangeTheme(ThemeStyle::MossambiPunch));
                             }
                             CMD_TOGGLE_ZERO_LOSS => {
                                 zero_loss_enabled = !zero_loss_enabled;
