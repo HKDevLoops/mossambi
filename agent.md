@@ -1230,3 +1230,45 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   security, A5 fixes, A6 QA, then the post-wave computer-use
   verification phase (theme-picker gate 13 palettes + columns
   proofs + icon crispness captures + all queued probes).
+
+2026-11-12 MILLER LINEAGE WAVE CLOSED (feat(gui) 8c33689, +592/-529 over
+2 files): Miller columns render Finder-conformant lineage on every
+navigation. (1) Pure model in explorer_view.rs: ancestor_chain(dir)
+root-first (excludes dir; empty for roots and relative paths),
+lineage_policy(new, old, stack) -> MillerLineage {KeepStack, ShiftTo(k),
+ClearStack}, ColumnRole {Ancestor, Current, Descendant};
+tests/test_miller.rs 10/10. (2) navigate_to lineage rewrite: KeepStack
+(refresh + fs-op completion via poll_background_scans -> navigate_to)
+preserves chain/stack/preview/rename-in-progress; ShiftTo(k) drains
+stack[0..=k] so deeper columns stay open and sets a directory
+placeholder preview that keeps the auto-preview guard dormant (the
+inspector renders files only); pure up-nav (dir.parent()==old_dir)
+selects old_dir + placeholder preview (old_dir cloned before the
+HashSet insert - E0382 fix); unrelated nav clears the stack.
+needs_miller_scroll_align one-shot set by navigate_to (ShiftTo/
+ClearStack) and the post-render stack-push site; consumed after the
+inspector inside the horizontal closure via
+ui.scroll_to_cursor(Some(Align::Max)) so the deepest column +
+inspector are revealed. (3) Render restructure: the duplicated col-0
+block and stack loop (~260 lines each) collapsed into ONE shared
+render_miller_column(role) method via line-index surgery with hard
+boundary assertions; chain columns built per frame from ancestor_chain
++ get_column_entries cache; num_cols = chain.len()+1+stack.len();
+col1_w dropped; unified tags (all roles), drop-highlight alpha 80,
+chevron, hover and selection bands in every role; path-based id_salt
+("miller_col_scroll", col_salt) replaces both old salts (one-time
+scroll reset on navigation); dispatch: Ancestor = navigate or preview
+(no-op on the chain-highlighted row), Current = legacy col-0 dispatch,
+Descendant = legacy stack dispatch. (4) column_subfolder field + ctor
+init + all writes REMOVED; census now 0 in src and tests (ledger/plan
+mentions are historical text only). Gates green: fmt, clippy
+-D warnings, full test suite (incl ASCII sweep over src/gui), release
+build 1m00s, porcelain exactly explorer_view.rs + tests/test_miller.rs.
+Deviations from the plan doc: miller_suppress_autopreview was added in
+Step 2 then REPLACED by directory placeholder previews (the one-shot
+suppress only delayed the phantom preview one frame - the auto-preview
+guard re-fires every frame while column_preview_item is None); scroll
+align implemented via scroll_to_cursor(Align::Max) after the inspector
+(not scroll_to_rect on the deepest column); tags now also painted in
+stack columns; drop alpha unified 70/80 -> 80; focused_row highlight
+kept only in the Current role.
