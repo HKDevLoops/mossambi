@@ -57,6 +57,62 @@ fn kind_key(item: &FileItem) -> &'static str {
     resolve_file_icon(&item.name, &item.extension, item.is_dir).category
 }
 
+/// Pure Miller lineage helper: the ancestor chain of a directory,
+/// root-first, excluding the directory itself (Finder column view
+/// renders this chain to the LEFT of the current directory column).
+/// Empty for a filesystem root and for relative paths (Miller
+/// columns are only meaningful for absolute paths).
+pub fn ancestor_chain(dir: &Path) -> Vec<PathBuf> {
+    if !dir.is_absolute() {
+        return Vec::new();
+    }
+    let mut chain: Vec<PathBuf> = dir.ancestors().skip(1).map(|p| p.to_path_buf()).collect();
+    chain.reverse();
+    chain
+}
+
+/// Pure Miller lineage decision for a navigation target relative to
+/// the previously current directory and the opened descendant stack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MillerLineage {
+    /// Target is the same directory (refresh / fs-op completion):
+    /// keep the entire chain and stack untouched.
+    KeepStack,
+    /// Target is the stack entry at index k: that folder becomes the
+    /// current directory, stack[k+1..] stay opened as its
+    /// descendants, and stack[0..=k] dissolve into the ancestor
+    /// chain.
+    ShiftTo(usize),
+    /// Target is unrelated to the opened branch: the stack closes
+    /// (up-navigation, sideways navigation, bookmarks, fresh dirs).
+    ClearStack,
+}
+
+/// Classifies a navigation target for the Miller column view.
+pub fn lineage_policy(
+    new_dir: &Path,
+    old_dir: &Path,
+    stack: &[(PathBuf, Vec<FileItem>)],
+) -> MillerLineage {
+    if new_dir == old_dir {
+        return MillerLineage::KeepStack;
+    }
+    if let Some(k) = stack.iter().position(|(p, _)| p.as_path() == new_dir) {
+        return MillerLineage::ShiftTo(k);
+    }
+    MillerLineage::ClearStack
+}
+
+/// Which Miller column a shared row renderer is painting: ancestor
+/// chain columns left of the current directory, the current
+/// directory column itself, or an opened descendant stack column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnRole {
+    Ancestor,
+    Current,
+    Descendant,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SortColumn {
     Name,
@@ -661,10 +717,13 @@ pub struct ExplorerView {
 
     // macOS Finder & Linux System Features
     pub show_hidden_files: bool,
-    pub column_subfolder: Option<(PathBuf, Vec<FileItem>)>,
     pub column_stack: Vec<(PathBuf, Vec<FileItem>)>,
     pub column_preview_item: Option<FileItem>,
     pub column_cache: std::collections::HashMap<PathBuf, Vec<FileItem>>,
+    /// One-shot: the Miller hscroll should align to the deepest
+    /// column on the next render (set by navigate_to and the
+    /// stack-push site).
+    pub needs_miller_scroll_align: bool,
 
     // Windows 11 & macOS Home Dashboard View
     pub is_home_view: bool,
@@ -920,10 +979,10 @@ impl Default for ExplorerView {
             last_g_press: None,
             focus_search_requested: false,
             show_hidden_files: false,
-            column_subfolder: None,
             column_stack: Vec::new(),
             column_preview_item: None,
             column_cache: std::collections::HashMap::new(),
+            needs_miller_scroll_align: false,
             hover_preview: None,
             thumb_cache: std::collections::HashMap::new(),
             thumb_decode_budget: (0, Instant::now()),
@@ -1021,14 +1080,48 @@ impl ExplorerView {
             self.history_idx = self.history.len() - 1;
         }
 
-        self.current_dir = dir.clone();
-        self.path_edit_buffer = dir.to_string_lossy().to_string();
-        self.is_editing_path = false;
-        self.renaming_path = None;
-        self.focused_row = 0;
-        self.column_stack.clear();
-        self.column_subfolder = None;
-        self.column_preview_item = None;
+        // Miller lineage (Finder column-view semantics): refreshes
+        // and fs-op completions keep the opened chain and stack;
+        // entering an opened stack folder shifts it into the chain
+        // and keeps deeper columns; unrelated navigation closes the
+        // stack.
+        let old_dir = std::mem::replace(&mut self.current_dir, dir.clone());
+        let lineage = lineage_policy(&dir, &old_dir, &self.column_stack);
+        match lineage {
+            MillerLineage::KeepStack => {
+                // Same directory: preserve the Miller chain, the
+                // stack, any inspector preview, and in-progress
+                // rename or path-bar editing.
+            }
+            MillerLineage::ShiftTo(k) => {
+                self.column_stack.drain(0..=k);
+                // Finder: entering a folder shows no file preview;
+                // a directory placeholder keeps the auto-preview
+                // guard dormant without opening the inspector.
+                self.column_preview_item = Some(FileItem::from_path(dir.clone()));
+                self.needs_miller_scroll_align = true;
+            }
+            MillerLineage::ClearStack => {
+                self.column_stack.clear();
+                self.column_preview_item = None;
+                self.needs_miller_scroll_align = true;
+                if dir.parent() == Some(old_dir.as_path()) {
+                    // Pure up-navigation: Finder highlights the
+                    // folder just left and shows no phantom
+                    // first-file preview. The directory placeholder
+                    // preview keeps the auto-preview guard dormant.
+                    self.selected_paths.clear();
+                    self.selected_paths.insert(old_dir.clone());
+                    self.column_preview_item = Some(FileItem::from_path(old_dir));
+                }
+            }
+        }
+        if lineage != MillerLineage::KeepStack {
+            self.path_edit_buffer = dir.to_string_lossy().to_string();
+            self.is_editing_path = false;
+            self.renaming_path = None;
+            self.focused_row = 0;
+        }
 
         let home_opt = crate::core::platform_paths::home_dir_opt();
         self.is_home_view = Some(&dir) == home_opt.as_ref();
@@ -5858,6 +5951,312 @@ impl ExplorerView {
         }
     }
 
+    /// Shared Miller row renderer: one column body for the ancestor
+    /// chain columns, the current directory column, and the opened
+    /// descendant stack columns (Finder column-view parity -
+    /// identical visuals and interaction in every role, with
+    /// role-specific click dispatch). `col_salt` keys the per-column
+    /// scroll state so freshly navigated columns reset their scroll
+    /// once; `chain_highlight` marks the row that is currently open
+    /// in the next column (Finder blue tint).
+    #[allow(clippy::too_many_arguments)]
+    fn render_miller_column(
+        &mut self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        col_salt: &Path,
+        entries: &[FileItem],
+        role: ColumnRole,
+        col_w: f32,
+        full_h: f32,
+        selection_snapshot: &[PathBuf],
+        icon_pack: crate::core::icon_packs::IconPack,
+        menu_style: crate::core::config::MenuStyle,
+        chain_highlight: Option<&Path>,
+        stack_index: usize,
+        subfolder_to_load: &mut Option<(usize, PathBuf)>,
+        nav_into_dir: &mut Option<PathBuf>,
+        preview_to_set: &mut Option<FileItem>,
+        column_drop: &mut Option<DropOp>,
+        item_intents: &mut Vec<ItemMenuIntents>,
+    ) {
+        ui.allocate_ui_with_layout(
+            Vec2::new(col_w, full_h),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                egui::Frame::none()
+                    .fill(palette.card_bg)
+                    .stroke(Stroke::new(1.0_f32, palette.border))
+                    .show(ui, |ui| {
+                        ui.set_min_size(Vec2::new(col_w, full_h));
+                        egui::ScrollArea::vertical()
+                            .id_salt(("miller_col_scroll", col_salt))
+                            .auto_shrink([false, false])
+                            .scroll_bar_visibility(
+                                egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                            )
+                            .show(ui, |ui| {
+                                ui.vertical(|ui| {
+                                    for (idx, item) in entries.iter().enumerate() {
+                                        let chain_sel = role == ColumnRole::Ancestor
+                                            && chain_highlight == Some(item.path.as_path());
+                                        let is_selected = self.selected_paths.contains(&item.path)
+                                            || (role == ColumnRole::Current
+                                                && self.focused_row == idx)
+                                            || chain_sel;
+                                        let icon_spec = resolve_file_icon(
+                                            &item.name,
+                                            &item.extension,
+                                            item.is_dir,
+                                        );
+
+                                        let symlink_suffix =
+                                            if item.is_symlink { " ->" } else { "" };
+                                        let display_name = truncate_middle(
+                                            &format!("{}{}", item.name, symlink_suffix),
+                                            (col_w / 8.5) as usize,
+                                        );
+
+                                        let (row_rect, resp) = ui.allocate_exact_size(
+                                            Vec2::new(col_w - 6.0, 30.0),
+                                            egui::Sense::click_and_drag(),
+                                        );
+                                        // Drag source + folder-row drop targets
+                                        if resp.drag_started_by(egui::PointerButton::Primary) {
+                                            if !is_selected {
+                                                self.selected_paths.clear();
+                                                self.selected_paths.insert(item.path.clone());
+                                            }
+                                            let paths: Vec<PathBuf> = self
+                                                .selected_paths
+                                                .iter()
+                                                .cloned()
+                                                .collect::<Vec<_>>();
+                                            egui::DragAndDrop::set_payload(
+                                                ui.ctx(),
+                                                FileDragPayload { paths },
+                                            );
+                                        }
+                                        if item.is_dir {
+                                            let drop_hl = drop_highlight_id(&item.path);
+                                            if let Some(payload) =
+                                                resp.dnd_hover_payload::<FileDragPayload>()
+                                            {
+                                                let legal = payload
+                                                    .paths
+                                                    .iter()
+                                                    .all(|p| !same_or_within(&item.path, p));
+                                                if legal {
+                                                    let a = self.hover_anims.drive(
+                                                        drop_hl,
+                                                        1.0,
+                                                        self.animations.hover,
+                                                        crate::gui::anim::frame_dt(ui.ctx()),
+                                                    );
+                                                    ui.painter().rect_filled(
+                                                        row_rect,
+                                                        Rounding::same(5.0),
+                                                        Color32::from_rgba_unmultiplied(
+                                                            palette.accent.r(),
+                                                            palette.accent.g(),
+                                                            palette.accent.b(),
+                                                            (a * 80.0) as u8,
+                                                        ),
+                                                    );
+                                                }
+                                            } else {
+                                                self.hover_anims.drive(
+                                                    drop_hl,
+                                                    0.0,
+                                                    self.animations.hover,
+                                                    crate::gui::anim::frame_dt(ui.ctx()),
+                                                );
+                                            }
+                                            if let Some(payload) =
+                                                resp.dnd_release_payload::<FileDragPayload>()
+                                            {
+                                                let copy = ui.input(|i| {
+                                                    i.modifiers.ctrl || i.modifiers.command
+                                                });
+                                                *column_drop = Some((
+                                                    item.path.clone(),
+                                                    payload.paths.to_vec(),
+                                                    copy,
+                                                ));
+                                            }
+                                        }
+                                        // Row band: hover/selected/opened chain row
+                                        if is_selected {
+                                            // Selection tint: straight accent alpha,
+                                            // 45 dark / 26 light (premul with raw
+                                            // rgb rendered near-opaque).
+                                            ui.painter().rect_filled(
+                                                row_rect,
+                                                Rounding::same(5.0),
+                                                Color32::from_rgba_unmultiplied(
+                                                    palette.accent.r(),
+                                                    palette.accent.g(),
+                                                    palette.accent.b(),
+                                                    if palette.is_dark { 45 } else { 26 },
+                                                ),
+                                            );
+                                        } else if resp.hovered() {
+                                            ui.painter().rect_filled(
+                                                row_rect,
+                                                Rounding::same(5.0),
+                                                Color32::from_rgba_unmultiplied(
+                                                    palette.accent.r(),
+                                                    palette.accent.g(),
+                                                    palette.accent.b(),
+                                                    18,
+                                                ),
+                                            );
+                                        }
+                                        // Pack vector icon on left
+                                        let (icon_glyph, accent_rgb) =
+                                            crate::core::icon_packs::IconGlyph::resolve(
+                                                &item.name,
+                                                &item.extension,
+                                                item.is_dir,
+                                                icon_spec.is_image,
+                                                icon_spec.is_media,
+                                                icon_spec.is_archive,
+                                                icon_spec.is_document,
+                                                icon_spec.is_code,
+                                                icon_spec.color_rgb,
+                                            );
+                                        let icon_rect = Rect::from_center_size(
+                                            Pos2::new(row_rect.left() + 16.0, row_rect.center().y),
+                                            Vec2::splat(22.0),
+                                        );
+                                        crate::core::icon_packs::paint_icon(
+                                            ui, icon_pack, icon_glyph, icon_rect, accent_rgb,
+                                        );
+                                        // Name text right of icon, tag dots before it
+                                        let name_color = if is_selected {
+                                            palette.text_primary
+                                        } else if item.is_hidden {
+                                            palette.text_muted
+                                        } else {
+                                            palette.text_primary
+                                        };
+                                        let col_tags =
+                                            crate::core::tags::read_tags_cache(&item.path);
+                                        let col_dots_w = tag_dots_width(&col_tags);
+                                        let col_name_x = row_rect.left() + 34.0 + col_dots_w;
+                                        ui.painter().text(
+                                            Pos2::new(col_name_x, row_rect.center().y),
+                                            egui::Align2::LEFT_CENTER,
+                                            &display_name,
+                                            egui::FontId::proportional(13.5),
+                                            name_color,
+                                        );
+                                        if !col_tags.is_empty() {
+                                            paint_tag_dots(
+                                                ui,
+                                                &col_tags,
+                                                col_name_x - 4.0,
+                                                row_rect.center().y,
+                                            );
+                                        }
+                                        // Folder chevron on far right (Finder style)
+                                        if item.is_dir {
+                                            ui.painter().text(
+                                                Pos2::new(
+                                                    row_rect.right() - 8.0,
+                                                    row_rect.center().y,
+                                                ),
+                                                egui::Align2::RIGHT_CENTER,
+                                                ">",
+                                                egui::FontId::proportional(14.0),
+                                                if is_selected {
+                                                    palette.accent
+                                                } else {
+                                                    palette.text_muted
+                                                },
+                                            );
+                                        }
+                                        // Role-specific click dispatch
+                                        if resp.clicked() {
+                                            match role {
+                                                ColumnRole::Ancestor => {
+                                                    if !chain_sel {
+                                                        self.selected_paths.clear();
+                                                        self.selected_paths
+                                                            .insert(item.path.clone());
+                                                        if item.is_dir {
+                                                            *nav_into_dir = Some(item.path.clone());
+                                                        } else {
+                                                            *preview_to_set = Some(item.clone());
+                                                        }
+                                                    }
+                                                }
+                                                ColumnRole::Current => {
+                                                    self.focused_row = idx;
+                                                    self.selected_paths.clear();
+                                                    self.selected_paths.insert(item.path.clone());
+                                                    if item.is_dir {
+                                                        *subfolder_to_load =
+                                                            Some((0, item.path.clone()));
+                                                        self.column_preview_item = None;
+                                                        *preview_to_set = None;
+                                                    } else {
+                                                        *preview_to_set = Some(item.clone());
+                                                        self.column_stack.clear();
+                                                    }
+                                                }
+                                                ColumnRole::Descendant => {
+                                                    self.selected_paths.clear();
+                                                    self.selected_paths.insert(item.path.clone());
+                                                    if item.is_dir {
+                                                        *subfolder_to_load = Some((
+                                                            stack_index + 1,
+                                                            item.path.clone(),
+                                                        ));
+                                                        self.column_preview_item = None;
+                                                        *preview_to_set = None;
+                                                    } else {
+                                                        *preview_to_set = Some(item.clone());
+                                                        self.column_stack.truncate(stack_index + 1);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if resp.double_clicked() {
+                                            if item.is_dir {
+                                                *nav_into_dir = Some(item.path.clone());
+                                            } else {
+                                                open_in_default_app(&item.path);
+                                            }
+                                        }
+
+                                        // Right-click menu (same wiring as list/grid rows).
+                                        resp.context_menu(|menu_ui| {
+                                            let targets = if selection_snapshot.len() > 1
+                                                && selection_snapshot.contains(&item.path)
+                                            {
+                                                selection_snapshot.to_vec()
+                                            } else {
+                                                vec![item.path.clone()]
+                                            };
+                                            item_intents.clear();
+                                            item_intents.push(Self::run_item_context_menu(
+                                                menu_ui,
+                                                icon_pack,
+                                                menu_style,
+                                                palette.accent,
+                                                item,
+                                                &targets,
+                                            ));
+                                        });
+                                    }
+                                });
+                            });
+                    });
+            },
+        );
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn render_columns_view(
         &mut self,
@@ -5942,538 +6341,112 @@ impl ExplorerView {
                     // DYNAMIC MILLER COLUMNS: Maximize Space Utilization
                     // ==========================================
                     let active_preview = self.column_preview_item.clone();
-                    let has_inspector = active_preview.as_ref().map(|item| !item.is_dir).unwrap_or(false);
+                    let has_inspector = active_preview
+                        .as_ref()
+                        .map(|item| !item.is_dir)
+                        .unwrap_or(false);
                     let avail_w = ui.available_width().max(400.0);
                     let inspector_w = if has_inspector {
                         (avail_w * 0.28).clamp(280.0, 420.0)
                     } else {
                         0.0
                     };
-                    let num_cols = (self.column_stack.len() + 1) as f32;
+                    // Miller lineage: columns are the ancestor chain
+                    // (root-first) + the current directory + the opened
+                    // descendant stack (Finder column-view layout).
+                    let cur_dir = self.current_dir.clone();
+                    let chain_cols: Vec<(PathBuf, Vec<FileItem>)> = ancestor_chain(&cur_dir)
+                        .into_iter()
+                        .map(|p| {
+                            let sub = self.get_column_entries(&p);
+                            (p, sub)
+                        })
+                        .collect();
+                    let num_cols = (chain_cols.len() + 1 + self.column_stack.len()) as f32;
                     let cols_avail_w = (avail_w - inspector_w - (num_cols * 2.0)).max(220.0);
                     let natural_col_w = cols_avail_w / num_cols;
                     let col_w = natural_col_w.max(230.0);
-                    let col1_w = col_w;
-
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(col1_w, full_h),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            egui::Frame::none()
-                                .fill(palette.card_bg)
-                                .stroke(Stroke::new(1.0_f32, palette.border))
-                                .show(ui, |ui| {
-                                    ui.set_min_size(Vec2::new(col1_w, full_h));
-                                    egui::ScrollArea::vertical()
-                                        .id_salt("miller_col_scroll_0")
-                                        .auto_shrink([false, false])
-                                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-                                        .show(ui, |ui| {
-                                            ui.vertical(|ui| {
-                                                for (idx, item) in entries.iter().enumerate() {
-                                                    let is_selected =
-                                                        self.selected_paths.contains(&item.path)
-                                                            || self.focused_row == idx;
-                                                    let icon_spec = resolve_file_icon(
-                                                        &item.name,
-                                                        &item.extension,
-                                                        item.is_dir,
-                                                    );
-
-                                                    let symlink_suffix =
-                                                        if item.is_symlink { " ->" } else { "" };
-                                                    let display_name = truncate_middle(
-                                                        &format!("{}{}", item.name, symlink_suffix),
-                                                        (col1_w / 8.5) as usize,
-                                                    );
-
-                                                    let (row_rect, resp) = ui.allocate_exact_size(
-                                                        Vec2::new(col1_w - 6.0, 30.0),
-                                                        egui::Sense::click_and_drag(),
-                                                    );
-                                                    // Drag source + folder-row drop targets
-                                                    if resp.drag_started_by(
-                                                        egui::PointerButton::Primary,
-                                                    ) {
-                                                        if !is_selected {
-                                                            self.selected_paths.clear();
-                                                            self.selected_paths
-                                                                .insert(item.path.clone());
-                                                        }
-                                                        let paths: Vec<PathBuf> = self
-                                                            .selected_paths
-                                                            .iter()
-                                                            .cloned()
-                                                            .collect::<Vec<_>>();
-                                                        egui::DragAndDrop::set_payload(
-                                                            ui.ctx(),
-                                                            FileDragPayload { paths },
-                                                        );
-                                                    }
-                                                    if item.is_dir {
-                                                        let drop_hl = drop_highlight_id(&item.path);
-                                                        if let Some(payload) = resp
-                                                            .dnd_hover_payload::<FileDragPayload>()
-                                                        {
-                                                            let legal =
-                                                                payload.paths.iter().all(|p| {
-                                                                    !same_or_within(&item.path, p)
-                                                                });
-                                                            if legal {
-                                                                let a = self.hover_anims.drive(
-                                                                    drop_hl,
-                                                                    1.0,
-                                                                    self.animations.hover,
-                                                                    crate::gui::anim::frame_dt(
-                                                                        ui.ctx(),
-                                                                    ),
-                                                                );
-                                                                ui.painter().rect_filled(
-                                                            row_rect,
-                                                            Rounding::same(5.0),
-                                                            Color32::from_rgba_unmultiplied(
-                                                                palette.accent.r(),
-                                                                palette.accent.g(),
-                                                                palette.accent.b(),
-                                                                (a * 80.0) as u8,
-                                                            ),
-                                                        );
-                                                            }
-                                                        } else {
-                                                            self.hover_anims.drive(
-                                                                drop_hl,
-                                                                0.0,
-                                                                self.animations.hover,
-                                                                crate::gui::anim::frame_dt(
-                                                                    ui.ctx(),
-                                                                ),
-                                                            );
-                                                        }
-                                                        if let Some(payload) = resp
-                                                            .dnd_release_payload::<FileDragPayload>(
-                                                            )
-                                                        {
-                                                            let copy = ui.input(|i| {
-                                                                i.modifiers.ctrl
-                                                                    || i.modifiers.command
-                                                            });
-                                                            column_drop = Some((
-                                                                item.path.clone(),
-                                                                payload.paths.to_vec(),
-                                                                copy,
-                                                            ));
-                                                        }
-                                                    }
-                                                    // Row band: hover/selected
-                                                    if is_selected {
-                                                        // Selection tint: straight accent alpha,
-                                                        // 45 dark / 26 light (premul with raw
-                                                        // rgb rendered near-opaque).
-                                                        ui.painter().rect_filled(
-                                                            row_rect,
-                                                            Rounding::same(5.0),
-                                                            Color32::from_rgba_unmultiplied(
-                                                                palette.accent.r(),
-                                                                palette.accent.g(),
-                                                                palette.accent.b(),
-                                                                if palette.is_dark { 45 } else { 26 },
-                                                            ),
-                                                        );
-                                                    } else if resp.hovered() {
-                                                        ui.painter().rect_filled(
-                                                            row_rect,
-                                                            Rounding::same(5.0),
-                                                            Color32::from_rgba_unmultiplied(
-                                                                palette.accent.r(),
-                                                                palette.accent.g(),
-                                                                palette.accent.b(),
-                                                                18,
-                                                            ),
-                                                        );
-                                                    }
-                                                    // Pack vector icon on left
-                                                    let (icon_glyph, accent_rgb) =
-                                                        crate::core::icon_packs::IconGlyph::resolve(
-                                                            &item.name,
-                                                            &item.extension,
-                                                            item.is_dir,
-                                                            icon_spec.is_image,
-                                                            icon_spec.is_media,
-                                                            icon_spec.is_archive,
-                                                            icon_spec.is_document,
-                                                            icon_spec.is_code,
-                                                            icon_spec.color_rgb,
-                                                        );
-                                                    let icon_rect = Rect::from_center_size(
-                                                        Pos2::new(
-                                                            row_rect.left() + 16.0,
-                                                            row_rect.center().y,
-                                                        ),
-                                                        Vec2::splat(22.0),
-                                                    );
-                                                    crate::core::icon_packs::paint_icon(
-                                                        ui,
-                                                        self.icon_pack,
-                                                        icon_glyph,
-                                                        icon_rect,
-                                                        accent_rgb,
-                                                    );
-                                                    // Name text right of icon
-                                                    let name_color = if is_selected {
-                                                        palette.text_primary
-                                                    } else if item.is_hidden {
-                                                        palette.text_muted
-                                                    } else {
-                                                        palette.text_primary
-                                                    };
-                                                    let col_tags =
-                                                        crate::core::tags::read_tags_cache(
-                                                            &item.path,
-                                                        );
-                                                    let col_dots_w = tag_dots_width(&col_tags);
-                                                    let col_name_x =
-                                                        row_rect.left() + 34.0 + col_dots_w;
-                                                    ui.painter().text(
-                                                        Pos2::new(col_name_x, row_rect.center().y),
-                                                        egui::Align2::LEFT_CENTER,
-                                                        &display_name,
-                                                        egui::FontId::proportional(13.5),
-                                                        name_color,
-                                                    );
-                                                    if !col_tags.is_empty() {
-                                                        paint_tag_dots(
-                                                            ui,
-                                                            &col_tags,
-                                                            col_name_x - 4.0,
-                                                            row_rect.center().y,
-                                                        );
-                                                    }
-                                                    // Folder chevron on far right (Finder style)
-                                                    if item.is_dir {
-                                                        ui.painter().text(
-                                                            Pos2::new(
-                                                                row_rect.right() - 8.0,
-                                                                row_rect.center().y,
-                                                            ),
-                                                            egui::Align2::RIGHT_CENTER,
-                                                            ">",
-                                                            egui::FontId::proportional(14.0),
-                                                            if is_selected {
-                                                                palette.accent
-                                                            } else {
-                                                                palette.text_muted
-                                                            },
-                                                        );
-                                                    }
-                                                    if resp.clicked() {
-                                                        self.focused_row = idx;
-                                                        self.selected_paths.clear();
-                                                        self.selected_paths
-                                                            .insert(item.path.clone());
-                                                        if item.is_dir {
-                                                            subfolder_to_load =
-                                                                Some((0, item.path.clone()));
-                                                            self.column_preview_item = None;
-                                                            preview_to_set = None;
-                                                        } else {
-                                                            preview_to_set = Some(item.clone());
-                                                            self.column_stack.clear();
-                                                            self.column_subfolder = None;
-                                                        }
-                                                    }
-                                                    if resp.double_clicked() {
-                                                        if item.is_dir {
-                                                            nav_into_dir = Some(item.path.clone());
-                                                        } else {
-                                                            open_in_default_app(&item.path);
-                                                        }
-                                                    }
-
-                                                    // Right-click menu (same wiring as list/grid rows).
-                                                    resp.context_menu(|menu_ui| {
-                                                        let targets = if selection_snapshot.len() > 1
-                                                            && selection_snapshot.contains(&item.path)
-                                                        {
-                                                            selection_snapshot.clone()
-                                                        } else {
-                                                            vec![item.path.clone()]
-                                                        };
-                                                        item_intents.clear();
-                                                        item_intents.push(Self::run_item_context_menu(
-                                                            menu_ui,
-                                                            icon_pack,
-                                                            menu_style,
-                                                            palette.accent,
-                                                            item,
-                                                            &targets,
-                                                        ));
-                                                    });
-                                                }
-                                            });
-                                        });
-                                });
-                        },
-                    );
 
                     // ==========================================
-                    // MULTI-COLUMN STACK: Nested Subfolders (macOS Finder Parity)
+                    // MILLER CHAIN: ancestor columns, root-first (Finder
+                    // column view renders the whole chain left of the
+                    // current directory column)
                     // ==========================================
-                    for (col_idx, (_sub_path, sub_items)) in
-                        self.column_stack.clone().into_iter().enumerate()
+                    for (ci, (chain_path, chain_entries)) in chain_cols.iter().enumerate() {
+                        let next_chain: PathBuf = chain_cols
+                            .get(ci + 1)
+                            .map(|(p, _)| p.clone())
+                            .unwrap_or_else(|| cur_dir.clone());
+                        self.render_miller_column(
+                            ui,
+                            palette,
+                            chain_path,
+                            chain_entries,
+                            ColumnRole::Ancestor,
+                            col_w,
+                            full_h,
+                            &selection_snapshot,
+                            icon_pack,
+                            menu_style,
+                            Some(next_chain.as_path()),
+                            0,
+                            &mut subfolder_to_load,
+                            &mut nav_into_dir,
+                            &mut preview_to_set,
+                            &mut column_drop,
+                            &mut item_intents,
+                        );
+                    }
+
+                    // Current directory column (click behavior identical
+                    // to the old primary column; the vestigial subfolder
+                    // state write is gone).
                     {
-                        ui.allocate_ui_with_layout(
-                            Vec2::new(col_w, full_h),
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                egui::Frame::none()
-                                    .fill(palette.card_bg)
-                                    .stroke(Stroke::new(1.0_f32, palette.border))
-                                    .show(ui, |ui| {
-                                        ui.set_min_size(Vec2::new(col_w, full_h));
-                                        egui::ScrollArea::vertical()
-                                            .id_salt(("miller_col_scroll_child", col_idx))
-                                            .auto_shrink([false, false])
-                                            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-                                            .show(ui, |ui| {
-                                                ui.vertical(|ui| {
-                                                    for sub_item in &sub_items {
-                                                        let is_sel = self
-                                                            .selected_paths
-                                                            .contains(&sub_item.path);
-                                                        let icon_spec = resolve_file_icon(
-                                                            &sub_item.name,
-                                                            &sub_item.extension,
-                                                            sub_item.is_dir,
-                                                        );
+                        self.render_miller_column(
+                            ui,
+                            palette,
+                            cur_dir.as_path(),
+                            &entries,
+                            ColumnRole::Current,
+                            col_w,
+                            full_h,
+                            &selection_snapshot,
+                            icon_pack,
+                            menu_style,
+                            None,
+                            0,
+                            &mut subfolder_to_load,
+                            &mut nav_into_dir,
+                            &mut preview_to_set,
+                            &mut column_drop,
+                            &mut item_intents,
+                        );
+                    }
 
-                                                        let symlink_suffix = if sub_item.is_symlink
-                                                        {
-                                                            " ->"
-                                                        } else {
-                                                            ""
-                                                        };
-                                                        let display_name = truncate_middle(
-                                                            &format!(
-                                                                "{}{}",
-                                                                sub_item.name, symlink_suffix
-                                                            ),
-                                                            (col_w / 8.5) as usize,
-                                                        );
-
-                                                        let (row_rect, resp) = ui
-                                                            .allocate_exact_size(
-                                                                Vec2::new(col_w - 6.0, 30.0),
-                                                                egui::Sense::click_and_drag(),
-                                                            );
-                                                        // Drag source + folder-row drop targets
-                                                        if resp.drag_started_by(
-                                                            egui::PointerButton::Primary,
-                                                        ) {
-                                                            if !is_sel {
-                                                                self.selected_paths.clear();
-                                                                self.selected_paths
-                                                                    .insert(sub_item.path.clone());
-                                                            }
-                                                            let paths: Vec<PathBuf> = self
-                                                                .selected_paths
-                                                                .iter()
-                                                                .cloned()
-                                                                .collect::<Vec<_>>();
-                                                            egui::DragAndDrop::set_payload(
-                                                                ui.ctx(),
-                                                                FileDragPayload { paths },
-                                                            );
-                                                        }
-                                                        if sub_item.is_dir {
-                                                            let drop_hl =
-                                                                drop_highlight_id(&sub_item.path);
-                                                            if let Some(payload) =
-                                                        resp.dnd_hover_payload::<FileDragPayload>()
-                                                    {
-                                                        let legal = payload.paths.iter().all(|p| {
-                                                            !same_or_within(&sub_item.path, p)
-                                                        });
-                                                        if legal {
-                                                            let a = self.hover_anims.drive(
-                                                                drop_hl,
-                                                                1.0,
-                                                                self.animations.hover,
-                                                                crate::gui::anim::frame_dt(
-                                                                    ui.ctx(),
-                                                                ),
-                                                            );
-                                                            ui.painter().rect_filled(
-                                                                row_rect,
-                                                                Rounding::same(5.0),
-                                                                Color32::from_rgba_unmultiplied(
-                                                                    palette.accent.r(),
-                                                                    palette.accent.g(),
-                                                                    palette.accent.b(),
-                                                                    (a * 70.0) as u8,
-                                                                ),
-                                                            );
-                                                        }
-                                                    } else {
-                                                        self.hover_anims.drive(
-                                                            drop_hl,
-                                                            0.0,
-                                                            self.animations.hover,
-                                                            crate::gui::anim::frame_dt(ui.ctx()),
-                                                        );
-                                                    }
-                                                            if let Some(payload) = resp
-                                                        .dnd_release_payload::<FileDragPayload>()
-                                                    {
-                                                        let copy = ui.input(|i| {
-                                                            i.modifiers.ctrl || i.modifiers.command
-                                                        });
-                                                        column_drop = Some((
-                                                            sub_item.path.clone(),
-                                                            payload.paths.to_vec(),
-                                                            copy,
-                                                        ));
-                                                    }
-                                                        }
-                                                        if is_sel {
-                                                            // Selection tint: straight accent
-                                                            // alpha, 45 dark / 26 light.
-                                                            ui.painter().rect_filled(
-                                                                row_rect,
-                                                                Rounding::same(5.0),
-                                                                Color32::from_rgba_unmultiplied(
-                                                                    palette.accent.r(),
-                                                                    palette.accent.g(),
-                                                                    palette.accent.b(),
-                                                                    if palette.is_dark { 45 } else { 26 },
-                                                                ),
-                                                            );
-                                                        } else if resp.hovered() {
-                                                            ui.painter().rect_filled(
-                                                                row_rect,
-                                                                Rounding::same(5.0),
-                                                                Color32::from_rgba_unmultiplied(
-                                                                    palette.accent.r(),
-                                                                    palette.accent.g(),
-                                                                    palette.accent.b(),
-                                                                    18,
-                                                                ),
-                                                            );
-                                                        }
-                                                        let (cglyph, caccent) =
-                                                    crate::core::icon_packs::IconGlyph::resolve(
-                                                        &sub_item.name,
-                                                        &sub_item.extension,
-                                                        sub_item.is_dir,
-                                                        icon_spec.is_image,
-                                                        icon_spec.is_media,
-                                                        icon_spec.is_archive,
-                                                        icon_spec.is_document,
-                                                        icon_spec.is_code,
-                                                        icon_spec.color_rgb,
-                                                    );
-                                                        let icon_rect = Rect::from_center_size(
-                                                            Pos2::new(
-                                                                row_rect.left() + 16.0,
-                                                                row_rect.center().y,
-                                                            ),
-                                                            Vec2::splat(22.0),
-                                                        );
-                                                        crate::core::icon_packs::paint_icon(
-                                                            ui,
-                                                            self.icon_pack,
-                                                            cglyph,
-                                                            icon_rect,
-                                                            caccent,
-                                                        );
-                                                        let name_color = if is_sel {
-                                                            palette.text_primary
-                                                        } else if sub_item.is_hidden {
-                                                            palette.text_muted
-                                                        } else {
-                                                            palette.text_primary
-                                                        };
-                                                        ui.painter().text(
-                                                            Pos2::new(
-                                                                row_rect.left() + 34.0,
-                                                                row_rect.center().y,
-                                                            ),
-                                                            egui::Align2::LEFT_CENTER,
-                                                            &display_name,
-                                                            egui::FontId::proportional(13.5),
-                                                            name_color,
-                                                        );
-                                                        // Folder chevron on far right
-                                                        if sub_item.is_dir {
-                                                            ui.painter().text(
-                                                                Pos2::new(
-                                                                    row_rect.right() - 8.0,
-                                                                    row_rect.center().y,
-                                                                ),
-                                                                egui::Align2::RIGHT_CENTER,
-                                                                ">",
-                                                                egui::FontId::proportional(14.0),
-                                                                if is_sel {
-                                                                    palette.accent
-                                                                } else {
-                                                                    palette.text_muted
-                                                                },
-                                                            );
-                                                        }
-                                                        if resp.clicked() {
-                                                            self.selected_paths.clear();
-                                                            self.selected_paths
-                                                                .insert(sub_item.path.clone());
-                                                            if sub_item.is_dir {
-                                                                subfolder_to_load = Some((
-                                                                    col_idx + 1,
-                                                                    sub_item.path.clone(),
-                                                                ));
-                                                                self.column_preview_item = None;
-                                                                preview_to_set = None;
-                                                            } else {
-                                                                preview_to_set =
-                                                                    Some(sub_item.clone());
-                                                                let new_len = col_idx + 1;
-                                                                self.column_stack.truncate(new_len);
-                                                            }
-                                                        }
-                                                        if resp.double_clicked() {
-                                                            if sub_item.is_dir {
-                                                                nav_into_dir =
-                                                                    Some(sub_item.path.clone());
-                                                            } else {
-                                                                open_in_default_app(&sub_item.path);
-                                                            }
-                                                        }
-
-                                                        // Right-click menu (same wiring as list/grid rows).
-                                                        resp.context_menu(|menu_ui| {
-                                                            let targets =
-                                                                if selection_snapshot.len() > 1
-                                                                    && selection_snapshot
-                                                                        .contains(&sub_item.path)
-                                                                {
-                                                                    selection_snapshot.clone()
-                                                                } else {
-                                                                    vec![sub_item.path.clone()]
-                                                                };
-                                                            item_intents.clear();
-                                                            item_intents.push(
-                                                                Self::run_item_context_menu(
-                                                                    menu_ui,
-                                                                    icon_pack,
-                                                                    menu_style,
-                                                                    palette.accent,
-                                                                    sub_item,
-                                                                    &targets,
-                                                                ),
-                                                            );
-                                                        });
-                                                    }
-                                                });
-                                            });
-                                    });
-                            },
+                    // ==========================================
+                    // MILLER STACK: opened descendant columns (kept
+                    // right of the current directory column)
+                    // ==========================================
+                    let stack_clone: Vec<(PathBuf, Vec<FileItem>)> = self.column_stack.clone();
+                    for (si, (sub_path, sub_items)) in stack_clone.iter().enumerate() {
+                        self.render_miller_column(
+                            ui,
+                            palette,
+                            sub_path,
+                            sub_items,
+                            ColumnRole::Descendant,
+                            col_w,
+                            full_h,
+                            &selection_snapshot,
+                            icon_pack,
+                            menu_style,
+                            None,
+                            si,
+                            &mut subfolder_to_load,
+                            &mut nav_into_dir,
+                            &mut preview_to_set,
+                            &mut column_drop,
+                            &mut item_intents,
                         );
                     }
 
@@ -6500,6 +6473,14 @@ impl ExplorerView {
                             );
                         }
                     }
+
+                    // Finder behavior: after navigation or a newly opened
+                    // column, align the hscroll to the deepest column and
+                    // the inspector (the right-most content).
+                    if self.needs_miller_scroll_align {
+                        self.needs_miller_scroll_align = false;
+                        ui.scroll_to_cursor(Some(egui::Align::Max));
+                    }
                 });
             });
 
@@ -6507,7 +6488,8 @@ impl ExplorerView {
             let sub_entries = self.get_column_entries(&sub_path);
             self.column_stack.truncate(insert_idx);
             self.column_stack.push((sub_path, sub_entries));
-            self.column_subfolder = self.column_stack.first().cloned();
+            // Reveal the newly opened deepest column next frame.
+            self.needs_miller_scroll_align = true;
         }
         if let Some(preview_item) = preview_to_set {
             self.column_preview_item = Some(preview_item);
