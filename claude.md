@@ -1311,3 +1311,42 @@ Out of scope (recorded in the plan): studio_view.rs breadcrumb
 consumer, Finder-style segment collapse ("..." root elision) - scope
 was scrolling, not elision - and the pre-existing synchronous
 list_directory_sync inside the child-folder dropdown popup.
+
+2026-11-12 A4 SECURITY AUDIT WAVE CLOSED (docs(plan) 5c446e9 94 lines,
+fix(gui) 01d8e60 +5/-1): full execution-surface census read verbatim
+across src/ - shell_verb, open_with_choose (openas verb first, rundll32
+OpenAs_RunDLL fallback), expand_env_vars, open_with::candidates
+(KEY_READ-only registry), open_with::launch, run_command_line,
+run_custom_item (Command/App/Script/Link kinds), shell_execute_open,
+open_in_default_app (+ cmd /c start argv-array fallback),
+open_in_default_editor, reveal_in_file_manager, open_terminal_in_dir,
+perform_drop, apply_item_intent (extract/delete/cut/copy/duplicate),
+extract_archive_safe + unpack_tar_safe + extract_single_file_safe, the
+fs worker (Copy via resolve_unique_paste_path + action_journal, Move,
+Delete staging), reg.exe autostart add/delete/query, ffmpeg encoder
+probe, daemon start/stop, widget spawns.
+FINDING S-1 HIGH (FIXED): open_terminal_in_dir PowerShell fallback
+interpolated the raw path into "Set-Location -LiteralPath \x27{path}\x27"
+with NO escaping - an NTFS-legal single quote in a folder name
+terminates the PowerShell string and executes injected code. Fix:
+double embedded single quotes (\x27 -> \x27\x27) before interpolation.
+Gates green: fmt, clippy -D warnings, full test suite (incl ASCII
+sweep over src/gui), release build 46.54s, porcelain exactly
+src/gui/explorer_view.rs.
+S-2 INFO (accepted boundary, recorded not changed): naive "{path}"
+double-quote wrapping in the rundll32 fallback, substitute_target and
+open_with::launch - safe because Windows paths cannot contain "
+(NTFS-forbidden character).
+S-3 INFO (by design): run_command_line executes user-config command
+lines verbatim via CreateProcessW; trust boundary is the user\x27s own
+MossambiConfig file, identical to Explorer run-verb menus.
+S-4 verified safe: extract_archive_safe dunce-canonicalizes the dest,
+zip enclosed_name() Zip-Slip bail, tar ParentDir/RootDir/Prefix
+component bail, symlink/hardlink escape checks, entry-count cap and
+uncompressed-bytes ceiling with a bounded take() read (bomb
+protection); perform_drop rejects dest holding/containing source
+(same_or_within + parent check); deletes filtered by
+is_protected_os_file with trash-first + logged permanent fallback;
+reg/ffmpeg/daemon/widget spawns all Command::args([...]) argv-array
+form; expand_env_vars preserves unknown %VAR% pairs literally.
+Deviations from the plan doc: none.
