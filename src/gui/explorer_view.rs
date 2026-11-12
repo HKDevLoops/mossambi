@@ -724,6 +724,10 @@ pub struct ExplorerView {
     /// column on the next render (set by navigate_to and the
     /// stack-push site).
     pub needs_miller_scroll_align: bool,
+    /// One-shot: the breadcrumb path bar should reveal the current
+    /// segment on the next render (set by navigate_to when the
+    /// directory actually changes).
+    pub needs_breadcrumb_scroll_align: bool,
 
     // Windows 11 & macOS Home Dashboard View
     pub is_home_view: bool,
@@ -983,6 +987,7 @@ impl Default for ExplorerView {
             column_preview_item: None,
             column_cache: std::collections::HashMap::new(),
             needs_miller_scroll_align: false,
+            needs_breadcrumb_scroll_align: false,
             hover_preview: None,
             thumb_cache: std::collections::HashMap::new(),
             thumb_decode_budget: (0, Instant::now()),
@@ -1121,6 +1126,9 @@ impl ExplorerView {
             self.is_editing_path = false;
             self.renaming_path = None;
             self.focused_row = 0;
+            // Finder parity: reveal the current segment in the
+            // breadcrumb path bar after a real directory change.
+            self.needs_breadcrumb_scroll_align = true;
         }
 
         let home_opt = crate::core::platform_paths::home_dir_opt();
@@ -2984,144 +2992,172 @@ impl ExplorerView {
         let mut breadcrumb_nav: Option<PathBuf> = None;
         let current_dir = self.current_dir.clone();
 
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(3.0, 0.0);
-            for (i, seg) in segments.iter().enumerate() {
-                if i > 0 {
-                    ui.label(
-                        egui::RichText::new(">")
-                            .size(12.0)
-                            .color(palette.text_muted),
-                    );
-                }
-                let is_current = seg.target_path == current_dir;
-
-                // Authentic macOS Finder segment icon
-                let glyph = if i == 0 {
-                    IconGlyph::Drive
-                } else {
-                    IconGlyph::Folder
-                };
-                let (icon_rect, _) =
-                    ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::hover());
-                let tint = if is_current {
-                    [palette.accent.r(), palette.accent.g(), palette.accent.b()]
-                } else {
-                    [
-                        palette.text_secondary.r(),
-                        palette.text_secondary.g(),
-                        palette.text_secondary.b(),
-                    ]
-                };
-                crate::core::icon_packs::paint_icon(ui, self.icon_pack, glyph, icon_rect, tint);
-
-                let text = egui::RichText::new(&seg.label)
-                    .size(12.5)
-                    .color(if is_current {
-                        palette.text_primary
-                    } else {
-                        palette.text_secondary
-                    });
-                let btn = egui::Button::new(text)
-                    .fill(Color32::TRANSPARENT)
-                    .stroke(Stroke::NONE)
-                    .min_size(Vec2::new(0.0, 24.0));
-                let resp = ui.add(btn);
-                if resp.clicked() {
-                    let target = seg.target_path.clone();
-                    self.navigate_to(target);
-                }
-
-                // Child folder dropdown popover
-                let pop_id =
-                    ui.make_persistent_id(format!("bc_pop_{}_{}", i, seg.target_path.display()));
-                let ch_resp = ui.add(
-                    egui::Button::new(egui::RichText::new("v").size(8.5).color(palette.text_muted))
-                        .fill(Color32::TRANSPARENT)
-                        .stroke(Stroke::NONE)
-                        .min_size(Vec2::new(10.0, 20.0)),
-                );
-                if ch_resp.clicked() {
-                    ui.memory_mut(|m| m.toggle_popup(pop_id));
-                }
-                egui::popup::popup_below_widget(
-                    ui,
-                    pop_id,
-                    &ch_resp,
-                    egui::PopupCloseBehavior::CloseOnClick,
-                    |popup_ui| {
-                        popup_ui.set_max_width(220.0);
-                        popup_ui.set_max_height(260.0);
-                        egui::ScrollArea::vertical().show(popup_ui, |pui| {
-                            let subs = list_directory_sync(&seg.target_path);
-                            let dirs: Vec<_> = subs.into_iter().filter(|e| e.is_dir).collect();
-                            if dirs.is_empty() {
-                                pui.label(
-                                    egui::RichText::new("No subfolders")
-                                        .size(11.0)
-                                        .color(palette.text_muted),
-                                );
-                            } else {
-                                for sub in dirs {
-                                    if pui
-                                        .button(
-                                            egui::RichText::new(format!("> {}", sub.name))
-                                                .size(11.5),
-                                        )
-                                        .clicked()
-                                    {
-                                        breadcrumb_nav = Some(sub.path);
-                                    }
-                                }
-                            }
-                        });
-                    },
-                );
-
-                // Dragging a file onto an ancestor path segment moves it there.
-                if !is_current {
-                    if let Some(payload) = resp.dnd_hover_payload::<FileDragPayload>() {
-                        let legal = payload
-                            .paths
-                            .iter()
-                            .all(|p| !same_or_within(&seg.target_path, p));
-                        if legal {
-                            let a = self.hover_anims.drive(
-                                drop_highlight_id(&seg.target_path),
-                                1.0,
-                                self.animations.hover,
-                                crate::gui::anim::frame_dt(ui.ctx()),
-                            );
-                            ui.painter().rect_stroke(
-                                resp.rect,
-                                Rounding::same(5.0),
-                                Stroke::new(
-                                    (a * 2.0).max(1.0),
-                                    Color32::from_rgba_unmultiplied(
-                                        palette.accent.r(),
-                                        palette.accent.g(),
-                                        palette.accent.b(),
-                                        (a * 200.0) as u8,
-                                    ),
-                                ),
+        // Finder parity: a long ancestor trail scrolls horizontally
+        // instead of clipping (scrollbar appears only when needed).
+        egui::ScrollArea::horizontal()
+            .id_salt("breadcrumb_hscroll")
+            .auto_shrink([false, true])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(3.0, 0.0);
+                    for (i, seg) in segments.iter().enumerate() {
+                        if i > 0 {
+                            ui.label(
+                                egui::RichText::new(">")
+                                    .size(12.0)
+                                    .color(palette.text_muted),
                             );
                         }
-                    } else {
-                        self.hover_anims.drive(
-                            drop_highlight_id(&seg.target_path),
-                            0.0,
-                            self.animations.hover,
-                            crate::gui::anim::frame_dt(ui.ctx()),
+                        let is_current = seg.target_path == current_dir;
+
+                        // Authentic macOS Finder segment icon
+                        let glyph = if i == 0 {
+                            IconGlyph::Drive
+                        } else {
+                            IconGlyph::Folder
+                        };
+                        let (icon_rect, _) =
+                            ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::hover());
+                        let tint = if is_current {
+                            [palette.accent.r(), palette.accent.g(), palette.accent.b()]
+                        } else {
+                            [
+                                palette.text_secondary.r(),
+                                palette.text_secondary.g(),
+                                palette.text_secondary.b(),
+                            ]
+                        };
+                        crate::core::icon_packs::paint_icon(
+                            ui,
+                            self.icon_pack,
+                            glyph,
+                            icon_rect,
+                            tint,
                         );
+
+                        let text =
+                            egui::RichText::new(&seg.label)
+                                .size(12.5)
+                                .color(if is_current {
+                                    palette.text_primary
+                                } else {
+                                    palette.text_secondary
+                                });
+                        let btn = egui::Button::new(text)
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::NONE)
+                            .min_size(Vec2::new(0.0, 24.0));
+                        let resp = ui.add(btn);
+                        if resp.clicked() {
+                            let target = seg.target_path.clone();
+                            self.navigate_to(target);
+                        }
+
+                        // Child folder dropdown popover
+                        let pop_id = ui.make_persistent_id(format!(
+                            "bc_pop_{}_{}",
+                            i,
+                            seg.target_path.display()
+                        ));
+                        let ch_resp = ui.add(
+                            egui::Button::new(
+                                egui::RichText::new("v").size(8.5).color(palette.text_muted),
+                            )
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::NONE)
+                            .min_size(Vec2::new(10.0, 20.0)),
+                        );
+                        if ch_resp.clicked() {
+                            ui.memory_mut(|m| m.toggle_popup(pop_id));
+                        }
+                        egui::popup::popup_below_widget(
+                            ui,
+                            pop_id,
+                            &ch_resp,
+                            egui::PopupCloseBehavior::CloseOnClick,
+                            |popup_ui| {
+                                popup_ui.set_max_width(220.0);
+                                popup_ui.set_max_height(260.0);
+                                egui::ScrollArea::vertical().show(popup_ui, |pui| {
+                                    let subs = list_directory_sync(&seg.target_path);
+                                    let dirs: Vec<_> =
+                                        subs.into_iter().filter(|e| e.is_dir).collect();
+                                    if dirs.is_empty() {
+                                        pui.label(
+                                            egui::RichText::new("No subfolders")
+                                                .size(11.0)
+                                                .color(palette.text_muted),
+                                        );
+                                    } else {
+                                        for sub in dirs {
+                                            if pui
+                                                .button(
+                                                    egui::RichText::new(format!("> {}", sub.name))
+                                                        .size(11.5),
+                                                )
+                                                .clicked()
+                                            {
+                                                breadcrumb_nav = Some(sub.path);
+                                            }
+                                        }
+                                    }
+                                });
+                            },
+                        );
+
+                        // Dragging a file onto an ancestor path segment moves it there.
+                        if !is_current {
+                            if let Some(payload) = resp.dnd_hover_payload::<FileDragPayload>() {
+                                let legal = payload
+                                    .paths
+                                    .iter()
+                                    .all(|p| !same_or_within(&seg.target_path, p));
+                                if legal {
+                                    let a = self.hover_anims.drive(
+                                        drop_highlight_id(&seg.target_path),
+                                        1.0,
+                                        self.animations.hover,
+                                        crate::gui::anim::frame_dt(ui.ctx()),
+                                    );
+                                    ui.painter().rect_stroke(
+                                        resp.rect,
+                                        Rounding::same(5.0),
+                                        Stroke::new(
+                                            (a * 2.0).max(1.0),
+                                            Color32::from_rgba_unmultiplied(
+                                                palette.accent.r(),
+                                                palette.accent.g(),
+                                                palette.accent.b(),
+                                                (a * 200.0) as u8,
+                                            ),
+                                        ),
+                                    );
+                                }
+                            } else {
+                                self.hover_anims.drive(
+                                    drop_highlight_id(&seg.target_path),
+                                    0.0,
+                                    self.animations.hover,
+                                    crate::gui::anim::frame_dt(ui.ctx()),
+                                );
+                            }
+                            if let Some(payload) = resp.dnd_release_payload::<FileDragPayload>() {
+                                let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
+                                breadcrumb_drop =
+                                    Some((seg.target_path.clone(), payload.paths.to_vec(), copy));
+                            }
+                        }
                     }
-                    if let Some(payload) = resp.dnd_release_payload::<FileDragPayload>() {
-                        let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-                        breadcrumb_drop =
-                            Some((seg.target_path.clone(), payload.paths.to_vec(), copy));
-                    }
+                });
+
+                // Finder behavior: after navigation the path bar reveals
+                // the current (right-most) segment.
+                if self.needs_breadcrumb_scroll_align {
+                    self.needs_breadcrumb_scroll_align = false;
+                    ui.scroll_to_cursor(Some(egui::Align::Max));
                 }
-            }
-        });
+            });
 
         if let Some((dest_dir, paths, copy)) = breadcrumb_drop {
             self.perform_drop(dest_dir, &paths, copy);
