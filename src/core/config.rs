@@ -647,6 +647,14 @@ pub struct MossambiConfig {
     /// User-defined context-menu entries (Phase 4 customization).
     #[serde(default)]
     pub context_menu_items: Vec<CustomMenuItem>,
+    /// Details-view visible columns (DetailColumn ids, persisted
+    /// order). Name (id 0) is locked first. Missing in old configs ->
+    /// Finder defaults.
+    #[serde(default = "default_explorer_columns")]
+    pub explorer_columns: Vec<u8>,
+    /// Persisted per-column widths keyed by DetailColumn id.
+    #[serde(default)]
+    pub explorer_column_widths: std::collections::BTreeMap<u8, u32>,
     #[serde(default)]
     pub animations: AnimationSettings,
     #[serde(default = "default_explorer_zoom")]
@@ -792,6 +800,11 @@ fn default_explorer_layout() -> u8 {
     0
 }
 
+fn default_explorer_columns() -> Vec<u8> {
+    // Finder defaults: Name(0), DateModified(1), Size(2), Kind(3).
+    vec![0, 1, 2, 3]
+}
+
 fn default_calculate_checksums() -> bool {
     true
 }
@@ -847,6 +860,8 @@ impl Default for MossambiConfig {
             checkbox_mode: CheckboxMode::default(),
             menu_style: MenuStyle::default(),
             context_menu_items: Vec::new(),
+            explorer_columns: default_explorer_columns(),
+            explorer_column_widths: std::collections::BTreeMap::new(),
             animations: AnimationSettings::default(),
             explorer_zoom: default_explorer_zoom(),
             background_work: default_background_work(),

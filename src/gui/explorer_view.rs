@@ -41,6 +41,22 @@ pub enum ViewMode {
 /// ASCII funnel glyph for the compact filter popover button.
 const FILTER_FUNNEL_GLYPH: &str = "|v";
 
+/// Optional-comparison helper that sorts missing values last in the
+/// natural (ascending) direction.
+pub fn cmp_opt_last<T: Ord>(a: &Option<T>, b: &Option<T>) -> std::cmp::Ordering {
+    match (a, b) {
+        (Some(x), Some(y)) => x.cmp(y),
+        (None, None) => std::cmp::Ordering::Equal,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (Some(_), None) => std::cmp::Ordering::Less,
+    }
+}
+
+/// Derived Kind sort key - the same category the details table paints.
+fn kind_key(item: &FileItem) -> &'static str {
+    resolve_file_icon(&item.name, &item.extension, item.is_dir).category
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SortColumn {
     Name,
@@ -48,6 +64,12 @@ pub enum SortColumn {
     Extension,
     Date,
     Permissions,
+    DateCreated,
+    Hidden,
+    Symlink,
+    SymlinkTarget,
+    Path,
+    Kind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +90,342 @@ impl SortDirection {
         match self {
             Self::Ascending => "^",
             Self::Descending => "v",
+        }
+    }
+}
+
+/// Details (list) view columns, Finder parity. `Name` is locked: it
+/// is always present and always first; every other column can be
+/// shown, hidden, resized, sorted and filtered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DetailColumn {
+    Name,
+    DateModified,
+    Size,
+    Kind,
+    DateCreated,
+    Permissions,
+    Hidden,
+    Symlink,
+    SymlinkTarget,
+    Extension,
+    Path,
+}
+
+impl DetailColumn {
+    /// Canonical column set in persisted order.
+    pub fn all() -> [DetailColumn; 11] {
+        [
+            Self::Name,
+            Self::DateModified,
+            Self::Size,
+            Self::Kind,
+            Self::DateCreated,
+            Self::Permissions,
+            Self::Hidden,
+            Self::Symlink,
+            Self::SymlinkTarget,
+            Self::Extension,
+            Self::Path,
+        ]
+    }
+
+    /// Stable persisted id (config key). Variant order IS the id.
+    pub fn id(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_id(id: u8) -> Option<Self> {
+        if id < 11 {
+            Some(Self::all()[id as usize])
+        } else {
+            None
+        }
+    }
+
+    /// Plain-ASCII header label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::DateModified => "Date Modified",
+            Self::Size => "Size",
+            Self::Kind => "Kind",
+            Self::DateCreated => "Date Created",
+            Self::Permissions => "Permissions",
+            Self::Hidden => "Hidden",
+            Self::Symlink => "Symlink",
+            Self::SymlinkTarget => "Symlink Target",
+            Self::Extension => "Extension",
+            Self::Path => "Path",
+        }
+    }
+
+    /// Finder-parity default width before any resize.
+    pub fn default_w(self) -> f32 {
+        match self {
+            Self::Name => 260.0,
+            Self::DateModified => 170.0,
+            Self::Size => 110.0,
+            Self::Kind => 140.0,
+            Self::DateCreated => 170.0,
+            Self::Permissions => 110.0,
+            Self::Hidden => 80.0,
+            Self::Symlink => 90.0,
+            Self::SymlinkTarget => 200.0,
+            Self::Extension => 100.0,
+            Self::Path => 240.0,
+        }
+    }
+
+    /// Hard minimum during resize.
+    pub fn min_w(self) -> f32 {
+        match self {
+            Self::Name => 120.0,
+            Self::DateModified | Self::DateCreated => 100.0,
+            Self::Size => 80.0,
+            Self::Kind | Self::Permissions => 90.0,
+            Self::Hidden | Self::Symlink => 60.0,
+            Self::SymlinkTarget => 100.0,
+            Self::Extension => 60.0,
+            Self::Path => 120.0,
+        }
+    }
+
+    pub fn aligns_right(self) -> bool {
+        matches!(self, Self::Size)
+    }
+
+    /// The SortColumn axis driven by this column header.
+    pub fn sort_column(self) -> SortColumn {
+        match self {
+            Self::Name => SortColumn::Name,
+            Self::DateModified => SortColumn::Date,
+            Self::Size => SortColumn::Size,
+            Self::Kind => SortColumn::Kind,
+            Self::DateCreated => SortColumn::DateCreated,
+            Self::Permissions => SortColumn::Permissions,
+            Self::Hidden => SortColumn::Hidden,
+            Self::Symlink => SortColumn::Symlink,
+            Self::SymlinkTarget => SortColumn::SymlinkTarget,
+            Self::Extension => SortColumn::Extension,
+            Self::Path => SortColumn::Path,
+        }
+    }
+
+    /// Finder default visible set: Name, Date Modified, Size, Kind.
+    pub fn default_visible_ids() -> [u8; 4] {
+        [0, 1, 2, 3]
+    }
+}
+
+/// Visible-column order plus per-column widths for the details
+/// table. Filters are session-scoped and intentionally not part of
+/// this struct; only visibility and widths persist to MossambiConfig.
+#[derive(Debug, Clone)]
+pub struct ColumnLayout {
+    pub visible: Vec<DetailColumn>,
+    pub widths: std::collections::BTreeMap<u8, f32>,
+}
+
+impl Default for ColumnLayout {
+    fn default() -> Self {
+        Self::finder_default()
+    }
+}
+
+impl ColumnLayout {
+    /// Finder-parity defaults: Name, Date Modified, Size, Kind with
+    /// each column's default width.
+    pub fn finder_default() -> Self {
+        let visible = DetailColumn::default_visible_ids()
+            .iter()
+            .filter_map(|&id| DetailColumn::from_id(id))
+            .collect();
+        let widths = DetailColumn::all()
+            .iter()
+            .map(|c| (c.id(), c.default_w()))
+            .collect();
+        Self { visible, widths }
+    }
+
+    /// Effective width of a column (persisted width or its default).
+    pub fn width(&self, col: DetailColumn) -> f32 {
+        self.widths
+            .get(&col.id())
+            .copied()
+            .unwrap_or(col.default_w())
+    }
+
+    pub fn set_width(&mut self, col: DetailColumn, w: f32) {
+        self.widths.insert(col.id(), w.max(col.min_w()));
+    }
+
+    /// Name is locked: always visible and always first.
+    pub fn is_locked(col: DetailColumn) -> bool {
+        col == DetailColumn::Name
+    }
+
+    pub fn show(&mut self, col: DetailColumn) {
+        if !self.visible.contains(&col) {
+            self.visible.push(col);
+        }
+    }
+
+    pub fn hide(&mut self, col: DetailColumn) {
+        if Self::is_locked(col) {
+            return;
+        }
+        self.visible.retain(|c| *c != col);
+    }
+
+    /// Rebuilds from persisted config values; unknown ids are dropped
+    /// and Name is re-locked first. An empty persisted list falls back
+    /// to the Finder defaults (legacy/missing keys behave the same).
+    pub fn from_config(visible_ids: &[u8], widths: &std::collections::BTreeMap<u8, u32>) -> Self {
+        let mut layout = Self::finder_default();
+        if !visible_ids.is_empty() {
+            let mut visible: Vec<DetailColumn> = visible_ids
+                .iter()
+                .filter_map(|&id| DetailColumn::from_id(id))
+                .collect();
+            // Name locked first, exactly once.
+            visible.retain(|c| *c != DetailColumn::Name);
+            visible.insert(0, DetailColumn::Name);
+            layout.visible = visible;
+        }
+        for (id, w) in widths {
+            if let Some(col) = DetailColumn::from_id(*id) {
+                layout.set_width(col, *w as f32);
+            }
+        }
+        layout
+    }
+
+    /// Persists back to config types.
+    pub fn to_config(&self) -> (Vec<u8>, std::collections::BTreeMap<u8, u32>) {
+        (
+            self.visible.iter().map(|c| c.id()).collect(),
+            self.widths.iter().map(|(id, w)| (*id, *w as u32)).collect(),
+        )
+    }
+}
+
+/// Tri-state boolean filter (Hidden / Symlink columns).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriState {
+    Any,
+    Yes,
+    No,
+}
+
+/// Date bucket filter (Date Modified / Date Created columns).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DateBucket {
+    Any,
+    Today,
+    ThisWeek,
+    ThisMonth,
+    Older,
+}
+
+/// Session-scoped per-column filter value. Values are keyed by
+/// DetailColumn id in ExplorerView.column_filters and compose AND.
+/// Filters are intentionally not persisted.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ColumnFilterValue {
+    /// Case-insensitive substring on the column's text.
+    Text(String),
+    /// Tri-state on Hidden / Symlink columns.
+    TriState(TriState),
+    /// Minimum size in bytes (files only).
+    SizeMin(u64),
+    /// Maximum size in bytes (files only).
+    SizeMax(u64),
+    /// Date bucket on Date Modified / Date Created columns.
+    Date(DateBucket),
+}
+
+/// Bucket membership test against a reference "today". Pure so tests
+/// can drive it with fixed dates.
+pub fn date_in_bucket(
+    date: chrono::NaiveDate,
+    today: chrono::NaiveDate,
+    bucket: DateBucket,
+) -> bool {
+    use chrono::Datelike;
+    match bucket {
+        DateBucket::Any => true,
+        DateBucket::Today => date == today,
+        DateBucket::ThisWeek => date > today - chrono::Duration::days(7),
+        DateBucket::ThisMonth => date.year() == today.year() && date.month() == today.month(),
+        DateBucket::Older => date < today.with_day(1).unwrap_or(today),
+    }
+}
+
+fn column_text(item: &FileItem, col: DetailColumn) -> String {
+    match col {
+        DetailColumn::Name => item.name.clone(),
+        DetailColumn::Kind => kind_key(item).to_string(),
+        DetailColumn::Extension => item.extension.clone(),
+        DetailColumn::SymlinkTarget => item
+            .symlink_target
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        DetailColumn::Path => item.path.to_string_lossy().to_string(),
+        _ => String::new(),
+    }
+}
+
+fn column_bool(item: &FileItem, col: DetailColumn) -> bool {
+    match col {
+        DetailColumn::Hidden => item.is_hidden,
+        DetailColumn::Symlink => item.is_symlink,
+        _ => false,
+    }
+}
+
+fn column_time(item: &FileItem, col: DetailColumn) -> Option<std::time::SystemTime> {
+    match col {
+        DetailColumn::DateModified => item.modified,
+        DetailColumn::DateCreated => item.created,
+        _ => None,
+    }
+}
+
+/// True when the item passes the given column filter value.
+pub fn matches_column_filter(
+    item: &FileItem,
+    col: DetailColumn,
+    value: &ColumnFilterValue,
+) -> bool {
+    match value {
+        ColumnFilterValue::Text(q) => {
+            let q = q.trim();
+            if q.is_empty() {
+                return true;
+            }
+            let hay = column_text(item, col);
+            let q_lower = q.to_lowercase();
+            hay.to_lowercase().contains(&q_lower)
+        }
+        ColumnFilterValue::TriState(tri) => match tri {
+            TriState::Any => true,
+            TriState::Yes => column_bool(item, col),
+            TriState::No => !column_bool(item, col),
+        },
+        ColumnFilterValue::SizeMin(min) => !item.is_dir && item.size_bytes >= *min,
+        ColumnFilterValue::SizeMax(max) => !item.is_dir && item.size_bytes <= *max,
+        ColumnFilterValue::Date(bucket) => {
+            if *bucket == DateBucket::Any {
+                return true;
+            }
+            let Some(time) = column_time(item, col) else {
+                return false;
+            };
+            let dt: chrono::DateTime<chrono::Local> = time.into();
+            let today = chrono::Local::now().date_naive();
+            date_in_bucket(dt.date_naive(), today, *bucket)
         }
     }
 }
@@ -254,6 +612,8 @@ pub struct ExplorerView {
     pub view_mode: ViewMode,
     pub icon_size: f32,
     pub sort_column: SortColumn,
+    pub column_filters: std::collections::BTreeMap<u8, ColumnFilterValue>,
+    pub column_layout: ColumnLayout,
     pub sort_direction: SortDirection,
     pub category_filter: CategoryFilter,
     /// Active tag smart-list filter (from the sidebar Tags section).
@@ -526,6 +886,11 @@ impl Default for ExplorerView {
             },
             icon_size: 96.0,
             sort_column: SortColumn::Name,
+            column_filters: std::collections::BTreeMap::new(),
+            column_layout: {
+                let cfg0 = crate::core::MossambiConfig::load();
+                ColumnLayout::from_config(&cfg0.explorer_columns, &cfg0.explorer_column_widths)
+            },
             sort_direction: SortDirection::Ascending,
             category_filter: CategoryFilter::All,
             active_tag: None,
@@ -889,6 +1254,14 @@ impl ExplorerView {
             .filter(|e| !crate::core::is_protected_os_file(&e.path))
             .filter(|e| self.show_hidden_files || !e.is_hidden)
             .filter(|e| self.category_filter.matches(e))
+            .filter(|e| {
+                self.column_filters
+                    .iter()
+                    .all(|(id, value)| match DetailColumn::from_id(*id) {
+                        Some(col) => matches_column_filter(e, col, value),
+                        None => true,
+                    })
+            })
             .filter(|e| match active_tag {
                 // Tag smart-list: keep only items carrying the active tag.
                 Some(tag) => crate::core::tags::read_tags_cache(&e.path)
@@ -924,8 +1297,14 @@ impl ExplorerView {
                 SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
                 SortColumn::Size => a.size_bytes.cmp(&b.size_bytes),
                 SortColumn::Extension => a.extension.cmp(&b.extension),
-                SortColumn::Date => a.modified.cmp(&b.modified),
+                SortColumn::Date => cmp_opt_last(&a.modified, &b.modified),
+                SortColumn::DateCreated => cmp_opt_last(&a.created, &b.created),
                 SortColumn::Permissions => a.permissions_mode.cmp(&b.permissions_mode),
+                SortColumn::Hidden => a.is_hidden.cmp(&b.is_hidden),
+                SortColumn::Symlink => a.is_symlink.cmp(&b.is_symlink),
+                SortColumn::SymlinkTarget => cmp_opt_last(&a.symlink_target, &b.symlink_target),
+                SortColumn::Path => a.path.cmp(&b.path),
+                SortColumn::Kind => kind_key(a).cmp(kind_key(b)),
             };
             let directed = match self.sort_direction {
                 SortDirection::Ascending => ordering,
@@ -939,6 +1318,18 @@ impl ExplorerView {
         });
 
         scored_list.into_iter().map(|(item, _)| item).collect()
+    }
+
+    /// Persists column visibility + widths to MossambiConfig via the
+    /// load-modify-save pattern (filters stay session-scoped).
+    pub fn save_column_layout(&mut self) {
+        let mut cfg = crate::core::MossambiConfig::load();
+        let (cols, widths) = self.column_layout.to_config();
+        cfg.explorer_columns = cols;
+        cfg.explorer_column_widths = widths;
+        if let Err(e) = cfg.save() {
+            eprintln!("mossambi: failed to save column layout: {e}");
+        }
     }
 
     /// Returns the count of non-folder items matching a category
@@ -3528,7 +3919,10 @@ impl ExplorerView {
             on_inspect_file,
         );
 
-        // Finder-style column metrics: [checkbox] Name | Date Modified | Size | Kind
+        // Finder-style column metrics: [checkbox] + one header per
+        // ColumnLayout.visible column. Widths come from the persisted
+        // layout; the LAST visible column auto-fills the remaining
+        // width (Finder rule), clamped to its minimum.
         let scrollbar_reserve = 12.0;
         let content_width = (ui.available_width() - scrollbar_reserve).max(320.0);
         let col_pad = 6.0_f32;
@@ -3539,19 +3933,18 @@ impl ExplorerView {
             _ => 30.0_f32,
         };
         let available_for_cols = (content_width - checkbox_w).max(320.0);
-        let (name_w, date_w, size_w, kind_w) = if available_for_cols > 860.0 {
-            let n_w = (available_for_cols * 0.44).clamp(260.0, 520.0);
-            let d_w = (available_for_cols * 0.22).clamp(140.0, 210.0);
-            let s_w = (available_for_cols * 0.13).clamp(90.0, 130.0);
-            let k_w = (available_for_cols - n_w - d_w - s_w).max(110.0);
-            (n_w, d_w, s_w, k_w)
-        } else {
-            let k_w = 110.0_f32;
-            let s_w = 88.0_f32;
-            let d_w = 130.0_f32;
-            let n_w = (available_for_cols - k_w - s_w - d_w).max(180.0);
-            (n_w, d_w, s_w, k_w)
-        };
+
+        let visible: Vec<DetailColumn> = self.column_layout.visible.clone();
+        let mut widths: Vec<f32> = visible
+            .iter()
+            .map(|c| self.column_layout.width(*c))
+            .collect();
+        let n_cols = visible.len();
+        if n_cols > 0 {
+            let fixed: f32 = widths[..n_cols - 1].iter().sum();
+            let min_last = visible[n_cols - 1].min_w();
+            widths[n_cols - 1] = (available_for_cols - fixed).max(min_last);
+        }
 
         // Column header: flat interactive labels, no button boxes, hairline underneath
         let header_h = 26.0_f32;
@@ -3559,37 +3952,30 @@ impl ExplorerView {
             ui.allocate_exact_size(Vec2::new(content_width, header_h), egui::Sense::hover());
         let hp = ui.painter_at(header_rect);
 
-        // Column rects (name starts with left inset so it aligns with row glyphs)
-        // Authentic macOS Finder order: Name | Date Modified | Size | Kind
-        let cols = {
-            let x0 = header_rect.left() + checkbox_w;
-            let y0 = header_rect.top();
-            (
-                Rect::from_min_size(Pos2::new(x0 + col_pad, y0), Vec2::new(name_w, header_h)),
-                Rect::from_min_size(Pos2::new(x0 + name_w, y0), Vec2::new(date_w, header_h)),
-                Rect::from_min_size(
-                    Pos2::new(x0 + name_w + date_w, y0),
-                    Vec2::new(size_w, header_h),
-                ),
-                Rect::from_min_size(
-                    Pos2::new(x0 + name_w + date_w + size_w, y0),
-                    Vec2::new(kind_w + col_pad, header_h),
-                ),
-            )
-        };
-
         let mut header_sort: Option<SortColumn> = None;
-        let header_cells: [(&str, Rect, SortColumn, bool); 4] = [
-            ("Name", cols.0, SortColumn::Name, false),
-            ("Date Modified", cols.1, SortColumn::Date, false),
-            ("Size", cols.2, SortColumn::Size, true),
-            ("Kind", cols.3, SortColumn::Extension, false),
-        ];
+        // Dynamic header cells over the visible column order. Each cell is
+        // click-to-sort, right-click opens the visibility menu (Finder
+        // parity; Name is locked), and carries a 6 px resize strip on its
+        // right boundary (except the auto-filling last column).
+        let mut header_specs: Vec<(Rect, DetailColumn)> = Vec::with_capacity(n_cols);
+        let mut col_x = header_rect.left() + checkbox_w;
+        for (ci, col) in visible.iter().enumerate() {
+            header_specs.push((
+                Rect::from_min_size(
+                    Pos2::new(col_x, header_rect.top()),
+                    Vec2::new(widths[ci], header_h),
+                ),
+                *col,
+            ));
+            col_x += widths[ci];
+        }
 
-        for (label, hrect, col, right_align) in header_cells {
-            let is_active = self.sort_column == col;
-            let id = ui.make_persistent_id(("hdr", col));
-            let resp = ui.interact(hrect, id, egui::Sense::click());
+        for (hrect, col) in header_specs.iter() {
+            let right_align = col.aligns_right();
+            let is_active = self.sort_column == col.sort_column();
+            let filter_active = self.column_filters.contains_key(&col.id());
+            let id = ui.make_persistent_id(("hdr", col.id()));
+            let resp = ui.interact(*hrect, id, egui::Sense::click());
             if resp.hovered() {
                 // Straight-alpha hover band: premul with raw card_hover rgb
                 // rendered near-opaque over the header row.
@@ -3609,6 +3995,11 @@ impl ExplorerView {
             } else {
                 String::new()
             };
+            let funnel = if filter_active {
+                format!(" {}", FILTER_FUNNEL_GLYPH)
+            } else {
+                String::new()
+            };
             let align = if right_align {
                 egui::Align2::RIGHT_CENTER
             } else {
@@ -3622,16 +4013,66 @@ impl ExplorerView {
             hp.text(
                 Pos2::new(tx, hrect.center().y),
                 align,
-                format!("{}{}", label, arrow),
+                format!("{}{}{}", col.label(), arrow, funnel),
                 egui::FontId::proportional(11.5),
-                if is_active {
+                if is_active || filter_active {
                     palette.accent
                 } else {
                     palette.text_muted
                 },
             );
             if resp.clicked() {
-                header_sort = Some(col);
+                header_sort = Some(col.sort_column());
+            }
+            // Finder parity: right-click a header to choose which columns
+            // are shown. Name is locked (always visible, always first).
+            resp.context_menu(|menu_ui| {
+                for choice in DetailColumn::all() {
+                    let shown = self.column_layout.visible.contains(&choice);
+                    let row_label = if ColumnLayout::is_locked(choice) {
+                        format!("{} (locked)", choice.label())
+                    } else if shown {
+                        format!("[x] {}", choice.label())
+                    } else {
+                        format!("[ ] {}", choice.label())
+                    };
+                    let row = crate::gui::file_menu::menu_item_custom(menu_ui, &row_label);
+                    if row.clicked() && !ColumnLayout::is_locked(choice) {
+                        if shown {
+                            self.column_layout.hide(choice);
+                        } else {
+                            self.column_layout.show(choice);
+                        }
+                        self.save_column_layout();
+                    }
+                }
+            });
+        }
+
+        // 6 px resize strips on header boundaries: dragging resizes the
+        // column LEFT of the strip (Finder rule). The last visible column
+        // auto-fills instead, so it gets no strip.
+        for (i, (hrect, col)) in header_specs.iter().enumerate() {
+            if i + 1 >= header_specs.len() {
+                break;
+            }
+            let strip = Rect::from_min_size(
+                Pos2::new(hrect.right() - 3.0, header_rect.top()),
+                Vec2::new(6.0, header_h),
+            );
+            let sid = ui.make_persistent_id(("colsz", col.id()));
+            let sresp = ui
+                .interact(strip, sid, egui::Sense::drag())
+                .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            if sresp.dragged() {
+                let delta = sresp.drag_delta().x;
+                if delta != 0.0 {
+                    let cur = self.column_layout.width(*col);
+                    self.column_layout.set_width(*col, cur + delta);
+                }
+            }
+            if sresp.drag_stopped() {
+                self.save_column_layout();
             }
         }
 
@@ -3787,104 +4228,174 @@ impl ExplorerView {
                         icon_spec.color_rgb,
                     );
 
-                    // 1. Name cell: icon + name (Finder semantics)
-                    let name_x = row_rect.left() + col_pad + checkbox_w;
-                    let icon_side = 22.0;
-                    let icon_rect = Rect::from_center_size(
-                        Pos2::new(name_x + 2.0 + icon_side * 0.5, row_rect.center().y),
-                        Vec2::splat(icon_side),
-                    );
-                    crate::core::icon_packs::paint_icon(
-                        ui,
-                        self.icon_pack,
-                        icon_glyph,
-                        icon_rect,
-                        icon_accent,
-                    );
-                    // High-contrast text: selection is disclosed by the checkbox,
-                    // so the name always sits on the normal fill (Finder detail).
-                    let mut name_color = palette.text_primary;
-                    if item.is_hidden {
-                        name_color = Color32::from_rgba_unmultiplied(
-                            name_color.r(),
-                            name_color.g(),
-                            name_color.b(),
-                            130,
-                        );
-                    }
-                    let name_font = egui::FontId::proportional(13.5);
-                    // Tag dots sit immediately before the name, so the name
-                    // shifts right by the width the dots occupy.
                     let row_tags = crate::core::tags::read_tags_cache(&item.path);
                     let dots_w = tag_dots_width(&row_tags);
-                    let name_pos_x = name_x + 28.0 + dots_w;
-                    let name_avail = name_w - 32.0 - col_pad - dots_w;
-                    let suffix = if item.is_symlink { " ->" } else { "" };
-                    let display = truncate_middle(
-                        &format!("{}{}", item.name, suffix),
-                        (name_avail / 7.0) as usize,
-                    );
+
+                    // Dynamic per-column row cells over the visible column
+                    // order (Finder parity). The name cell keeps its special
+                    // painting: icon, tag dots, symlink suffix, hidden dim.
+                    let mut cell_x = row_rect.left() + checkbox_w;
                     let rp = ui.painter();
-                    rp.text(
-                        Pos2::new(name_pos_x, row_rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        display,
-                        name_font,
-                        name_color,
-                    );
-                    if !row_tags.is_empty() {
-                        paint_tag_dots(ui, &row_tags, name_pos_x - 4.0, row_rect.center().y);
+                    for (ci, col) in visible.iter().enumerate() {
+                        let w = widths[ci];
+                        let cell_rect = Rect::from_min_size(
+                            Pos2::new(cell_x, row_rect.top()),
+                            Vec2::new(w, row_height),
+                        );
+                        if *col == DetailColumn::Name {
+                            let name_x = cell_rect.left() + col_pad;
+                            let icon_side = 22.0;
+                            let icon_rect = Rect::from_center_size(
+                                Pos2::new(name_x + 2.0 + icon_side * 0.5, row_rect.center().y),
+                                Vec2::splat(icon_side),
+                            );
+                            crate::core::icon_packs::paint_icon(
+                                ui,
+                                self.icon_pack,
+                                icon_glyph,
+                                icon_rect,
+                                icon_accent,
+                            );
+                            // High-contrast text: selection is disclosed by the
+                            // checkbox, so the name always sits on the normal
+                            // fill (Finder detail).
+                            let mut name_color = palette.text_primary;
+                            if item.is_hidden {
+                                name_color = Color32::from_rgba_unmultiplied(
+                                    name_color.r(),
+                                    name_color.g(),
+                                    name_color.b(),
+                                    130,
+                                );
+                            }
+                            let name_font = egui::FontId::proportional(13.5);
+                            // The name text starts after the icon + tag dots.
+                            let name_pos_x = name_x + 28.0 + dots_w;
+                            let name_avail = w - 32.0 - col_pad - dots_w;
+                            let suffix = if item.is_symlink { " ->" } else { "" };
+                            let display = truncate_middle(
+                                &format!("{}{}", item.name, suffix),
+                                (name_avail / 7.0) as usize,
+                            );
+                            rp.text(
+                                Pos2::new(name_pos_x, row_rect.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                display,
+                                name_font,
+                                name_color,
+                            );
+                            if !row_tags.is_empty() {
+                                paint_tag_dots(
+                                    ui,
+                                    &row_tags,
+                                    name_pos_x - 4.0,
+                                    row_rect.center().y,
+                                );
+                            }
+                        } else {
+                            let (text, font, color, align) = match col {
+                                DetailColumn::Name => (
+                                    String::new(),
+                                    egui::FontId::proportional(12.0),
+                                    palette.text_secondary,
+                                    egui::Align2::LEFT_CENTER,
+                                ),
+                                DetailColumn::DateModified => (
+                                    item.formatted_date(),
+                                    egui::FontId::proportional(12.0),
+                                    palette.text_secondary,
+                                    egui::Align2::LEFT_CENTER,
+                                ),
+                                DetailColumn::DateCreated => (
+                                    item.formatted_created(),
+                                    egui::FontId::proportional(12.0),
+                                    palette.text_secondary,
+                                    egui::Align2::LEFT_CENTER,
+                                ),
+                                DetailColumn::Size => {
+                                    let size_text = if item.is_dir {
+                                        String::from("--")
+                                    } else {
+                                        item.formatted_size()
+                                    };
+                                    (
+                                        size_text,
+                                        egui::FontId::monospace(11.5),
+                                        palette.text_secondary,
+                                        egui::Align2::RIGHT_CENTER,
+                                    )
+                                }
+                                DetailColumn::Kind => (
+                                    icon_spec.category.to_string(),
+                                    egui::FontId::proportional(12.0),
+                                    palette.text_muted,
+                                    egui::Align2::LEFT_CENTER,
+                                ),
+                                DetailColumn::Permissions => (
+                                    item.formatted_permissions(),
+                                    egui::FontId::monospace(11.5),
+                                    palette.text_secondary,
+                                    egui::Align2::LEFT_CENTER,
+                                ),
+                                DetailColumn::Hidden => (
+                                    if item.is_hidden {
+                                        "Yes".to_string()
+                                    } else {
+                                        String::new()
+                                    },
+                                    egui::FontId::proportional(12.0),
+                                    palette.text_secondary,
+                                    egui::Align2::LEFT_CENTER,
+                                ),
+                                DetailColumn::Symlink => (
+                                    if item.is_symlink {
+                                        "Link".to_string()
+                                    } else {
+                                        String::new()
+                                    },
+                                    egui::FontId::proportional(12.0),
+                                    palette.text_secondary,
+                                    egui::Align2::LEFT_CENTER,
+                                ),
+                                DetailColumn::SymlinkTarget => (
+                                    item.symlink_target
+                                        .as_ref()
+                                        .map(|p| p.to_string_lossy().to_string())
+                                        .unwrap_or_default(),
+                                    egui::FontId::proportional(12.0),
+                                    palette.text_secondary,
+                                    egui::Align2::LEFT_CENTER,
+                                ),
+                                DetailColumn::Extension => (
+                                    item.extension.clone(),
+                                    egui::FontId::proportional(12.0),
+                                    palette.text_secondary,
+                                    egui::Align2::LEFT_CENTER,
+                                ),
+                                DetailColumn::Path => (
+                                    item.path.to_string_lossy().to_string(),
+                                    egui::FontId::proportional(12.0),
+                                    palette.text_muted,
+                                    egui::Align2::LEFT_CENTER,
+                                ),
+                            };
+                            let tx_x = if col.aligns_right() {
+                                cell_rect.right() - 4.0
+                            } else {
+                                cell_rect.left() + col_pad
+                            };
+                            let budget = ((w - 2.0 * col_pad) / 7.0).max(3.0) as usize;
+                            let display = truncate_middle(&text, budget);
+                            rp.text(
+                                Pos2::new(tx_x, row_rect.center().y),
+                                align,
+                                display,
+                                font,
+                                color,
+                            );
+                        }
+                        cell_x += w;
                     }
-
-                    // 2. Date Modified cell (macOS Finder order: right after Name)
-                    let date_rect = Rect::from_min_size(
-                        Pos2::new(row_rect.left() + checkbox_w + name_w, row_rect.top()),
-                        Vec2::new(date_w, row_height),
-                    );
-                    rp.text(
-                        Pos2::new(date_rect.left() + col_pad, date_rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        item.formatted_date(),
-                        egui::FontId::proportional(12.0),
-                        palette.text_secondary,
-                    );
-
-                    // 3. Size cell (right-aligned, monospace). Dirs report "--".
-                    let size_rect = Rect::from_min_size(
-                        Pos2::new(
-                            row_rect.left() + checkbox_w + name_w + date_w,
-                            row_rect.top(),
-                        ),
-                        Vec2::new(size_w, row_height),
-                    );
-                    let size_text = if item.is_dir {
-                        String::from("--")
-                    } else {
-                        item.formatted_size()
-                    };
-                    rp.text(
-                        Pos2::new(size_rect.right() - 4.0, size_rect.center().y),
-                        egui::Align2::RIGHT_CENTER,
-                        size_text.as_str(),
-                        egui::FontId::monospace(11.5),
-                        palette.text_secondary,
-                    );
-
-                    // 4. Kind cell (Finder "Kind": human category, dim)
-                    let kind_rect = Rect::from_min_size(
-                        Pos2::new(
-                            row_rect.left() + checkbox_w + name_w + date_w + size_w,
-                            row_rect.top(),
-                        ),
-                        Vec2::new(kind_w, row_height),
-                    );
-                    rp.text(
-                        Pos2::new(kind_rect.left() + 2.0, kind_rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        icon_spec.category,
-                        egui::FontId::proportional(12.0),
-                        palette.text_muted,
-                    );
 
                     // -- Interaction: Finder semantics --
                     if row_resp.double_clicked() {

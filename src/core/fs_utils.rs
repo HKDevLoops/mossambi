@@ -140,6 +140,7 @@ pub struct FileItem {
     pub is_dir: bool,
     pub size_bytes: u64,
     pub modified: Option<SystemTime>,
+    pub created: Option<SystemTime>,
     pub extension: String,
     pub is_hidden: bool,
     pub is_symlink: bool,
@@ -157,6 +158,7 @@ impl FileItem {
         let metadata = std::fs::metadata(&path).ok();
         let size_bytes = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
         let modified = metadata.as_ref().and_then(|m| m.modified().ok());
+        let created = metadata.as_ref().and_then(|m| m.created().ok());
         let extension = if is_dir {
             String::new()
         } else {
@@ -217,6 +219,7 @@ impl FileItem {
             is_dir,
             size_bytes,
             modified,
+            created,
             extension,
             is_hidden,
             is_symlink,
@@ -271,6 +274,16 @@ impl FileItem {
     /// (e.g. "22 Nov 2024 at 08:30") using standard chrono local time.
     pub fn formatted_date(&self) -> String {
         let Some(time) = self.modified else {
+            return "--".to_string();
+        };
+        let dt: chrono::DateTime<chrono::Local> = time.into();
+        dt.format("%d %b %Y at %H:%M").to_string()
+    }
+
+    /// Formats the creation timestamp in the same Finder format as
+    /// formatted_date (e.g. "22 Nov 2024 at 08:30").
+    pub fn formatted_created(&self) -> String {
+        let Some(time) = self.created else {
             return "--".to_string();
         };
         let dt: chrono::DateTime<chrono::Local> = time.into();
