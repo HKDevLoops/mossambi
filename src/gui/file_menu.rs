@@ -313,9 +313,11 @@ pub fn menu_item_glyph(
 /// uses 15 px white type per the macOS Finder design directive.
 fn menu_row_text(ui: &mut Ui, label: &str) -> Response {
     let font = eframe::egui::FontId::proportional(15.0);
+    let budget = ui.available_width() - 12.0;
+    let label = elide_to_width(ui, label, budget, font.clone());
     let galley = ui
         .painter()
-        .layout_no_wrap(label.to_owned(), font, eframe::egui::Color32::WHITE);
+        .layout_no_wrap(label, font, eframe::egui::Color32::WHITE);
     let row_h = galley.size().y + 8.0;
     let (rect, resp) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::click());
@@ -349,10 +351,39 @@ pub fn menu_item_custom(ui: &mut Ui, label: &str) -> Response {
     menu_row_text(ui, label)
 }
 
+/// Measures a label and chops it with an ASCII ellipsis until it fits the
+/// given width budget (Finder truncation style: one line, ellipsis at end).
+fn elide_to_width(ui: &Ui, label: &str, max_width: f32, font: eframe::egui::FontId) -> String {
+    if max_width <= 0.0 {
+        return label.to_owned();
+    }
+    let fits = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), eframe::egui::Color32::WHITE)
+            .size()
+            .x
+            <= max_width
+    };
+    if fits(label) {
+        return label.to_owned();
+    }
+    let mut out: String = label.to_owned();
+    loop {
+        if fits(&format!("{out}...")) {
+            return format!("{out}...");
+        }
+        if out.pop().is_none() {
+            return "...".to_owned();
+        }
+    }
+}
+
 /// Bold header line for the selected item's name (Apple principle: the only
 /// labeled part of a menu is the context header - groups are separated by
 /// hairlines, not captions).
 pub fn menu_header(ui: &mut Ui, name: &str, tint: Color32) {
+    let font = eframe::egui::FontId::proportional(13.5);
+    let name = elide_to_width(ui, name, ui.available_width() - 12.0, font);
     ui.label(
         eframe::egui::RichText::new(name)
             .strong()

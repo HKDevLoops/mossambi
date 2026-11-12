@@ -636,7 +636,26 @@ pub fn apply_theme_visuals(ctx: &egui::Context, palette: &ThemePalette) {
         egui::Visuals::light()
     };
 
-    visuals.window_fill = palette.window_bg;
+    // Finder-width context menus: egui defaults spacing.menu_width to 400,
+    // which makes every menu (root, submenu, context) about 400 px wide.
+    // macOS Finder menus run about 230 px; all menu Areas share this spacing
+    // value, so one setting narrows every level including submenus.
+    ctx.style_mut(|style| style.spacing.menu_width = 230.0);
+
+    if palette.is_translucent && palette.window_bg.a() == 255 {
+        // Acrylic menu material: menus and popups paint window_fill through
+        // Frame::menu / Frame::popup. The main window canvas stays solid
+        // while floating menus render translucent acrylic at alpha 232.
+        visuals.window_fill = Color32::from_rgba_unmultiplied(
+            palette.window_bg.r(),
+            palette.window_bg.g(),
+            palette.window_bg.b(),
+            232,
+        );
+        visuals.menu_rounding = Rounding::same(10.0);
+    } else {
+        visuals.window_fill = palette.window_bg;
+    }
     visuals.panel_fill = palette.sidebar_bg;
     visuals.faint_bg_color = palette.card_bg;
     visuals.extreme_bg_color = palette.window_bg;
