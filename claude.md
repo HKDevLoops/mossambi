@@ -1175,3 +1175,58 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   scroll, A4 security, A5 fixes, A6 QA, then the post-wave
   computer-use verification phase (theme-picker gate + columns
   proofs + all queued probes).
+
+- ICON BLUR WAVE (2026-11-12): pixel-snapped icon painting, crisp
+  at any display scale, no resampling in the icon paint path.
+  Plans committed b45cb48 (icon-blur research + implementation
+  docs). Commit 8610a83 feat (3 files +113/-10): icon_packs.rs,
+  explorer_view.rs, tests/test_icons.rs (new).
+- Research census: 4 blur vectors - (A) fractional paint position
+  (every file-list call site centers on row_rect.center().y),
+  (B) texture/quad device-size drift (quad uses raw size*ppp,
+  texture uses round(css*ppp) clamped 12..512), (C) 7 direct
+  icon_texture consumers rasterize at one size and display at a
+  smaller one (5 nav buttons 24-to-20, 2 pills 16-to-14),
+  (D) rasterize truncation casts one device pixel under phys.
+- Step 1 icon_packs.rs: new pub snapped_icon_quad(ctx, rect,
+  css_px) - phys formula byte-identical to icon_texture
+  (((css_px*ppp).round() as u32).clamp(12,512)), css = phys/ppp,
+  min corner snapped to integer device pixels ((min*ppp).round()
+  /ppp), quad from_min_size(min, splat(css)). paint_icon_with
+  now paints snapped_icon_quad(ctx, rect, size) instead of the
+  raw from_center_size(rect.center(), splat(size)) - the single
+  choke point covers ALL paint_icon* consumers.
+- Step 2 icon_packs.rs: rasterize scaled_w/scaled_h casts now
+  .round() - the off-by-one under f32 epsilon is gone.
+- Step 3 explorer_view.rs: 7 direct consumers request the DISPLAY
+  size (texture/quad matched, 1:1 blit): 5 nav buttons back/fwd/
+  up/refresh/newfolder 24.0-to-20.0 (replaceAll on the 3-line
+  24.0/nav_tint/) pattern, confirmed 5 occurrences by nav_tint
+  census first), filter pill + toolbar pill 16.0-to-14.0.
+  nav_icon_button px-to-px matched, untouched (egui Button
+  layout position = accepted residual, out of scope).
+- Step 4 tests/test_icons.rs: 4 tests - ppp 1.0 integer snap +
+  exact 20.0 quad, ppp 1.25/1.5 device-width integral and equal
+  to the icon_texture phys size, 2 px request clamps to the 12
+  device-pixel floor, 6000 px request clamps to 512.
+- TEST-CAUGHT EGUI SEMANTIC (durable lesson): Context::
+  set_pixels_per_point is DEFERRED until the next begin_pass -
+  pixels_per_point() keeps returning the old value after set.
+  Probed empirically with a throwaway probe_ppp.rs (1.0 before
+  set, 1.0 after set, 1.25 after begin_pass; helper quad
+  verified correct: min [0.8 10.4], width 20, dx 1, dy 13).
+  Fix: tests use ctx_at() which sets ppp AND begins a pass
+  (simulating a real frame), plus a semantics-lock assert that
+  the requested ppp is ACTIVE not deferred. Probe file deleted.
+- Gates: cargo fmt clean; clippy -D warnings exit 0; cargo test
+  exit 0 (full suite green, test_icons 4/4, ASCII gate ok);
+  release build 49.69s exit 0 (mossambi.exe not running);
+  git status exactly icon_packs/explorer_view/test_icons.
+- VERDICT: ICON BLUR wave CODE-PASS. Live crispness comparison
+  captures QUEUED to the post-wave computer-use phase per user
+  directive (finish all code waves first, then verify everything
+  and fix what it finds).
+- Next: Miller 2+ fix, breadcrumb horizontal scroll, A4
+  security, A5 fixes, A6 QA, then the post-wave computer-use
+  verification phase (theme-picker gate 13 palettes + columns
+  proofs + icon crispness captures + all queued probes).
