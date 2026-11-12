@@ -1096,3 +1096,82 @@ shover/fhover/probe/fore modes plus region-diff and hash checks):
   blur fix, Miller 2+ fix, breadcrumb horizontal scroll, A4
   security, A5 fixes, A6 QA, then the post-wave computer-use
   verification phase (theme-picker gate + all queued probes).
+
+- COLUMN WAVE (2026-11-12): details-view columns - every file
+  parameter addable/removable/resizable/sortable/filterable, NO
+  zebra highlighting (standing rule). Plans committed 6af4ada
+  (columns research + implementation docs). Commit 8f9cf20 feat
+  (4 files +1155/-140): fs_utils.rs, explorer_view.rs, config.rs,
+  tests/test_columns.rs (new).
+- Step 1 fs_utils.rs: FileItem.created Option<SystemTime>
+  populated in from_path via metadata.created().ok();
+  formatted_created() mirrors the Finder date format (e.g. 22 Nov
+  2024 at 08:30). from_path remains the sole FileItem constructor.
+- Step 2 explorer_view.rs: pub cmp_opt_last (None sorts last) and
+  kind_key via resolve_file_icon().category (a static str);
+  SortColumn grown to 11 variants (Name Size Extension Date
+  Permissions DateCreated Hidden Symlink SymlinkTarget Path Kind)
+  with an 11-arm comparator (Date/DateCreated/SymlinkTarget via
+  cmp_opt_last, dirs-first retained); DetailColumn 11 variants
+  with id()/from_id()/label()/default_w()/min_w()/aligns_right()
+  (only Size right-aligns)/default_visible_ids [0,1,2,3] (Finder
+  Name, Date Modified, Size, Kind)/sort_column(); ColumnLayout
+  finder_default/width/set_width (clamps to min)/is_locked (Name
+  always visible, always first)/show/hide/from_config/to_config.
+- Step 3 session-scoped per-column filters: ColumnFilterValue =
+  Text (case-insensitive substring) / TriState / SizeMin or
+  SizeMax (files only) / Date (Any Today ThisWeek ThisMonth
+  Older), keyed by DetailColumn id in ExplorerView.column_filters
+  and composed AND into filtered_and_sorted_entries after the
+  category filter; pure date_in_bucket(date, today, bucket) for
+  testability. Filters are NOT persisted.
+- Step 4 render_details_table fully dynamic: header_specs built
+  from ColumnLayout.visible; the LAST visible column auto-fills
+  the remaining width clamped to its min; headers click-to-sort
+  with ^/v indicator plus a |v funnel tick when a column filter
+  is active; right-click header opens the visibility menu via
+  menu_item_custom with ASCII [x]/[ ]/(locked) markers (Name
+  locked), saving on toggle; 6 px drag strips on boundaries
+  resize the LEFT column (Sense::drag, ResizeHorizontal cursor,
+  drag_stopped -> save); row cells painted per column (Name keeps
+  icon/tag dots/arrow suffix/hidden dim; Size right-aligned
+  monospace with dirs as --; Permissions monospace; Path dim).
+- Step 5 persistence: MossambiConfig.explorer_columns Vec<u8>
+  (serde default vec![0,1,2,3]) and explorer_column_widths
+  BTreeMap<u8,u32>; default_explorer_columns() keeps core
+  gui-free; constructor loads ColumnLayout via a block-expression
+  local cfg0 (E0716 lesson); save_column_layout() load-modify-
+  save, called on visibility toggle and on resize release.
+- Step 6 tests/test_columns.rs: 16 tests - dense ids 0..=10,
+  ASCII labels, min<=default, only-Size right-align, from_id
+  bounds, injective sort mapping, cmp_opt_last None-last,
+  fixed-today date buckets (2026-11-12), text/Kind/tri-state/
+  size/date filter semantics, Finder defaults plus Default
+  fallback, show/hide/lock/clamp, to_config/from_config
+  roundtrip, legacy [2,7,0,99] recovery, config serde roundtrip
+  and legacy-keys-removed defaults. FileItem built via struct
+  literal (11 fields, permissions_mode u32).
+- Test-caught bug: from_config guarded emptiness AFTER inserting
+  the locked Name (the list was always non-empty by then), so an
+  empty persisted list wiped the Finder defaults down to [Name].
+  Fixed to guard the raw visible_ids BEFORE building: empty ->
+  Finder defaults; [2,7,0,99] -> [Name, Size, Symlink] with 99
+  dropped and widths applied. Locked by the legacy/unknown test.
+- Clippy catches (3): needless_borrow explorer_view.rs:1307
+  (kind_key already returns a reference - dropped the extra &),
+  field_reassign_with_default test_columns.rs:458 (struct-update
+  syntax ..MossambiConfig::default()), needless_character_
+  iteration test_columns.rs:48 (label.is_ascii()).
+- Gates: cargo fmt clean; clippy -D warnings exit 0; cargo test
+  exit 0 (test_columns 16/16, full suite green, ASCII gate ok);
+  release build 49.97s exit 0 (mossambi.exe not running);
+  git status exactly fs_utils/explorer_view/config/test_columns.
+- VERDICT: COLUMN wave CODE-PASS. Live columns proofs (resize
+  drag, header visibility menu, sort arrows, funnel filters,
+  no-zebra census) QUEUED to the post-wave computer-use phase
+  per user directive (finish all code waves first, then verify
+  everything and fix what it finds).
+- Next: icon blur fix, Miller 2+ fix, breadcrumb horizontal
+  scroll, A4 security, A5 fixes, A6 QA, then the post-wave
+  computer-use verification phase (theme-picker gate + columns
+  proofs + all queued probes).
