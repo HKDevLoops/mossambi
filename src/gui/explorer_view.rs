@@ -8248,10 +8248,14 @@ fn open_terminal_in_dir(path: &Path) {
             .spawn();
 
         if wt_result.is_err() {
+            // PowerShell single-quoted strings double embedded single
+            // quotes; a literal `'` in a path would otherwise terminate
+            // the quoting and run as injected code (S-1 security fix).
+            let ps_path = path.display().to_string().replace('\'', "''");
             let _ = std::process::Command::new("powershell.exe")
                 .arg("-NoExit")
                 .arg("-Command")
-                .arg(format!("Set-Location -LiteralPath '{}'", path.display()))
+                .arg(format!("Set-Location -LiteralPath '{}'", ps_path))
                 .spawn();
         }
     }
