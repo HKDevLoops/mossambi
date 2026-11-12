@@ -718,6 +718,9 @@ pub struct ExplorerView {
     // macOS Finder & Linux System Features
     pub show_hidden_files: bool,
     pub column_stack: Vec<(PathBuf, Vec<FileItem>)>,
+    /// Once-per-open listings for the breadcrumb child-folder popup
+    /// (F-2 fix): cleared on every navigate_to.
+    pub breadcrumb_popup_cache: std::collections::HashMap<PathBuf, Vec<FileItem>>,
     pub column_preview_item: Option<FileItem>,
     pub column_cache: std::collections::HashMap<PathBuf, Vec<FileItem>>,
     /// One-shot: the Miller hscroll should align to the deepest
@@ -984,6 +987,7 @@ impl Default for ExplorerView {
             focus_search_requested: false,
             show_hidden_files: false,
             column_stack: Vec::new(),
+            breadcrumb_popup_cache: std::collections::HashMap::new(),
             column_preview_item: None,
             column_cache: std::collections::HashMap::new(),
             needs_miller_scroll_align: false,
@@ -1072,11 +1076,34 @@ impl ExplorerView {
         self.secondary_focused_row = 0;
     }
 
+    /// Child-folder popup listing, loaded once per path and cached
+    /// (F-2 fix): the popup closure re-runs every frame while open,
+    /// so a synchronous re-list each frame would freeze the UI on
+    /// slow directories.
+    fn popup_child_dirs(&mut self, path: &Path) -> Vec<FileItem> {
+        if !self.breadcrumb_popup_cache.contains_key(path) {
+            let dirs: Vec<FileItem> = list_directory_sync(path)
+                .into_iter()
+                .filter(|e| e.is_dir)
+                .collect();
+            self.breadcrumb_popup_cache.insert(path.to_path_buf(), dirs);
+        }
+        self.breadcrumb_popup_cache
+            .get(path)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// Navigate to a new directory asynchronously with zero UI hitching
     pub fn navigate_to(&mut self, dir: PathBuf) {
         if !dir.exists() {
             return;
         }
+
+        // Popup listings are cached once per path (F-2 fix); every
+        // navigation and refresh invalidates them so the child-folder
+        // dropdown never shows stale contents after a fs operation.
+        self.breadcrumb_popup_cache.clear();
 
         // Push to navigation history
         if self.history.get(self.history_idx) != Some(&dir) {
@@ -3080,9 +3107,10 @@ impl ExplorerView {
                                 popup_ui.set_max_width(220.0);
                                 popup_ui.set_max_height(260.0);
                                 egui::ScrollArea::vertical().show(popup_ui, |pui| {
-                                    let subs = list_directory_sync(&seg.target_path);
-                                    let dirs: Vec<_> =
-                                        subs.into_iter().filter(|e| e.is_dir).collect();
+                                    // Once-per-open cache (F-2 fix): this
+                                    // closure re-runs every frame while the
+                                    // popup is open.
+                                    let dirs = self.popup_child_dirs(&seg.target_path);
                                     if dirs.is_empty() {
                                         pui.label(
                                             egui::RichText::new("No subfolders")

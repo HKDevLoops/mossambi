@@ -67,6 +67,10 @@ pub struct StudioView {
     // Universal Media Conformer Studio State
     pub conformer_unit: usize,
     pub conformer_preset_selector: String,
+
+    // Once-per-open listings for the sibling-folder context menu
+    // (F-2 fix): cleared when a navigation target is applied.
+    pub sibling_menu_cache: std::collections::HashMap<PathBuf, Vec<crate::core::FileItem>>,
 }
 
 impl Default for StudioView {
@@ -94,11 +98,31 @@ impl Default for StudioView {
 
             conformer_unit: 0,
             conformer_preset_selector: "Passport Photo (35x45mm / 300 DPI)".to_string(),
+            sibling_menu_cache: std::collections::HashMap::new(),
         }
     }
 }
 
 impl StudioView {
+    /// Sibling-folder menu listing, loaded once per directory and
+    /// cached (F-2 fix): the context-menu closure re-runs every frame
+    /// while open, so a synchronous re-list each frame would freeze
+    /// the UI on slow directories.
+    fn sibling_dirs(&mut self, parent_dir: &Path) -> Vec<crate::core::FileItem> {
+        if !self.sibling_menu_cache.contains_key(parent_dir) {
+            let dirs: Vec<crate::core::FileItem> = crate::core::list_directory_sync(parent_dir)
+                .into_iter()
+                .filter(|e| e.is_dir)
+                .collect();
+            self.sibling_menu_cache
+                .insert(parent_dir.to_path_buf(), dirs);
+        }
+        self.sibling_menu_cache
+            .get(parent_dir)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// Renders the complete macOS Studio window with sidebar and content area.
     #[allow(clippy::too_many_arguments)]
     pub fn render(
@@ -580,6 +604,20 @@ impl StudioView {
                                         );
                                         let num_segs = segments.len();
 
+                                        // Finder parity: a deep trail scrolls
+                                        // horizontally instead of clipping; the
+                                        // Edit button stays pinned right.
+                                        let edit_reserve = 52.0_f32;
+                                        let trail_w = (ribbon_w - 8.0 - edit_reserve).max(120.0);
+                                        ui.allocate_ui_with_layout(
+                                            Vec2::new(trail_w, 28.0),
+                                            egui::Layout::left_to_right(egui::Align::Center),
+                                            |ui| {
+                                                egui::ScrollArea::horizontal()
+                                                    .id_salt("studio_breadcrumb_hscroll")
+                                                    .auto_shrink([false, true])
+                                                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+                                                    .show(ui, |ui| {
                                         for (idx, seg) in segments.iter().enumerate() {
                                             if idx > 0 {
                                                 ui.label(
@@ -647,10 +685,10 @@ impl StudioView {
                                                     .target_path
                                                     .parent()
                                                     .unwrap_or(&seg.target_path);
-                                                let subs =
-                                                    crate::core::list_directory_sync(parent_dir);
-                                                let dirs: Vec<_> =
-                                                    subs.into_iter().filter(|e| e.is_dir).collect();
+                                                // Once-per-open cache (F-2 fix): this
+                                                // closure re-runs every frame while
+                                                // the menu is open.
+                                                let dirs = self.sibling_dirs(parent_dir);
                                                 if dirs.is_empty() {
                                                     menu_ui.label(
                                                         egui::RichText::new("No sibling folders")
@@ -677,6 +715,9 @@ impl StudioView {
                                                 }
                                             });
                                         }
+                                                });
+                                            },
+                                        );
 
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
@@ -696,6 +737,9 @@ impl StudioView {
                         }
 
                         if let Some(target) = nav_target {
+                            // Invalidate the sibling-menu cache (F-2 fix)
+                            // so listings never go stale after navigation.
+                            self.sibling_menu_cache.clear();
                             self.explorer_view.navigate_to(target);
                         }
                         if toggle_edit {
