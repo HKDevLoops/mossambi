@@ -341,6 +341,14 @@ fn menu_row_text(ui: &mut Ui, label: &str) -> Response {
     resp.on_hover_cursor(eframe::egui::CursorIcon::Default)
 }
 
+/// A user-defined custom context-menu row (Phase 4 customization).
+///
+/// Renders identically to built-in actions - the Finder-style text-first
+/// iconless row - with the label coming from the user's configuration.
+pub fn menu_item_custom(ui: &mut Ui, label: &str) -> Response {
+    menu_row_text(ui, label)
+}
+
 /// Bold header line for the selected item's name (Apple principle: the only
 /// labeled part of a menu is the context header - groups are separated by
 /// hairlines, not captions).

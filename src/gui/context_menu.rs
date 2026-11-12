@@ -4,6 +4,7 @@
 //! Defender scan...) so Mossambi's right-click flyouts match what Explorer shows.
 //! No external crates required - only Win32 via windows-sys.
 
+use crate::core::config::{CustomMenuItem, CustomMenuKind};
 use std::path::Path;
 
 /// Whether the Defender scan verb can execute (Windows only).
@@ -311,7 +312,7 @@ mod open_with {
 
     /// Expands %VAR% via the process environment (REG_EXPAND_SZ values).
     /// Unknown variables are left verbatim.
-    fn expand_env_vars(s: &str) -> String {
+    pub(super) fn expand_env_vars(s: &str) -> String {
         let mut out = String::with_capacity(s.len());
         let mut rest = s;
         while let Some(i) = rest.find('%') {
@@ -497,6 +498,151 @@ pub fn print_file(path: &Path) -> bool {
 /// Play with the associated media player (verb "play")
 pub fn play_file(path: &Path) -> bool {
     shell_verb(path, "play")
+}
+
+/// Substitute `%p`/`%1` in a template with the quoted target path. The
+/// substitution is an empty string when the entry is invoked from the
+/// background menu (no target path).
+fn substitute_target(template: &str, path: Option<&Path>) -> String {
+    let quoted = path
+        .map(|p| format!("\"{}\"", p.to_string_lossy()))
+        .unwrap_or_default();
+    template.replace("%p", &quoted).replace("%1", &quoted)
+}
+
+/// Run a raw command line through CreateProcessW. Unlike
+/// [`open_with::launch`] no path is appended automatically: the command
+/// line is executed exactly as configured.
+#[cfg(target_os = "windows")]
+pub fn run_command_line(cmdline: &str) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
+    };
+
+    // CreateProcessW may write into the command buffer: keep a mutable copy.
+    let mut buf: Vec<u16> = cmdline.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let mut si: STARTUPINFOW = std::mem::zeroed();
+        si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+        let ok = CreateProcessW(
+            std::ptr::null(),
+            buf.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            0,
+            std::ptr::null(),
+            std::ptr::null(),
+            &si,
+            &mut pi,
+        ) != 0;
+        if ok {
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        } else {
+            log::warn!(
+                target: "mossambi::context_menu",
+                "CreateProcessW failed for custom command line"
+            );
+        }
+        ok
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn run_command_line(_cmdline: &str) -> bool {
+    false
+}
+
+/// Execute a user-defined custom context-menu entry (Phase 4
+/// customization). `path` is `None` when the entry is invoked from the
+/// background menu.
+pub fn run_custom_item(item: &CustomMenuItem, path: Option<&Path>) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let raw_args = substitute_target(&item.args, path);
+        let raw_args = raw_args.trim().to_string();
+        let args = if raw_args.is_empty() {
+            String::new()
+        } else {
+            format!(" {raw_args}")
+        };
+        match item.kind {
+            CustomMenuKind::Command => {
+                let cmdline = open_with::expand_env_vars(&format!(
+                    "cmd.exe /C {}{}",
+                    item.value.trim(),
+                    args
+                ));
+                run_command_line(&cmdline)
+            }
+            CustomMenuKind::App => {
+                let cmdline = open_with::expand_env_vars(&format!("{}{}", item.value.trim(), args));
+                run_command_line(&cmdline)
+            }
+            CustomMenuKind::Script => {
+                let target = open_with::expand_env_vars(&substitute_target(&item.value, path));
+                let params = if raw_args.is_empty() {
+                    None
+                } else {
+                    Some(raw_args.as_str())
+                };
+                shell_execute_open(target.trim(), params)
+            }
+            CustomMenuKind::Link => {
+                let target = open_with::expand_env_vars(&substitute_target(&item.value, path));
+                shell_execute_open(target.trim(), None)
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (item, path);
+        false
+    }
+}
+
+/// Open a target (URL, script, document) with the shell "open" verb.
+pub fn shell_execute_open(target: &str, params: Option<&str>) -> bool {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let file: Vec<u16> = OsStr::new(target)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let action: Vec<u16> = OsStr::new("open")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let param_wide: Vec<u16> = match params {
+            Some(p) if !p.trim().is_empty() => OsStr::new(p)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect(),
+            _ => vec![0],
+        };
+        let res = ShellExecuteW(
+            std::ptr::null_mut(),
+            action.as_ptr(),
+            file.as_ptr(),
+            param_wide.as_ptr(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
+        (res as usize) > 32
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (target, params);
+        false
+    }
 }
 
 /// Copy a list of files to the OLE clipboard (CF_HDROP + PreferredDropEffect) so

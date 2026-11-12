@@ -7829,6 +7829,9 @@ pub struct ItemMenuIntents {
     pub open_with: Option<PathBuf>,
     /// Launch directly with an enumerated Open With command line.
     pub open_with_launch: Option<(String, PathBuf)>,
+    /// Run a user-defined custom menu entry (Phase 4); the optional path
+    /// is `None` for background-menu entries.
+    pub custom_item: Option<(crate::core::config::CustomMenuItem, Option<PathBuf>)>,
     pub play: Option<PathBuf>,
     pub print: Option<Vec<PathBuf>>,
     pub transcode: Option<(Vec<PathBuf>, String)>,
@@ -8053,6 +8056,11 @@ impl ExplorerView {
         if let Some((cmd, p)) = intent.open_with_launch {
             if !cm::launch_open_with_cmd(&cmd, &p) {
                 log::warn!("Open With launch failed for {}", p.display());
+            }
+        }
+        if let Some((item, target)) = intent.custom_item {
+            if !cm::run_custom_item(&item, target.as_deref()) {
+                log::warn!("Custom menu item '{}' failed to run", item.label);
             }
         }
         if let Some(p) = intent.play {
@@ -8405,6 +8413,30 @@ impl ExplorerView {
                 }
             }
         });
+
+        // -- Custom user entries (Phase 4 menu customization) --
+        // Background-scope config entries; no target path is passed.
+        {
+            let cfg = crate::core::MossambiConfig::load();
+            let customs: Vec<_> = cfg
+                .context_menu_items
+                .iter()
+                .filter(|c| {
+                    c.show_in == crate::core::config::CustomMenuScope::All
+                        || c.show_in == crate::core::config::CustomMenuScope::Background
+                })
+                .collect();
+            if !customs.is_empty() {
+                menu_ui.separator();
+                for entry in customs {
+                    if fm::menu_item_custom(menu_ui, &entry.label).clicked() {
+                        let item = entry.clone();
+                        menu_ui.close_menu();
+                        crate::gui::context_menu::run_custom_item(&item, None);
+                    }
+                }
+            }
+        }
 
         menu_ui.separator();
         if menu_row(
@@ -8770,6 +8802,32 @@ impl ExplorerView {
         {
             intent.shortcut = Some(path.clone());
             menu_ui.close_menu();
+        }
+
+        // -- Custom user entries (Phase 4 menu customization) --
+        {
+            let wanted = if is_dir {
+                crate::core::config::CustomMenuScope::Folders
+            } else {
+                crate::core::config::CustomMenuScope::Files
+            };
+            let cfg = crate::core::MossambiConfig::load();
+            let customs: Vec<_> = cfg
+                .context_menu_items
+                .iter()
+                .filter(|c| {
+                    c.show_in == wanted || c.show_in == crate::core::config::CustomMenuScope::All
+                })
+                .collect();
+            if !customs.is_empty() {
+                menu_ui.separator();
+                for entry in customs {
+                    if fm::menu_item_custom(menu_ui, &entry.label).clicked() {
+                        intent.custom_item = Some((entry.clone(), Some(path.clone())));
+                        menu_ui.close_menu();
+                    }
+                }
+            }
         }
 
         // -- Clipboard group --

@@ -10,7 +10,8 @@
 // Pure ASCII. No emoji. Uses the shared design tokens from crate::gui::design.
 
 use crate::core::config::{
-    AnimStyle, AnimationSettings, CheckboxMode, GlassEffect, MenuStyle, MossambiConfig, OutputMode,
+    AnimStyle, AnimationSettings, CheckboxMode, CustomMenuItem, CustomMenuKind, CustomMenuScope,
+    GlassEffect, MenuStyle, MossambiConfig, OutputMode,
 };
 use crate::core::donut_config::{DonutConfig, DonutProfile, DonutSlicePreset};
 use crate::core::fields_config::FieldsConfig;
@@ -1953,6 +1954,85 @@ impl PreferencesView {
                         *ms_mut = v;
                         *dirty = true;
                     }
+                }
+            });
+
+            // -- Context Menu customization (user-defined entries, Phase 4) --
+            egui::CollapsingHeader::new(
+                egui::RichText::new("Context Menu")
+                    .size(design::type_scale::BODY_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            )
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.add_space(design::space::XS);
+                let items = &mut self.cfg.context_menu_items;
+                let mut removed: Option<usize> = None;
+                for (idx, item) in items.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("#{}", idx + 1))
+                                .size(design::type_scale::SMALL)
+                                .strong()
+                                .color(palette.text_secondary),
+                        );
+                        ui.add(
+                            TextEdit::singleline(&mut item.label)
+                                .id_salt(format!("ctx_label_{idx}"))
+                                .desired_width(140.0)
+                                .hint_text("Menu label"),
+                        );
+                        ui.add(
+                            TextEdit::singleline(&mut item.value)
+                                .id_salt(format!("ctx_value_{idx}"))
+                                .desired_width(200.0)
+                                .hint_text("Command / app / script / URL"),
+                        );
+                        ui.add(
+                            TextEdit::singleline(&mut item.args)
+                                .id_salt(format!("ctx_args_{idx}"))
+                                .desired_width(110.0)
+                                .hint_text("Args (%p = path)"),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt(format!("ctx_kind_{idx}"))
+                            .selected_text(item.kind.name())
+                            .show_ui(ui, |ui| {
+                                for k in CustomMenuKind::all() {
+                                    ui.selectable_value(&mut item.kind, *k, k.name());
+                                }
+                            });
+                        egui::ComboBox::from_id_salt(format!("ctx_scope_{idx}"))
+                            .selected_text(item.show_in.name())
+                            .show_ui(ui, |ui| {
+                                for s in CustomMenuScope::all() {
+                                    ui.selectable_value(&mut item.show_in, *s, s.name());
+                                }
+                            });
+                        if ui
+                            .button(egui::RichText::new("Remove").size(design::type_scale::SMALL))
+                            .clicked()
+                        {
+                            removed = Some(idx);
+                        }
+                    });
+                    ui.add_space(design::space::XS);
+                }
+                if let Some(idx) = removed {
+                    items.remove(idx);
+                    *dirty = true;
+                }
+                if ui.button("Add custom item").clicked() {
+                    items.push(CustomMenuItem {
+                        label: "New item".to_string(),
+                        kind: CustomMenuKind::Command,
+                        value: String::new(),
+                        args: String::new(),
+                        show_in: CustomMenuScope::All,
+                    });
+                    *dirty = true;
                 }
             });
 

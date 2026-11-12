@@ -310,6 +310,96 @@ impl MenuStyle {
     }
 }
 
+/// The execution kind of a user-defined context-menu entry (Phase 4
+/// customization, configured in Preferences > Context Menu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomMenuKind {
+    /// Run `value` as a full command line through `cmd.exe /C`.
+    #[default]
+    Command,
+    /// Launch an executable directly (CreateProcessW) with optional args.
+    App,
+    /// Open a script file with the shell "open" verb.
+    Script,
+    /// Open a URL or document with the shell "open" verb.
+    Link,
+}
+
+impl CustomMenuKind {
+    pub fn all() -> &'static [CustomMenuKind] {
+        &[
+            CustomMenuKind::Command,
+            CustomMenuKind::App,
+            CustomMenuKind::Script,
+            CustomMenuKind::Link,
+        ]
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Command => "Command (cmd.exe)",
+            Self::App => "App (executable)",
+            Self::Script => "Script",
+            Self::Link => "Link (URL)",
+        }
+    }
+}
+
+/// Which menus a user-defined context-menu entry appears in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomMenuScope {
+    /// Item menus and the background canvas menu.
+    #[default]
+    All,
+    /// Item menus of files only.
+    Files,
+    /// Item menus of folders only.
+    Folders,
+    /// The background (empty-canvas) menu only.
+    Background,
+}
+
+impl CustomMenuScope {
+    pub fn all() -> &'static [CustomMenuScope] {
+        &[
+            CustomMenuScope::All,
+            CustomMenuScope::Files,
+            CustomMenuScope::Folders,
+            CustomMenuScope::Background,
+        ]
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::All => "All menus",
+            Self::Files => "Files only",
+            Self::Folders => "Folders only",
+            Self::Background => "Background only",
+        }
+    }
+}
+
+/// One user-defined context-menu entry (Phase 4 customization). `%p` and
+/// `%1` inside `value`/`args` are substituted with the quoted target path
+/// (empty on the background menu).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CustomMenuItem {
+    /// Menu label as shown to the user.
+    pub label: String,
+    /// What kind of launcher this entry is.
+    pub kind: CustomMenuKind,
+    /// Command line / executable path / script path / URL.
+    pub value: String,
+    /// Optional argument template appended after `value`.
+    #[serde(default)]
+    pub args: String,
+    /// Which menus the entry appears in.
+    #[serde(default)]
+    pub show_in: CustomMenuScope,
+}
+
 /// Motion primitive used for a single animated surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -507,6 +597,9 @@ pub struct MossambiConfig {
     pub checkbox_mode: CheckboxMode,
     #[serde(default)]
     pub menu_style: MenuStyle,
+    /// User-defined context-menu entries (Phase 4 customization).
+    #[serde(default)]
+    pub context_menu_items: Vec<CustomMenuItem>,
     #[serde(default)]
     pub animations: AnimationSettings,
     #[serde(default = "default_explorer_zoom")]
@@ -706,6 +799,7 @@ impl Default for MossambiConfig {
             grid_icon_size: default_grid_icon_size(),
             checkbox_mode: CheckboxMode::default(),
             menu_style: MenuStyle::default(),
+            context_menu_items: Vec::new(),
             animations: AnimationSettings::default(),
             explorer_zoom: default_explorer_zoom(),
             background_work: default_background_work(),
