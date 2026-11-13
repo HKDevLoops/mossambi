@@ -1493,3 +1493,40 @@ after Desktop->Home, tab strip shows the active-view pill in
 Settings and tool views. Live instance pid=10644 hwnd=67656
 (relaunched 2026-11-13; older pid 26716 / hwnd 23529548 are dead).
 Ledger mirrors claude.md/gemini.md byte-identical (SHA256 x3).
+
+2026-11-13 PATH-BAR REFINEMENT WAVE CLOSED: chain e74e904
+docs(plan) (docs/superpowers/plans/2026-11-13-path-bar-refinement-
+wave.md, 110 lines) <- 7629528 feat(gui) (3 files +25/-20)
+<- this docs(audit) entry. EVIDENCE: user screenshot called the
+always-visible caret-down "v" buttons cheap (one per bottom-bar
+segment including a trailing one after the current folder).
+MECHANISMS: (1) finder_chrome.rs NEW pub paint_path_chevron(ui,
+color): 4.5x9.0 hover-sensed slot + Shape::line chevron-right,
+Stroke 1.5_f32 (first draft 1.5 hit clippy float-literal-f32-
+fallback under -D warnings; fixed). Horizontal layouts center
+the slot vertically like the text separators it replaces.
+(2) explorer_view.rs render_bottom_path_bar: text ">" separators
+-> painted chevrons; the "v" caret Button DELETED on every
+segment; popup bc_pop_{i}_{path} now toggles on
+resp.secondary_clicked() (right-click on the segment itself,
+Finder-authentic, matching the studio ribbon) and
+popup_below_widget re-anchored &ch_resp -> &resp; content +
+CloseOnClick + F-2 popup_child_dirs cache byte-identical.
+(3) studio_view.rs ribbon: text ">" separators -> same chevron;
+its right-click context_menu (sibling listing, F-2
+sibling_menu_cache) untouched. Both path bars now share one
+interaction language. ALL FIVE GATES GREEN: fmt; clippy
+--all-targets -- -D warnings 5.91s; cargo test full suite (lib
+69/69, gui_ascii_gate, columns 16, miller 10, pantone 6, icons
+4, TUI 3, widget 8, CLI 9, all integration suites pass);
+release 7.21s (first attempt blocked: pid 24384 held the exe
+lock, instance killed cleanly, rebuild passed); porcelain
+exactly 3 files. NOTE: the user's status-bar screenshot shows
+old carets because it was captured from the pre-rebuild
+binary; carets no longer exist in source. Live verification of
+this wave + B-1/B-2/B-3 deferred per user rule (work first,
+tool after everything completes). NEXT: user mega-directive
+opened a new wave queue (sidebar Zen/Arc pin design, icon pack
+upgrade, settings/config/Lua, Tools & Converters redesign,
+fast folder sizes, status bar redesign, grid-view icon bugs);
+5 research agents dispatched.
