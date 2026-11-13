@@ -1657,3 +1657,56 @@ text_primary, row hover text_secondary, idle text_muted). (4) Old
 helpers render_sidebar_section_header and
 render_sidebar_collapsible_header DELETED (grep-verified: every
 caller migrated into the zone structure).
+
+MOSSAMBI FOLDER SIZES WAVE CLOSED (2026-11-13): feat 00c302c
+(feat(gui) 3 files +392/-14: fs_utils.rs +106/0, explorer_view.rs
++179/-14, tests/test_dir_sizes.rs NEW +107) <- plan d70d304
+(docs(plan) 152 lines), prior ledger a6dcd82 (sidebar Zen/Arc wave).
+ALL FIVE GATES GREEN (fmt clean; clippy --all-targets -- -D warnings
+6.86s zero findings after one int_plus_one fix; cargo test full suite
+passed + NEW test_dir_sizes 5/5: empty_dir_is_zero,
+sums_two_files_exactly, disk_cache_roundtrip, depth_cap_limits_descent,
+entry_cap_bounds_work [unix-only symlinks_are_skipped compiles out on
+Windows]; release 48.89s; porcelain exactly 3 expected files).
+MECHANISMS: (1) D1 WORKER MODEL - ExplorerView gains dir_sizes
+HashMap<PathBuf,(Option<SystemTime>,u64)> (computed total + root mtime
+at compute time = the freshness key), dir_size_queued HashSet dedupe,
+dir_size_job_tx/dir_size_rx channel pair, dir_size_last_request
+throttle stamp, dir_size_cache_dirty counter + dir_size_last_flush;
+TWO persistent worker threads spawned in Default sharing one
+Arc<Mutex<Receiver<PathBuf>>> - each blocks on recv() (the receiver
+lock is released before computing so bursts parallelize; all senders
+dropping ends the loop), captures the root mtime via std::fs::metadata,
+computes, and sends DirSizeResult { path, mtime, total }; threads
+named mossambi-dir-size-{0,1}, spawn failure logged via log::warn.
+(2) D2 COMPUTE KERNEL - NEW pub compute_dir_size(root, max_depth,
+max_entries) in fs_utils.rs: iterative BFS with an explicit stack (no
+recursion overflow), depth cap 8, entry cap 100_000, NO symlink
+descent (entry.file_type() is lstat-like and never resolves links or
+junctions - is_symlink() skips both descent and link length
+accounting); IO errors skip the offending entry so results are partial
+sums (Finder reports partial totals the same way); DirSizeResult
+struct added alongside. (3) D3 REQUEST SCOPING - throttled 200ms pass
+inside poll_background_scans: candidates = primary selected folders
+(path-sorted) first, then the primary visible listing's folders in
+filtered_and_sorted_entries order, then (when split_view_enabled) the
+secondary selection + secondary listing; skips already-queued and
+already-fresh (stored mtime == FileItem.modified) candidates; caps 64
+sends per tick; queued entries cleared as results drain. (4) D4
+STALENESS - no notify crate exists and none was added: a stored size
+is fresh iff item.modified == stored root mtime; changed folders
+re-enqueue on the next throttle tick; DirWatcher rescans naturally
+refresh mtimes; sort-by-size stays keyed on size_bytes (out of scope,
+unchanged). (5) D5 DISPLAY - NEW dir_size_text helper: files keep
+formatted_size(); directories show format_file_size(total) when a
+fresh computed size exists else "--"; wired into the Details Size
+match arm and the Grid tile caption (both previous "--" sites);
+status-bar selection totals in BOTH branches (primary + secondary) now
+add fresh folder totals (0 when unknown) instead of filtering dirs
+out. (6) D6 DISK CACHE WRITE-BEHIND - ~/.mossambi/cache/dir_sizes.json
+via serde_json (path keys as strings, mtime as epoch secs, 0 = None;
+BTreeMap for stable output); load_dir_size_cache_from /
+save_dir_size_cache_to take explicit paths (testable; missing or
+corrupt files load empty); loaded once in Default; new results bump
+dir_size_cache_dirty; flush when dirty >= 100 OR 30s elapsed since the
+last flush (synchronous write on the UI thread at these sizes).
