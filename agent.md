@@ -1567,3 +1567,48 @@ thumb_{path}@{max_px}; decode budget 3 -> 6 decodes per 300ms window.
 Preferences grid_icon_size slider all widened; config comment 64..300;
 studio_app last_grid_icon_size mirror so Preferences changes propagate
 to explorer_view.icon_size without fighting the live sliders.
+
+MOSSAMBI STATUS BAR SEAMLESS WAVE CLOSED (2026-11-13): feat 5f0596a
+(feat(gui) 2 files +240/-143: explorer_view.rs +230/-139,
+studio_view.rs +10/-4) <- plan b1041b1 (docs(plan) 153 lines), prior
+ledger 44fc148 (grid preview wave). ALL FIVE GATES GREEN (fmt clean;
+clippy --all-targets -- -D warnings 29.29s zero findings; cargo test
+full suite passed: icons 4/4, miller 10/10, pantone 6/6, pdf 5/5,
+registry 7/7, remux 4/4, thumbs 5/5, tui 3/3, widget 8/8; release
+1m09s; porcelain exactly 2 expected files). MECHANISMS: (1) D1 DOCKED
+PANELS - bottom_bars_h reservation (28/56) and the
+allocate_ui_with_layout wrapper DELETED; render() order:
+TopBottomPanel::bottom("explorer_status_bar") FIRST (docks lowest),
+then TopBottomPanel::bottom("explorer_path_bar") added only when
+!is_home_view && !parse_breadcrumbs(current_dir).is_empty() (docks
+above status; no panel = no space, so early returns can never leave
+reservation gaps), then CentralPanel::default().show_inside for the
+file view filling the exact remainder. (2) D2 FLUSH EDGES -
+studio_view.rs CentralPanel inner_margin ZERO for
+StudioTab::FileExplorer only (other tabs keep symmetric(10,6));
+explorer self-padding: top bars wrapped in Frame Margin{10,10,6,0};
+file-view panel Margin{left 10, right 0, top 4} so the scrollbar sits
+flush with the window edge; bottom panels carry their own horizontal
+margins; the drop banner carries its own 10px inset. (3) D3 FINDER
+SEMANTICS - left text: selection REPLACES items ("N selected, X" via
+format_file_size, accent + strong) else pluralize_items(total) + ",
+X available" (drive free_bytes) + " (K hidden)" when hidden entries
+are filtered; pipe separators REMOVED; drive display_name and total
+size dropped (Finder shows free space only). (4) D4 ACTIVE-PANE
+AWARENESS - use_secondary = split_view_enabled && active_pane == 1;
+the shared status bar reflects the ACTIVE pane's items, hidden,
+selection bytes, and dir for the drive lookup (secondary_entries /
+secondary_selected_paths / secondary_dir). (5) D5 DRIVE REFRESH
+HOOK - last_drives_refresh: Option<Instant> (Default None); at the
+top of render(): None or elapsed > 5s -> self.drives =
+get_system_drives(); keeps free space and mount/unmount current for
+the status bar AND the sidebar drive list. (6) D6 PANEL CHROME - each
+bottom panel: Frame::none() fill window_bg,
+show_separator_line(false), plus a manual 1px hairline painted at the
+panel's top edge via ui.painter().line_segment over the response.rect
+(Stroke::new(1.0, palette.border)); status bar content bar_h 26; path
+bar keeps its horizontal ScrollArea chevron row. (7) D7 SPLIT SIZING
+- render_dual_pane_view renders its toolbar row FIRST, then pane_h =
+ui.available_height().max(120.0) from the exact remainder
+(pre-emptive -32.0 guess removed), so pane frames reach the bottom
+edge precisely.
