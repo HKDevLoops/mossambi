@@ -83,6 +83,25 @@ impl Default for QuickSettingsState {
 }
 
 impl QuickSettingsState {
+    /// Session state seeded from the persistent conversion defaults in cfg
+    /// (Finder System-Settings model: Preferences holds the defaults; the
+    /// popover tweaks are session-local and never write back on their own).
+    pub fn from_config(cfg: &crate::core::MossambiConfig) -> Self {
+        Self {
+            image_quality: cfg.conv_image_quality,
+            image_lossless: cfg.conv_image_lossless,
+            image_dpi: cfg.conv_image_dpi,
+            audio_bitrate: cfg.conv_audio_bitrate.clone(),
+            audio_strict_lossless: cfg.conv_audio_strict_lossless,
+            video_crf: cfg.conv_video_crf,
+            video_preset: cfg.conv_video_preset.clone(),
+            video_hw_accel: cfg.conv_video_hw_accel,
+            archive_compression: cfg.conv_archive_compression.clone(),
+            exam_mode_enabled: cfg.conv_exam_mode_enabled,
+            ..Default::default()
+        }
+    }
+
     pub fn set_active_format(&mut self, fmt: &str) {
         self.active_format = fmt.to_uppercase();
         if self.active_format.contains("EXAM") {

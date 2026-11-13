@@ -4,6 +4,7 @@
 //! view modes, and navigation destinations. Pure ASCII.
 
 use crate::core::icon_packs::{IconGlyph, IconPack};
+use crate::core::scripting::ScriptLang;
 use crate::gui::design::{radius, space, type_scale};
 use crate::gui::macos_theme::ThemePalette;
 use eframe::egui::{self, Color32, FontId, Key, Pos2, Rect, Rounding, Sense, Stroke, Vec2};
@@ -36,7 +37,11 @@ pub enum PaletteAction {
     ConvertTarget(&'static str),
     ExamConform,
     PackZip,
-    RunUserScript { title: String, body: String },
+    RunUserScript {
+        title: String,
+        body: String,
+        lang: ScriptLang,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -303,6 +308,7 @@ impl CommandPalette {
                 action: PaletteAction::RunUserScript {
                     title: script.title,
                     body: script.body,
+                    lang: script.lang,
                 },
             });
         }

@@ -16,6 +16,7 @@ use crate::core::config::{
 use crate::core::donut_config::{DonutConfig, DonutProfile, DonutSlicePreset};
 use crate::core::fields_config::FieldsConfig;
 use crate::core::icon_packs::IconPack;
+use crate::core::scripting::{ScriptConsole, ScriptLang};
 use crate::gui::design;
 use crate::gui::macos_theme::ThemePalette;
 use crate::gui::macos_theme::ThemeStyle;
@@ -36,6 +37,7 @@ const CATEGORIES: &[&str] = &[
     "Behavior",
     "Performance",
     "Conversion & Engines",
+    "Scripts",
     "About",
 ];
 
@@ -48,7 +50,7 @@ pub struct PreferenceCategory {
 pub fn preference_categories() -> &'static [PreferenceCategory] {
     // Static table kept in sync with CATEGORIES above. Returned as a slice of
     // owned-ish statics so the command palette can reference category titles.
-    static CATS: [PreferenceCategory; 10] = [
+    static CATS: [PreferenceCategory; 11] = [
         PreferenceCategory {
             id: "general",
             title: "General",
@@ -86,6 +88,10 @@ pub fn preference_categories() -> &'static [PreferenceCategory] {
             title: "Conversion & Engines",
         },
         PreferenceCategory {
+            id: "scripts",
+            title: "Scripts",
+        },
+        PreferenceCategory {
             id: "about",
             title: "About",
         },
@@ -113,8 +119,15 @@ pub struct PreferencesView {
     pub donut_view_back: bool,
     pub new_ext_input: String,
     pub new_profile_name: String,
-    pub exclusion_input: String,
     pub save_error: Option<String>,
+
+    // Rebind capture: Some(shortcut action id) while waiting for the next key.
+    pub capturing_action: Option<String>,
+    // Script editor state (create mode when the id is None).
+    pub script_edit_id: Option<String>,
+    pub script_edit_title: String,
+    pub script_edit_lang: ScriptLang,
+    pub script_edit_body: String,
 }
 
 impl Default for PreferencesView {
@@ -131,8 +144,12 @@ impl Default for PreferencesView {
             donut_view_back: false,
             new_ext_input: String::new(),
             new_profile_name: String::new(),
-            exclusion_input: String::new(),
             save_error: None,
+            capturing_action: None,
+            script_edit_id: None,
+            script_edit_title: String::new(),
+            script_edit_lang: ScriptLang::Rhai,
+            script_edit_body: String::new(),
         }
     }
 }
@@ -148,6 +165,8 @@ impl PreferencesView {
         palette: &ThemePalette,
         current_theme: &mut ThemeStyle,
         settings: &mut QuickSettingsState,
+        console: &mut ScriptConsole,
+        run_ctx: (Option<std::path::PathBuf>, Vec<std::path::PathBuf>),
     ) {
         // Keep cfg.theme_mode in sync with the live theme selection.
         self.cfg.theme_mode = (*current_theme).into();
@@ -423,6 +442,7 @@ impl PreferencesView {
                                             6 => self.render_behavior(ui, palette, &mut dirty),
                                             7 => self.render_performance(ui, palette, &mut dirty),
                                             8 => self.render_conversion(ui, palette, settings, &mut dirty),
+                                            9 => self.render_scripts(ui, palette, console, run_ctx, &mut dirty),
                                             _ => self.render_about(ui, palette),
                                         }
                                     });
@@ -522,13 +542,14 @@ impl PreferencesView {
         match i {
             0 => "Startup, default save locations, browser drag staging, and history.",
             1 => "Profiles, interactive radial donut preview, extension bindings, and appearance metrics.",
-            2 => "Modifier drag gestures, hotkeys, flip keys, and app exclusion list.",
+            2 => "Studio shortcut rebinds, gesture engine keys, and physics.",
             3 => "Toggle specialized domains on or off across the suite.",
             4 => "Theme, glass, opacity, menu and control style.",
             5 => "Layout, hidden files, tags and pinned folders.",
             6 => "Startup, sound, background work, and shell replacement.",
             7 => "Threads, DirectML hardware acceleration, and frame rate.",
-            8 => "Zero-loss transcode engines, 255-format routing, and local AI catalog.",
+            8 => "Zero-loss transcode engines, 255-format routing, and script engines.",
+            9 => "Create, run, and monitor Rhai and Lua automation scripts.",
             _ => "Version, hardware telemetry, and credits.",
         }
     }
@@ -592,6 +613,19 @@ impl PreferencesView {
             category_title: "Explorer",
             setting_label: "Calculate checksums",
             value_label: on_off(self.cfg.calculate_checksums).to_string(),
+        });
+        // Scripts
+        out.push(PreferenceHit {
+            category_id: "scripts",
+            category_title: "Scripts",
+            setting_label: "Script console",
+            value_label: "Run Rhai and Lua scripts and watch live outcomes".to_string(),
+        });
+        out.push(PreferenceHit {
+            category_id: "scripts",
+            category_title: "Scripts",
+            setting_label: "New script (Rhai or Lua)",
+            value_label: "Saved to the custom commands database".to_string(),
         });
         // Behavior
         out.push(PreferenceHit {
@@ -1437,274 +1471,233 @@ impl PreferencesView {
     }
 
     fn render_shortcuts(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
+        // Rebind capture: while listening, the next pressed key (Esc cancels)
+        // becomes the binding for the pending action. Raw events are read
+        // here, and the studio dispatch skips its own shortcuts while a
+        // capture is pending so the key lands in the binding instead.
+        if let Some(action_id) = self.capturing_action.clone() {
+            let events: Vec<egui::Event> = ui.ctx().input(|i| i.events.clone());
+            for event in events {
+                if let egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } = event
+                {
+                    if key == egui::Key::Escape {
+                        self.capturing_action = None;
+                    } else {
+                        self.cfg
+                            .shortcuts
+                            .insert(action_id.clone(), key_binding_display(modifiers, key));
+                        *dirty = true;
+                        self.capturing_action = None;
+                    }
+                    break;
+                }
+            }
+        }
+
         ui.label(
             egui::RichText::new(
-                "Choose how the donut toolbar opens. You can add as many gestures as you like.",
+                "Rebind the studio shortcuts and tune the global gesture engine. Bindings are saved to config.json.",
             )
             .size(design::type_scale::BODY_SM)
             .color(palette.text_secondary),
         );
         ui.add_space(design::space::XS);
 
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("Global input detection is running.")
-                    .size(design::type_scale::BODY_SM)
-                    .color(palette.accent),
-            );
-            ui.button("Retry gestures").clicked();
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let _ = ui.button("+ Add gesture");
-            });
-        });
-        ui.add_space(design::space::SM);
-
-        // Card 1: Ctrl + Left
-        card(ui, palette, |ui| {
-            ui.horizontal(|ui| {
-                let mut on = true;
-                let _ = ui.checkbox(&mut on, "");
-                ui.label(
-                    egui::RichText::new("Ctrl + Left")
-                        .size(design::type_scale::BODY)
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let _ = ui.button("Delete");
-                });
-            });
-            ui.add_space(design::space::XS);
-
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("Gesture")
-                            .size(design::type_scale::CAPTION)
-                            .color(palette.text_muted),
-                    );
-                    ui.label(
-                        egui::RichText::new("Modifier + drag files")
-                            .size(design::type_scale::BODY_SM)
-                            .color(palette.text_primary),
-                    );
-                });
-                ui.add_space(design::space::MD);
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("Active in")
-                            .size(design::type_scale::CAPTION)
-                            .color(palette.text_muted),
-                    );
-                    ui.label(
-                        egui::RichText::new("File managers and desktop")
-                            .size(design::type_scale::BODY_SM)
-                            .color(palette.text_primary),
-                    );
-                });
-            });
-            ui.add_space(design::space::XS);
-
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("Modifier keys")
-                            .size(design::type_scale::CAPTION)
-                            .color(palette.text_muted),
-                    );
-                    ui.horizontal(|ui| {
-                        let _ = ui.button("Ctrl");
-                        let _ = ui.button("Alt");
-                        let _ = ui.button("Shift");
-                        let _ = ui.button("Win");
-                    });
-                });
-                ui.add_space(design::space::MD);
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("Mouse button")
-                            .size(design::type_scale::CAPTION)
-                            .color(palette.text_muted),
-                    );
-                    ui.label(
-                        egui::RichText::new("Left")
-                            .size(design::type_scale::BODY_SM)
-                            .color(palette.text_primary),
-                    );
-                });
-            });
-            ui.add_space(design::space::XS);
-
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Drag distance")
-                        .size(design::type_scale::CAPTION)
-                        .color(palette.text_muted),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new("System default")
-                            .size(design::type_scale::CAPTION)
-                            .color(palette.text_secondary),
-                    );
-                });
-            });
-        });
-
-        ui.add_space(design::space::MD);
-
-        // Card 2: Ctrl + Alt + Space
-        card(ui, palette, |ui| {
-            ui.horizontal(|ui| {
-                let mut on = true;
-                let _ = ui.checkbox(&mut on, "");
-                ui.label(
-                    egui::RichText::new("Ctrl + Alt + Space")
-                        .size(design::type_scale::BODY)
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let _ = ui.button("Delete");
-                });
-            });
-            ui.add_space(design::space::XS);
-
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("Gesture")
-                            .size(design::type_scale::CAPTION)
-                            .color(palette.text_muted),
-                    );
-                    ui.label(
-                        egui::RichText::new("Keyboard shortcut (selected files)")
-                            .size(design::type_scale::BODY_SM)
-                            .color(palette.text_primary),
-                    );
-                });
-                ui.add_space(design::space::MD);
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("Active in")
-                            .size(design::type_scale::CAPTION)
-                            .color(palette.text_muted),
-                    );
-                    ui.label(
-                        egui::RichText::new("File managers and desktop")
-                            .size(design::type_scale::BODY_SM)
-                            .color(palette.text_primary),
-                    );
-                });
-            });
-            ui.add_space(design::space::XS);
-
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("Modifier keys")
-                            .size(design::type_scale::CAPTION)
-                            .color(palette.text_muted),
-                    );
-                    ui.horizontal(|ui| {
-                        let _ = ui.button("Ctrl");
-                        let _ = ui.button("Alt");
-                        let _ = ui.button("Shift");
-                        let _ = ui.button("Win");
-                    });
-                });
-                ui.add_space(design::space::MD);
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("Key")
-                            .size(design::type_scale::CAPTION)
-                            .color(palette.text_muted),
-                    );
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("Space")
-                                .size(design::type_scale::BODY_SM)
-                                .color(palette.text_primary),
-                        );
-                        let _ = ui.button("Record");
-                        let _ = ui.button("Clear");
-                    });
-                });
-            });
-        });
-
-        ui.add_space(design::space::MD);
-
-        // Card 3: Flip the donut
+        // App shortcuts card: the three rebindable studio bindings.
         card(ui, palette, |ui| {
             ui.label(
-                egui::RichText::new("Flip the donut")
+                egui::RichText::new("App shortcuts")
                     .size(design::type_scale::TITLE_SM)
                     .strong()
                     .color(palette.text_primary),
             );
-            ui.label(egui::RichText::new("While the donut is open, this key or a turn of the mouse wheel shows its back. Each donut gets its back under Donut toolbar.").size(design::type_scale::CAPTION).color(palette.text_secondary));
-            ui.add_space(design::space::SM);
-
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Key:")
-                        .size(design::type_scale::BODY_SM)
-                        .color(palette.text_secondary),
-                );
-                ui.label(
-                    egui::RichText::new("Tab")
-                        .size(design::type_scale::BODY)
-                        .strong()
-                        .color(palette.accent),
-                );
-                let _ = ui.button("Record");
-                let _ = ui.button("Use Tab");
-                let _ = ui.button("Clear");
-            });
-            ui.add_space(design::space::XS);
-
-            let mut wheel_flip = true;
-            toggle_row(
-                ui,
-                palette,
-                "Mouse wheel flips the donut",
-                "",
-                &mut wheel_flip,
-                dirty,
-            );
-        });
-
-        ui.add_space(design::space::MD);
-
-        // Card 4: Never trigger in these apps
-        card(ui, palette, |ui| {
-            ui.label(
-                egui::RichText::new("Never trigger in these apps")
-                    .size(design::type_scale::TITLE_SM)
-                    .strong()
-                    .color(palette.text_primary),
-            );
-            ui.add_space(design::space::XS);
-
-            ui.add(
-                TextEdit::singleline(&mut self.exclusion_input)
-                    .hint_text("Type an app name and press Enter, e.g. photoshop")
-                    .desired_width(f32::INFINITY),
-            );
-            ui.add_space(design::space::XS);
-
-            ui.horizontal(|ui| {
-                let _ = ui.button("+ Pick a running app");
-            });
-            ui.add_space(design::space::XS);
-
             ui.label(
                 egui::RichText::new(
-                    "Gestures and shortcuts do nothing while the pointer is over these apps.",
+                    "Click Rebind, then press the new key combination. Esc cancels.",
                 )
                 .size(design::type_scale::CAPTION)
-                .color(palette.text_muted),
+                .color(palette.text_secondary),
+            );
+            ui.add_space(design::space::XS);
+
+            for (action_id, action_label) in [
+                ("palette", "Command palette"),
+                ("new_tab", "New tab"),
+                ("close_tab", "Close tab"),
+            ] {
+                let binding = self.cfg.shortcut_for(action_id);
+                let capturing_this = self.capturing_action.as_deref() == Some(action_id);
+                let shown = if capturing_this {
+                    "Press keys... (Esc to cancel)".to_string()
+                } else {
+                    binding
+                };
+                ui.add_space(design::space::XS);
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new(action_label)
+                                .size(design::type_scale::CAPTION)
+                                .color(palette.text_muted),
+                        );
+                        ui.label(
+                            egui::RichText::new(shown)
+                                .size(design::type_scale::BODY)
+                                .strong()
+                                .color(if capturing_this {
+                                    palette.accent
+                                } else {
+                                    palette.text_primary
+                                }),
+                        );
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let btn_label = if capturing_this {
+                            "Listening..."
+                        } else {
+                            "Rebind"
+                        };
+                        if ui.button(btn_label).clicked() {
+                            self.capturing_action = Some(action_id.to_string());
+                        }
+                    });
+                });
+            }
+        });
+
+        ui.add_space(design::space::MD);
+
+        // Gestures card: the real gesture-engine keys from config.
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Gestures")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.add_space(design::space::XS);
+
+            let gtype_lbl = self.cfg.gesture_type.clone();
+            let gtype_mut = &mut self.cfg.gesture_type;
+            setting_row(
+                ui,
+                palette,
+                "Gesture type",
+                &gtype_lbl,
+                dirty,
+                |ui, dirty| {
+                    let mut changed = false;
+                    egui::ComboBox::from_id_salt("prefs_gesture_type")
+                        .selected_text(gtype_lbl.clone())
+                        .show_ui(ui, |ui| {
+                            for (value, label) in [
+                                ("shake", "Shake"),
+                                ("circle", "Circle"),
+                                ("both", "Shake or circle"),
+                            ] {
+                                if ui
+                                    .selectable_value(gtype_mut, value.to_string(), label)
+                                    .changed()
+                                {
+                                    changed = true;
+                                }
+                            }
+                        });
+                    if changed {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let gw = self.cfg.enable_gesture_wakeup;
+            let gw_lbl = on_off(gw).to_string();
+            let gw_mut = &mut self.cfg.enable_gesture_wakeup;
+            setting_row(
+                ui,
+                palette,
+                "Gesture wake-up",
+                &gw_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(gw_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let hw = self.cfg.enable_hotkey_wakeup;
+            let hw_lbl = on_off(hw).to_string();
+            let hw_mut = &mut self.cfg.enable_hotkey_wakeup;
+            setting_row(
+                ui,
+                palette,
+                "Hotkey wake-up",
+                &hw_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(hw_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let sens = self.cfg.shake_sensitivity_px;
+            let sens_lbl = format!("{sens} px");
+            let sens_mut = &mut self.cfg.shake_sensitivity_px;
+            setting_row(
+                ui,
+                palette,
+                "Shake sensitivity",
+                &sens_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui
+                        .add(egui::Slider::new(sens_mut, 5.0..=100.0).show_value(false))
+                        .changed()
+                    {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let to = self.cfg.gesture_timeout_ms;
+            let to_lbl = format!("{to} ms");
+            let to_mut = &mut self.cfg.gesture_timeout_ms;
+            setting_row(
+                ui,
+                palette,
+                "Gesture timeout",
+                &to_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui
+                        .add(egui::Slider::new(to_mut, 150..=1000).show_value(false))
+                        .changed()
+                    {
+                        *dirty = true;
+                    }
+                },
+            );
+
+            let dd = self.cfg.deep_drag_detection_only;
+            let dd_lbl = on_off(dd).to_string();
+            let dd_mut = &mut self.cfg.deep_drag_detection_only;
+            setting_row(
+                ui,
+                palette,
+                "Deep drag detection only",
+                &dd_lbl,
+                dirty,
+                |ui, dirty| {
+                    if ui.checkbox(dd_mut, "").changed() {
+                        *dirty = true;
+                    }
+                },
             );
         });
 
@@ -2945,58 +2938,6 @@ impl PreferencesView {
                 }
             },
         );
-
-        let ai = self.cfg.local_ai_enabled;
-        let ai_lbl = on_off(ai).to_string();
-        let ai_mut = &mut self.cfg.local_ai_enabled;
-        setting_row(
-            ui,
-            palette,
-            "Local AI (Ollama/LM Studio)",
-            &ai_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(ai_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let ep_lbl = self.cfg.local_ai_endpoint.clone();
-        let ep_mut = &mut self.cfg.local_ai_endpoint;
-        setting_row(
-            ui,
-            palette,
-            "Local AI endpoint",
-            &ep_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui
-                    .add(TextEdit::singleline(ep_mut).desired_width(180.0))
-                    .changed()
-                {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let mdl_lbl = self.cfg.local_ai_model.clone();
-        let mdl_mut = &mut self.cfg.local_ai_model;
-        setting_row(
-            ui,
-            palette,
-            "Local AI model",
-            &mdl_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui
-                    .add(TextEdit::singleline(mdl_mut).desired_width(140.0))
-                    .changed()
-                {
-                    *dirty = true;
-                }
-            },
-        );
     }
 
     fn render_conversion(
@@ -3105,11 +3046,13 @@ impl PreferencesView {
             let iq = settings.image_quality;
             let iq_lbl = format!("{}%", iq);
             let iq_mut = &mut settings.image_quality;
+            let iq_conv = &mut self.cfg.conv_image_quality;
             setting_row(ui, palette, "Image quality", &iq_lbl, dirty, |ui, dirty| {
                 if ui
                     .add(egui::Slider::new(iq_mut, 1..=100).show_value(false))
                     .changed()
                 {
+                    *iq_conv = *iq_mut;
                     *dirty = true;
                 }
             });
@@ -3117,6 +3060,7 @@ impl PreferencesView {
             let il = settings.image_lossless;
             let il_lbl = on_off(il).to_string();
             let il_mut = &mut settings.image_lossless;
+            let il_conv = &mut self.cfg.conv_image_lossless;
             setting_row(
                 ui,
                 palette,
@@ -3125,6 +3069,7 @@ impl PreferencesView {
                 dirty,
                 |ui, dirty| {
                     if ui.checkbox(il_mut, "").changed() {
+                        *il_conv = *il_mut;
                         *dirty = true;
                     }
                 },
@@ -3133,11 +3078,13 @@ impl PreferencesView {
             let idpi = settings.image_dpi;
             let idpi_lbl = format!("{}", idpi);
             let idpi_mut = &mut settings.image_dpi;
+            let idpi_conv = &mut self.cfg.conv_image_dpi;
             setting_row(ui, palette, "Image DPI", &idpi_lbl, dirty, |ui, dirty| {
                 if ui
                     .add(egui::Slider::new(idpi_mut, 72..=600).show_value(false))
                     .changed()
                 {
+                    *idpi_conv = *idpi_mut;
                     *dirty = true;
                 }
             });
@@ -3149,11 +3096,13 @@ impl PreferencesView {
                 ab.clone()
             };
             let ab_mut = &mut settings.audio_bitrate;
+            let ab_conv = &mut self.cfg.conv_audio_bitrate;
             setting_row(ui, palette, "Audio bitrate", &ab_lbl, dirty, |ui, dirty| {
                 if ui
                     .add(TextEdit::singleline(ab_mut).desired_width(120.0))
                     .changed()
                 {
+                    *ab_conv = ab_mut.clone();
                     *dirty = true;
                 }
             });
@@ -3161,6 +3110,7 @@ impl PreferencesView {
             let asl = settings.audio_strict_lossless;
             let asl_lbl = on_off(asl).to_string();
             let asl_mut = &mut settings.audio_strict_lossless;
+            let asl_conv = &mut self.cfg.conv_audio_strict_lossless;
             setting_row(
                 ui,
                 palette,
@@ -3169,6 +3119,7 @@ impl PreferencesView {
                 dirty,
                 |ui, dirty| {
                     if ui.checkbox(asl_mut, "").changed() {
+                        *asl_conv = *asl_mut;
                         *dirty = true;
                     }
                 },
@@ -3177,11 +3128,13 @@ impl PreferencesView {
             let vcrf = settings.video_crf;
             let vcrf_lbl = format!("{}", vcrf);
             let vcrf_mut = &mut settings.video_crf;
+            let vcrf_conv = &mut self.cfg.conv_video_crf;
             setting_row(ui, palette, "Video CRF", &vcrf_lbl, dirty, |ui, dirty| {
                 if ui
                     .add(egui::Slider::new(vcrf_mut, 0..=51).show_value(false))
                     .changed()
                 {
+                    *vcrf_conv = *vcrf_mut;
                     *dirty = true;
                 }
             });
@@ -3193,11 +3146,13 @@ impl PreferencesView {
                 vp.clone()
             };
             let vp_mut = &mut settings.video_preset;
+            let vp_conv = &mut self.cfg.conv_video_preset;
             setting_row(ui, palette, "Video preset", &vp_lbl, dirty, |ui, dirty| {
                 if ui
                     .add(TextEdit::singleline(vp_mut).desired_width(120.0))
                     .changed()
                 {
+                    *vp_conv = vp_mut.clone();
                     *dirty = true;
                 }
             });
@@ -3205,6 +3160,7 @@ impl PreferencesView {
             let vhw = settings.video_hw_accel;
             let vhw_lbl = on_off(vhw).to_string();
             let vhw_mut = &mut settings.video_hw_accel;
+            let vhw_conv = &mut self.cfg.conv_video_hw_accel;
             setting_row(
                 ui,
                 palette,
@@ -3213,6 +3169,7 @@ impl PreferencesView {
                 dirty,
                 |ui, dirty| {
                     if ui.checkbox(vhw_mut, "").changed() {
+                        *vhw_conv = *vhw_mut;
                         *dirty = true;
                     }
                 },
@@ -3225,6 +3182,7 @@ impl PreferencesView {
                 ac.clone()
             };
             let ac_mut = &mut settings.archive_compression;
+            let ac_conv = &mut self.cfg.conv_archive_compression;
             setting_row(
                 ui,
                 palette,
@@ -3236,6 +3194,7 @@ impl PreferencesView {
                         .add(TextEdit::singleline(ac_mut).desired_width(120.0))
                         .changed()
                     {
+                        *ac_conv = ac_mut.clone();
                         *dirty = true;
                     }
                 },
@@ -3244,6 +3203,7 @@ impl PreferencesView {
             let em = settings.exam_mode_enabled;
             let em_lbl = on_off(em).to_string();
             let em_mut = &mut settings.exam_mode_enabled;
+            let em_conv = &mut self.cfg.conv_exam_mode_enabled;
             setting_row(
                 ui,
                 palette,
@@ -3252,10 +3212,294 @@ impl PreferencesView {
                 dirty,
                 |ui, dirty| {
                     if ui.checkbox(em_mut, "").changed() {
+                        *em_conv = *em_mut;
                         *dirty = true;
                     }
                 },
             );
+        });
+    }
+
+    /// Scripts page: script manager (disk + database), the Rhai/Lua editor,
+    /// and the live execution console.
+    fn render_scripts(
+        &mut self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        console: &mut ScriptConsole,
+        run_ctx: (Option<std::path::PathBuf>, Vec<std::path::PathBuf>),
+        _dirty: &mut bool,
+    ) {
+        ui.label(
+            egui::RichText::new(
+                "Run Rhai or Lua scripts with sandboxed mossambi primitives. Disk scripts live in the scripts folder; saved scripts are stored in the custom commands database.",
+            )
+            .size(design::type_scale::BODY_SM)
+            .color(palette.text_secondary),
+        );
+        ui.add_space(design::space::SM);
+
+        // Manager card
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Installed scripts")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.add_space(design::space::XS);
+
+            let scripts = crate::core::scripting::load_all_user_scripts();
+            if scripts.is_empty() {
+                ui.label(
+                    egui::RichText::new("No scripts yet. Create one below.")
+                        .size(design::type_scale::CAPTION)
+                        .color(palette.text_muted),
+                );
+            }
+            for script in scripts {
+                ui.add_space(design::space::XS);
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new(script.title.clone())
+                                .size(design::type_scale::BODY)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
+                        let source_label = match &script.source {
+                            crate::core::scripting::ScriptSource::Disk(path) => {
+                                format!("disk - {}", path.display())
+                            }
+                            crate::core::scripting::ScriptSource::Database => {
+                                "database".to_string()
+                            }
+                        };
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} - {}",
+                                source_label,
+                                script.lang.label()
+                            ))
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_muted),
+                        );
+                    });
+                    ui.add_space(design::space::MD);
+                    if ui.button("Run").clicked() {
+                        let sender = console.sender();
+                        let (current_file, selected) = run_ctx.clone();
+                        let title = script.title.clone();
+                        crate::core::scripting::execute_script_async(
+                            script.body.clone(),
+                            script.lang,
+                            current_file,
+                            selected,
+                            move |outcome| {
+                                let _ = sender.send((title, outcome));
+                            },
+                        );
+                    }
+                    if let crate::core::scripting::ScriptSource::Database = script.source {
+                        if ui.button("Edit").clicked() {
+                            self.script_edit_id =
+                                Some(script.id.trim_start_matches("db:").to_string());
+                            self.script_edit_title = script.title.clone();
+                            self.script_edit_lang = script.lang;
+                            self.script_edit_body = script.body.clone();
+                        }
+                        if ui.button("Delete").clicked() {
+                            let record_id = script.id.trim_start_matches("db:").to_string();
+                            let _ = crate::core::state_db::delete_command(&record_id);
+                        }
+                    }
+                });
+            }
+        });
+        ui.add_space(design::space::MD);
+
+        // Editor card
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Script editor")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.add_space(design::space::XS);
+
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Title")
+                        .size(design::type_scale::CAPTION)
+                        .color(palette.text_muted),
+                );
+                ui.add(
+                    TextEdit::singleline(&mut self.script_edit_title)
+                        .hint_text("e.g. Rename screenshots by date")
+                        .desired_width(260.0),
+                );
+                ui.label(
+                    egui::RichText::new("Language")
+                        .size(design::type_scale::CAPTION)
+                        .color(palette.text_muted),
+                );
+                for lang in [ScriptLang::Rhai, ScriptLang::Lua] {
+                    if ui
+                        .selectable_label(self.script_edit_lang == lang, lang.label())
+                        .clicked()
+                    {
+                        self.script_edit_lang = lang;
+                    }
+                }
+            });
+            ui.add_space(design::space::XS);
+
+            ui.add(
+                TextEdit::multiline(&mut self.script_edit_body)
+                    .hint_text("-- Lua example: print(mossambi_file_size(current_file))")
+                    .desired_width(f32::INFINITY)
+                    .code_editor(),
+            );
+            ui.add_space(design::space::XS);
+
+            ui.horizontal(|ui| {
+                if ui.button("New").clicked() {
+                    self.script_edit_id = None;
+                    self.script_edit_title.clear();
+                    self.script_edit_body.clear();
+                    self.script_edit_lang = ScriptLang::Rhai;
+                }
+                if ui.button("Save").clicked() {
+                    let title = self.script_edit_title.trim().to_string();
+                    if !title.is_empty() && !self.script_edit_body.trim().is_empty() {
+                        let record_id = match &self.script_edit_id {
+                            Some(id) => id.clone(),
+                            None => format!(
+                                "cmd-{:x}",
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_nanos())
+                                    .unwrap_or(0)
+                            ),
+                        };
+                        let record = crate::core::state_db::CustomCommandRecord {
+                            id: record_id,
+                            title,
+                            script_lang: self.script_edit_lang.as_str().to_string(),
+                            script_body: self.script_edit_body.clone(),
+                            shortcut: None,
+                        };
+                        if crate::core::state_db::save_command(&record).is_ok() {
+                            self.script_edit_id = None;
+                            self.script_edit_title.clear();
+                            self.script_edit_body.clear();
+                        }
+                    }
+                }
+                match &self.script_edit_id {
+                    Some(id) => {
+                        ui.label(
+                            egui::RichText::new(format!("Editing {}", id))
+                                .size(design::type_scale::CAPTION)
+                                .color(palette.text_muted),
+                        );
+                    }
+                    None => {
+                        ui.label(
+                            egui::RichText::new("New script")
+                                .size(design::type_scale::CAPTION)
+                                .color(palette.text_muted),
+                        );
+                    }
+                }
+            });
+        });
+        ui.add_space(design::space::MD);
+
+        // Console card: live outcomes, newest first.
+        console.drain();
+        card(ui, palette, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Script console")
+                        .size(design::type_scale::TITLE_SM)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("Clear").clicked() {
+                        console.entries.clear();
+                    }
+                });
+            });
+            ui.add_space(design::space::XS);
+
+            if console.entries.is_empty() {
+                ui.label(
+                    egui::RichText::new(
+                        "No runs yet. Run a script above or from the command palette.",
+                    )
+                    .size(design::type_scale::CAPTION)
+                    .color(palette.text_muted),
+                );
+            }
+            for entry in console.entries.iter().rev() {
+                ui.add_space(design::space::XS);
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(if entry.outcome.success {
+                                "OK"
+                            } else {
+                                "FAILED"
+                            })
+                            .size(design::type_scale::CAPTION)
+                            .strong()
+                            .color(if entry.outcome.success {
+                                palette.accent
+                            } else {
+                                palette.text_primary
+                            }),
+                        );
+                        ui.label(
+                            egui::RichText::new(entry.title.clone())
+                                .size(design::type_scale::BODY)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
+                        ui.label(
+                            egui::RichText::new(entry.time.clone())
+                                .size(design::type_scale::CAPTION)
+                                .color(palette.text_muted),
+                        );
+                    });
+                    if entry.outcome.success {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Returned: {}",
+                                entry.outcome.return_value
+                            ))
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_secondary),
+                        );
+                    }
+                    if let Some(err) = &entry.outcome.error {
+                        ui.label(
+                            egui::RichText::new(format!("Error: {}", err))
+                                .size(design::type_scale::CAPTION)
+                                .color(palette.text_secondary),
+                        );
+                    }
+                    for log in &entry.outcome.logs {
+                        ui.label(
+                            egui::RichText::new(format!("  {}", log))
+                                .size(design::type_scale::CAPTION)
+                                .color(palette.text_secondary),
+                        );
+                    }
+                });
+            }
         });
     }
 
@@ -3297,6 +3541,23 @@ fn section(ui: &mut Ui, palette: &ThemePalette, title: &str) {
             .color(palette.text_primary),
     );
     ui.add_space(design::space::XS);
+}
+
+/// Renders an egui key press as the stored display form ("Ctrl+P").
+fn key_binding_display(modifiers: egui::Modifiers, key: egui::Key) -> String {
+    let key_name = format!("{:?}", key);
+    let mut out = String::new();
+    if modifiers.ctrl {
+        out.push_str("Ctrl+");
+    }
+    if modifiers.alt {
+        out.push_str("Alt+");
+    }
+    if modifiers.shift {
+        out.push_str("Shift+");
+    }
+    out.push_str(&key_name);
+    out
 }
 
 fn card<R>(ui: &mut Ui, palette: &ThemePalette, add_contents: impl FnOnce(&mut Ui) -> R) -> R {

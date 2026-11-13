@@ -79,7 +79,7 @@ impl Default for MossambiApp {
 
         Self {
             theme: current_theme,
-            quick_settings: QuickSettingsState::default(),
+            quick_settings: QuickSettingsState::from_config(&cfg),
             studio_view: StudioView::default(),
             activation_manager: ActivationManager::new(),
 

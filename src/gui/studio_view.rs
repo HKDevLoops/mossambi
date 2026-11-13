@@ -50,6 +50,47 @@ fn studio_tab_label(tab: StudioTab) -> (&'static str, IconGlyph) {
     }
 }
 
+/// True when `events` contains a key press matching a stored display binding
+/// ("Ctrl+P"). Modifier tokens: ctrl (cmd/command/win/super alias to ctrl),
+/// alt, shift; any other token is the key name, matched case-insensitively
+/// against the egui Key debug name. Modifiers must match exactly.
+fn shortcut_pressed(events: &[egui::Event], binding: &str) -> bool {
+    let binding = binding.trim();
+    if binding.is_empty() {
+        return false;
+    }
+    let mut want_ctrl = false;
+    let mut want_alt = false;
+    let mut want_shift = false;
+    let mut key_name = String::new();
+    for token in binding.split('+') {
+        let token = token.trim().to_ascii_lowercase();
+        match token.as_str() {
+            "ctrl" | "cmd" | "command" | "win" | "super" => want_ctrl = true,
+            "alt" | "option" => want_alt = true,
+            "shift" => want_shift = true,
+            _ => key_name = token,
+        }
+    }
+    if key_name.is_empty() {
+        return false;
+    }
+    events.iter().any(|event| match event {
+        egui::Event::Key {
+            key,
+            pressed: true,
+            modifiers,
+            ..
+        } => {
+            modifiers.ctrl == want_ctrl
+                && modifiers.alt == want_alt
+                && modifiers.shift == want_shift
+                && format!("{:?}", key).eq_ignore_ascii_case(key_name.as_str())
+        }
+        _ => false,
+    })
+}
+
 pub struct StudioView {
     pub current_tab: StudioTab,
     pub explorer_view: crate::gui::explorer_view::ExplorerView,
@@ -70,6 +111,10 @@ pub struct StudioView {
 
     // Finder-style Command Palette (Ctrl+P / Cmd+K)
     pub command_palette: CommandPalette,
+
+    // Live script execution console: worker threads send outcomes here
+    // through a channel; the Scripts preferences page drains it per frame.
+    pub script_console: crate::core::scripting::ScriptConsole,
 
     // Universal Media Conformer Studio State
     pub conformer_unit: usize,
@@ -96,6 +141,7 @@ impl Default for StudioView {
 
             prefs_view: crate::gui::preferences_view::PreferencesView::default(),
             command_palette: CommandPalette::default(),
+            script_console: crate::core::scripting::ScriptConsole::default(),
 
             conformer_unit: 0,
             conformer_preset_selector: "Passport Photo (35x45mm / 300 DPI)".to_string(),
@@ -140,40 +186,39 @@ impl StudioView {
     ) {
         let palette = current_theme.colors();
 
-        // Keyboard shortcuts: Ctrl+P / Cmd+K opens Command Palette
-        let toggle_palette = ctx.input(|i| {
-            (i.modifiers.ctrl || i.modifiers.command)
-                && (i.key_pressed(egui::Key::P) || i.key_pressed(egui::Key::K))
-        });
-        if toggle_palette {
+        // Rebindable studio shortcuts: match this frame's raw key events
+        // against the stored display bindings. While the Shortcuts page is
+        // capturing a rebind, the studio shortcuts stay quiet so the pressed
+        // key lands in the binding instead.
+        let capturing = self.prefs_view.capturing_action.is_some();
+        let events: Vec<egui::Event> = ctx.input(|i| i.events.clone());
+        let toggle_palette =
+            !capturing && shortcut_pressed(&events, &config.shortcut_for("palette"));
+        // Fixed secondary alias (Ctrl+K / Cmd+K) so the palette stays
+        // discoverable even after a rebind.
+        let palette_alias = !capturing
+            && ctx.input(|i| {
+                (i.modifiers.ctrl || i.modifiers.command)
+                    && !i.modifiers.shift
+                    && !i.modifiers.alt
+                    && i.key_pressed(egui::Key::K)
+            });
+        if toggle_palette || palette_alias {
             self.command_palette.toggle();
         }
         // B-1 gate flag: explorer raw-key handling is suppressed
         // while the palette modal is open (read in explorer_view).
         self.explorer_view.palette_open = self.command_palette.is_open;
 
-        // Global shortcuts: Ctrl+T / Cmd+T (New Tab), Ctrl+W / Cmd+W (Close Tab)
-        let open_new_tab = ctx.input(|i| {
-            (i.modifiers.ctrl || i.modifiers.command)
-                && !i.modifiers.shift
-                && !i.modifiers.alt
-                && i.key_pressed(egui::Key::T)
-                && !self.command_palette.is_open
-        });
-        if open_new_tab {
+        let open_new_tab = !capturing && shortcut_pressed(&events, &config.shortcut_for("new_tab"));
+        if open_new_tab && !self.command_palette.is_open {
             self.current_tab = StudioTab::FileExplorer;
             self.explorer_view
                 .add_tab(self.explorer_view.current_dir.clone());
         }
 
-        let close_tab_key = ctx.input(|i| {
-            (i.modifiers.ctrl || i.modifiers.command)
-                && !i.modifiers.shift
-                && !i.modifiers.alt
-                && i.key_pressed(egui::Key::W)
-                && !self.command_palette.is_open
-        });
-        if close_tab_key && self.explorer_view.tabs.len() > 1 {
+        let close_tab = !capturing && shortcut_pressed(&events, &config.shortcut_for("close_tab"));
+        if close_tab && !self.command_palette.is_open && self.explorer_view.tabs.len() > 1 {
             self.explorer_view
                 .close_tab(self.explorer_view.active_tab_index);
         }
@@ -1547,23 +1592,24 @@ impl StudioView {
                 }
                 self.current_tab = StudioTab::ArchiveSuite;
             }
-            PaletteAction::RunUserScript { title, body } => {
+            PaletteAction::RunUserScript { title, body, lang } => {
                 let current_file = self.explorer_view.selected_paths().first().cloned();
                 let selected = self.explorer_view.selected_paths();
-                let title_log = title.clone();
+                let sender = self.script_console.sender();
                 crate::core::scripting::execute_script_async(
                     body,
+                    lang,
                     current_file,
                     selected,
                     move |outcome| {
+                        // Terminal log stays for stdout runs; the live record
+                        // goes to the Scripts page console.
                         if outcome.success {
-                            println!(
-                                "[Script] '{}' finished successfully. Output: {}",
-                                title_log, outcome.return_value
-                            );
+                            println!("[Script] '{}' finished successfully", title);
                         } else {
-                            eprintln!("[Script] '{}' failed: {:?}", title_log, outcome.error);
+                            eprintln!("[Script] '{}' failed: {:?}", title, outcome.error);
                         }
+                        let _ = sender.send((title, outcome));
                     },
                 );
             }
@@ -2959,8 +3005,18 @@ impl StudioView {
         // stale snapshot is discarded in both directions. Safe because
         // PreferencesView::render has no early returns (verified 2026-11-10).
         std::mem::swap(&mut self.prefs_view.cfg, config);
-        self.prefs_view
-            .render(ui, palette, current_theme, _settings);
+        let run_ctx = {
+            let selected = self.explorer_view.selected_paths();
+            (selected.first().cloned(), selected)
+        };
+        self.prefs_view.render(
+            ui,
+            palette,
+            current_theme,
+            _settings,
+            &mut self.script_console,
+            run_ctx,
+        );
         std::mem::swap(&mut self.prefs_view.cfg, config);
     }
 

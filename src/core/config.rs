@@ -701,18 +701,40 @@ pub struct MossambiConfig {
     /// Keybinding profile: 0 = macOS Finder, 1 = Windows Explorer
     #[serde(default = "default_keybinding_profile")]
     pub keybinding_profile: u8,
-    /// Enable local AI acceleration (Ollama / LM Studio)
+    /// Persistent default: image conversion quality percent (10-100)
+    #[serde(default = "default_conv_image_quality")]
+    pub conv_image_quality: u8,
+    /// Persistent default: encode images losslessly
     #[serde(default)]
-    pub local_ai_enabled: bool,
-    /// Local AI HTTP API endpoint (e.g. http://localhost:11434/api or http://localhost:1234/v1)
-    #[serde(default = "default_local_ai_endpoint")]
-    pub local_ai_endpoint: String,
-    /// Local AI model name (e.g. qwen2.5-vl:7b, llama3.2-vision)
-    #[serde(default = "default_local_ai_model")]
-    pub local_ai_model: String,
-    /// Local AI temperature / effort
-    #[serde(default = "default_local_ai_temperature")]
-    pub local_ai_temperature: f32,
+    pub conv_image_lossless: bool,
+    /// Persistent default: image DPI (72-600)
+    #[serde(default = "default_conv_image_dpi")]
+    pub conv_image_dpi: u32,
+    /// Persistent default: audio bitrate string (e.g. "256k"; "" = default)
+    #[serde(default = "default_conv_audio_bitrate")]
+    pub conv_audio_bitrate: String,
+    /// Persistent default: audio strict-lossless mode
+    #[serde(default = "default_true")]
+    pub conv_audio_strict_lossless: bool,
+    /// Persistent default: video CRF quality (0-51)
+    #[serde(default = "default_conv_video_crf")]
+    pub conv_video_crf: u8,
+    /// Persistent default: video encoder preset label
+    #[serde(default = "default_conv_video_preset")]
+    pub conv_video_preset: String,
+    /// Persistent default: use hardware acceleration for video
+    #[serde(default = "default_true")]
+    pub conv_video_hw_accel: bool,
+    /// Persistent default: archive compression level label
+    #[serde(default = "default_conv_archive_compression")]
+    pub conv_archive_compression: String,
+    /// Persistent default: exam-envelope constraints enabled
+    #[serde(default)]
+    pub conv_exam_mode_enabled: bool,
+    /// Rebindable app shortcuts: action id -> display binding ("Ctrl+P").
+    /// Missing or blank ids fall back to DEFAULT_SHORTCUTS.
+    #[serde(default)]
+    pub shortcuts: std::collections::BTreeMap<String, String>,
     /// Retention period in days for staged deletion batches (.mossambi/Trash)
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
@@ -746,16 +768,28 @@ fn default_keybinding_profile() -> u8 {
     0
 }
 
-fn default_local_ai_endpoint() -> String {
-    "http://localhost:11434/api".into()
+fn default_conv_image_quality() -> u8 {
+    95
 }
 
-fn default_local_ai_model() -> String {
-    "qwen2.5-vl:7b".into()
+fn default_conv_image_dpi() -> u32 {
+    150
 }
 
-fn default_local_ai_temperature() -> f32 {
-    0.2
+fn default_conv_audio_bitrate() -> String {
+    "256k".into()
+}
+
+fn default_conv_video_crf() -> u8 {
+    16
+}
+
+fn default_conv_video_preset() -> String {
+    "High Quality".into()
+}
+
+fn default_conv_archive_compression() -> String {
+    "Ultra".into()
 }
 
 fn default_retention_days() -> u32 {
@@ -887,10 +921,20 @@ impl Default for MossambiConfig {
             sidebar_tools_expanded: true,
             explorer_style: ExplorerStyle::default(),
             keybinding_profile: default_keybinding_profile(),
-            local_ai_enabled: false,
-            local_ai_endpoint: default_local_ai_endpoint(),
-            local_ai_model: default_local_ai_model(),
-            local_ai_temperature: default_local_ai_temperature(),
+            conv_image_quality: default_conv_image_quality(),
+            conv_image_lossless: false,
+            conv_image_dpi: default_conv_image_dpi(),
+            conv_audio_bitrate: default_conv_audio_bitrate(),
+            conv_audio_strict_lossless: true,
+            conv_video_crf: default_conv_video_crf(),
+            conv_video_preset: default_conv_video_preset(),
+            conv_video_hw_accel: true,
+            conv_archive_compression: default_conv_archive_compression(),
+            conv_exam_mode_enabled: false,
+            shortcuts: DEFAULT_SHORTCUTS
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
             retention_days: default_retention_days(),
             donut: crate::core::donut_config::DonutConfig::default(),
             fields: crate::core::fields_config::FieldsConfig::default(),
@@ -900,6 +944,28 @@ impl Default for MossambiConfig {
             browser_save_converted_only: true,
             disable_conversion_history: false,
             conversion_history_limit: default_conversion_history_limit(),
+        }
+    }
+}
+
+/// Rebindable app shortcut action ids and their default bindings. The
+/// Shortcuts & Gestures page rebinds these; the studio dispatch reads them.
+pub const DEFAULT_SHORTCUTS: &[(&str, &str)] = &[
+    ("palette", "Ctrl+P"),
+    ("new_tab", "Ctrl+T"),
+    ("close_tab", "Ctrl+W"),
+];
+
+impl MossambiConfig {
+    /// Returns the display binding for a rebindable shortcut action id,
+    /// falling back to DEFAULT_SHORTCUTS when unset or blank.
+    pub fn shortcut_for(&self, id: &str) -> String {
+        match self.shortcuts.get(id) {
+            Some(b) if !b.trim().is_empty() => b.clone(),
+            _ => match DEFAULT_SHORTCUTS.iter().find(|(k, _)| *k == id) {
+                Some((_, v)) => v.to_string(),
+                None => String::new(),
+            },
         }
     }
 }
