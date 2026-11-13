@@ -517,33 +517,40 @@ pub fn render_filter_popover(
 // ---------------------------------------------------------------------------
 
 /// A standard macOS-Finder sidebar section header (uppercase, small, muted).
-pub fn render_sidebar_section_header(ui: &mut Ui, palette: &ThemePalette, label: &str) {
-    ui.add_space(space::MD);
-    ui.label(
-        egui::RichText::new(label.to_ascii_uppercase())
-            .size(type_scale::CAPTION)
-            .strong()
-            .color(palette.text_muted),
-    );
-    ui.add_space(space::XXS);
-}
-
-/// A collapsible sidebar section header with ASCII chevron and hover feedback.
-pub fn render_sidebar_collapsible_header(
+/// A stacked sidebar zone header with an identity boundary: a faint 1px
+/// hairline above the header (Finder group boundary), then the disclosure
+/// chevron and uppercase caption label. Returns true on click; callers
+/// toggle the zone and persist the new state in the config.
+pub fn render_sidebar_zone_header(
     ui: &mut Ui,
     palette: &ThemePalette,
     label: &str,
     expanded: bool,
 ) -> bool {
     ui.add_space(space::SM);
-    let row_h = 20.0;
+    // Zone identity boundary: hairline across the content width.
+    let cursor = ui.cursor();
+    let line_col = Color32::from_rgba_unmultiplied(
+        palette.border.r(),
+        palette.border.g(),
+        palette.border.b(),
+        90,
+    );
+    ui.painter().line_segment(
+        [
+            Pos2::new(cursor.min.x + 2.0, cursor.top() + 0.5),
+            Pos2::new(cursor.max.x - 2.0, cursor.top() + 0.5),
+        ],
+        Stroke::new(1.0_f32, line_col),
+    );
+    ui.add_space(space::XS);
+    let row_h = 22.0;
     let (rect, resp) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::click());
     let painter = ui.painter_at(rect);
     let chevron = if expanded { "v" } else { ">" };
     let text = format!("{} {}", chevron, label.to_ascii_uppercase());
-    let is_hovered = resp.hovered();
-    let col = if is_hovered {
+    let col = if resp.hovered() {
         palette.text_primary
     } else {
         palette.text_muted
@@ -580,15 +587,42 @@ pub struct SidebarRowSpec<'a> {
     pub show_pin: bool,
 }
 
-/// A standard sidebar row with a real vector icon, a label, and optional pin.
+/// What the user clicked on a sidebar row.
+///
+/// The pin strip is its own hit region, so a row action and a pin toggle
+/// can never fire from the same click.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SidebarRowClick {
+    /// The row body was clicked (navigate/activate).
+    pub row: bool,
+    /// The pin strip was clicked (toggle the pin).
+    pub pin: bool,
+}
+
+/// A standard sidebar row with a real vector icon, a label, and an
+/// interactive pin strip.
 ///
 /// The label elides to the available width instead of overflowing into the
 /// next column, which is the "Custom Conforme" truncation bug fixed at source.
-pub fn render_sidebar_row(ui: &mut Ui, palette: &ThemePalette, spec: &SidebarRowSpec<'_>) -> bool {
+/// When `show_pin` is set, the right edge of the row is a dedicated pin hit
+/// region - a real control, not a decorative glyph.
+pub fn render_sidebar_row(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    spec: &SidebarRowSpec<'_>,
+) -> SidebarRowClick {
     let row_h = 30.0;
     let desired_size = Vec2::new(ui.available_width(), row_h);
-    let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
-    let is_hovered = response.hovered();
+    let (rect, hover_resp) = ui.allocate_exact_size(desired_size, Sense::hover());
+
+    // Non-overlapping hit regions: the row action covers everything left of
+    // the pin strip; the pin strip is its own click target on the right edge.
+    let pin_strip_w = if spec.show_pin { 26.0 } else { 0.0 };
+    let row_hit_rect =
+        Rect::from_min_max(rect.min, Pos2::new(rect.max.x - pin_strip_w, rect.max.y));
+    let row_id = egui::Id::new(("mossambi_sidebar_row", rect.min.x as i32, rect.min.y as i32));
+    let row_resp = ui.interact(row_hit_rect, row_id, Sense::click());
+    let is_hovered = hover_resp.hovered() || row_resp.hovered();
     let painter = ui.painter_at(rect);
 
     // Straight-alpha fill. Feeding raw accent rgb into from_rgba_premultiplied
@@ -620,7 +654,6 @@ pub fn render_sidebar_row(ui: &mut Ui, palette: &ThemePalette, spec: &SidebarRow
     }
 
     let icon_side = 24.0;
-    let pin_side = if spec.show_pin { 16.0 } else { 0.0 };
     let icon_rect = Rect::from_center_size(
         Pos2::new(rect.min.x + 10.0 + icon_side / 2.0, rect.center().y),
         Vec2::splat(icon_side),
@@ -628,7 +661,7 @@ pub fn render_sidebar_row(ui: &mut Ui, palette: &ThemePalette, spec: &SidebarRow
     crate::core::icon_packs::paint_icon(ui, spec.pack, spec.glyph, icon_rect, spec.accent_rgb);
 
     let label_x = rect.min.x + 10.0 + icon_side + space::MD;
-    let label_max_w = (rect.max.x - label_x - pin_side - space::SM).max(space::LG);
+    let label_max_w = (rect.max.x - label_x - pin_strip_w - space::SM).max(space::LG);
     let font_id = FontId::proportional(14.0);
     let display_label = design::elide_end(ui, spec.label, &font_id, label_max_w);
     // High-contrast labels: the 3px accent bar already marks selection, so the
@@ -648,33 +681,50 @@ pub fn render_sidebar_row(ui: &mut Ui, palette: &ThemePalette, spec: &SidebarRow
         text_color,
     );
 
+    let mut pin_clicked = false;
     if spec.show_pin {
-        let pin_rect = Rect::from_center_size(
-            Pos2::new(rect.max.x - 12.0, rect.center().y),
-            Vec2::splat(pin_side),
+        let pin_rect =
+            Rect::from_min_max(Pos2::new(rect.max.x - pin_strip_w, rect.min.y), rect.max);
+        let pin_id = egui::Id::new(("mossambi_sidebar_pin", rect.min.x as i32, rect.min.y as i32));
+        let pin_resp = ui.interact(pin_rect, pin_id, Sense::click());
+        let pin_rect_glyph = Rect::from_center_size(
+            Pos2::new(rect.max.x - pin_strip_w / 2.0, rect.center().y),
+            Vec2::splat(16.0),
         );
+        let pin_color = if pin_resp.hovered() {
+            // Direct pin hover: the brightest affordance tier.
+            [
+                palette.text_primary.r(),
+                palette.text_primary.g(),
+                palette.text_primary.b(),
+            ]
+        } else if is_hovered {
+            [
+                palette.text_secondary.r(),
+                palette.text_secondary.g(),
+                palette.text_secondary.b(),
+            ]
+        } else {
+            [
+                palette.text_muted.r(),
+                palette.text_muted.g(),
+                palette.text_muted.b(),
+            ]
+        };
         crate::core::icon_packs::paint_icon(
             ui,
             spec.pack,
             IconGlyph::ActionPin,
-            pin_rect,
-            if is_hovered {
-                [
-                    palette.text_secondary.r(),
-                    palette.text_secondary.g(),
-                    palette.text_secondary.b(),
-                ]
-            } else {
-                [
-                    palette.text_muted.r(),
-                    palette.text_muted.g(),
-                    palette.text_muted.b(),
-                ]
-            },
+            pin_rect_glyph,
+            pin_color,
         );
+        pin_clicked = pin_resp.clicked();
     }
 
-    response.clicked()
+    SidebarRowClick {
+        row: row_resp.clicked(),
+        pin: pin_clicked,
+    }
 }
 
 #[cfg(test)]

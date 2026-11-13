@@ -685,6 +685,16 @@ pub struct MossambiConfig {
     /// `show_custom_pinned` is on.
     #[serde(default)]
     pub pinned_custom: Vec<String>,
+    /// Sidebar zone collapse states (Zen/Arc mechanics). Persisted so the
+    /// sidebar keeps its shape across restarts; all zones default expanded.
+    #[serde(default = "default_true")]
+    pub sidebar_favorites_expanded: bool,
+    #[serde(default = "default_true")]
+    pub sidebar_locations_expanded: bool,
+    #[serde(default = "default_true")]
+    pub sidebar_tags_expanded: bool,
+    #[serde(default = "default_true")]
+    pub sidebar_tools_expanded: bool,
     /// Explorer style: macOS Finder vs Windows Explorer.
     #[serde(default)]
     pub explorer_style: ExplorerStyle,
@@ -871,6 +881,10 @@ impl Default for MossambiConfig {
             show_tags_section: false,
             show_custom_pinned: false,
             pinned_custom: Vec::new(),
+            sidebar_favorites_expanded: true,
+            sidebar_locations_expanded: true,
+            sidebar_tags_expanded: true,
+            sidebar_tools_expanded: true,
             explorer_style: ExplorerStyle::default(),
             keybinding_profile: default_keybinding_profile(),
             local_ai_enabled: false,

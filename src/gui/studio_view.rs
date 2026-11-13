@@ -16,10 +16,7 @@ use crate::core::{FileCategory, UniversalRegistry};
 use crate::exam::{optimize_exam_media, ExamConstraint};
 use crate::gui::command_palette::{CommandPalette, PaletteAction};
 use crate::gui::design::{layout, radius, type_scale};
-use crate::gui::finder_chrome::{
-    render_sidebar_collapsible_header, render_sidebar_row, render_sidebar_section_header,
-    SidebarRowSpec,
-};
+use crate::gui::finder_chrome::{render_sidebar_row, render_sidebar_zone_header, SidebarRowSpec};
 use crate::gui::macos_theme::*;
 use crate::gui::quick_settings::QuickSettingsState;
 use crate::hwaccel::detect_hardware_capabilities;
@@ -65,12 +62,8 @@ pub struct StudioView {
     pub catalogue_search: String,
     pub catalogue_category: Option<FileCategory>,
 
-    // Sidebar Collapsible Sections
-    pub drives_expanded: bool,
-    pub cloud_expanded: bool,
-    pub network_expanded: bool,
-    pub tags_expanded: bool,
-    pub tools_expanded: bool,
+    // Sidebar zone collapse states live in MossambiConfig (sidebar_*_expanded
+    // keys) so they persist across restarts.
 
     // macOS System Settings-style Preferences surface
     pub prefs_view: crate::gui::preferences_view::PreferencesView,
@@ -100,12 +93,6 @@ impl Default for StudioView {
             inspected_file_path: None,
             catalogue_search: String::new(),
             catalogue_category: None,
-
-            drives_expanded: true,
-            cloud_expanded: false,
-            network_expanded: false,
-            tags_expanded: true,
-            tools_expanded: true,
 
             prefs_view: crate::gui::preferences_view::PreferencesView::default(),
             command_palette: CommandPalette::default(),
@@ -915,7 +902,8 @@ impl StudioView {
                             selected: is_home_active,
                             show_pin: false,
                         };
-                        if render_sidebar_row(ui, &palette, &home_spec) {
+                        let home_click = render_sidebar_row(ui, &palette, &home_spec);
+                        if home_click.row {
                             self.current_tab = StudioTab::FileExplorer;
                             let home_opt = crate::core::platform_paths::home_dir_opt();
                             let target = home_opt.unwrap_or_else(|| PathBuf::from("."));
@@ -923,12 +911,23 @@ impl StudioView {
                             self.explorer_view.is_home_view = true;
                         }
 
-                        // 2. FAVORITES Section (Authentic Finder folder colors)
-                        render_sidebar_section_header(ui, &palette, "Favorites");
+                        // 2. FAVORITES Zone (static favorites + user pins,
+                        // Finder semantics: pinned folders live inline)
+                        let mut cfg = crate::core::MossambiConfig::load();
+                        if render_sidebar_zone_header(
+                            ui,
+                            &palette,
+                            "Favorites",
+                            cfg.sidebar_favorites_expanded,
+                        ) {
+                            cfg.sidebar_favorites_expanded = !cfg.sidebar_favorites_expanded;
+                            if let Err(e) = cfg.save() {
+                                log::warn!("Could not persist sidebar state: {e}");
+                            }
+                        }
 
-                        let cfg = crate::core::MossambiConfig::load();
                         let home_opt = crate::core::platform_paths::home_dir_opt();
-                        if home_opt.is_some() {
+                        if cfg.sidebar_favorites_expanded && home_opt.is_some() {
                             let recycle_target = crate::core::resolve_recycle_bin_target();
                             let pinned: [(&str, IconGlyph, [u8; 3], PathBuf); 7] = [
                                 (
@@ -985,9 +984,10 @@ impl StudioView {
                                     accent_rgb: icon_col,
                                     label: name,
                                     selected: is_active,
-                                    show_pin: true,
+                                    show_pin: false,
                                 };
-                                if render_sidebar_row(ui, &palette, &spec) {
+                                let row_click = render_sidebar_row(ui, &palette, &spec);
+                                if row_click.row {
                                     if path.to_string_lossy().contains("$Recycle.Bin") {
                                         self.explorer_view.show_hidden_files = true;
                                     }
@@ -998,8 +998,10 @@ impl StudioView {
                                 ui.add_space(1.0);
                             }
 
+                            // User pins live inline in the Favorites zone
+                            // (Finder semantics); the pin strip is a real
+                            // unpin control.
                             if cfg.show_custom_pinned && !cfg.pinned_custom.is_empty() {
-                                render_sidebar_section_header(ui, &palette, "Pinned Folders");
                                 let custom = cfg.pinned_custom.clone();
                                 for raw in custom {
                                     let path = PathBuf::from(&raw);
@@ -1018,7 +1020,20 @@ impl StudioView {
                                         selected: is_active,
                                         show_pin: true,
                                     };
-                                    if render_sidebar_row(ui, &palette, &spec) {
+                                    let row_click = render_sidebar_row(ui, &palette, &spec);
+                                    if row_click.pin {
+                                        // Real unpin action: remove + persist.
+                                        cfg.pinned_custom.retain(|p| p != &raw);
+                                        if let Err(e) = cfg.save() {
+                                            log::warn!("Could not persist sidebar pins: {e}");
+                                        } else {
+                                            log::info!(
+                                                "Unpinned {} from the sidebar",
+                                                path.display()
+                                            );
+                                        }
+                                    }
+                                    if row_click.row {
                                         self.current_tab = StudioTab::FileExplorer;
                                         self.explorer_view.navigate_to(path);
                                         self.explorer_view.is_home_view = false;
@@ -1028,17 +1043,21 @@ impl StudioView {
                             }
                         }
 
-                        // 3. DRIVES Section (Collapsible)
-                        if render_sidebar_collapsible_header(
+                        // 3. LOCATIONS Zone (drives + cloud; the empty
+                        // Network section is removed)
+                        if render_sidebar_zone_header(
                             ui,
                             &palette,
-                            "Drives",
-                            self.drives_expanded,
+                            "Locations",
+                            cfg.sidebar_locations_expanded,
                         ) {
-                            self.drives_expanded = !self.drives_expanded;
+                            cfg.sidebar_locations_expanded = !cfg.sidebar_locations_expanded;
+                            if let Err(e) = cfg.save() {
+                                log::warn!("Could not persist sidebar state: {e}");
+                            }
                         }
 
-                        if self.drives_expanded {
+                        if cfg.sidebar_locations_expanded {
                             let drives = self.explorer_view.drives.clone();
                             for drive in &drives {
                                 let is_active = self.current_tab == StudioTab::FileExplorer
@@ -1061,25 +1080,15 @@ impl StudioView {
                                     selected: is_active,
                                     show_pin: false,
                                 };
-                                if render_sidebar_row(ui, &palette, &spec) {
+                                let drive_click = render_sidebar_row(ui, &palette, &spec);
+                                if drive_click.row {
                                     self.current_tab = StudioTab::FileExplorer;
                                     self.explorer_view.navigate_to(drive.path.clone());
                                     self.explorer_view.is_home_view = false;
                                 }
                                 ui.add_space(1.0);
                             }
-                        }
 
-                        // 4. CLOUD DRIVES Section (Collapsible)
-                        if render_sidebar_collapsible_header(
-                            ui,
-                            &palette,
-                            "Cloud",
-                            self.cloud_expanded,
-                        ) {
-                            self.cloud_expanded = !self.cloud_expanded;
-                        }
-                        if self.cloud_expanded {
                             if let Ok(userprofile) = std::env::var("USERPROFILE") {
                                 let od = PathBuf::from(&userprofile).join("OneDrive");
                                 if od.exists() {
@@ -1093,7 +1102,8 @@ impl StudioView {
                                         selected: is_active,
                                         show_pin: false,
                                     };
-                                    if render_sidebar_row(ui, &palette, &spec) {
+                                    let cloud_click = render_sidebar_row(ui, &palette, &spec);
+                                    if cloud_click.row {
                                         self.current_tab = StudioTab::FileExplorer;
                                         self.explorer_view.navigate_to(od);
                                     }
@@ -1101,27 +1111,20 @@ impl StudioView {
                             }
                         }
 
-                        // 5. NETWORK Section (Collapsible)
-                        if render_sidebar_collapsible_header(
-                            ui,
-                            &palette,
-                            "Network",
-                            self.network_expanded,
-                        ) {
-                            self.network_expanded = !self.network_expanded;
-                        }
-
-                        // 6. TAGS Section (Collapsible)
+                        // 4. TAGS Zone (optional Finder-like tags)
                         if cfg.show_tags_section {
-                            if render_sidebar_collapsible_header(
+                            if render_sidebar_zone_header(
                                 ui,
                                 &palette,
                                 "Tags",
-                                self.tags_expanded,
+                                cfg.sidebar_tags_expanded,
                             ) {
-                                self.tags_expanded = !self.tags_expanded;
+                                cfg.sidebar_tags_expanded = !cfg.sidebar_tags_expanded;
+                                if let Err(e) = cfg.save() {
+                                    log::warn!("Could not persist sidebar state: {e}");
+                                }
                             }
-                            if self.tags_expanded {
+                            if cfg.sidebar_tags_expanded {
                                 for tag_name in crate::core::tags::TAG_PRESETS {
                                     let tag_col = crate::core::tags::tag_color(tag_name);
                                     let is_active =
@@ -1187,16 +1190,19 @@ impl StudioView {
                             }
                         }
 
-                        // 7. TOOLS & CONVERTERS Section (Collapsible)
-                        if render_sidebar_collapsible_header(
+                        // 5. TOOLS & CONVERTERS Zone
+                        if render_sidebar_zone_header(
                             ui,
                             &palette,
                             "Tools & Converters",
-                            self.tools_expanded,
+                            cfg.sidebar_tools_expanded,
                         ) {
-                            self.tools_expanded = !self.tools_expanded;
+                            cfg.sidebar_tools_expanded = !cfg.sidebar_tools_expanded;
+                            if let Err(e) = cfg.save() {
+                                log::warn!("Could not persist sidebar state: {e}");
+                            }
                         }
-                        if self.tools_expanded {
+                        if cfg.sidebar_tools_expanded {
                             let tools = [
                                 (
                                     "Transcoder",
@@ -1245,7 +1251,8 @@ impl StudioView {
                                     selected: is_active,
                                     show_pin: false,
                                 };
-                                if render_sidebar_row(ui, &palette, &spec) {
+                                let tool_click = render_sidebar_row(ui, &palette, &spec);
+                                if tool_click.row {
                                     self.current_tab = tab;
                                     if tab == StudioTab::ExamStudio {
                                         quick_settings.exam_mode_enabled = true;
