@@ -1435,3 +1435,61 @@ columns interactions, icon crispness, Miller chains, breadcrumb
 scroll, A5 popup/menu behavior, Probe D stamp). Out-of-scope items
 remain: Finder segment collapse root elision, async directory listing
 infrastructure.
+
+2026-11-13 B-FIXES WAVE CLOSED (docs(plan) 0e2a879 119 lines,
+fix(gui) 485a803 3 files +511/-408 incl. fmt normalization of the
+wrapped block): B-1 command-palette raw-key leak, B-2 stray Home
+selection, B-3 missing active pill for non-explorer views. Five
+gates green: fmt clean; clippy -D warnings 30.11s plus
+--all-targets -- -D warnings 6.17s; cargo test full suite (lib
+69/69, gui_ascii_gate, columns, miller, pantone, fs_utils, TUI,
+widget); release 1m07s; porcelain exactly 3 src files + plan doc;
+ASCII sweep: added lines clean, plan doc clean.
+B-1 MECHANISM: egui raw input is app-wide; command_palette.rs
+(pub is_open :279; raw reads Escape :394, arrows :432/:435, Enter
+:447-452) renders AFTER the tab dispatch (studio_view.rs
+:1341-1347), so consumption order cannot protect underlying views.
+FIX (frame-scoped gate): ExplorerView gains pub palette_open
+(explorer_view.rs after show_internal_toolbar; ctor default
+false); studio_view.rs sets self.explorer_view.palette_open =
+self.command_palette.is_open right after the Ctrl+P/K toggle; the
+entire explorer raw-key block (explorer_view.rs :1603-2100:
+Escape, j/k/h/l/g/y/p/d/r/v, Space, F2/F3/F5/F6, Tab, Delete,
+arrows) is wrapped in if !self.palette_open; Ctrl+T (new tab) and
+Ctrl+W (close tab) reads gated with && !self.command_palette.is_open;
+studio_app.rs Ctrl+wheel zoom + Ctrl+0 reset gated with
+!palette_open on all four outcomes. Ctrl+P/K toggle deliberately
+UNGATED (it is the keyboard way to close the palette).
+lost_focus-gated Enter sites (path-edit studio_view.rs :580; rename
+TextEdits explorer_view.rs :2144/:2313/:2953) untouched - the
+palette steals focus on open, so they are self-protecting.
+B-2 MECHANISM: navigate_to pure up-nav branch (explorer_view.rs
+:1136-1148) re-selects the folder just left (Finder parity for
+folder listings); Desktop->Home qualifies as pure up-nav because
+the Desktop directory is a child of the home dir, so the Home
+dashboard inherited 1 selected (0 B). FIX: keep selected_paths.clear()
+and the directory placeholder preview unconditionally; gate only
+selected_paths.insert(old_dir.clone()) on
+home_dir_opt().as_ref() != Some(&dir). Both Home entry paths
+(sidebar Home row studio_view.rs :857-863; navigate_to_home
+explorer_view.rs :1319-1324) route through navigate_to, so one fix
+covers both.
+B-3 MECHANISM: tab-strip pill activation was already gated on
+current_tab == FileExplorer (studio_view.rs :220-222) so explorer
+pills rendered inactive while Settings was open, but the strip
+showed ONLY stale explorer pills - the active view had no pill.
+FIX: new helper studio_tab_label(StudioTab) -> (label, glyph)
+mirroring the sidebar Tools naming (Transcoder/ActionRefresh,
+Custom Conformer/ActionEdit, Quality Inspector/Search, Archive
+Suite/PageArchive, Hardware & AI/ActionShield, Preferences/Gear);
+after the explorer-tab loop, when current_tab != FileExplorer one
+130x26 active pill renders (card_bg fill, 1px border, Finder-blue
+glyph [79,168,255], 12-char title elision, text_primary 13.5).
+Non-clickable (it IS the current view), no close button.
+VERIFICATION PENDING (computer-use, deferred per user rule until
+all work completes): palette Enter->Preferences, palette typing
+leaks nothing into the explorer, Home shows no stray selection
+after Desktop->Home, tab strip shows the active-view pill in
+Settings and tool views. Live instance pid=10644 hwnd=67656
+(relaunched 2026-11-13; older pid 26716 / hwnd 23529548 are dead).
+Ledger mirrors claude.md/gemini.md byte-identical (SHA256 x3).
