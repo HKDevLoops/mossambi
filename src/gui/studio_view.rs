@@ -1259,10 +1259,16 @@ impl StudioView {
                     });
             });
 
-        // 2. Central Content Panel with smooth vertical ScrollArea
-        let central_frame = egui::Frame::none()
-            .fill(palette.window_bg)
-            .inner_margin(egui::Margin::symmetric(10.0, 6.0));
+        // 2. Central Content Panel with smooth vertical ScrollArea.
+        // The explorer tab renders flush to the window edges (Finder
+        // bottom chrome docks seamlessly); other tabs keep the inset.
+        let central_frame = egui::Frame::none().fill(palette.window_bg).inner_margin(
+            if self.current_tab == StudioTab::FileExplorer {
+                egui::Margin::same(0.0)
+            } else {
+                egui::Margin::symmetric(10.0, 6.0)
+            },
+        );
 
         egui::CentralPanel::default()
             .frame(central_frame)

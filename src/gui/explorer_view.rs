@@ -658,6 +658,9 @@ pub struct ExplorerView {
     pub selected_paths: HashSet<PathBuf>,
     pub search_query: String,
     pub drives: Vec<DriveInfo>,
+    /// Throttle for the periodic drive re-enumeration so free space,
+    /// mounts, and unmounts stay current (5 s cadence).
+    pub last_drives_refresh: Option<Instant>,
 
     // Multi-Tab Explorer Architecture
     pub tabs: Vec<ExplorerTab>,
@@ -949,6 +952,7 @@ impl Default for ExplorerView {
             selected_paths: HashSet::new(),
             search_query: String::new(),
             drives,
+            last_drives_refresh: None,
             tabs: vec![initial_tab],
             active_tab_index: 0,
             next_tab_id: 2,
@@ -1503,26 +1507,43 @@ impl ExplorerView {
     ) {
         self.poll_background_scans();
 
+        // Drive refresh hook: re-enumerate volumes every 5 s (cheap Win32
+        // lookup) so free space, mounts, and unmounts stay current for the
+        // status bar and the sidebar drive list.
+        let refresh_due = match self.last_drives_refresh {
+            Some(t) => t.elapsed() > std::time::Duration::from_secs(5),
+            None => true,
+        };
+        if refresh_due {
+            self.drives = get_system_drives();
+            self.last_drives_refresh = Some(Instant::now());
+        }
+
         // 1. External OS Drag & Drop Ingestion
         let (dropped_files, is_hovered) =
             ui.input(|i| (i.raw.dropped_files.clone(), !i.raw.hovered_files.is_empty()));
 
         if is_hovered {
             ui.add_space(4.0);
-            let drop_frame = egui::Frame::none()
-                .fill(Color32::from_rgba_unmultiplied(120, 190, 32, 50))
-                .stroke(Stroke::new(1.5_f32, palette.accent))
-                .rounding(Rounding::same(8.0))
-                .inner_margin(egui::Margin::symmetric(14.0, 7.0));
-            drop_frame.show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(
-                            "Drop external files or folders here to stage, inspect, or transcode",
-                        )
-                        .strong()
-                        .color(palette.accent),
-                    );
+            // Window-edge inset: the explorer tab renders flush, so the
+            // banner carries its own horizontal padding.
+            ui.horizontal(|ui| {
+                ui.add_space(10.0);
+                let drop_frame = egui::Frame::none()
+                    .fill(Color32::from_rgba_unmultiplied(120, 190, 32, 50))
+                    .stroke(Stroke::new(1.5_f32, palette.accent))
+                    .rounding(Rounding::same(8.0))
+                    .inner_margin(egui::Margin::symmetric(14.0, 7.0));
+                drop_frame.show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(
+                                "Drop external files or folders here to stage, inspect, or transcode",
+                            )
+                            .strong()
+                            .color(palette.accent),
+                        );
+                    });
                 });
             });
             ui.add_space(4.0);
@@ -2663,24 +2684,97 @@ impl ExplorerView {
 
         // 5. Explorer Layout: Full Width macOS Finder Canvas
         ui.vertical(|ui| {
-            if self.show_internal_toolbar {
-                // Top Navigation & Breadcrumbs Bar (macOS Toolbar style)
-                self.render_breadcrumb_bar(ui, palette);
-                ui.add_space(6.0);
-                if !self.is_home_view {
-                    // Category Filter Tabs Bar & View Mode Toggle (Segmented control)
-                    self.render_category_filter_bar(ui, palette);
-                    ui.add_space(6.0);
-                }
+            // Top chrome padding: the app CentralPanel is flush for the
+            // explorer tab, so the bars carry their own window inset.
+            egui::Frame::none()
+                .inner_margin(egui::Margin {
+                    left: 10.0,
+                    right: 10.0,
+                    top: 6.0,
+                    bottom: 0.0,
+                })
+                .show(ui, |ui| {
+                    if self.show_internal_toolbar {
+                        // Top Navigation & Breadcrumbs Bar (macOS Toolbar style)
+                        self.render_breadcrumb_bar(ui, palette);
+                        ui.add_space(6.0);
+                        if !self.is_home_view {
+                            // Category Filter Tabs Bar & View Mode Toggle (Segmented control)
+                            self.render_category_filter_bar(ui, palette);
+                            ui.add_space(6.0);
+                        }
+                    }
+                });
+
+            // Docked bottom chrome (Finder): the status bar docks at the
+            // very bottom edge; the path bar docks above it. Panels take
+            // exactly their content height, so early returns can never
+            // leave reservation gaps behind.
+            let status_resp = egui::TopBottomPanel::bottom("explorer_status_bar")
+                .frame(
+                    egui::Frame::none()
+                        .fill(palette.window_bg)
+                        .inner_margin(egui::Margin {
+                            left: 10.0,
+                            right: 10.0,
+                            top: 0.0,
+                            bottom: 2.0,
+                        }),
+                )
+                .show_separator_line(false)
+                .show_inside(ui, |ui| {
+                    self.render_status_bar(ui, palette);
+                });
+            let status_rect = status_resp.response.rect;
+            ui.painter().line_segment(
+                [
+                    Pos2::new(status_rect.left(), status_rect.top() + 0.5),
+                    Pos2::new(status_rect.right(), status_rect.top() + 0.5),
+                ],
+                Stroke::new(1.0_f32, palette.border),
+            );
+
+            let path_bar_visible =
+                !self.is_home_view && !parse_breadcrumbs(&self.current_dir).is_empty();
+            if path_bar_visible {
+                let path_resp =
+                    egui::TopBottomPanel::bottom("explorer_path_bar")
+                        .frame(egui::Frame::none().fill(palette.window_bg).inner_margin(
+                            egui::Margin {
+                                left: 10.0,
+                                right: 10.0,
+                                top: 0.0,
+                                bottom: 3.0,
+                            },
+                        ))
+                        .show_separator_line(false)
+                        .show_inside(ui, |ui| {
+                            self.render_bottom_path_bar(ui, palette);
+                        });
+                let path_rect = path_resp.response.rect;
+                ui.painter().line_segment(
+                    [
+                        Pos2::new(path_rect.left(), path_rect.top() + 0.5),
+                        Pos2::new(path_rect.right(), path_rect.top() + 0.5),
+                    ],
+                    Stroke::new(1.0_f32, palette.border),
+                );
             }
 
-            // File Table, Grid, or Miller Columns View
-            let bottom_bars_h = if self.is_home_view { 28.0 } else { 56.0 };
-            let avail_h = (ui.available_height() - bottom_bars_h).max(120.0);
-            ui.allocate_ui_with_layout(
-                Vec2::new(ui.available_width(), avail_h),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
+            // File Table, Grid, or Miller Columns View fills the exact
+            // remainder between the top chrome and the docked bars.
+            egui::CentralPanel::default()
+                .frame(
+                    egui::Frame::none()
+                        .fill(palette.window_bg)
+                        .inner_margin(egui::Margin {
+                            left: 10.0,
+                            right: 0.0,
+                            top: 4.0,
+                            bottom: 0.0,
+                        }),
+                )
+                .show_inside(ui, |ui| {
                     self.render_file_view(
                         ui,
                         palette,
@@ -2690,14 +2784,7 @@ impl ExplorerView {
                         &mut on_pack_archive,
                         &mut on_inspect_file,
                     );
-                },
-            );
-
-            // Finder path bar sits ABOVE the status bar (authentic macOS Finder hierarchy)
-            self.render_bottom_path_bar(ui, palette);
-
-            // macOS Finder Bottom Status Bar (Items, Available Space, Zoom)
-            self.render_status_bar(ui, palette);
+                });
         });
 
         // 5. Modal Quick Look / Peek Display Overlay (macOS Finder style)
@@ -7062,7 +7149,6 @@ impl ExplorerView {
     ) {
         let avail_w = ui.available_width();
         let pane_w = (avail_w - 12.0) * 0.5;
-        let pane_h = ui.available_height() - 32.0;
 
         let mut primary_nav_target: Option<PathBuf> = None;
         let mut secondary_nav_target: Option<PathBuf> = None;
@@ -7106,6 +7192,10 @@ impl ExplorerView {
             });
         });
         ui.add_space(4.0);
+
+        // Pane height from the exact remainder - no double reservation
+        // for the split toolbar rendered above.
+        let pane_h = ui.available_height().max(120.0);
 
         ui.horizontal(|ui| {
             // LEFT PANE (Primary)
@@ -7344,115 +7434,116 @@ impl ExplorerView {
     }
 
     fn render_status_bar(&mut self, ui: &mut Ui, palette: &ThemePalette) {
-        let bar_h = 24.0_f32;
-        let entries = self.filtered_and_sorted_entries();
-        let total_items = entries.len();
-        let total_hidden = self.entries.iter().filter(|e| e.is_hidden).count();
-        let sel_count = self.selected_paths.len();
+        let bar_h = 26.0_f32;
 
-        let total_selected_bytes: u64 = self
-            .entries
-            .iter()
-            .filter(|e| self.selected_paths.contains(&e.path) && !e.is_dir)
-            .map(|e| e.size_bytes)
-            .sum();
+        // Active-pane awareness: the shared status bar reflects the
+        // active pane's directory, items, and selection in split mode.
+        let use_secondary = self.split_view_enabled && self.active_pane == 1;
+        let drive_dir = if use_secondary {
+            self.secondary_dir.clone()
+        } else {
+            self.current_dir.clone()
+        };
+        let (total_items, total_hidden, sel_count, total_selected_bytes);
+        if use_secondary {
+            total_items = self
+                .secondary_entries
+                .iter()
+                .filter(|e| !e.is_hidden)
+                .count();
+            total_hidden = self
+                .secondary_entries
+                .iter()
+                .filter(|e| e.is_hidden)
+                .count();
+            sel_count = self.secondary_selected_paths.len();
+            total_selected_bytes = self
+                .secondary_entries
+                .iter()
+                .filter(|e| self.secondary_selected_paths.contains(&e.path) && !e.is_dir)
+                .map(|e| e.size_bytes)
+                .sum();
+        } else {
+            total_items = self.filtered_and_sorted_entries().len();
+            total_hidden = self.entries.iter().filter(|e| e.is_hidden).count();
+            sel_count = self.selected_paths.len();
+            total_selected_bytes = self
+                .entries
+                .iter()
+                .filter(|e| self.selected_paths.contains(&e.path) && !e.is_dir)
+                .map(|e| e.size_bytes)
+                .sum();
+        }
 
-        // Find drive space for current path
+        // Per-volume free space (Finder: "N items, X GB available").
         let drive_info = self
             .drives
             .iter()
-            .find(|d| self.current_dir.starts_with(&d.path))
-            .map(|d| format!("{} available on {}", d.formatted_space(), d.display_name));
+            .find(|d| drive_dir.starts_with(&d.path))
+            .map(|d| format_file_size(d.free_bytes));
 
-        egui::Frame::none()
-            .fill(Color32::from_rgba_unmultiplied(
-                palette.card_bg.r(),
-                palette.card_bg.g(),
-                palette.card_bg.b(),
-                220,
-            ))
-            .stroke(Stroke::new(1.0_f32, palette.border))
-            .inner_margin(egui::Margin::symmetric(10.0, 3.0))
-            .show(ui, |ui| {
-                ui.allocate_ui_with_layout(
-                    Vec2::new(ui.available_width(), bar_h),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        // Left: Item count & selection
-                        let count_text = if total_hidden > 0 && !self.show_hidden_files {
-                            format!("{} ({} hidden)", pluralize_items(total_items), total_hidden)
-                        } else {
-                            pluralize_items(total_items)
-                        };
-                        ui.label(
-                            egui::RichText::new(count_text)
-                                .size(11.5)
-                                .color(palette.text_secondary),
-                        );
+        // Left: selection REPLACES the item count (Finder semantics).
+        let items_text = if sel_count > 0 {
+            format!(
+                "{} selected, {}",
+                sel_count,
+                format_file_size(total_selected_bytes)
+            )
+        } else {
+            let mut text = pluralize_items(total_items);
+            if let Some(free) = &drive_info {
+                text.push_str(", ");
+                text.push_str(free);
+                text.push_str(" available");
+            }
+            if total_hidden > 0 && !self.show_hidden_files {
+                text.push_str(&format!(" ({} hidden)", total_hidden));
+            }
+            text
+        };
 
-                        if sel_count > 0 {
-                            ui.label(
-                                egui::RichText::new("|")
-                                    .size(11.0)
-                                    .color(palette.text_muted),
-                            );
-                            let sel_text = format!(
-                                "{} selected ({})",
-                                sel_count,
-                                format_file_size(total_selected_bytes)
-                            );
-                            ui.label(
-                                egui::RichText::new(sel_text)
-                                    .size(11.5)
-                                    .strong()
-                                    .color(palette.accent),
-                            );
-                        }
-
-                        // Right: Drive available space, zoom slider (if Grid), dotfiles indicator
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if self.view_mode == ViewMode::Grid {
-                                ui.add_sized(
-                                    [70.0, 16.0],
-                                    egui::Slider::new(&mut self.icon_size, 64.0..=300.0)
-                                        .show_value(false),
-                                );
-                                ui.label(
-                                    egui::RichText::new(format!("{:.0}px", self.icon_size))
-                                        .size(11.0)
-                                        .color(palette.text_muted),
-                                );
-                                ui.label(
-                                    egui::RichText::new("|")
-                                        .size(11.0)
-                                        .color(palette.text_muted),
-                                );
-                            }
-
-                            if self.show_hidden_files {
-                                ui.label(
-                                    egui::RichText::new("Dotfiles visible")
-                                        .size(11.0)
-                                        .color(palette.accent),
-                                );
-                                ui.label(
-                                    egui::RichText::new("|")
-                                        .size(11.0)
-                                        .color(palette.text_muted),
-                                );
-                            }
-
-                            if let Some(info) = drive_info {
-                                ui.label(
-                                    egui::RichText::new(info)
-                                        .size(11.5)
-                                        .color(palette.text_muted),
-                                );
-                            }
-                        });
-                    },
-                );
+        let mut items_label = egui::RichText::new(items_text)
+            .size(11.5)
+            .color(if sel_count > 0 {
+                palette.accent
+            } else {
+                palette.text_secondary
             });
+        if sel_count > 0 {
+            items_label = items_label.strong();
+        }
+
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), bar_h),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label(items_label);
+
+                // Right: zoom slider (Grid), dotfiles indicator. Finder
+                // separates with spacing, not pipes.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.view_mode == ViewMode::Grid {
+                        ui.add_sized(
+                            [70.0, 16.0],
+                            egui::Slider::new(&mut self.icon_size, 64.0..=300.0).show_value(false),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("{:.0}px", self.icon_size))
+                                .size(11.0)
+                                .color(palette.text_muted),
+                        );
+                    }
+
+                    if self.show_hidden_files {
+                        ui.label(
+                            egui::RichText::new("Dotfiles visible")
+                                .size(11.0)
+                                .color(palette.accent),
+                        );
+                    }
+                });
+            },
+        );
     }
 
     /// Renders the macOS Quick Look / Peek Display Modal Overlay
