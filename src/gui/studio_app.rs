@@ -61,6 +61,11 @@ pub struct MossambiApp {
 
     // Ctrl+Mouse-Wheel UI zoom (Finder/Explorer parity), 1.0 = native scale
     pub ui_zoom: f32,
+
+    // Mirror of cfg.grid_icon_size so the config-to-view sync only fires
+    // when the Preferences knob actually changes (does not fight the
+    // toolbar/status-bar sliders, which write explorer_view.icon_size).
+    pub last_grid_icon_size: u32,
 }
 
 impl Default for MossambiApp {
@@ -97,6 +102,7 @@ impl Default for MossambiApp {
             last_applied_glass: None,
             config: cfg,
             ui_zoom: 1.0,
+            last_grid_icon_size: 0,
         }
     }
 }
@@ -619,6 +625,13 @@ impl eframe::App for MossambiApp {
         // Sync icon pack from config (live)
         self.studio_view.explorer_view.icon_pack =
             crate::core::icon_packs::IconPack::from_config_id(&cfg.icon_pack);
+        // Sync grid icon size from config (Preferences -> live view).
+        // The mirror prevents this from fighting the toolbar/status-bar
+        // sliders, which write explorer_view.icon_size directly.
+        if cfg.grid_icon_size != self.last_grid_icon_size {
+            self.last_grid_icon_size = cfg.grid_icon_size;
+            self.studio_view.explorer_view.icon_size = cfg.grid_icon_size as f32;
+        }
         let current_glass = cfg.glass_effect;
         if self.frame_count == 1
             || self.last_applied_theme != Some(self.theme)

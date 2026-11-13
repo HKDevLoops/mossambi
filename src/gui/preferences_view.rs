@@ -2408,7 +2408,7 @@ impl PreferencesView {
                 dirty,
                 |ui, dirty| {
                     if ui
-                        .add(egui::Slider::new(gis_mut, 32..=128).show_value(false))
+                        .add(egui::Slider::new(gis_mut, 64..=300).show_value(false))
                         .changed()
                     {
                         *dirty = true;

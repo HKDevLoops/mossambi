@@ -1076,6 +1076,120 @@ fn stderr_tail_of(s: &str, max_chars: usize) -> String {
         .to_string()
 }
 
+/// Single in-flight slot for video first-frame extraction so a folder
+/// full of videos cannot storm ffmpeg processes (the UI decode budget
+/// caps decodes per frame; this caps concurrent video spawns at one).
+static VIDEO_THUMB_INFLIGHT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+struct VideoThumbGuard;
+
+impl Drop for VideoThumbGuard {
+    fn drop(&mut self) {
+        VIDEO_THUMB_INFLIGHT.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Extract the first video frame as an RGBA image scaled to fit within
+/// `max_dim` (aspect preserved, never upscaled). Requires ffmpeg on
+/// PATH; degrades to an error (callers fall back to the vector icon)
+/// when ffmpeg is missing. At most one extraction runs at a time; a
+/// concurrent call errors immediately so the tile keeps its vector
+/// icon for that frame.
+pub fn video_first_frame_thumbnail(input: &Path, max_dim: u32) -> Result<image::RgbaImage> {
+    use std::sync::atomic::Ordering;
+
+    if VIDEO_THUMB_INFLIGHT
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        bail!("another video thumbnail extraction is already running");
+    }
+    let _guard = VideoThumbGuard;
+
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i"]);
+    cmd.arg(input);
+    cmd.args([
+        "-frames:v",
+        "1",
+        "-an",
+        "-sn",
+        "-dn",
+        "-vf",
+        &format!(
+            "scale=w='min(iw,{max_dim})':h='min(ih,{max_dim})':force_original_aspect_ratio=decrease"
+        ),
+        "-f",
+        "image2pipe",
+        "-c:v",
+        "png",
+        "pipe:1",
+    ]);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
+        cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+    }
+
+    cmd.stdin(Stdio::null())
+        .stderr(Stdio::piped())
+        .stdout(Stdio::piped());
+    let mut child = cmd.spawn().with_context(|| {
+        format!(
+            "Failed to run FFmpeg for the video thumbnail of {}. Ensure FFmpeg is installed and accessible in PATH.",
+            input.display()
+        )
+    })?;
+
+    // Drain stderr on a thread so a chatty decoder cannot deadlock the
+    // stdout pipe, then read the PNG bytes from stdout.
+    let stderr_handle = child.stderr.take();
+    let stderr_thread = std::thread::spawn(move || {
+        let mut tail = String::new();
+        if let Some(mut pipe) = stderr_handle {
+            let _ = pipe.read_to_string(&mut tail);
+        }
+        tail
+    });
+
+    let mut png = Vec::new();
+    if let Some(mut out_pipe) = child.stdout.take() {
+        out_pipe.read_to_end(&mut png)?;
+    }
+    let status = child
+        .wait()
+        .context("Failed to wait for the FFmpeg process to finish")?;
+    let stderr_tail = stderr_thread.join().unwrap_or_default();
+    if !status.success() {
+        bail!(
+            "FFmpeg video thumbnail failed ({status}). ffmpeg stderr (tail):\n{}",
+            stderr_tail_of(&stderr_tail, 2000)
+        );
+    }
+    if png.is_empty() {
+        bail!("FFmpeg produced no frame for {}", input.display());
+    }
+
+    let img = image::load_from_memory(&png).with_context(|| {
+        format!(
+            "Failed to decode the extracted frame of {}",
+            input.display()
+        )
+    })?;
+    let (w, h) = (img.width(), img.height());
+    let thumb = if w <= max_dim && h <= max_dim {
+        img.to_rgba8()
+    } else {
+        img.resize(max_dim, max_dim, image::imageops::FilterType::Lanczos3)
+            .to_rgba8()
+    };
+    Ok(thumb)
+}
+
 // ---------------------------------------------------------------------------
 // Audio Zero-Loss Pipeline (Stream-Copy & Bit-Exact PCM)
 // ---------------------------------------------------------------------------

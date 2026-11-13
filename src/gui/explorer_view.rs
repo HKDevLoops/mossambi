@@ -600,6 +600,10 @@ pub struct ExplorerTab {
 /// Lazy per-path image thumbnail cache entry (path -> mtime -> texture)
 struct CachedThumb {
     mtime: Option<std::time::SystemTime>,
+    /// Decode resolution this entry was produced at; a cache hit
+    /// requires a stored size >= the requested one so larger zoom
+    /// levels re-decode instead of upscaling a small texture.
+    max_px: u32,
     state: ThumbState,
 }
 
@@ -3380,7 +3384,7 @@ impl ExplorerView {
                     ui.add_space(4.0);
                     ui.add_sized(
                         [75.0, 18.0],
-                        egui::Slider::new(&mut self.icon_size, 64.0..=160.0).show_value(false),
+                        egui::Slider::new(&mut self.icon_size, 64.0..=300.0).show_value(false),
                     );
                     ui.label(
                         egui::RichText::new(format!("{:.0}px", self.icon_size))
@@ -5166,7 +5170,7 @@ impl ExplorerView {
             if let Some(state) = self.hover_preview.as_mut() {
                 state.content = HoverContent::Children(children, total);
             }
-        } else if is_image_extension(&item.extension) {
+        } else if preview_kind(&item.extension) != PreviewKind::None {
             let tex = self.get_or_load_thumbnail(ctx, &item.path, 260);
             if tex.is_none() {
                 ctx.request_repaint_after(std::time::Duration::from_millis(60));
@@ -5397,8 +5401,10 @@ impl ExplorerView {
         path: &Path,
         max_px: u32,
     ) -> Option<egui::TextureHandle> {
-        // Per-frame decode budget: at most 3 image decodes per 300ms window
-        if self.thumb_decode_budget.0 >= 3 {
+        // Per-frame decode budget: at most 6 decodes per 300ms window
+        // (images + PDFs + video frames; the video path is additionally
+        // capped at one concurrent ffmpeg spawn).
+        if self.thumb_decode_budget.0 >= 6 {
             if self.thumb_decode_budget.1.elapsed() < std::time::Duration::from_millis(250) {
                 ctx.request_repaint_after(std::time::Duration::from_millis(40));
                 return None;
@@ -5408,7 +5414,7 @@ impl ExplorerView {
 
         let mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
         if let Some(entry) = self.thumb_cache.get(path) {
-            if entry.mtime == mtime {
+            if entry.mtime == mtime && entry.max_px >= max_px {
                 let tex = match &entry.state {
                     ThumbState::Ready(t) => t.clone(),
                 };
@@ -5421,7 +5427,7 @@ impl ExplorerView {
 
         let tex = decoded.map(|img| {
             ctx.load_texture(
-                format!("thumb_{}", path.display()),
+                format!("thumb_{}@{}", path.display(), max_px),
                 img,
                 egui::TextureOptions::LINEAR,
             )
@@ -5430,6 +5436,7 @@ impl ExplorerView {
             path.to_path_buf(),
             CachedThumb {
                 mtime,
+                max_px,
                 state: ThumbState::Ready(tex),
             },
         );
@@ -5491,9 +5498,17 @@ impl ExplorerView {
         // Icon size scaled by the zoom level (Small -> Medium -> Large -> Extra large)
         let grid_zoom_scale = Self::EXPLORER_ZOOM_LEVELS[(self.explorer_zoom as usize).min(4)];
         let grid_checkboxes = self.checkbox_mode;
-        let icon_sz = (self.icon_size * grid_zoom_scale).clamp(48.0, 160.0);
-        let tile_w = (icon_sz + 32.0).clamp(96.0, 180.0);
-        let tile_h = icon_sz + 52.0;
+        let icon_sz = (self.icon_size * grid_zoom_scale).clamp(64.0, 300.0);
+        // Proportional tile chrome: label and padding scale with the
+        // icon so the name never crowds the glyph at small sizes and
+        // the icon always paints at the requested size.
+        let label_font = (icon_sz * 0.15).clamp(12.0, 22.0);
+        let size_font = (label_font - 2.0).clamp(9.5, 12.0);
+        let label_zone_h = label_font * 2.6;
+        let bottom_chrome = label_zone_h + size_font + 10.0;
+        let top_pad = (icon_sz * 0.10).clamp(8.0, 26.0);
+        let tile_w = (icon_sz + 32.0).max(96.0);
+        let tile_h = top_pad + icon_sz + bottom_chrome;
         let tile_size = Vec2::new(tile_w, tile_h);
 
         egui::ScrollArea::vertical()
@@ -5676,16 +5691,20 @@ impl ExplorerView {
                             }
                         }
 
-                        // Middle zone: Icon / Thumbnail centered strictly below the header zone
-                        let top_bound = rect.top() + 24.0;
-                        let bot_bound = rect.bottom() - 62.0;
-                        let icon_zone_h = (bot_bound - top_bound).max(40.0);
-                        let icon_center = Pos2::new(rect.center().x, top_bound + icon_zone_h * 0.5);
-                        let icon_box_side = (icon_zone_h * 0.90).min(tile_w - 24.0);
+                        // Middle zone: Icon / Thumbnail between the
+                        // proportional top padding and the label chrome
+                        let zone_top = rect.top() + top_pad;
+                        let zone_bottom = rect.bottom() - bottom_chrome;
+                        let icon_zone_h = zone_bottom - zone_top;
+                        let icon_center = Pos2::new(rect.center().x, zone_top + icon_zone_h * 0.5);
+                        let icon_box_side = icon_zone_h.min(tile_w - 24.0);
 
-                        // Image files: real thumbnail preview (lazily decoded, cached)
-                        let thumb = if !item.is_dir && is_image_extension(&item.extension) {
-                            self.get_or_load_thumbnail(ui.ctx(), &item.path, 220)
+                        // Any previewable file: real thumbnail preview
+                        // (lazily decoded, cached at the tile resolution)
+                        let thumb = if !item.is_dir
+                            && preview_kind(&item.extension) != PreviewKind::None
+                        {
+                            self.get_or_load_thumbnail(ui.ctx(), &item.path, thumb_max_px(icon_sz))
                         } else {
                             None
                         };
@@ -5768,9 +5787,8 @@ impl ExplorerView {
                             palette.text_primary
                         };
 
-                        let font_id =
-                            egui::FontId::proportional((icon_sz * 0.08 + 5.0).clamp(12.0, 14.0));
-                        let max_text_w = (tile_w - 18.0).max(60.0);
+                        let font_id = egui::FontId::proportional(label_font);
+                        let max_text_w = (tile_w - 16.0).max(60.0);
                         let mut job = egui::text::LayoutJob::simple(
                             raw_name,
                             font_id,
@@ -5786,7 +5804,8 @@ impl ExplorerView {
                             rect.left() + 8.0,
                             (rect.right() - 8.0 - name_w).max(rect.left() + 8.0),
                         );
-                        let name_y = rect.bottom() - 26.0 - name_h;
+                        let name_y =
+                            (rect.bottom() - size_font - 10.0 - name_h).max(zone_bottom + 2.0);
                         ui.painter_at(rect).galley(
                             Pos2::new(name_x, name_y),
                             galley,
@@ -5812,7 +5831,7 @@ impl ExplorerView {
                             Pos2::new(rect.center().x, size_y),
                             egui::Align2::CENTER_CENTER,
                             size_text.as_str(),
-                            egui::FontId::proportional(11.0),
+                            egui::FontId::proportional(size_font),
                             size_color,
                         );
 
@@ -6689,8 +6708,8 @@ impl ExplorerView {
                             item_clone.is_dir,
                         );
 
-                        // Image or PDF Live Thumbnail or Media Scrubber or Icon
-                        if icon_spec.is_image || item_clone.extension == "PDF" {
+                        // Any previewable file Live Thumbnail or Media Scrubber or Icon
+                        if preview_kind(&item_clone.extension) != PreviewKind::None {
                             let thumb_tex =
                                 self.get_or_load_thumbnail(ui.ctx(), &item_clone.path, 320);
                             if let Some(tex) = thumb_tex {
@@ -7395,7 +7414,7 @@ impl ExplorerView {
                             if self.view_mode == ViewMode::Grid {
                                 ui.add_sized(
                                     [70.0, 16.0],
-                                    egui::Slider::new(&mut self.icon_size, 64.0..=160.0)
+                                    egui::Slider::new(&mut self.icon_size, 64.0..=300.0)
                                         .show_value(false),
                                 );
                                 ui.label(
@@ -7972,26 +7991,40 @@ fn load_image_thumbnail(ctx: &egui::Context, path: &Path) -> Option<egui::Textur
     None
 }
 
-/// True if the extension maps to an image category we can thumbnail
-fn is_image_extension(ext: &str) -> bool {
-    matches!(
-        ext,
-        "JPG"
-            | "JPEG"
-            | "PNG"
-            | "WEBP"
-            | "GIF"
-            | "AVIF"
-            | "TIFF"
-            | "BMP"
-            | "ICO"
-            | "HEIC"
-            | "RAW"
-            | "PDF"
-    )
+/// Which kind of raster preview a file extension can produce.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PreviewKind {
+    /// No raster preview; the painted vector icon is used.
+    None,
+    /// Decodable still image (GIF uses its first frame).
+    Image,
+    /// PDF first page.
+    Pdf,
+    /// Video first frame (ffmpeg; degrades to the vector icon when
+    /// ffmpeg is unavailable).
+    Video,
 }
 
-/// Decode an image or document file down to a `max_px` thumbnail ColorImage
+/// Map a file extension (any case) to its raster-preview capability.
+pub fn preview_kind(ext: &str) -> PreviewKind {
+    match ext.to_ascii_uppercase().as_str() {
+        "JPG" | "JPEG" | "PNG" | "WEBP" | "GIF" | "AVIF" | "TIFF" | "BMP" | "ICO" | "HEIC"
+        | "RAW" => PreviewKind::Image,
+        "PDF" => PreviewKind::Pdf,
+        "MP4" | "MKV" | "AVI" | "MOV" | "WEBM" | "M4V" | "WMV" | "FLV" | "TS" | "M2TS" | "MTS"
+        | "3GP" | "3G2" | "OGV" | "VOB" | "MPG" | "MPEG" | "F4V" => PreviewKind::Video,
+        _ => PreviewKind::None,
+    }
+}
+
+/// Thumbnail decode resolution for a grid tile of `icon_sz` css px:
+/// never below 128 (avoids re-decoding during small zoom changes),
+/// never above 512.
+pub fn thumb_max_px(icon_sz: f32) -> u32 {
+    (icon_sz.ceil() as u32).clamp(128, 512)
+}
+
+/// Decode any previewable file down to a `max_px` thumbnail ColorImage
 fn decode_thumbnail(path: &Path, max_px: u32) -> Option<egui::ColorImage> {
     let ext = path
         .extension()
@@ -7999,30 +8032,41 @@ fn decode_thumbnail(path: &Path, max_px: u32) -> Option<egui::ColorImage> {
         .unwrap_or("")
         .to_ascii_uppercase();
 
-    if ext == "PDF" {
-        if let Ok(rgba) = crate::codec::render_pdf_first_page_thumbnail(path, max_px) {
+    match preview_kind(&ext) {
+        PreviewKind::Pdf => {
+            let rgba = crate::codec::render_pdf_first_page_thumbnail(path, max_px).ok()?;
             let (w, h) = rgba.dimensions();
-            return Some(egui::ColorImage::from_rgba_unmultiplied(
+            Some(egui::ColorImage::from_rgba_unmultiplied(
                 [w as usize, h as usize],
                 &rgba.into_raw(),
-            ));
+            ))
         }
+        PreviewKind::Video => {
+            let rgba = crate::codec::video_first_frame_thumbnail(path, max_px).ok()?;
+            let (w, h) = rgba.dimensions();
+            Some(egui::ColorImage::from_rgba_unmultiplied(
+                [w as usize, h as usize],
+                &rgba.into_raw(),
+            ))
+        }
+        PreviewKind::Image => {
+            let bytes = std::fs::read(path).ok()?;
+            let img = image::load_from_memory(&bytes).ok()?;
+            let (orig_w, orig_h) = (img.width(), img.height());
+            let thumb = if orig_w <= max_px && orig_h <= max_px {
+                img.to_rgba8()
+            } else {
+                img.resize(max_px, max_px, image::imageops::FilterType::Lanczos3)
+                    .to_rgba8()
+            };
+            let (w, h) = thumb.dimensions();
+            Some(egui::ColorImage::from_rgba_unmultiplied(
+                [w as usize, h as usize],
+                &thumb.into_raw(),
+            ))
+        }
+        PreviewKind::None => None,
     }
-
-    let bytes = std::fs::read(path).ok()?;
-    let img = image::load_from_memory(&bytes).ok()?;
-    let (orig_w, orig_h) = (img.width(), img.height());
-    let thumb = if orig_w <= max_px && orig_h <= max_px {
-        img.to_rgba8()
-    } else {
-        img.resize(max_px, max_px, image::imageops::FilterType::Lanczos3)
-            .to_rgba8()
-    };
-    let (w, h) = thumb.dimensions();
-    Some(egui::ColorImage::from_rgba_unmultiplied(
-        [w as usize, h as usize],
-        &thumb.into_raw(),
-    ))
 }
 
 /// Truncate a label in the middle ("verylongfilename.txt" -> "verylo...ame.txt")

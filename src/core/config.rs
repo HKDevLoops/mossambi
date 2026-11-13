@@ -639,7 +639,7 @@ pub struct MossambiConfig {
     #[serde(default)]
     pub font_family: Option<String>,
     #[serde(default = "default_grid_icon_size")]
-    pub grid_icon_size: u32, // 64..160
+    pub grid_icon_size: u32, // 64..300
     #[serde(default)]
     pub checkbox_mode: CheckboxMode,
     #[serde(default)]
