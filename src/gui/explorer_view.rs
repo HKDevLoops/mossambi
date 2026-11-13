@@ -735,6 +735,11 @@ pub struct ExplorerView {
     // Windows 11 & macOS Home Dashboard View
     pub is_home_view: bool,
     pub show_internal_toolbar: bool,
+    /// B-1 gate: set true every frame by the studio view while the
+    /// command palette modal is open. Suppresses all explorer
+    /// raw-key handling so palette typing and Enter never leak
+    /// into the view underneath.
+    pub palette_open: bool,
 
     // Finder-style long-hover preview (files & folders)
     hover_preview: Option<HoverPreviewState>,
@@ -966,6 +971,7 @@ impl Default for ExplorerView {
             show_new_folder_dialog: false,
             is_home_view: home_opt.is_some(),
             show_internal_toolbar: false,
+            palette_open: false,
             new_folder_buffer: "New Folder".to_string(),
             clipboard_paths: Vec::new(),
             clipboard_is_cut: false,
@@ -1142,8 +1148,14 @@ impl ExplorerView {
                     // folder just left and shows no phantom
                     // first-file preview. The directory placeholder
                     // preview keeps the auto-preview guard dormant.
+                    // B-2 exception: up-navigation into the Home
+                    // dashboard must not inherit a selection; the
+                    // dashboard is not a listing of the parent and
+                    // always starts clean.
                     self.selected_paths.clear();
-                    self.selected_paths.insert(old_dir.clone());
+                    if crate::core::platform_paths::home_dir_opt().as_ref() != Some(&dir) {
+                        self.selected_paths.insert(old_dir.clone());
+                    }
                     self.column_preview_item = Some(FileItem::from_path(old_dir));
                 }
             }
@@ -1600,306 +1612,350 @@ impl ExplorerView {
             .collect();
         let total_nav_items = nav_entries.len();
 
-        ui.input(|i| {
-            if i.key_pressed(egui::Key::Escape) {
-                if !self.search_query.is_empty() || is_search_focused {
-                    self.search_query.clear();
-                    ui.memory_mut(|m| {
-                        m.surrender_focus(egui::Id::new("mossambi_global_search_input"))
-                    });
-                }
-                self.peek_item = None;
-                self.peek_texture = None;
-                self.peek_text_cache = None;
-                self.peek_hash_cache = None;
-                self.renaming_path = None;
-                self.show_new_folder_dialog = false;
-                self.properties_item = None;
-            }
-
-            // Vim & Emacs Navigation (Active when not typing in text boxes)
-            if !is_typing {
-                // Vim `j` / Down: Cursor Down
-                if total_nav_items > 0
-                    && ((i.key_pressed(egui::Key::J)
-                        && !i.modifiers.command
-                        && !i.modifiers.ctrl
-                        && !i.modifiers.alt)
-                        || i.key_pressed(egui::Key::ArrowDown))
-                {
-                    self.focused_row = (self.focused_row + 1).min(total_nav_items - 1);
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        self.selected_paths.clear();
-                        self.selected_paths.insert(item.path.clone());
+        // B-1 gate: while the command palette modal is open the
+        // palette owns the keyboard. egui raw input is app-wide, so
+        // every handler below would also fire for keys meant for
+        // the palette (Enter, vim letters, arrows, Space, Delete).
+        // Skip the whole block; the view resumes raw-key handling
+        // on the frame after the palette closes.
+        if !self.palette_open {
+            ui.input(|i| {
+                if i.key_pressed(egui::Key::Escape) {
+                    if !self.search_query.is_empty() || is_search_focused {
+                        self.search_query.clear();
+                        ui.memory_mut(|m| {
+                            m.surrender_focus(egui::Id::new("mossambi_global_search_input"))
+                        });
                     }
+                    self.peek_item = None;
+                    self.peek_texture = None;
+                    self.peek_text_cache = None;
+                    self.peek_hash_cache = None;
+                    self.renaming_path = None;
+                    self.show_new_folder_dialog = false;
+                    self.properties_item = None;
                 }
 
-                // Vim `k` / Up / Emacs `Ctrl+P`: Cursor Up
-                if total_nav_items > 0
-                    && ((i.key_pressed(egui::Key::K)
-                        && !i.modifiers.command
-                        && !i.modifiers.ctrl
-                        && !i.modifiers.alt)
-                        || i.key_pressed(egui::Key::ArrowUp)
-                        || ((i.modifiers.ctrl || i.modifiers.command)
-                            && i.key_pressed(egui::Key::P)))
-                {
-                    self.focused_row = self.focused_row.saturating_sub(1);
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        self.selected_paths.clear();
-                        self.selected_paths.insert(item.path.clone());
-                    }
-                }
-
-                // Vim `h` / Left / Emacs `Ctrl+B`: Parent Directory
-                if (i.key_pressed(egui::Key::H)
-                    && !i.modifiers.command
-                    && !i.modifiers.ctrl
-                    && !i.modifiers.alt)
-                    || (i.modifiers.alt && i.key_pressed(egui::Key::ArrowLeft))
-                    || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::B))
-                    || i.key_pressed(egui::Key::Backspace)
-                {
-                    if let Some(parent) = self.current_dir.parent() {
-                        let p = parent.to_path_buf();
-                        if !p.as_os_str().is_empty() {
-                            self.navigate_to(p);
-                        }
-                    }
-                }
-
-                // Vim `l` / Right / Enter / Emacs `Ctrl+F`: Enter Directory or Open File (Finder parity)
-                if (i.key_pressed(egui::Key::L)
-                    && !i.modifiers.command
-                    && !i.modifiers.ctrl
-                    && !i.modifiers.alt)
-                    || i.key_pressed(egui::Key::Enter)
-                    || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::F))
-                {
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        if item.is_dir {
-                            self.navigate_to(item.path.clone());
-                        } else {
-                            open_in_default_app(&item.path);
-                            on_stage_file(item.path.clone());
-                        }
-                    }
-                }
-
-                // Space: macOS Quick Look / Peek on the focused item (Finder parity)
-                if i.key_pressed(egui::Key::Space) && !i.modifiers.ctrl && !i.modifiers.command {
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        self.peek_item = Some(item.clone());
-                        self.peek_texture = None;
-                        self.peek_text_cache = None;
-                        self.peek_hash_cache = None;
-                    }
-                }
-
-                // F2: Rename focused item in place
-                if i.key_pressed(egui::Key::F2) {
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        if let Some(name) = item.path.file_name() {
-                            self.renaming_path =
-                                Some((item.path.clone(), name.to_string_lossy().to_string()));
-                        }
-                    }
-                }
-
-                // Vim `gg` / Emacs `Alt+<`: Jump to First Item
-                if (i.key_pressed(egui::Key::G)
-                    && !i.modifiers.shift
-                    && !i.modifiers.ctrl
-                    && !i.modifiers.command
-                    && !i.modifiers.alt)
-                    || (i.modifiers.alt && i.key_pressed(egui::Key::Comma))
-                {
-                    if i.modifiers.alt {
-                        self.focused_row = 0;
-                        if let Some(item) = nav_entries.first() {
+                // Vim & Emacs Navigation (Active when not typing in text boxes)
+                if !is_typing {
+                    // Vim `j` / Down: Cursor Down
+                    if total_nav_items > 0
+                        && ((i.key_pressed(egui::Key::J)
+                            && !i.modifiers.command
+                            && !i.modifiers.ctrl
+                            && !i.modifiers.alt)
+                            || i.key_pressed(egui::Key::ArrowDown))
+                    {
+                        self.focused_row = (self.focused_row + 1).min(total_nav_items - 1);
+                        if let Some(item) = nav_entries.get(self.focused_row) {
                             self.selected_paths.clear();
                             self.selected_paths.insert(item.path.clone());
                         }
-                    } else {
-                        let now = Instant::now();
-                        if let Some(prev) = self.last_g_press {
-                            if now.duration_since(prev) < std::time::Duration::from_millis(400) {
-                                self.focused_row = 0;
-                                if let Some(item) = nav_entries.first() {
-                                    self.selected_paths.clear();
-                                    self.selected_paths.insert(item.path.clone());
-                                }
-                                self.last_g_press = None;
-                            } else {
-                                self.last_g_press = Some(now);
-                            }
-                        } else {
-                            self.last_g_press = Some(now);
-                        }
                     }
-                }
 
-                // Vim `G` (Shift+G) / Emacs `Alt+>`: Jump to Last Item
-                if total_nav_items > 0
-                    && ((i.key_pressed(egui::Key::G)
-                        && i.modifiers.shift
-                        && !i.modifiers.ctrl
-                        && !i.modifiers.command)
-                        || (i.modifiers.alt && i.key_pressed(egui::Key::Period)))
-                {
-                    self.focused_row = total_nav_items - 1;
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        self.selected_paths.clear();
-                        self.selected_paths.insert(item.path.clone());
-                    }
-                }
-
-                // Vim `/` / Neovim / Emacs `Ctrl+S` / `Ctrl+F`: Focus Search Bar
-                if (i.key_pressed(egui::Key::Slash)
-                    && !i.modifiers.ctrl
-                    && !i.modifiers.command
-                    && !i.modifiers.alt)
-                    || ((i.modifiers.ctrl || i.modifiers.command)
-                        && (i.key_pressed(egui::Key::F) || i.key_pressed(egui::Key::S)))
-                {
-                    self.focus_search_requested = true;
-                }
-
-                // Vim `v`: Visual Multi-Selection Toggle
-                if i.key_pressed(egui::Key::V)
-                    && !i.modifiers.ctrl
-                    && !i.modifiers.command
-                    && !i.modifiers.alt
-                {
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        if self.selected_paths.contains(&item.path) {
-                            self.selected_paths.remove(&item.path);
-                        } else {
+                    // Vim `k` / Up / Emacs `Ctrl+P`: Cursor Up
+                    if total_nav_items > 0
+                        && ((i.key_pressed(egui::Key::K)
+                            && !i.modifiers.command
+                            && !i.modifiers.ctrl
+                            && !i.modifiers.alt)
+                            || i.key_pressed(egui::Key::ArrowUp)
+                            || ((i.modifiers.ctrl || i.modifiers.command)
+                                && i.key_pressed(egui::Key::P)))
+                    {
+                        self.focused_row = self.focused_row.saturating_sub(1);
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            self.selected_paths.clear();
                             self.selected_paths.insert(item.path.clone());
                         }
                     }
-                }
 
-                // Vim `y` / Emacs `Alt+W`: Yank / Copy
-                if (i.key_pressed(egui::Key::Y)
-                    && !i.modifiers.ctrl
-                    && !i.modifiers.command
-                    && !i.modifiers.alt)
-                    || (i.modifiers.alt && i.key_pressed(egui::Key::W))
-                {
-                    if self.selected_paths.is_empty() {
-                        if let Some(item) = nav_entries.get(self.focused_row) {
-                            self.clipboard_paths = vec![item.path.clone()];
+                    // Vim `h` / Left / Emacs `Ctrl+B`: Parent Directory
+                    if (i.key_pressed(egui::Key::H)
+                        && !i.modifiers.command
+                        && !i.modifiers.ctrl
+                        && !i.modifiers.alt)
+                        || (i.modifiers.alt && i.key_pressed(egui::Key::ArrowLeft))
+                        || ((i.modifiers.ctrl || i.modifiers.command)
+                            && i.key_pressed(egui::Key::B))
+                        || i.key_pressed(egui::Key::Backspace)
+                    {
+                        if let Some(parent) = self.current_dir.parent() {
+                            let p = parent.to_path_buf();
+                            if !p.as_os_str().is_empty() {
+                                self.navigate_to(p);
+                            }
                         }
-                    } else {
-                        self.clipboard_paths =
-                            self.selected_paths.iter().cloned().collect::<Vec<_>>();
                     }
-                    self.clipboard_is_cut = false;
-                }
 
-                // Vim `p` / Emacs `Ctrl+Y`: Put / Paste
-                if (i.key_pressed(egui::Key::P)
-                    && !i.modifiers.ctrl
-                    && !i.modifiers.command
-                    && !i.modifiers.alt)
-                    || ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::Y))
-                {
-                    self.paste_from_clipboard();
-                }
-
-                // Vim `d` (without modifiers): Delete focused/selected
-                if i.key_pressed(egui::Key::D)
-                    && !i.modifiers.ctrl
-                    && !i.modifiers.command
-                    && !i.modifiers.alt
-                {
-                    let mut deleted = false;
-                    if self.selected_paths.is_empty() {
+                    // Vim `l` / Right / Enter / Emacs `Ctrl+F`: Enter Directory or Open File (Finder parity)
+                    if (i.key_pressed(egui::Key::L)
+                        && !i.modifiers.command
+                        && !i.modifiers.ctrl
+                        && !i.modifiers.alt)
+                        || i.key_pressed(egui::Key::Enter)
+                        || ((i.modifiers.ctrl || i.modifiers.command)
+                            && i.key_pressed(egui::Key::F))
+                    {
                         if let Some(item) = nav_entries.get(self.focused_row) {
-                            log_result(
-                                "Delete",
-                                &item.path,
-                                crate::core::action_journal::stage_delete(std::slice::from_ref(
+                            if item.is_dir {
+                                self.navigate_to(item.path.clone());
+                            } else {
+                                open_in_default_app(&item.path);
+                                on_stage_file(item.path.clone());
+                            }
+                        }
+                    }
+
+                    // Space: macOS Quick Look / Peek on the focused item (Finder parity)
+                    if i.key_pressed(egui::Key::Space) && !i.modifiers.ctrl && !i.modifiers.command
+                    {
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            self.peek_item = Some(item.clone());
+                            self.peek_texture = None;
+                            self.peek_text_cache = None;
+                            self.peek_hash_cache = None;
+                        }
+                    }
+
+                    // F2: Rename focused item in place
+                    if i.key_pressed(egui::Key::F2) {
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            if let Some(name) = item.path.file_name() {
+                                self.renaming_path =
+                                    Some((item.path.clone(), name.to_string_lossy().to_string()));
+                            }
+                        }
+                    }
+
+                    // Vim `gg` / Emacs `Alt+<`: Jump to First Item
+                    if (i.key_pressed(egui::Key::G)
+                        && !i.modifiers.shift
+                        && !i.modifiers.ctrl
+                        && !i.modifiers.command
+                        && !i.modifiers.alt)
+                        || (i.modifiers.alt && i.key_pressed(egui::Key::Comma))
+                    {
+                        if i.modifiers.alt {
+                            self.focused_row = 0;
+                            if let Some(item) = nav_entries.first() {
+                                self.selected_paths.clear();
+                                self.selected_paths.insert(item.path.clone());
+                            }
+                        } else {
+                            let now = Instant::now();
+                            if let Some(prev) = self.last_g_press {
+                                if now.duration_since(prev) < std::time::Duration::from_millis(400)
+                                {
+                                    self.focused_row = 0;
+                                    if let Some(item) = nav_entries.first() {
+                                        self.selected_paths.clear();
+                                        self.selected_paths.insert(item.path.clone());
+                                    }
+                                    self.last_g_press = None;
+                                } else {
+                                    self.last_g_press = Some(now);
+                                }
+                            } else {
+                                self.last_g_press = Some(now);
+                            }
+                        }
+                    }
+
+                    // Vim `G` (Shift+G) / Emacs `Alt+>`: Jump to Last Item
+                    if total_nav_items > 0
+                        && ((i.key_pressed(egui::Key::G)
+                            && i.modifiers.shift
+                            && !i.modifiers.ctrl
+                            && !i.modifiers.command)
+                            || (i.modifiers.alt && i.key_pressed(egui::Key::Period)))
+                    {
+                        self.focused_row = total_nav_items - 1;
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            self.selected_paths.clear();
+                            self.selected_paths.insert(item.path.clone());
+                        }
+                    }
+
+                    // Vim `/` / Neovim / Emacs `Ctrl+S` / `Ctrl+F`: Focus Search Bar
+                    if (i.key_pressed(egui::Key::Slash)
+                        && !i.modifiers.ctrl
+                        && !i.modifiers.command
+                        && !i.modifiers.alt)
+                        || ((i.modifiers.ctrl || i.modifiers.command)
+                            && (i.key_pressed(egui::Key::F) || i.key_pressed(egui::Key::S)))
+                    {
+                        self.focus_search_requested = true;
+                    }
+
+                    // Vim `v`: Visual Multi-Selection Toggle
+                    if i.key_pressed(egui::Key::V)
+                        && !i.modifiers.ctrl
+                        && !i.modifiers.command
+                        && !i.modifiers.alt
+                    {
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            if self.selected_paths.contains(&item.path) {
+                                self.selected_paths.remove(&item.path);
+                            } else {
+                                self.selected_paths.insert(item.path.clone());
+                            }
+                        }
+                    }
+
+                    // Vim `y` / Emacs `Alt+W`: Yank / Copy
+                    if (i.key_pressed(egui::Key::Y)
+                        && !i.modifiers.ctrl
+                        && !i.modifiers.command
+                        && !i.modifiers.alt)
+                        || (i.modifiers.alt && i.key_pressed(egui::Key::W))
+                    {
+                        if self.selected_paths.is_empty() {
+                            if let Some(item) = nav_entries.get(self.focused_row) {
+                                self.clipboard_paths = vec![item.path.clone()];
+                            }
+                        } else {
+                            self.clipboard_paths =
+                                self.selected_paths.iter().cloned().collect::<Vec<_>>();
+                        }
+                        self.clipboard_is_cut = false;
+                    }
+
+                    // Vim `p` / Emacs `Ctrl+Y`: Put / Paste
+                    if (i.key_pressed(egui::Key::P)
+                        && !i.modifiers.ctrl
+                        && !i.modifiers.command
+                        && !i.modifiers.alt)
+                        || ((i.modifiers.ctrl || i.modifiers.command)
+                            && i.key_pressed(egui::Key::Y))
+                    {
+                        self.paste_from_clipboard();
+                    }
+
+                    // Vim `d` (without modifiers): Delete focused/selected
+                    if i.key_pressed(egui::Key::D)
+                        && !i.modifiers.ctrl
+                        && !i.modifiers.command
+                        && !i.modifiers.alt
+                    {
+                        let mut deleted = false;
+                        if self.selected_paths.is_empty() {
+                            if let Some(item) = nav_entries.get(self.focused_row) {
+                                log_result(
+                                    "Delete",
                                     &item.path,
-                                )),
-                            );
-                            deleted = true;
+                                    crate::core::action_journal::stage_delete(
+                                        std::slice::from_ref(&item.path),
+                                    ),
+                                );
+                                deleted = true;
+                            }
+                        } else {
+                            let paths: Vec<PathBuf> = self.selected_paths.iter().cloned().collect();
+                            let r = crate::core::action_journal::stage_delete(&paths);
+                            log_result("Delete", &paths[0], r);
+                            deleted = !paths.is_empty();
+                            self.selected_paths.clear();
                         }
-                    } else {
-                        let paths: Vec<PathBuf> = self.selected_paths.iter().cloned().collect();
-                        let r = crate::core::action_journal::stage_delete(&paths);
-                        log_result("Delete", &paths[0], r);
-                        deleted = !paths.is_empty();
-                        self.selected_paths.clear();
+                        if deleted {
+                            self.navigate_to(self.current_dir.clone());
+                        }
                     }
-                    if deleted {
+
+                    // Vim `r`: In-place Rename
+                    if i.key_pressed(egui::Key::R)
+                        && !i.modifiers.ctrl
+                        && !i.modifiers.command
+                        && !i.modifiers.alt
+                    {
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            self.renaming_path = Some((item.path.clone(), item.name.clone()));
+                        }
+                    }
+
+                    // Space: Quick Look / Peek Toggle
+                    if i.key_pressed(egui::Key::Space) {
+                        if self.peek_item.is_some() {
+                            self.peek_item = None;
+                            self.peek_texture = None;
+                            self.peek_text_cache = None;
+                            self.peek_hash_cache = None;
+                        } else if let Some(item) = nav_entries.get(self.focused_row) {
+                            self.peek_item = Some(item.clone());
+                        }
+                    }
+
+                    // Alt+Enter / Cmd+I: Properties Dialog
+                    if ((i.modifiers.alt && i.key_pressed(egui::Key::Enter))
+                        || (i.modifiers.command && i.key_pressed(egui::Key::I)))
+                        && !is_typing
+                    {
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            self.properties_item = Some(item.clone());
+                        }
+                    }
+                }
+
+                // Ctrl+H (Linux) / Cmd+Shift+. (macOS): Toggle Hidden Files
+                if ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::H))
+                    || (i.modifiers.command
+                        && i.modifiers.shift
+                        && i.key_pressed(egui::Key::Period))
+                {
+                    self.show_hidden_files = !self.show_hidden_files;
+                }
+
+                // Ctrl+Shift+T: Open Terminal in Directory
+                if (i.modifiers.ctrl || i.modifiers.command)
+                    && i.modifiers.shift
+                    && i.key_pressed(egui::Key::T)
+                {
+                    open_terminal_in_dir(&self.current_dir);
+                }
+
+                // F3: Toggle Dual-Pane Split View
+                if i.key_pressed(egui::Key::F3) {
+                    self.toggle_split_view();
+                }
+
+                // Tab: Switch active pane in Split View (when not typing)
+                if !is_typing && self.split_view_enabled && i.key_pressed(egui::Key::Tab) {
+                    self.active_pane = 1 - self.active_pane;
+                }
+
+                // Standard Explorer Hotkeys
+                if i.key_pressed(egui::Key::F5) {
+                    if self.split_view_enabled {
+                        let (src_paths, dest_dir) = if self.active_pane == 0 {
+                            (
+                                self.selected_paths.iter().cloned().collect::<Vec<_>>(),
+                                self.secondary_dir.clone(),
+                            )
+                        } else {
+                            (
+                                self.secondary_selected_paths
+                                    .iter()
+                                    .cloned()
+                                    .collect::<Vec<_>>(),
+                                self.current_dir.clone(),
+                            )
+                        };
+                        for src in &src_paths {
+                            if let Some(fname) = src.file_name() {
+                                let dest = dest_dir.join(fname);
+                                let unique = resolve_unique_paste_path(&dest);
+                                log_result("Copy", src, copy_entry_recursive(src, &unique));
+                            }
+                        }
+                        self.navigate_to(self.current_dir.clone());
+                        self.secondary_navigate_to(self.secondary_dir.clone());
+                    } else {
                         self.navigate_to(self.current_dir.clone());
                     }
                 }
 
-                // Vim `r`: In-place Rename
-                if i.key_pressed(egui::Key::R)
-                    && !i.modifiers.ctrl
-                    && !i.modifiers.command
-                    && !i.modifiers.alt
-                {
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        self.renaming_path = Some((item.path.clone(), item.name.clone()));
-                    }
-                }
-
-                // Space: Quick Look / Peek Toggle
-                if i.key_pressed(egui::Key::Space) {
-                    if self.peek_item.is_some() {
-                        self.peek_item = None;
-                        self.peek_texture = None;
-                        self.peek_text_cache = None;
-                        self.peek_hash_cache = None;
-                    } else if let Some(item) = nav_entries.get(self.focused_row) {
-                        self.peek_item = Some(item.clone());
-                    }
-                }
-
-                // Alt+Enter / Cmd+I: Properties Dialog
-                if ((i.modifiers.alt && i.key_pressed(egui::Key::Enter))
-                    || (i.modifiers.command && i.key_pressed(egui::Key::I)))
-                    && !is_typing
-                {
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        self.properties_item = Some(item.clone());
-                    }
-                }
-            }
-
-            // Ctrl+H (Linux) / Cmd+Shift+. (macOS): Toggle Hidden Files
-            if ((i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::H))
-                || (i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Period))
-            {
-                self.show_hidden_files = !self.show_hidden_files;
-            }
-
-            // Ctrl+Shift+T: Open Terminal in Directory
-            if (i.modifiers.ctrl || i.modifiers.command)
-                && i.modifiers.shift
-                && i.key_pressed(egui::Key::T)
-            {
-                open_terminal_in_dir(&self.current_dir);
-            }
-
-            // F3: Toggle Dual-Pane Split View
-            if i.key_pressed(egui::Key::F3) {
-                self.toggle_split_view();
-            }
-
-            // Tab: Switch active pane in Split View (when not typing)
-            if !is_typing && self.split_view_enabled && i.key_pressed(egui::Key::Tab) {
-                self.active_pane = 1 - self.active_pane;
-            }
-
-            // Standard Explorer Hotkeys
-            if i.key_pressed(egui::Key::F5) {
-                if self.split_view_enabled {
+                // F6: Move cross-pane in Split View
+                if self.split_view_enabled && i.key_pressed(egui::Key::F6) {
                     let (src_paths, dest_dir) = if self.active_pane == 0 {
                         (
                             self.selected_paths.iter().cloned().collect::<Vec<_>>(),
@@ -1917,187 +1973,160 @@ impl ExplorerView {
                     for src in &src_paths {
                         if let Some(fname) = src.file_name() {
                             let dest = dest_dir.join(fname);
-                            let unique = resolve_unique_paste_path(&dest);
-                            log_result("Copy", src, copy_entry_recursive(src, &unique));
+                            log_result("Move", src, move_entry(src, &dest));
                         }
                     }
                     self.navigate_to(self.current_dir.clone());
                     self.secondary_navigate_to(self.secondary_dir.clone());
-                } else {
+                }
+
+                // Ctrl+Shift+P / Cmd+Shift+P: Toggle Inspector Preview Pane
+                if (i.modifiers.ctrl || i.modifiers.command)
+                    && i.modifiers.shift
+                    && i.key_pressed(egui::Key::P)
+                {
+                    self.toggle_inspector_pane();
+                }
+                if i.modifiers.alt && i.key_pressed(egui::Key::ArrowRight) {
+                    self.go_forward();
+                }
+                if (i.modifiers.ctrl || i.modifiers.command)
+                    && i.modifiers.shift
+                    && i.key_pressed(egui::Key::N)
+                {
+                    self.show_new_folder_dialog = true;
+                }
+                // Ctrl+N / Cmd+N (without Shift): Open New Concurrent Explorer Window
+                if (i.modifiers.ctrl || i.modifiers.command)
+                    && !i.modifiers.shift
+                    && !i.modifiers.alt
+                    && i.key_pressed(egui::Key::N)
+                {
+                    spawn_new_explorer_window(Some(&self.current_dir));
+                }
+                // Ctrl+T / Cmd+T and Ctrl+W / Cmd+W are handled once globally in
+                // StudioView::render (where they also switch to the explorer tab);
+                // duplicating them here fired each keystroke's action twice.
+                // Ctrl+Tab / Ctrl+Shift+Tab: Cycle Next/Previous Tab
+                if (i.modifiers.ctrl || i.modifiers.command)
+                    && i.key_pressed(egui::Key::Tab)
+                    && !self.tabs.is_empty()
+                {
+                    if i.modifiers.shift {
+                        if self.active_tab_index == 0 {
+                            self.active_tab_index = self.tabs.len().saturating_sub(1);
+                        } else {
+                            self.active_tab_index = self.active_tab_index.saturating_sub(1);
+                        }
+                    } else {
+                        self.active_tab_index = (self.active_tab_index + 1) % self.tabs.len();
+                    }
+                    if let Some(tab) = self.tabs.get(self.active_tab_index) {
+                        let target = tab.path.clone();
+                        self.navigate_to(target);
+                    }
+                }
+                if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::L) {
+                    self.path_edit_buffer = self.current_dir.to_string_lossy().to_string();
+                    self.is_editing_path = true;
+                }
+                // Ctrl+Z / Cmd+Z: reverse the last journaled action.
+                //
+                // The journal records rename/move/copy/create/delete/tag, so this
+                // single binding covers every reversible mutation the explorer
+                // performs. Ctrl+Shift+Z redoes is intentionally NOT offered: the
+                // journal appends an Undo marker instead of replaying, so the
+                // stack always walks backwards.
+                if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::Z) {
+                    let note = crate::core::action_journal::undo_last();
+                    self.show_status_note(note);
+                    // The undo may have changed the current directory (a moved or
+                    // restored folder), so rescan whatever we are looking at.
                     self.navigate_to(self.current_dir.clone());
                 }
-            }
-
-            // F6: Move cross-pane in Split View
-            if self.split_view_enabled && i.key_pressed(egui::Key::F6) {
-                let (src_paths, dest_dir) = if self.active_pane == 0 {
-                    (
-                        self.selected_paths.iter().cloned().collect::<Vec<_>>(),
-                        self.secondary_dir.clone(),
-                    )
-                } else {
-                    (
-                        self.secondary_selected_paths
-                            .iter()
-                            .cloned()
-                            .collect::<Vec<_>>(),
-                        self.current_dir.clone(),
-                    )
-                };
-                for src in &src_paths {
-                    if let Some(fname) = src.file_name() {
-                        let dest = dest_dir.join(fname);
-                        log_result("Move", src, move_entry(src, &dest));
-                    }
-                }
-                self.navigate_to(self.current_dir.clone());
-                self.secondary_navigate_to(self.secondary_dir.clone());
-            }
-
-            // Ctrl+Shift+P / Cmd+Shift+P: Toggle Inspector Preview Pane
-            if (i.modifiers.ctrl || i.modifiers.command)
-                && i.modifiers.shift
-                && i.key_pressed(egui::Key::P)
-            {
-                self.toggle_inspector_pane();
-            }
-            if i.modifiers.alt && i.key_pressed(egui::Key::ArrowRight) {
-                self.go_forward();
-            }
-            if (i.modifiers.ctrl || i.modifiers.command)
-                && i.modifiers.shift
-                && i.key_pressed(egui::Key::N)
-            {
-                self.show_new_folder_dialog = true;
-            }
-            // Ctrl+N / Cmd+N (without Shift): Open New Concurrent Explorer Window
-            if (i.modifiers.ctrl || i.modifiers.command)
-                && !i.modifiers.shift
-                && !i.modifiers.alt
-                && i.key_pressed(egui::Key::N)
-            {
-                spawn_new_explorer_window(Some(&self.current_dir));
-            }
-            // Ctrl+T / Cmd+T and Ctrl+W / Cmd+W are handled once globally in
-            // StudioView::render (where they also switch to the explorer tab);
-            // duplicating them here fired each keystroke's action twice.
-            // Ctrl+Tab / Ctrl+Shift+Tab: Cycle Next/Previous Tab
-            if (i.modifiers.ctrl || i.modifiers.command)
-                && i.key_pressed(egui::Key::Tab)
-                && !self.tabs.is_empty()
-            {
-                if i.modifiers.shift {
-                    if self.active_tab_index == 0 {
-                        self.active_tab_index = self.tabs.len().saturating_sub(1);
+                // Context-tagged keystroke logging. The journal keeps these
+                // separate from the file actions; they record what the user was
+                // doing, so a future history panel can explain an action.
+                {
+                    let context = if self.renaming_path.is_some() {
+                        "rename-edit"
+                    } else if self.is_editing_path {
+                        "path-edit"
+                    } else if is_search_focused {
+                        "text-input"
                     } else {
-                        self.active_tab_index = self.active_tab_index.saturating_sub(1);
-                    }
-                } else {
-                    self.active_tab_index = (self.active_tab_index + 1) % self.tabs.len();
-                }
-                if let Some(tab) = self.tabs.get(self.active_tab_index) {
-                    let target = tab.path.clone();
-                    self.navigate_to(target);
-                }
-            }
-            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::L) {
-                self.path_edit_buffer = self.current_dir.to_string_lossy().to_string();
-                self.is_editing_path = true;
-            }
-            // Ctrl+Z / Cmd+Z: reverse the last journaled action.
-            //
-            // The journal records rename/move/copy/create/delete/tag, so this
-            // single binding covers every reversible mutation the explorer
-            // performs. Ctrl+Shift+Z redoes is intentionally NOT offered: the
-            // journal appends an Undo marker instead of replaying, so the
-            // stack always walks backwards.
-            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::Z) {
-                let note = crate::core::action_journal::undo_last();
-                self.show_status_note(note);
-                // The undo may have changed the current directory (a moved or
-                // restored folder), so rescan whatever we are looking at.
-                self.navigate_to(self.current_dir.clone());
-            }
-            // Context-tagged keystroke logging. The journal keeps these
-            // separate from the file actions; they record what the user was
-            // doing, so a future history panel can explain an action.
-            {
-                let context = if self.renaming_path.is_some() {
-                    "rename-edit"
-                } else if self.is_editing_path {
-                    "path-edit"
-                } else if is_search_focused {
-                    "text-input"
-                } else {
-                    "explorer-nav"
-                };
-                let modifiers = modifier_string(i.modifiers);
-                for ev in &i.events {
-                    if let egui::Event::Key {
-                        key,
-                        pressed: true,
-                        repeat: false,
-                        ..
-                    } = ev
-                    {
-                        crate::core::action_journal::record_keystroke(
-                            context,
-                            &format!("{key:?}"),
-                            &modifiers,
-                        );
+                        "explorer-nav"
+                    };
+                    let modifiers = modifier_string(i.modifiers);
+                    for ev in &i.events {
+                        if let egui::Event::Key {
+                            key,
+                            pressed: true,
+                            repeat: false,
+                            ..
+                        } = ev
+                        {
+                            crate::core::action_journal::record_keystroke(
+                                context,
+                                &format!("{key:?}"),
+                                &modifiers,
+                            );
+                        }
                     }
                 }
-            }
-            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::C) {
-                if self.selected_paths.is_empty() {
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        self.clipboard_paths = vec![item.path.clone()];
-                    }
-                } else {
-                    self.clipboard_paths = self.selected_paths.iter().cloned().collect::<Vec<_>>();
-                }
-                self.clipboard_is_cut = false;
-            }
-            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::X) {
-                if self.selected_paths.is_empty() {
-                    if let Some(item) = nav_entries.get(self.focused_row) {
-                        self.clipboard_paths = vec![item.path.clone()];
-                    }
-                } else {
-                    self.clipboard_paths = self.selected_paths.iter().cloned().collect::<Vec<_>>();
-                }
-                self.clipboard_is_cut = true;
-            }
-            if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::V) {
-                self.paste_from_clipboard();
-            }
-            if i.key_pressed(egui::Key::Delete) {
-                let paths_to_delete: Vec<PathBuf> = if self.selected_paths.is_empty() {
-                    nav_entries
-                        .get(self.focused_row)
-                        .map(|item| vec![item.path.clone()])
-                        .unwrap_or_default()
-                } else {
-                    self.selected_paths.iter().cloned().collect()
-                };
-
-                let paths_to_delete: Vec<PathBuf> = paths_to_delete
-                    .into_iter()
-                    .filter(|p| !crate::core::is_protected_os_file(p))
-                    .collect();
-
-                if !paths_to_delete.is_empty() {
-                    if i.modifiers.shift {
-                        self.permanent_delete_prompt = Some(paths_to_delete);
+                if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::C) {
+                    if self.selected_paths.is_empty() {
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            self.clipboard_paths = vec![item.path.clone()];
+                        }
                     } else {
-                        let r = crate::core::action_journal::stage_delete(&paths_to_delete);
-                        log_result("Delete (Recycle Bin)", &paths_to_delete[0], r);
-                        self.selected_paths.clear();
-                        self.navigate_to(self.current_dir.clone());
+                        self.clipboard_paths =
+                            self.selected_paths.iter().cloned().collect::<Vec<_>>();
+                    }
+                    self.clipboard_is_cut = false;
+                }
+                if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::X) {
+                    if self.selected_paths.is_empty() {
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            self.clipboard_paths = vec![item.path.clone()];
+                        }
+                    } else {
+                        self.clipboard_paths =
+                            self.selected_paths.iter().cloned().collect::<Vec<_>>();
+                    }
+                    self.clipboard_is_cut = true;
+                }
+                if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::V) {
+                    self.paste_from_clipboard();
+                }
+                if i.key_pressed(egui::Key::Delete) {
+                    let paths_to_delete: Vec<PathBuf> = if self.selected_paths.is_empty() {
+                        nav_entries
+                            .get(self.focused_row)
+                            .map(|item| vec![item.path.clone()])
+                            .unwrap_or_default()
+                    } else {
+                        self.selected_paths.iter().cloned().collect()
+                    };
+
+                    let paths_to_delete: Vec<PathBuf> = paths_to_delete
+                        .into_iter()
+                        .filter(|p| !crate::core::is_protected_os_file(p))
+                        .collect();
+
+                    if !paths_to_delete.is_empty() {
+                        if i.modifiers.shift {
+                            self.permanent_delete_prompt = Some(paths_to_delete);
+                        } else {
+                            let r = crate::core::action_journal::stage_delete(&paths_to_delete);
+                            log_result("Delete (Recycle Bin)", &paths_to_delete[0], r);
+                            self.selected_paths.clear();
+                            self.navigate_to(self.current_dir.clone());
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
 
         let modal_bg = if palette.is_dark {
             Color32::from_rgb(30, 32, 36)

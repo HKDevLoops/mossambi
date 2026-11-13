@@ -39,6 +39,20 @@ pub enum StudioTab {
     Preferences,
 }
 
+/// Display label + glyph for the tab-strip pill of a non-explorer
+/// view (B-3). Names and glyphs mirror the sidebar Tools list.
+fn studio_tab_label(tab: StudioTab) -> (&'static str, IconGlyph) {
+    match tab {
+        StudioTab::Transcoder => ("Transcoder", IconGlyph::ActionRefresh),
+        StudioTab::ExamStudio => ("Custom Conformer", IconGlyph::ActionEdit),
+        StudioTab::QualityInspector => ("Quality Inspector", IconGlyph::Search),
+        StudioTab::ArchiveSuite => ("Archive Suite", IconGlyph::PageArchive),
+        StudioTab::HardwareTelemetry => ("Hardware & AI", IconGlyph::ActionShield),
+        StudioTab::Preferences => ("Preferences", IconGlyph::Gear),
+        StudioTab::FileExplorer => ("File Explorer", IconGlyph::Folder),
+    }
+}
+
 pub struct StudioView {
     pub current_tab: StudioTab,
     pub explorer_view: crate::gui::explorer_view::ExplorerView,
@@ -147,6 +161,9 @@ impl StudioView {
         if toggle_palette {
             self.command_palette.toggle();
         }
+        // B-1 gate flag: explorer raw-key handling is suppressed
+        // while the palette modal is open (read in explorer_view).
+        self.explorer_view.palette_open = self.command_palette.is_open;
 
         // Global shortcuts: Ctrl+T / Cmd+T (New Tab), Ctrl+W / Cmd+W (Close Tab)
         let open_new_tab = ctx.input(|i| {
@@ -154,6 +171,7 @@ impl StudioView {
                 && !i.modifiers.shift
                 && !i.modifiers.alt
                 && i.key_pressed(egui::Key::T)
+                && !self.command_palette.is_open
         });
         if open_new_tab {
             self.current_tab = StudioTab::FileExplorer;
@@ -166,6 +184,7 @@ impl StudioView {
                 && !i.modifiers.shift
                 && !i.modifiers.alt
                 && i.key_pressed(egui::Key::W)
+                && !self.command_palette.is_open
         });
         if close_tab_key && self.explorer_view.tabs.len() > 1 {
             self.explorer_view
@@ -336,6 +355,49 @@ impl StudioView {
                         if resp.clicked() {
                             tab_to_select = Some(idx);
                         }
+                    }
+
+                    // B-3: when a non-explorer view is on screen the
+                    // strip must show what is actually displayed
+                    // instead of only stale explorer pills.
+                    if self.current_tab != StudioTab::FileExplorer {
+                        let (label, glyph) = studio_tab_label(self.current_tab);
+                        let (p_rect, _) =
+                            ui.allocate_exact_size(Vec2::new(130.0, 26.0), Sense::hover());
+                        ui.painter()
+                            .rect_filled(p_rect, Rounding::same(6.0), palette.card_bg);
+                        ui.painter().rect_stroke(
+                            p_rect,
+                            Rounding::same(6.0),
+                            Stroke::new(1.0_f32, palette.border),
+                        );
+                        let pill_icon_rect = Rect::from_center_size(
+                            p_rect.left_center() + Vec2::new(14.0, 0.0),
+                            Vec2::splat(16.0),
+                        );
+                        crate::core::icon_packs::paint_icon(
+                            ui,
+                            pack,
+                            glyph,
+                            pill_icon_rect,
+                            [79, 168, 255],
+                        );
+                        let max_title_chars = 12;
+                        let title_display = if label.chars().count() > max_title_chars {
+                            format!(
+                                "{}...",
+                                label.chars().take(max_title_chars).collect::<String>()
+                            )
+                        } else {
+                            label.to_string()
+                        };
+                        ui.painter().text(
+                            p_rect.left_center() + Vec2::new(30.0, 0.0),
+                            egui::Align2::LEFT_CENTER,
+                            title_display,
+                            egui::FontId::proportional(13.5),
+                            palette.text_primary,
+                        );
                     }
 
                     if let Some(idx) = tab_to_close {

@@ -504,16 +504,28 @@ impl eframe::App for MossambiApp {
         // Ctrl+0              -> reset explorer zoom to the default level 2
         // Ctrl+Shift+wheel    -> whole-UI pixel scale (Finder/Explorer parity)
         // Ctrl+Shift+0        -> reset UI scale to native
+        // B-1 gate: while the command palette modal is open it owns
+        // pointer wheel and digit keys; zoom must not mutate the
+        // view underneath the backdrop.
+        let palette_open = self.studio_view.command_palette.is_open;
         let (ui_zoom_scroll, ui_zoom_reset, explorer_scroll, explorer_reset) = ctx.input(|i| {
             let ctrl = i.modifiers.ctrl || i.modifiers.command;
             let shift = i.modifiers.shift;
             let scroll = if ctrl { i.raw_scroll_delta.y } else { 0.0 };
             let num0 = i.key_pressed(egui::Key::Num0);
             (
-                if ctrl && shift { scroll } else { 0.0 },
-                ctrl && shift && num0,
-                if ctrl && !shift { scroll } else { 0.0 },
-                ctrl && !shift && num0,
+                if ctrl && shift && !palette_open {
+                    scroll
+                } else {
+                    0.0
+                },
+                ctrl && shift && num0 && !palette_open,
+                if ctrl && !shift && !palette_open {
+                    scroll
+                } else {
+                    0.0
+                },
+                ctrl && !shift && num0 && !palette_open,
             )
         });
         if explorer_reset {
