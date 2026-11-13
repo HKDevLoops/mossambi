@@ -682,10 +682,9 @@ impl StudioView {
                                                     .show(ui, |ui| {
                                         for (idx, seg) in segments.iter().enumerate() {
                                             if idx > 0 {
-                                                ui.label(
-                                                    egui::RichText::new(">")
-                                                        .size(12.5)
-                                                        .color(palette.text_muted),
+                                                crate::gui::finder_chrome::paint_path_chevron(
+                                                    ui,
+                                                    palette.text_muted,
                                                 );
                                             }
                                             let is_current = idx + 1 == num_segs;

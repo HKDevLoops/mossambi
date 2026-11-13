@@ -3059,11 +3059,7 @@ impl ExplorerView {
                     ui.spacing_mut().item_spacing = Vec2::new(3.0, 0.0);
                     for (i, seg) in segments.iter().enumerate() {
                         if i > 0 {
-                            ui.label(
-                                egui::RichText::new(">")
-                                    .size(12.0)
-                                    .color(palette.text_muted),
-                            );
+                            crate::gui::finder_chrome::paint_path_chevron(ui, palette.text_muted);
                         }
                         let is_current = seg.target_path == current_dir;
 
@@ -3110,27 +3106,22 @@ impl ExplorerView {
                             self.navigate_to(target);
                         }
 
-                        // Child folder dropdown popover
+                        // Child-folder popup: Finder shows no caret
+                        // affordance; right-click a segment to browse
+                        // its subfolders (same interaction as the
+                        // studio ribbon).
                         let pop_id = ui.make_persistent_id(format!(
                             "bc_pop_{}_{}",
                             i,
                             seg.target_path.display()
                         ));
-                        let ch_resp = ui.add(
-                            egui::Button::new(
-                                egui::RichText::new("v").size(8.5).color(palette.text_muted),
-                            )
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::NONE)
-                            .min_size(Vec2::new(10.0, 20.0)),
-                        );
-                        if ch_resp.clicked() {
+                        if resp.secondary_clicked() {
                             ui.memory_mut(|m| m.toggle_popup(pop_id));
                         }
                         egui::popup::popup_below_widget(
                             ui,
                             pop_id,
-                            &ch_resp,
+                            &resp,
                             egui::PopupCloseBehavior::CloseOnClick,
                             |popup_ui| {
                                 popup_ui.set_max_width(220.0);
