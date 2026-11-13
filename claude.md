@@ -1530,3 +1530,40 @@ opened a new wave queue (sidebar Zen/Arc pin design, icon pack
 upgrade, settings/config/Lua, Tools & Converters redesign,
 fast folder sizes, status bar redesign, grid-view icon bugs);
 5 research agents dispatched.
+
+MOSSAMBI GRID PREVIEW WAVE CLOSED (2026-11-13): feat d26fa33 (feat(gui)
+6 files +293/-66: explorer_view.rs +108/-64, codec/mod.rs +114,
+tests/test_thumbs.rs NEW +56, studio_app.rs +13, config.rs +1/-1,
+preferences_view.rs +1/-1) <- plan e41644e (docs(plan) 161 lines). ALL
+FIVE GATES GREEN (fmt clean; clippy --all-targets -- -D warnings 11.52s
+zero findings; cargo test full suite passed: test_thumbs 5/5 NEW,
+remux 4/4, widget 8/8, TUI 3/3, pantone 7/7, doc-tests ok; release
+56.03s; porcelain exactly 6 expected files). MECHANISMS: (1)
+proportional tile chrome - icon_sz=(icon_size*zoom).clamp(64,300);
+label_font=(icon_sz*0.15).clamp(12,22); size_font=(label_font-2).clamp
+(9.5,12); label_zone_h=label_font*2.6; bottom_chrome=label_zone_h+
+size_font+10; top_pad=(icon_sz*0.10).clamp(8,26); tile_h=top_pad+
+icon_sz+bottom_chrome; tile_w=(icon_sz+32).max(96) (180 cap removed);
+icon zone height is exactly icon_sz so the painted icon equals the
+requested size; name top = max(rect.bottom - size_font - 10 - name_h,
+zone_bottom + 2.0) so a wrapped 2-line name never touches the icon;
+max_text_w=(tile_w-16).max(60). (2) universal previews -
+is_image_extension removed; pub enum PreviewKind{None,Image,Pdf,Video}
++ pub fn preview_kind(ext) case-insensitive + pub fn thumb_max_px
+(icon_sz)=(ceil).clamp(128,512); grid tiles ask thumb_max_px(icon_sz),
+hover card 260, inspector and Miller 320; decode_thumbnail match-
+dispatches (PDF -> render_pdf_first_page_thumbnail, video ->
+video_first_frame_thumbnail, image Lanczos3 resize); audio/text/code
+keep vector icons. (3) video first frames - codec::
+video_first_frame_thumbnail: ffmpeg -frames:v 1, scale
+force_original_aspect_ratio=decrease, image2pipe PNG to stdout;
+VIDEO_THUMB_INFLIGHT AtomicBool single-flight with VideoThumbGuard
+Drop reset; CREATE_NO_WINDOW|BELOW_NORMAL_PRIORITY_CLASS on Windows;
+stderr drained on a thread; ffmpeg missing -> bail, tile degrades to
+vector icon. (4) thumbnail cache - CachedThumb gains max_px: hit
+requires mtime match AND stored max_px >= requested; texture id
+thumb_{path}@{max_px}; decode budget 3 -> 6 decodes per 300ms window.
+(5) icon range 64..=300 - toolbar + status-bar sliders and the
+Preferences grid_icon_size slider all widened; config comment 64..300;
+studio_app last_grid_icon_size mirror so Preferences changes propagate
+to explorer_view.icon_size without fighting the live sliders.
