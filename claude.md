@@ -1612,3 +1612,48 @@ bar keeps its horizontal ScrollArea chevron row. (7) D7 SPLIT SIZING
 ui.available_height().max(120.0) from the exact remainder
 (pre-emptive -32.0 guess removed), so pane frames reach the bottom
 edge precisely.
+
+MOSSAMBI SIDEBAR ZEN/ARC WAVE CLOSED (2026-11-13): feat 4c8fe72
+(feat(gui) 3 files +176/-105: config.rs +14/0, finder_chrome.rs
++90/-40, studio_view.rs +72/-65) <- plan 1cb167c (docs(plan) 146
+lines), prior ledger 9d55bf7 (status-bar wave). ALL FIVE GATES GREEN
+(fmt clean; clippy --all-targets -- -D warnings 9.24s zero findings;
+cargo test full suite passed: icons 4/4, miller 10/10, pantone 6/6,
+pdf 5/5, registry 7/7, remux 4/4, thumbs 5/5, tui 3/3, widget 8/8;
+release 52.66s; porcelain exactly 3 expected files). MECHANISMS: (1)
+D1 ZONE STACKING WITH IDENTITY BOUNDARY - the sidebar is now four
+stacked zones, each introduced by NEW render_sidebar_zone_header
+(finder_chrome.rs): a faint 1px hairline across the content width
+above the header (Color32::from_rgba_unmultiplied border at alpha 90,
+painter line_segment at cursor.top()+0.5), then the ASCII chevron
+(v / >) plus the uppercase caption label with hover color shift;
+zones FAVORITES (the Home row stays ABOVE all zones as app identity),
+LOCATIONS (drive rows + OneDrive row; replaces the separate Drives
+and Cloud sections), TAGS (gated by show_tags_section), and TOOLS &
+CONVERTERS; the EMPTY Network section is DELETED; the separate
+"Pinned Folders" header is DELETED (custom pins merge into the
+Favorites zone inline, still gated by show_custom_pinned). (2) D2
+PERSISTED COLLAPSE FLAGS - four new config keys
+sidebar_favorites_expanded / sidebar_locations_expanded /
+sidebar_tags_expanded / sidebar_tools_expanded (all serde
+default_true, Default true); the five in-memory StudioView flags
+(drives/cloud/network/tags/tools_expanded) DELETED; a zone toggle
+mutates the loaded config and calls save() (log::warn on failure);
+MossambiConfig::load() stays per-frame-cheap via the existing
+CONFIG_CACHE mtime stamp (config.rs file_stamp check; save()
+refreshes the stamp so the next load is consistent). (3) D3 REAL PIN
+HIT-REGIONS - SidebarRowSpec.show_pin now draws an INTERACTIVE strip:
+render_sidebar_row allocates the row with Sense::hover() then creates
+two NON-overlapping interact rects (row = full rect minus the right
+26px strip; pin = the right 26px strip, egui Ids from position) so a
+click can never double-fire; it returns SidebarRowClick { row, pin }
+(all 6 call sites migrated); static favorites now show_pin FALSE
+(decorative pins removed - built-ins are not user-pinnable); custom
+pinned rows keep show_pin true and a pin click UNPINS
+(pinned_custom.retain + cfg.save, mirroring the explorer intent path,
+logged the same way); the pin glyph recentered on the strip
+(max.x - 13.0) with a three-tier color ramp (direct pin hover
+text_primary, row hover text_secondary, idle text_muted). (4) Old
+helpers render_sidebar_section_header and
+render_sidebar_collapsible_header DELETED (grep-verified: every
+caller migrated into the zone structure).
