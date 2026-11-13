@@ -2,6 +2,7 @@
 //!
 //! Inspired by File Pilot (zero-allocation fast paths) and Yazi (generation-based async scanning).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
@@ -402,6 +403,111 @@ pub fn format_file_size(bytes: u64) -> String {
     } else {
         format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
     }
+}
+
+/// Result of a background folder-size computation sent back to the UI.
+#[derive(Debug, Clone)]
+pub struct DirSizeResult {
+    pub path: PathBuf,
+    /// Root mtime captured at compute start - the freshness key the UI
+    /// compares against `FileItem.modified`.
+    pub mtime: Option<SystemTime>,
+    pub total: u64,
+}
+
+/// Computes the recursive byte total of a directory under strict budgets.
+///
+/// Iterative BFS with an explicit stack (no recursion overflow), a depth
+/// cap and an entry cap so huge or pathological trees cannot stall the
+/// worker. Symlinks are skipped entirely - no descent and no link length
+/// accounting - because `DirEntry::file_type()` is lstat-like and never
+/// resolves links or junctions. IO errors skip the offending entry, so
+/// the result is a partial sum (Finder reports partial totals the same
+/// way).
+pub fn compute_dir_size(root: &Path, max_depth: usize, max_entries: usize) -> u64 {
+    let mut total = 0u64;
+    let mut visited = 0usize;
+    let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0usize)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(read) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in read.flatten() {
+            if visited >= max_entries {
+                return total;
+            }
+            visited += 1;
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
+            if ft.is_symlink() {
+                continue;
+            }
+            if ft.is_dir() {
+                if depth < max_depth {
+                    stack.push((entry.path(), depth + 1));
+                }
+            } else if let Ok(meta) = entry.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
+/// Where the folder-size disk cache lives:
+/// `~/.mossambi/cache/dir_sizes.json`.
+pub fn dir_size_cache_path() -> PathBuf {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home)
+        .join(".mossambi")
+        .join("cache")
+        .join("dir_sizes.json")
+}
+
+/// Loads the folder-size disk cache. A missing or corrupt file loads
+/// empty and is rewritten on the next flush.
+pub fn load_dir_size_cache_from(path: &Path) -> HashMap<PathBuf, (Option<SystemTime>, u64)> {
+    let mut out = HashMap::new();
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return out;
+    };
+    // JSON shape: { "<path>": [<mtime epoch secs, 0 = none>, <total>] }
+    let Ok(raw) = serde_json::from_str::<std::collections::BTreeMap<String, [u64; 2]>>(&content)
+    else {
+        return out;
+    };
+    for (path, pair) in raw {
+        let mtime = if pair[0] == 0 {
+            None
+        } else {
+            Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(pair[0]))
+        };
+        out.insert(PathBuf::from(path), (mtime, pair[1]));
+    }
+    out
+}
+
+/// Write-behind flush of the folder-size disk cache.
+pub fn save_dir_size_cache_to(
+    path: &Path,
+    map: &HashMap<PathBuf, (Option<SystemTime>, u64)>,
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut raw = std::collections::BTreeMap::new();
+    for (path, (mtime, total)) in map {
+        let secs = mtime
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        raw.insert(path.to_string_lossy().into_owned(), [secs, *total]);
+    }
+    let data = serde_json::to_string_pretty(&raw).unwrap_or_default();
+    std::fs::write(path, data)
 }
 
 /// Batch of scanned directory entries tagged with generation counter

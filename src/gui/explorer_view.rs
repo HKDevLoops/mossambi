@@ -703,6 +703,15 @@ pub struct ExplorerView {
     pub fs_worker_tx: Sender<FsOperation>,
     pub fs_worker_rx: Receiver<FsOpResult>,
 
+    // Background Folder-Size Worker (Finder-style recursive byte totals)
+    pub dir_sizes: std::collections::HashMap<PathBuf, (Option<std::time::SystemTime>, u64)>,
+    pub dir_size_queued: HashSet<PathBuf>,
+    pub dir_size_job_tx: Sender<PathBuf>,
+    pub dir_size_rx: Receiver<crate::core::fs_utils::DirSizeResult>,
+    pub dir_size_last_request: Option<Instant>,
+    pub dir_size_cache_dirty: usize,
+    pub dir_size_last_flush: Option<Instant>,
+
     // Quick Look / Peek Modal Overlay State
     pub peek_item: Option<FileItem>,
     pub peek_texture: Option<(PathBuf, egui::TextureHandle)>,
@@ -921,6 +930,45 @@ impl Default for ExplorerView {
             })
             .ok();
 
+        // Two persistent folder-size workers sharing one job receiver:
+        // Finder-style recursive byte totals computed off the UI thread
+        // with strict depth/entry budgets.
+        let (dir_size_job_tx, dir_size_job_rx) = channel::<PathBuf>();
+        let dir_size_shared_rx = Arc::new(std::sync::Mutex::new(dir_size_job_rx));
+        let (dir_size_res_tx, dir_size_rx) = channel::<crate::core::fs_utils::DirSizeResult>();
+        for n in 0..2 {
+            let job_rx = Arc::clone(&dir_size_shared_rx);
+            let res_tx = dir_size_res_tx.clone();
+            if let Err(e) = std::thread::Builder::new()
+                .name(format!("mossambi-dir-size-{n}"))
+                .spawn(move || loop {
+                    let job = {
+                        let guard = match job_rx.lock() {
+                            Ok(g) => g,
+                            Err(_) => break,
+                        };
+                        guard.recv()
+                    };
+                    match job {
+                        Ok(path) => {
+                            let mtime = std::fs::metadata(&path)
+                                .ok()
+                                .and_then(|m| m.modified().ok());
+                            let total = crate::core::fs_utils::compute_dir_size(&path, 8, 100_000);
+                            let _ = res_tx.send(crate::core::fs_utils::DirSizeResult {
+                                path,
+                                mtime,
+                                total,
+                            });
+                        }
+                        Err(_) => break,
+                    }
+                })
+            {
+                log::warn!("Could not spawn folder-size worker {n}: {e}");
+            }
+        }
+
         let home_opt = crate::core::platform_paths::home_dir_opt();
         let current_dir = home_opt
             .clone()
@@ -988,6 +1036,15 @@ impl Default for ExplorerView {
             scan_rx,
             fs_worker_tx,
             fs_worker_rx,
+            dir_sizes: crate::core::fs_utils::load_dir_size_cache_from(
+                &crate::core::fs_utils::dir_size_cache_path(),
+            ),
+            dir_size_queued: HashSet::new(),
+            dir_size_job_tx,
+            dir_size_rx,
+            dir_size_last_request: None,
+            dir_size_cache_dirty: 0,
+            dir_size_last_flush: None,
             peek_item: None,
             peek_texture: None,
             peek_text_cache: None,
@@ -1387,6 +1444,92 @@ impl ExplorerView {
             }
             let dir = self.current_dir.clone();
             self.navigate_to(dir);
+        }
+
+        // -- Folder-size worker: drain results, throttle requests, flush --
+        while let Ok(res) = self.dir_size_rx.try_recv() {
+            self.dir_size_queued.remove(&res.path);
+            self.dir_sizes.insert(res.path, (res.mtime, res.total));
+            self.dir_size_cache_dirty += 1;
+        }
+
+        let now = Instant::now();
+        let request_due = match self.dir_size_last_request {
+            Some(t) => now.duration_since(t) >= std::time::Duration::from_millis(200),
+            None => true,
+        };
+        if request_due {
+            self.dir_size_last_request = Some(now);
+            let mut candidates: Vec<(PathBuf, Option<std::time::SystemTime>)> = Vec::new();
+            let mut primary_selected: Vec<&FileItem> = self
+                .entries
+                .iter()
+                .filter(|e| e.is_dir && self.selected_paths.contains(&e.path))
+                .collect();
+            primary_selected.sort_by(|a, b| a.path.cmp(&b.path));
+            candidates.extend(
+                primary_selected
+                    .into_iter()
+                    .map(|e| (e.path.clone(), e.modified)),
+            );
+            for e in self.filtered_and_sorted_entries() {
+                if e.is_dir {
+                    candidates.push((e.path.clone(), e.modified));
+                }
+            }
+            if self.split_view_enabled {
+                let mut secondary_selected: Vec<&FileItem> = self
+                    .secondary_entries
+                    .iter()
+                    .filter(|e| e.is_dir && self.secondary_selected_paths.contains(&e.path))
+                    .collect();
+                secondary_selected.sort_by(|a, b| a.path.cmp(&b.path));
+                candidates.extend(
+                    secondary_selected
+                        .into_iter()
+                        .map(|e| (e.path.clone(), e.modified)),
+                );
+                for e in &self.secondary_entries {
+                    if e.is_dir {
+                        candidates.push((e.path.clone(), e.modified));
+                    }
+                }
+            }
+
+            let mut sent = 0usize;
+            for (path, mtime) in candidates {
+                if sent >= 64 {
+                    break;
+                }
+                if self.dir_size_queued.contains(&path) {
+                    continue;
+                }
+                if let Some((stored, _)) = self.dir_sizes.get(&path) {
+                    if *stored == mtime {
+                        continue;
+                    }
+                }
+                self.dir_size_queued.insert(path.clone());
+                let _ = self.dir_size_job_tx.send(path);
+                sent += 1;
+            }
+        }
+
+        // Write-behind flush: after 100 new entries or 30 seconds.
+        let flush_due = match self.dir_size_last_flush {
+            Some(t) => now.duration_since(t) >= std::time::Duration::from_secs(30),
+            None => true,
+        };
+        if self.dir_size_cache_dirty > 0 && (self.dir_size_cache_dirty >= 100 || flush_due) {
+            if crate::core::fs_utils::save_dir_size_cache_to(
+                &crate::core::fs_utils::dir_size_cache_path(),
+                &self.dir_sizes,
+            )
+            .is_ok()
+            {
+                self.dir_size_cache_dirty = 0;
+            }
+            self.dir_size_last_flush = Some(now);
         }
     }
 
@@ -4581,11 +4724,7 @@ impl ExplorerView {
                                     egui::Align2::LEFT_CENTER,
                                 ),
                                 DetailColumn::Size => {
-                                    let size_text = if item.is_dir {
-                                        String::from("--")
-                                    } else {
-                                        item.formatted_size()
-                                    };
+                                    let size_text = self.dir_size_text(item);
                                     (
                                         size_text,
                                         egui::FontId::monospace(11.5),
@@ -5904,11 +6043,7 @@ impl ExplorerView {
                         }
 
                         let size_y = rect.bottom() - 11.0;
-                        let size_text = if item.is_dir {
-                            String::from("--")
-                        } else {
-                            item.formatted_size()
-                        };
+                        let size_text = self.dir_size_text(item);
                         let size_color = if palette.is_dark {
                             Color32::from_rgb(150, 160, 175)
                         } else {
@@ -7433,6 +7568,18 @@ impl ExplorerView {
         }
     }
 
+    /// Finder-style size text: files show their formatted byte size;
+    /// directories show the fresh computed recursive total, else "--".
+    fn dir_size_text(&self, item: &FileItem) -> String {
+        if !item.is_dir {
+            return item.formatted_size();
+        }
+        match self.dir_sizes.get(&item.path) {
+            Some((mtime, total)) if item.modified == *mtime => format_file_size(*total),
+            _ => "--".to_string(),
+        }
+    }
+
     fn render_status_bar(&mut self, ui: &mut Ui, palette: &ThemePalette) {
         let bar_h = 26.0_f32;
 
@@ -7460,8 +7607,17 @@ impl ExplorerView {
             total_selected_bytes = self
                 .secondary_entries
                 .iter()
-                .filter(|e| self.secondary_selected_paths.contains(&e.path) && !e.is_dir)
-                .map(|e| e.size_bytes)
+                .filter(|e| self.secondary_selected_paths.contains(&e.path))
+                .map(|e| {
+                    if e.is_dir {
+                        match self.dir_sizes.get(&e.path) {
+                            Some((mtime, total)) if e.modified == *mtime => *total,
+                            _ => 0,
+                        }
+                    } else {
+                        e.size_bytes
+                    }
+                })
                 .sum();
         } else {
             total_items = self.filtered_and_sorted_entries().len();
@@ -7470,8 +7626,17 @@ impl ExplorerView {
             total_selected_bytes = self
                 .entries
                 .iter()
-                .filter(|e| self.selected_paths.contains(&e.path) && !e.is_dir)
-                .map(|e| e.size_bytes)
+                .filter(|e| self.selected_paths.contains(&e.path))
+                .map(|e| {
+                    if e.is_dir {
+                        match self.dir_sizes.get(&e.path) {
+                            Some((mtime, total)) if e.modified == *mtime => *total,
+                            _ => 0,
+                        }
+                    } else {
+                        e.size_bytes
+                    }
+                })
                 .sum();
         }
 
