@@ -136,10 +136,14 @@ fn draw_x_glyph(painter: &egui::Painter, center: egui::Pos2, size: f32) {
 /// from eating clicks and is centered vertically by the horizontal
 /// layout, like the text separators it replaces.
 pub fn paint_path_chevron(ui: &mut Ui, color: Color32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(4.5, 9.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(5.5, 10.0), Sense::hover());
     ui.painter().add(egui::Shape::line(
-        vec![rect.left_top(), rect.right_center(), rect.left_bottom()],
-        Stroke::new(1.5_f32, color),
+        vec![
+            rect.left_top() + Vec2::new(0.9, 1.1),
+            rect.right_center() - Vec2::new(0.9, 0.0),
+            rect.left_bottom() + Vec2::new(0.9, -1.1),
+        ],
+        Stroke::new(1.8_f32, color),
     ));
 }
 

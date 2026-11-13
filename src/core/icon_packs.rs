@@ -575,7 +575,69 @@ fn emblem_for(glyph: IconGlyph, fg: &str, fg_soft: &str) -> Option<String> {
     })
 }
 
-/// Folder body shapes per pack tab style
+/// Parses a #RRGGBB color into its three channel bytes.
+fn parse_hex(c: &str) -> Option<[u8; 3]> {
+    let h = c.strip_prefix('#')?;
+    if h.len() != 6 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some([
+        u8::from_str_radix(&h[0..2], 16).ok()?,
+        u8::from_str_radix(&h[2..4], 16).ok()?,
+        u8::from_str_radix(&h[4..6], 16).ok()?,
+    ])
+}
+
+/// Blends two #RRGGBB colors per channel: t = 0 keeps `a`, t = 1 keeps
+/// `b`. Malformed input returns `a` unchanged.
+pub fn mix_hex(a: &str, b: &str, t: f32) -> String {
+    let blend = |x: u8, y: u8| {
+        ((x as f32) + ((y as f32) - (x as f32)) * t)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    match (parse_hex(a), parse_hex(b)) {
+        (Some(pa), Some(pb)) => format!(
+            "#{:02X}{:02X}{:02X}",
+            blend(pa[0], pb[0]),
+            blend(pa[1], pb[1]),
+            blend(pa[2], pb[2])
+        ),
+        _ => a.to_string(),
+    }
+}
+
+/// Scales each channel of a #RRGGBB color by `f`. Malformed input
+/// returns the input unchanged.
+pub fn shade_hex(a: &str, f: f32) -> String {
+    match parse_hex(a) {
+        Some(p) => {
+            let s = |x: u8| ((x as f32) * f).round().clamp(0.0, 255.0) as u8;
+            format!("#{:02X}{:02X}{:02X}", s(p[0]), s(p[1]), s(p[2]))
+        }
+        None => a.to_string(),
+    }
+}
+
+/// Specular top edge plus a faint bottom inner-edge catch, inset from a
+/// front flap (x, y, width, height) so corner rounding never clips.
+fn glass_layers(fx: f32, fy: f32, fw: f32, fh: f32) -> String {
+    format!(
+        "<rect x='{sx:.1}' y='{sy:.1}' width='{sw:.1}' height='2.2' rx='1.1' fill='#FFFFFF' opacity='0.35'/> \
+         <rect x='{sx:.1}' y='{by:.1}' width='{sw:.1}' height='1.5' rx='0.75' fill='#FFFFFF' opacity='0.14'/>",
+        sx = fx + 3.0,
+        sy = fy + 2.2,
+        by = fy + fh - 3.7,
+        sw = fw - 6.0
+    )
+}
+
+/// Folder body shapes per pack tab style.
+///
+/// Golden Gate glass anatomy: a back wall, a front flap carrying a
+/// vertical light gradient (`ggfront`), a specular highlight along the
+/// front's top edge and a faint bottom catch. Tab anchors are unchanged
+/// so every pack keeps its recognisable silhouette.
 fn folder_shapes(st: &PackStyle) -> String {
     let r = st.radius;
     let out = match st.outline {
@@ -585,51 +647,69 @@ fn folder_shapes(st: &PackStyle) -> String {
         ),
         None => String::new(),
     };
-    let (back, front, tab) = (st.back, st.front, st.tab);
+    let ggtop = mix_hex(st.front, "#FFFFFF", 0.38);
+    let ggbot = shade_hex(st.front, 0.86);
+    let defs = format!(
+        "<defs><linearGradient id='ggfront' x1='0' y1='0' x2='0' y2='1'> \
+         <stop offset='0' stop-color='{top}'/> \
+         <stop offset='0.5' stop-color='{mid}'/> \
+         <stop offset='1' stop-color='{bot}'/> \
+         </linearGradient></defs>",
+        top = ggtop,
+        mid = st.front,
+        bot = ggbot
+    );
+    let (back, tab) = (st.back, st.tab);
     match st.tab_style {
         // Material / Fluent / Android: open-mouth top band, full-width front
         TabStyle::Flush => format!(
-            "<rect x='8' y='20' width='84' height='16' rx='{r}' fill='{back}'{out}/> \
-             <rect x='8' y='30' width='84' height='52' rx='{r}' fill='{front}'{out}/> \
-             <rect x='8' y='30' width='84' height='2.4' fill='#FFFFFF' opacity='0.18'/>",
+            "{defs} \
+             <rect x='8' y='20' width='84' height='16' rx='{r}' fill='{back}'{out}/> \
+             <rect x='8' y='30' width='84' height='52' rx='{r}' fill='url(#ggfront)'{out}/> \
+             {glass}",
+            defs = defs,
             r = r,
             back = back,
-            front = front,
-            out = out
+            out = out,
+            glass = glass_layers(8.0, 30.0, 84.0, 52.0)
         ),
         // Classic Finder / Win7 / XP style: distinct tab on top-left
         TabStyle::Tab => format!(
-            "<rect x='8' y='12' width='44' height='16' rx='{tr}' fill='{tab}'{out_x}/> \
+            "{defs} \
+             <rect x='8' y='12' width='44' height='16' rx='{tr}' fill='{tab}'{out_x}/> \
              <rect x='8' y='22' width='84' height='60' rx='{r}' fill='{back}'{out}/> \
-             <rect x='8' y='34' width='84' height='48' rx='{r}' fill='{front}'{out}/> \
-             <rect x='8' y='34' width='84' height='2.4' fill='#FFFFFF' opacity='0.18'/>",
+             <rect x='8' y='34' width='84' height='48' rx='{r}' fill='url(#ggfront)'{out}/> \
+             {glass}",
+            defs = defs,
             tr = (r * 0.7).max(3.0),
             tab = tab,
             out_x = out,
             r = r,
             back = back,
-            front = front,
-            out = out
+            out = out,
+            glass = glass_layers(8.0, 34.0, 84.0, 48.0)
         ),
         // GNOME / Adwaita / Hyprland: detached short notch
         TabStyle::Notch => format!(
-            "<rect x='18' y='13' width='40' height='10' rx='5' fill='{tab}'{out_x}/> \
+            "{defs} \
+             <rect x='18' y='13' width='40' height='10' rx='5' fill='{tab}'{out_x}/> \
              <rect x='8' y='20' width='84' height='60' rx='{r}' fill='{back}'{out}/> \
-             <rect x='8' y='33' width='84' height='47' rx='{r}' fill='{front}'{out}/> \
-             <rect x='8' y='33' width='84' height='1.6' fill='#FFFFFF' opacity='0.10'/>",
+             <rect x='8' y='33' width='84' height='47' rx='{r}' fill='url(#ggfront)'{out}/> \
+             {glass}",
+            defs = defs,
             tab = tab,
             out_x = out,
             r = r,
             back = back,
-            front = front,
-            out = out
+            out = out,
+            glass = glass_layers(8.0, 33.0, 84.0, 47.0)
         ),
     }
 }
 
 fn gloss_overlay(y_top: f32, y_bot: f32) -> String {
     format!(
-        "<path d='M8 {:.0} L92 {:.0} L92 {:.0} L8 {:.0} Z' fill='#FFFFFF' opacity='0.22'/>",
+        "<path d='M8 {:.0} L92 {:.0} L92 {:.0} L8 {:.0} Z' fill='#FFFFFF' opacity='0.12'/>",
         y_top, y_top, y_bot, y_bot
     )
 }

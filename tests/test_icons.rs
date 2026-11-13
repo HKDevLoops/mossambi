@@ -3,7 +3,9 @@
 //! and whose min corner sits on integer device pixels.
 
 use eframe::egui::{Context, Pos2, RawInput, Rect, Vec2};
-use mossambi::core::icon_packs::snapped_icon_quad;
+use mossambi::core::icon_packs::{
+    mix_hex, shade_hex, snapped_icon_quad, svg_for, IconGlyph, IconPack,
+};
 
 /// Fresh headless egui context with pixels-per-point APPLIED.
 /// set_pixels_per_point only takes effect at the next begin_pass
@@ -83,4 +85,32 @@ fn test_quad_huge_request_clamps_to_512_device_px() {
         512.0,
         "oversize request must clamp to 512 device pixels"
     );
+}
+
+// -- Icon wave: hex helpers and glassy folder anatomy ------------------------
+
+#[test]
+fn shade_hex_scales_channels() {
+    assert_eq!(shade_hex("#FFFFFF", 0.5), "#808080");
+    assert_eq!(shade_hex("#FFFFFF", 1.0), "#FFFFFF");
+    assert_eq!(shade_hex("#FFFFFF", 0.0), "#000000");
+    assert_eq!(shade_hex("not-a-hex", 0.5), "not-a-hex");
+}
+
+#[test]
+fn mix_hex_blends_channels() {
+    assert_eq!(mix_hex("#FF0000", "#FFFFFF", 0.5), "#FF8080");
+    assert_eq!(mix_hex("#FF0000", "#FFFFFF", 0.0), "#FF0000");
+    assert_eq!(mix_hex("#FF0000", "#FFFFFF", 1.0), "#FFFFFF");
+    assert_eq!(mix_hex("bad", "#FFFFFF", 0.5), "bad");
+}
+
+#[test]
+fn finder_folder_svg_has_glass_anatomy() {
+    let svg = svg_for(IconPack::MacosFinder, IconGlyph::Folder, [75, 75, 75]);
+    assert!(svg.contains("<linearGradient"), "gradient element missing");
+    assert!(svg.contains("ggfront"), "gradient id missing");
+    assert!(svg.contains("url(#ggfront)"), "front glass fill missing");
+    assert!(svg.contains("opacity='0.35'"), "specular top edge missing");
+    assert!(svg.contains("opacity='0.14'"), "bottom catch missing");
 }
