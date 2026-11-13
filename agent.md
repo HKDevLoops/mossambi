@@ -1710,3 +1710,53 @@ save_dir_size_cache_to take explicit paths (testable; missing or
 corrupt files load empty); loaded once in Default; new results bump
 dir_size_cache_dirty; flush when dirty >= 100 OR 30s elapsed since the
 last flush (synchronous write on the UI thread at these sizes).
+
+MOSSAMBI ICON PACK UPGRADE WAVE CLOSED (2026-11-13): feat 1d9e0e0
+(feat(gui) 3 files +136/-22: icon_packs.rs +98/-18, finder_chrome.rs
++7/-3, tests/test_icons.rs +31/-1) <- plan 45d60ac (docs(plan) 132
+lines), prior ledger 2d1efbb (folder-sizes wave). ALL FIVE GATES GREEN
+(fmt clean; clippy --all-targets -- -D warnings 6.38s zero findings
+first try; cargo test full suite passed + test_icons 7/7 incl. 3 NEW:
+shade_hex_scales_channels, mix_hex_blends_channels,
+finder_folder_svg_has_glass_anatomy; release 52.13s; porcelain exactly
+3 expected files). MECHANISMS: (1) D1 GLASSY
+THREE-LAYER FOLDER - folder_shapes rewritten per TabStyle with anchors
+UNCHANGED: defs block emits <linearGradient id='ggfront' x1='0' y1='0'
+x2='0' y2='1'> (vertical, objectBoundingBox) with stops offset 0 =
+mix_hex(front,#FFFFFF,0.38) light source, 0.5 = front, 1 =
+shade_hex(front,0.86) depth; layer 1 back wall rect in st.back, layer
+2 front flap fill url(#ggfront) OPAQUE (glass sold by gradient +
+specular, not translucency - rows/thumbnails behind can never wash
+out), layer 3 specular top edge (rect inset 3 from front edges, h 2.2,
+rx 1.1, white 0.35) + bottom inner-edge catch (h 1.5, rx 0.75, white
+0.14) via NEW glass_layers(fx,fy,fw,fh); anchors: Flush back 8,20,84x16
++ front 8,30,84x52; Tab tab 8,12,44x16 rx=(r*0.7).max(3) + back
+8,22,84x60 + front 8,34,84x48; Notch notch 18,13,40x10 rx=5 + back
+8,20,84x60 + front 8,33,84x47; old flat white edge lines (0.18/0.10)
+REMOVED - replaced by the specular; st.outline strokes retained on
+both walls via paint-order; Tab/Notch tab rects unchanged; svg_for
+assembly {head}{shapes}{gloss}{emblem} untouched so defs slot in
+cleanly and emblems/paper-peek keep coordinates. (2) D2 COLOR HELPERS -
+NEW pub mix_hex(a,b,t) per-channel linear blend + pub shade_hex(a,f)
+per-channel scale (both round half-away-from-zero + clamp; malformed
+#RRGGBB input falls back to the input unchanged) + private parse_hex
+(strip #, len 6, ascii-hexdigit check, from_str_radix); NO PackStyle
+field changes, no new config; derived stops keep all 14 packs
+recognizable in their own hues. (3) GLOSS TUNE - gloss_overlay band
+opacity 0.22 -> 0.12 so it reads as a sheen layer over the gradient
+instead of a flat stripe. (4) D3 CHEVRON CRAFT - paint_path_chevron
+slot 4.5x9.0 -> 5.5x10.0, stroke 1.5 -> 1.8, points inset 0.9
+horizontally / 1.1 vertically from the slot edges (left_top+0.9,1.1 /
+right_center-0.9,0 / left_bottom+0.9,-1.1, expressed as
+rect-corner+Vec2 so no new imports) so strokes never clip and the
+vertical center is preserved; both call sites (explorer_view.rs 3296,
+studio_view.rs 672) absorb the +1.0 slot width via the item_spacing
+3.0 horizontal layout. (5) D4 TESTS - test_icons.rs imports extended
+to mix_hex/shade_hex/svg_for/IconGlyph/IconPack + 3 NEW tests:
+shade_hex_scales_channels (#FFFFFF x0.5 -> #808080, x1.0 identity,
+x0.0 -> #000000, malformed passthrough), mix_hex_blends_channels
+(#FF0000+#FFFFFF t0.5 -> #FF8080, t0 -> a, t1 -> b, malformed
+passthrough), finder_folder_svg_has_glass_anatomy
+(svg_for(MacosFinder, Folder, [75,75,75]) contains <linearGradient,
+ggfront id, url(#ggfront) front fill, specular 0.35, bottom catch
+0.14). The proven snapped_icon_quad/icon_texture pipeline is untouched.
