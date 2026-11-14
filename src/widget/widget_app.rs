@@ -470,6 +470,7 @@ impl eframe::App for MossambiWidgetApp {
         }
 
         // 4. Handle Drag-and-Drop Files directly onto petals
+        let mut close_requested = false;
         ctx.input(|i| {
             if let Some(hover) = i.raw.hovered_files.first() {
                 if let Some(ref path) = hover.path {
@@ -602,10 +603,15 @@ impl eframe::App for MossambiWidgetApp {
                     self.expanded_group = None;
                     self.hovered_sub_petal = None;
                 } else {
-                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                    close_requested = true;
                 }
             }
         });
+        // Sent outside `ctx.input`: a viewport command issued while the
+        // input lock is held deadlocks egui.
+        if close_requested {
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+        }
 
         // 5. Render Frameless Transparent Widget (NO titlebar, NO borders, NO ribbon)
         egui::CentralPanel::default()

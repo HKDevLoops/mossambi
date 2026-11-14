@@ -432,7 +432,9 @@ fn main() -> Result<()> {
     }
 
     if cli.app {
-        return handle_gui(None);
+        // `--app DIR` opens the explorer at DIR (documented in --help).
+        let dir = cli.input.clone().filter(|p| p.is_dir());
+        return handle_gui(dir);
     }
     if cli.widget {
         return handle_widget(None, false, None);

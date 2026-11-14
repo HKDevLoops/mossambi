@@ -255,11 +255,9 @@ impl PreferencesView {
                                                 Align2::LEFT_CENTER,
                                                 *cat,
                                                 egui::FontId::proportional(design::type_scale::BODY_SM),
-                                                if is_sel {
-                                                    palette.accent
-                                                } else {
-                                                    palette.text_primary
-                                                },
+                                                // Accent text on the accent-tinted
+                                                // selection fill was unreadable.
+                                                palette.text_primary,
                                             );
                                             ui.painter().text(
                                                 Pos2::new(text_x, rect.top() + 26.0),

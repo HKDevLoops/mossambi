@@ -560,7 +560,7 @@ impl StudioView {
                 if self.current_tab == StudioTab::FileExplorer {
                     ui.add_space(6.0);
 
-                    ui.horizontal(|ui| {
+                    let row2 = ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
 
                         // Navigation Cluster (Finder-style vector icon buttons)
@@ -932,7 +932,7 @@ impl StudioView {
                             let search_w = 170.0_f32;
                             let search_resp = ui.add(
                                 egui::TextEdit::singleline(&mut self.explorer_view.search_query)
-                                    .id_source("mossambi_global_search_input")
+                                    .id(egui::Id::new("mossambi_global_search_input"))
                                     .hint_text("Search (/)")
                                     .desired_width(search_w),
                             );
@@ -1003,6 +1003,29 @@ impl StudioView {
                             );
                         });
                     });
+                    let row2_h = row2.response.rect.height();
+                    ui.data_mut(|d| d.insert_temp(egui::Id::new("mossambi_toolbar_row2_h"), row2_h));
+                } else {
+                    // Tool pages keep a toolbar row of the SAME height carrying
+                    // the page title, so the sidebar and content never jump
+                    // vertically when switching between Explorer and a tool.
+                    ui.add_space(6.0);
+                    let row2_h = ui
+                        .data(|d| d.get_temp::<f32>(egui::Id::new("mossambi_toolbar_row2_h")))
+                        .unwrap_or(28.0);
+                    let (title, _) = studio_tab_label(self.current_tab);
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(ui.available_width(), row2_h),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.add_space(10.0);
+                            ui.label(
+                                egui::RichText::new(title)
+                                    .size(15.0)
+                                    .color(palette.text_primary),
+                            );
+                        },
+                    );
                 }
             });
 
@@ -1056,6 +1079,42 @@ impl StudioView {
                             }
                         }
 
+                        // Exactly ONE sidebar row is active: the deepest sidebar
+                        // location that contains the current folder. Before,
+                        // a favorite AND its drive lit up together (and the
+                        // drive also lit up on the Home dashboard).
+                        let active_sidebar_path: Option<PathBuf> = if self.current_tab
+                            == StudioTab::FileExplorer
+                            && !self.explorer_view.is_home_view
+                        {
+                            let cur = &self.explorer_view.current_dir;
+                            let mut candidates: Vec<PathBuf> = vec![
+                                crate::core::platform_paths::desktop_dir(),
+                                crate::core::platform_paths::downloads_dir(),
+                                crate::core::platform_paths::documents_dir(),
+                                crate::core::platform_paths::pictures_dir(),
+                                crate::core::platform_paths::music_dir(),
+                                crate::core::platform_paths::videos_dir(),
+                                crate::core::resolve_recycle_bin_target(),
+                            ];
+                            if cfg.show_custom_pinned {
+                                candidates.extend(cfg.pinned_custom.iter().map(PathBuf::from));
+                            }
+                            candidates
+                                .extend(self.explorer_view.drives.iter().map(|d| d.path.clone()));
+                            if let Ok(up) = std::env::var("USERPROFILE") {
+                                candidates.push(PathBuf::from(up).join("OneDrive"));
+                            }
+                            candidates
+                                .into_iter()
+                                .filter(|p| cur.starts_with(p))
+                                .max_by_key(|p| p.components().count())
+                        } else {
+                            None
+                        };
+                        let is_sidebar_active =
+                            |p: &PathBuf| active_sidebar_path.as_ref() == Some(p);
+
                         let home_opt = crate::core::platform_paths::home_dir_opt();
                         if cfg.sidebar_favorites_expanded && home_opt.is_some() {
                             let recycle_target = crate::core::resolve_recycle_bin_target();
@@ -1105,9 +1164,7 @@ impl StudioView {
                             ];
 
                             for (name, glyph, icon_col, path) in pinned {
-                                let is_active = self.current_tab == StudioTab::FileExplorer
-                                    && !self.explorer_view.is_home_view
-                                    && self.explorer_view.current_dir == path;
+                                let is_active = is_sidebar_active(&path);
                                 let spec = SidebarRowSpec {
                                     pack,
                                     glyph,
@@ -1139,9 +1196,7 @@ impl StudioView {
                                         .file_name()
                                         .map(|n| n.to_string_lossy().into_owned())
                                         .unwrap_or_else(|| raw.clone());
-                                    let is_active = self.current_tab == StudioTab::FileExplorer
-                                        && !self.explorer_view.is_home_view
-                                        && self.explorer_view.current_dir == path;
+                                    let is_active = is_sidebar_active(&path);
                                     let spec = SidebarRowSpec {
                                         pack,
                                         glyph: IconGlyph::Folder,
@@ -1190,8 +1245,7 @@ impl StudioView {
                         if cfg.sidebar_locations_expanded {
                             let drives = self.explorer_view.drives.clone();
                             for drive in &drives {
-                                let is_active = self.current_tab == StudioTab::FileExplorer
-                                    && self.explorer_view.current_dir.starts_with(&drive.path);
+                                let is_active = is_sidebar_active(&drive.path);
                                 let glyph = if drive.is_system {
                                     IconGlyph::DriveSystem
                                 } else {
@@ -1222,8 +1276,7 @@ impl StudioView {
                             if let Ok(userprofile) = std::env::var("USERPROFILE") {
                                 let od = PathBuf::from(&userprofile).join("OneDrive");
                                 if od.exists() {
-                                    let is_active = self.current_tab == StudioTab::FileExplorer
-                                        && self.explorer_view.current_dir == od;
+                                    let is_active = is_sidebar_active(&od);
                                     let spec = SidebarRowSpec {
                                         pack,
                                         glyph: IconGlyph::Cloud,
@@ -1236,6 +1289,7 @@ impl StudioView {
                                     if cloud_click.row {
                                         self.current_tab = StudioTab::FileExplorer;
                                         self.explorer_view.navigate_to(od);
+                                        self.explorer_view.is_home_view = false;
                                     }
                                 }
                             }
@@ -2134,12 +2188,15 @@ impl StudioView {
                     .rounding(Rounding::same(10.0))
                     .inner_margin(egui::Margin::same(14.0));
                 p1.show(&mut cols[0], |ui| {
+                    // Left-aligned (not justified) text inside the card.
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                     ui.label(egui::RichText::new("Web Image Optimizer").size(14.0).strong().color(palette.text_primary));
                     ui.label(egui::RichText::new("Convert PNG/JPG to WebP/AVIF for up to 80% size savings with zero perceptual loss.").size(12.5).color(palette.text_secondary));
                     ui.add_space(6.0);
                     if ui.button(egui::RichText::new("Select Images ->").size(12.5).color(palette.accent)).clicked() {
                         on_pick_file();
                     }
+                    });
                 });
 
                 // Preset 2: Vector PDF
@@ -2149,12 +2206,15 @@ impl StudioView {
                     .rounding(Rounding::same(10.0))
                     .inner_margin(egui::Margin::same(14.0));
                 p2.show(&mut cols[1], |ui| {
+                    // Left-aligned (not justified) text inside the card.
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                     ui.label(egui::RichText::new("Notes to Vector PDF").size(14.0).strong().color(palette.text_primary));
                     ui.label(egui::RichText::new("Typeset text, markdown, and code into publication-grade 300 DPI vector PDF.").size(12.5).color(palette.text_secondary));
                     ui.add_space(6.0);
                     if ui.button(egui::RichText::new("Select Document ->").size(12.5).color(palette.accent)).clicked() {
                         on_pick_file();
                     }
+                    });
                 });
             });
 
@@ -2168,12 +2228,15 @@ impl StudioView {
                     .rounding(Rounding::same(10.0))
                     .inner_margin(egui::Margin::same(14.0));
                 p3.show(&mut cols[0], |ui| {
+                    // Left-aligned (not justified) text inside the card.
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                     ui.label(egui::RichText::new("Lossless Audio Remux").size(14.0).strong().color(palette.text_primary));
                     ui.label(egui::RichText::new("Bit-exact WAV <-> FLAC transcoding with zero stream re-encoding and CRC verification.").size(12.5).color(palette.text_secondary));
                     ui.add_space(6.0);
                     if ui.button(egui::RichText::new("Select Audio ->").size(12.5).color(palette.accent)).clicked() {
                         on_pick_file();
                     }
+                    });
                 });
 
                 // Preset 4: Indian Exam Form
@@ -2183,12 +2246,15 @@ impl StudioView {
                     .rounding(Rounding::same(10.0))
                     .inner_margin(egui::Margin::same(14.0));
                 p4.show(&mut cols[1], |ui| {
+                    // Left-aligned (not justified) text inside the card.
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                     ui.label(egui::RichText::new("Custom Form Conformer").size(14.0).strong().color(palette.text_primary));
                     ui.label(egui::RichText::new("Conforms any photo, signature, or document to exact custom dimensions, DPI, and file size boundaries.").size(12.5).color(palette.text_secondary));
                     ui.add_space(6.0);
                     if ui.button(egui::RichText::new("Open Conformer ->").size(12.5).color(palette.accent)).clicked() {
                         self.current_tab = StudioTab::ExamStudio;
                     }
+                    });
                 });
             });
 
@@ -2219,29 +2285,43 @@ impl StudioView {
             // description filter directly.
             const MAX_CATALOG_CHIPS: usize = 48;
             let filtered = UniversalRegistry::search_catalogue(&self.catalogue_search);
+            // Chips are laid out with a KNOWN size (galley measured first):
+            // a Frame inside horizontal_wrapped cannot wrap, so the row used
+            // to run off the right edge of the window.
             ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
                 for spec in filtered.iter().take(MAX_CATALOG_CHIPS) {
-                    let chip_frame = egui::Frame::none()
-                        .fill(palette.card_bg)
-                        .stroke(Stroke::new(1.0_f32, palette.border))
-                        .rounding(Rounding::same(6.0))
-                        .inner_margin(egui::Margin::symmetric(10.0, 6.0));
-
-                    chip_frame.show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(spec.extension)
-                                    .size(13.0)
-                                    .strong()
-                                    .color(palette.text_primary),
-                            );
-                            ui.label(
-                                egui::RichText::new(spec.description)
-                                    .size(12.0)
-                                    .color(palette.text_muted),
-                            );
-                        });
-                    });
+                    let mut job = egui::text::LayoutJob::default();
+                    job.append(
+                        spec.extension,
+                        0.0,
+                        egui::TextFormat::simple(
+                            egui::FontId::proportional(13.0),
+                            palette.text_primary,
+                        ),
+                    );
+                    job.append(
+                        spec.description,
+                        8.0,
+                        egui::TextFormat::simple(
+                            egui::FontId::proportional(12.0),
+                            palette.text_muted,
+                        ),
+                    );
+                    let galley = ui.fonts(|fo| fo.layout_job(job));
+                    let pad = Vec2::new(10.0, 6.0);
+                    let (rect, _) =
+                        ui.allocate_exact_size(galley.size() + pad * 2.0, egui::Sense::hover());
+                    if ui.is_rect_visible(rect) {
+                        let p = ui.painter();
+                        p.rect_filled(rect, Rounding::same(6.0), palette.card_bg);
+                        p.rect_stroke(
+                            rect,
+                            Rounding::same(6.0),
+                            Stroke::new(1.0_f32, palette.border),
+                        );
+                        p.galley(rect.min + pad, galley, palette.text_primary);
+                    }
                 }
             });
 

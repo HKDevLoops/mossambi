@@ -1297,10 +1297,7 @@ impl ExplorerView {
             tab.title = if self.is_home_view {
                 "Home".to_string()
             } else {
-                dir.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("Folder")
-                    .to_string()
+                folder_title(&dir)
             };
             tab.icon = if self.is_home_view { "H" } else { "D" };
         }
@@ -1335,10 +1332,7 @@ impl ExplorerView {
         let title = if is_home {
             "Home".to_string()
         } else {
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("Folder")
-                .to_string()
+            folder_title(&path)
         };
         let icon = if is_home { "H" } else { "D" };
         let id = self.next_tab_id;
@@ -1471,6 +1465,17 @@ impl ExplorerView {
         while let Ok(batch) = self.scan_rx.try_recv() {
             if batch.gen == self.scan_gen.load(Ordering::Relaxed) {
                 self.entries = batch.entries;
+                // A selection made in the previous folder must not survive
+                // navigation: toolbar actions and the Delete key act on the
+                // selection, so a stale one hit files the user can't see.
+                // (Columns view keeps cross-column selection by design.)
+                if self.view_mode != ViewMode::Columns {
+                    // Keep only paths that are still listed (also drops a
+                    // just-renamed or deleted item's stale entry).
+                    let listed: std::collections::HashSet<&Path> =
+                        self.entries.iter().map(|e| e.path.as_path()).collect();
+                    self.selected_paths.retain(|p| listed.contains(p.as_path()));
+                }
             }
         }
 
@@ -1589,6 +1594,7 @@ impl ExplorerView {
     pub fn filtered_and_sorted_entries(&self) -> Vec<&FileItem> {
         let q = self.search_query.trim();
         let is_searching = !q.is_empty();
+        let q_lower = q.to_lowercase();
         let active_tag = self.active_tag.as_deref();
 
         let mut scored_list: Vec<(&FileItem, i64)> = self
@@ -1614,7 +1620,12 @@ impl ExplorerView {
             })
             .filter_map(|e| {
                 if is_searching {
-                    let score = fuzzy_match(q, &e.name)?;
+                    // Substring filter (Finder): a loose subsequence match
+                    // made "dl" list nearly every file in the folder.
+                    if !e.name.to_lowercase().contains(&q_lower) {
+                        return None;
+                    }
+                    let score = fuzzy_match(q, &e.name).unwrap_or(0);
                     Some((e, score))
                 } else {
                     Some((e, 0))
@@ -1623,16 +1634,8 @@ impl ExplorerView {
             .collect();
 
         scored_list.sort_by(|(a, score_a), (b, score_b)| {
-            if is_searching
-                && self.sort_column == SortColumn::Name
-                && self.sort_direction == SortDirection::Ascending
-            {
-                return score_b
-                    .cmp(score_a)
-                    .then_with(|| b.is_dir.cmp(&a.is_dir))
-                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-            }
-
+            // Search results keep the chosen sort (Finder): ordering by
+            // fuzzy score made a Name-sorted list look shuffled.
             if a.is_dir != b.is_dir {
                 return b.is_dir.cmp(&a.is_dir);
             }
@@ -1795,7 +1798,8 @@ impl ExplorerView {
                         "Drag-out hand-off: {} path(s) leaving the window",
                         payload.paths.len()
                     );
-                    let note = crate::core::begin_file_drag_out(&payload.paths);
+                    let note = crate::core::begin_file_drag_out(&payload.paths)
+                        .map_err(|e| format!("Drag-out failed: {e}"));
                     self.show_status_note(note);
                     egui::DragAndDrop::clear_payload(ui.ctx());
                 }
@@ -1819,11 +1823,18 @@ impl ExplorerView {
         // 2. Global Explorer Hotkey Interceptions with Vim & Emacs Navigation Engine
         let is_search_focused =
             ui.memory(|m| m.has_focus(egui::Id::new("mossambi_global_search_input")));
+        // Any focused text field (search, path bar, rename, dialogs) owns
+        // the keyboard: single-letter and editing shortcuts must not fire.
+        let text_field_focused = ui.ctx().wants_keyboard_input();
         let is_typing = self.is_editing_path
             || self.renaming_path.is_some()
             || self.show_new_folder_dialog
             || self.properties_item.is_some()
-            || is_search_focused;
+            || is_search_focused
+            || text_field_focused;
+        // Focus changes must happen outside `ui.input`: calling
+        // `ui.memory_mut` while the input lock is held deadlocks egui.
+        let mut surrender_search_focus = false;
 
         let nav_entries: Vec<FileItem> = self
             .filtered_and_sorted_entries()
@@ -1843,9 +1854,7 @@ impl ExplorerView {
                 if i.key_pressed(egui::Key::Escape) {
                     if !self.search_query.is_empty() || is_search_focused {
                         self.search_query.clear();
-                        ui.memory_mut(|m| {
-                            m.surrender_focus(egui::Id::new("mossambi_global_search_input"))
-                        });
+                        surrender_search_focus = true;
                     }
                     self.peek_item = None;
                     self.peek_texture = None;
@@ -2052,35 +2061,8 @@ impl ExplorerView {
                         self.paste_from_clipboard();
                     }
 
-                    // Vim `d` (without modifiers): Delete focused/selected
-                    if i.key_pressed(egui::Key::D)
-                        && !i.modifiers.ctrl
-                        && !i.modifiers.command
-                        && !i.modifiers.alt
-                    {
-                        let mut deleted = false;
-                        if self.selected_paths.is_empty() {
-                            if let Some(item) = nav_entries.get(self.focused_row) {
-                                log_result(
-                                    "Delete",
-                                    &item.path,
-                                    crate::core::action_journal::stage_delete(
-                                        std::slice::from_ref(&item.path),
-                                    ),
-                                );
-                                deleted = true;
-                            }
-                        } else {
-                            let paths: Vec<PathBuf> = self.selected_paths.iter().cloned().collect();
-                            let r = crate::core::action_journal::stage_delete(&paths);
-                            log_result("Delete", &paths[0], r);
-                            deleted = !paths.is_empty();
-                            self.selected_paths.clear();
-                        }
-                        if deleted {
-                            self.navigate_to(self.current_dir.clone());
-                        }
-                    }
+                    // Bare `d` no longer deletes: a single stray letter must never
+                    // move files to the trash. Delete / Shift+Delete do that.
 
                     // Vim `r`: In-place Rename
                     if i.key_pressed(egui::Key::R)
@@ -2257,7 +2239,11 @@ impl ExplorerView {
                 // performs. Ctrl+Shift+Z redoes is intentionally NOT offered: the
                 // journal appends an Undo marker instead of replaying, so the
                 // stack always walks backwards.
-                if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::Z) {
+                // Not while typing: Ctrl+Z in a text field is text undo.
+                if !is_typing
+                    && (i.modifiers.ctrl || i.modifiers.command)
+                    && i.key_pressed(egui::Key::Z)
+                {
                     let note = crate::core::action_journal::undo_last();
                     self.show_status_note(note);
                     // The undo may have changed the current directory (a moved or
@@ -2294,7 +2280,10 @@ impl ExplorerView {
                         }
                     }
                 }
-                if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::C) {
+                if !is_typing
+                    && (i.modifiers.ctrl || i.modifiers.command)
+                    && i.key_pressed(egui::Key::C)
+                {
                     if self.selected_paths.is_empty() {
                         if let Some(item) = nav_entries.get(self.focused_row) {
                             self.clipboard_paths = vec![item.path.clone()];
@@ -2305,7 +2294,10 @@ impl ExplorerView {
                     }
                     self.clipboard_is_cut = false;
                 }
-                if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::X) {
+                if !is_typing
+                    && (i.modifiers.ctrl || i.modifiers.command)
+                    && i.key_pressed(egui::Key::X)
+                {
                     if self.selected_paths.is_empty() {
                         if let Some(item) = nav_entries.get(self.focused_row) {
                             self.clipboard_paths = vec![item.path.clone()];
@@ -2316,10 +2308,13 @@ impl ExplorerView {
                     }
                     self.clipboard_is_cut = true;
                 }
-                if (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::V) {
+                if !is_typing
+                    && (i.modifiers.ctrl || i.modifiers.command)
+                    && i.key_pressed(egui::Key::V)
+                {
                     self.paste_from_clipboard();
                 }
-                if i.key_pressed(egui::Key::Delete) {
+                if !is_typing && i.key_pressed(egui::Key::Delete) {
                     let paths_to_delete: Vec<PathBuf> = if self.selected_paths.is_empty() {
                         nav_entries
                             .get(self.focused_row)
@@ -2346,6 +2341,9 @@ impl ExplorerView {
                     }
                 }
             });
+        }
+        if surrender_search_focus {
+            ui.memory_mut(|m| m.surrender_focus(egui::Id::new("mossambi_global_search_input")));
         }
 
         let modal_bg = if palette.is_dark {
@@ -2529,6 +2527,12 @@ impl ExplorerView {
         if let Some((old_path, mut new_name)) = self.renaming_path.clone() {
             let mut close_dialog = false;
             let mut do_rename = false;
+            // One-shot flag: pre-select the name stem on the first frame only.
+            let sel_init_key = egui::Id::new(("mossambi_rename_sel_init", &old_path));
+            let old_display = old_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
 
             egui::Window::new("Rename Item Dialog")
                 .title_bar(false)
@@ -2550,16 +2554,38 @@ impl ExplorerView {
                             .color(palette.text_primary),
                     );
                     ui.add_space(4.0);
+                    // Name the target: the list selection can change while
+                    // the sheet is open, so say exactly what gets renamed.
                     ui.label(
-                        egui::RichText::new("Enter new name:")
+                        egui::RichText::new(format!("New name for \"{old_display}\":"))
                             .size(12.5)
                             .color(palette.text_secondary),
                     );
                     ui.add_space(6.0);
-                    let resp =
-                        ui.add(egui::TextEdit::singleline(&mut new_name).desired_width(280.0));
+                    let out = egui::TextEdit::singleline(&mut new_name)
+                        .desired_width(280.0)
+                        .show(ui);
+                    let resp = out.response;
+                    if !ui.data(|d| d.get_temp::<bool>(sel_init_key).unwrap_or(false)) {
+                        // Finder/Explorer: select the name without its
+                        // extension so typing replaces it (typing used to
+                        // append: "alpha.txtrenamed").
+                        let stem_chars = rename_stem_chars(&new_name, old_path.is_dir());
+                        let mut state = out.state;
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(stem_chars),
+                            )));
+                        state.store(ui.ctx(), resp.id);
+                        ui.data_mut(|d| d.insert_temp(sel_init_key, true));
+                    }
                     resp.request_focus();
-                    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    // Enter commits. (The old check needed lost_focus, which
+                    // never happened because focus is re-requested every
+                    // frame, so Enter did nothing.)
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         do_rename = true;
                     }
 
@@ -2597,20 +2623,44 @@ impl ExplorerView {
 
             if do_rename {
                 let trimmed = new_name.trim();
-                if !trimmed.is_empty() {
+                let mut keep_open = false;
+                if !trimmed.is_empty() && trimmed != old_display {
                     if let Some(parent) = old_path.parent() {
                         let new_path = parent.join(trimmed);
-                        let _ = std::fs::rename(&old_path, &new_path);
-                        crate::core::action_journal::record_rename(
-                            old_path.clone(),
-                            new_path.clone(),
-                        );
-                        self.navigate_to(self.current_dir.clone());
+                        // Never clobber: on Linux/macOS rename() silently
+                        // replaces an existing file.
+                        let case_only = trimmed.eq_ignore_ascii_case(&old_display);
+                        let result = if new_path.exists() && !case_only {
+                            Err(format!("\"{trimmed}\" already exists in this folder"))
+                        } else {
+                            std::fs::rename(&old_path, &new_path)
+                                .map_err(|e| format!("Could not rename: {e}"))
+                        };
+                        match result {
+                            Ok(()) => {
+                                // Journal only renames that really happened.
+                                crate::core::action_journal::record_rename(
+                                    old_path.clone(),
+                                    new_path.clone(),
+                                );
+                                self.navigate_to(self.current_dir.clone());
+                            }
+                            Err(msg) => {
+                                self.show_status_note(Err(msg));
+                                keep_open = true;
+                            }
+                        }
                     }
                 }
-                self.renaming_path = None;
+                if keep_open {
+                    self.renaming_path = Some((old_path, new_name));
+                } else {
+                    self.renaming_path = None;
+                    ui.ctx().data_mut(|d| d.remove::<bool>(sel_init_key));
+                }
             } else if close_dialog {
                 self.renaming_path = None;
+                ui.ctx().data_mut(|d| d.remove::<bool>(sel_init_key));
             } else {
                 self.renaming_path = Some((old_path, new_name));
             }
@@ -3028,7 +3078,7 @@ impl ExplorerView {
                     };
                     let search_resp = ui.add(
                         egui::TextEdit::singleline(&mut self.search_query)
-                            .id_source("mossambi_global_search_input")
+                            .id(egui::Id::new("mossambi_global_search_input"))
                             .hint_text("Filter files (/)...")
                             .desired_width(box_w),
                     );
@@ -3063,7 +3113,7 @@ impl ExplorerView {
                     };
                     let search_resp = ui.add(
                         egui::TextEdit::singleline(&mut self.search_query)
-                            .id_source("mossambi_global_search_input")
+                            .id(egui::Id::new("mossambi_global_search_input"))
                             .hint_text("Filter files (/)...")
                             .desired_width(box_w),
                     );
@@ -4217,41 +4267,13 @@ impl ExplorerView {
                 });
                 ui.add_space(6.0);
 
-                let banner_h = 42.0;
-                let banner_w = (ui.available_width() - 14.0).max(200.0);
-                let (rect, _) = ui.allocate_exact_size(Vec2::new(banner_w, banner_h), egui::Sense::hover());
-                ui.painter().rect_filled(rect, Rounding::same(6.0), palette.card_bg);
-                ui.painter().rect_stroke(rect, Rounding::same(6.0), Stroke::new(1.0_f32, palette.border));
-
-                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
-                    ui.horizontal(|ui| {
-                        ui.add_space(12.0);
-                        let info_badge_center = Pos2::new(ui.cursor().min.x + 8.0, rect.center().y);
-                        ui.painter().circle_filled(info_badge_center, 8.0, palette.accent);
-                        ui.painter().text(
-                            info_badge_center,
-                            egui::Align2::CENTER_CENTER,
-                            "i",
-                            egui::FontId::proportional(11.0),
-                            Color32::WHITE,
-                        );
-                        ui.add_space(24.0);
-                        ui.label(
-                            egui::RichText::new("There are no network locations. If you don't use network locations, you can disable the widget.")
-                                .size(12.0)
-                                .color(palette.text_secondary)
-                        );
-
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.add_space(12.0);
-                            let dis_btn = egui::Button::new(egui::RichText::new("Disable").size(12.0).color(palette.text_primary))
-                                .fill(palette.card_hover)
-                                .rounding(Rounding::same(4.0));
-                            let _ = ui.add(dis_btn).on_hover_text("Disable network location discovery");
-                        });
-                    });
-                });
-
+                // Empty state, not an alert: no accent badge and no dead
+                // "Disable" button (it never did anything).
+                ui.label(
+                    egui::RichText::new("No network locations found.")
+                        .size(12.5)
+                        .color(palette.text_muted),
+                );
                 ui.add_space(20.0);
 
                 // ==========================================
@@ -4384,8 +4406,9 @@ impl ExplorerView {
 
         // Finder-style column metrics: [checkbox] + one header per
         // ColumnLayout.visible column. Widths come from the persisted
-        // layout; the LAST visible column auto-fills the remaining
-        // width (Finder rule), clamped to its minimum.
+        // layout; the NAME column grows to absorb the spare width so long
+        // names are not middle-elided while the window is mostly empty
+        // (without Name, the last visible column fills instead).
         let scrollbar_reserve = 12.0;
         let content_width = (ui.available_width() - scrollbar_reserve).max(320.0);
         let col_pad = 6.0_f32;
@@ -4403,10 +4426,19 @@ impl ExplorerView {
             .map(|c| self.column_layout.width(*c))
             .collect();
         let n_cols = visible.len();
+        let flex_idx = visible
+            .iter()
+            .position(|c| *c == DetailColumn::Name)
+            .unwrap_or(n_cols.saturating_sub(1));
         if n_cols > 0 {
-            let fixed: f32 = widths[..n_cols - 1].iter().sum();
-            let min_last = visible[n_cols - 1].min_w();
-            widths[n_cols - 1] = (available_for_cols - fixed).max(min_last);
+            let fixed: f32 = widths
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != flex_idx)
+                .map(|(_, w)| *w)
+                .sum();
+            let min_flex = visible[flex_idx].min_w().max(widths[flex_idx]);
+            widths[flex_idx] = (available_for_cols - fixed).max(min_flex);
         }
 
         // Column header: flat interactive labels, no button boxes, hairline underneath
@@ -4608,7 +4640,7 @@ impl ExplorerView {
                         menu_ui,
                         icon_pack,
                         menu_style,
-                        palette.accent,
+                        palette.text_secondary,
                         has_clipboard,
                         !entries.is_empty(),
                         self.sort_column,
@@ -4640,6 +4672,11 @@ impl ExplorerView {
                         egui::Sense::click_and_drag(),
                     );
                     marquee_rects.push(row_rect);
+                    // Off-screen rows keep their layout slot (scroll extent,
+                    // marquee hit-test) but skip painting and per-row work.
+                    if !ui.is_rect_visible(row_rect) {
+                        continue;
+                    }
 
                     // Selection disclosure is the checkbox ONLY (never a row band).
                     // Hover/Always reveal drives the alpha with the pack's spring.
@@ -4723,6 +4760,9 @@ impl ExplorerView {
                                 icon_rect,
                                 icon_accent,
                             );
+                            if item.is_symlink {
+                                paint_alias_badge(ui.painter(), icon_rect);
+                            }
                             // High-contrast text: selection is disclosed by the
                             // checkbox, so the name always sits on the normal
                             // fill (Finder detail).
@@ -4739,11 +4779,7 @@ impl ExplorerView {
                             // The name text starts after the icon + tag dots.
                             let name_pos_x = name_x + 28.0 + dots_w;
                             let name_avail = w - 32.0 - col_pad - dots_w;
-                            let suffix = if item.is_symlink { " ->" } else { "" };
-                            let display = truncate_middle(
-                                &format!("{}{}", item.name, suffix),
-                                (name_avail / 7.0) as usize,
-                            );
+                            let display = truncate_middle(&item.name, (name_avail / 7.0) as usize);
                             rp.text(
                                 Pos2::new(name_pos_x, row_rect.center().y),
                                 egui::Align2::LEFT_CENTER,
@@ -4952,8 +4988,13 @@ impl ExplorerView {
                     }
 
                     if row_resp.hovered() {
-                        new_hover =
-                            Some((item.clone(), row_rect.right_center() + Vec2::new(14.0, 0.0)));
+                        // Anchor next to the pointer: the row spans the whole
+                        // width, so its right edge put the card far away.
+                        let anchor = ui
+                            .input(|i| i.pointer.hover_pos())
+                            .unwrap_or(row_rect.right_center())
+                            + Vec2::new(18.0, 14.0);
+                        new_hover = Some((item.clone(), anchor));
                     }
 
                     // Comprehensive Right-Click Context Menu for the File Row.
@@ -4971,6 +5012,9 @@ impl ExplorerView {
                             menu_ui, icon_pack, menu_style, tint, item, &targets,
                         ));
                     });
+                }
+                if entries.is_empty() {
+                    paint_empty_listing(ui, palette, &self.search_query);
                 }
             });
 
@@ -5448,8 +5492,7 @@ impl ExplorerView {
                             ui.label(
                                 egui::RichText::new(label)
                                     .size(12.0)
-                                    .strong()
-                                    .color(palette.accent),
+                                    .color(palette.text_secondary),
                             );
                         }
                     }
@@ -5504,6 +5547,15 @@ impl ExplorerView {
 
     /// Floating Finder-style preview card: folder contents / image preview / metadata
     fn render_hover_preview(&mut self, ui: &Ui, palette: &ThemePalette) {
+        // Never float a preview over an open menu or a modal dialog.
+        if ui.ctx().memory(|m| m.any_popup_open())
+            || self.renaming_path.is_some()
+            || self.properties_item.is_some()
+            || self.show_new_folder_dialog
+            || self.permanent_delete_prompt.is_some()
+        {
+            return;
+        }
         let show = self
             .hover_preview
             .as_ref()
@@ -5845,7 +5897,7 @@ impl ExplorerView {
                         menu_ui,
                         icon_pack,
                         menu_style,
-                        palette.accent,
+                        palette.text_secondary,
                         has_clipboard,
                         !entries.is_empty(),
                         self.sort_column,
@@ -6088,12 +6140,14 @@ impl ExplorerView {
                                 irect,
                                 accent,
                             );
+                            if item.is_symlink {
+                                paint_alias_badge(ui.painter(), irect);
+                            }
                         }
 
                         // Bottom zone: Filename (wrapped up to 2 lines, macOS Finder style) + Crisp File Size
-                        let symlink_suffix = if item.is_symlink { " ->" } else { "" };
                         let tile_tags = crate::core::tags::read_tags_cache(&item.path);
-                        let raw_name = format!("{}{}", item.name, symlink_suffix);
+                        let raw_name = item.name.clone();
 
                         let tile_name_color = if item.is_hidden {
                             Color32::from_rgba_unmultiplied(
@@ -6114,15 +6168,14 @@ impl ExplorerView {
                             tile_name_color,
                             max_text_w,
                         );
+                        // Finder wraps at word boundaries and centres each line;
+                        // break_anywhere split words mid-way ("Te / mplates").
                         job.wrap.max_rows = 2;
-                        job.wrap.break_anywhere = true;
+                        job.wrap.break_anywhere = false;
+                        job.halign = egui::Align::Center;
                         let galley = ui.fonts(|f| f.layout_job(job));
-                        let name_w = galley.size().x;
                         let name_h = galley.size().y;
-                        let name_x = (rect.center().x - name_w * 0.5).clamp(
-                            rect.left() + 8.0,
-                            (rect.right() - 8.0 - name_w).max(rect.left() + 8.0),
-                        );
+                        let name_x = rect.center().x;
                         let name_y =
                             (rect.bottom() - size_font - 10.0 - name_h).max(zone_bottom + 2.0);
                         ui.painter_at(rect).galley(
@@ -6188,13 +6241,16 @@ impl ExplorerView {
                                 menu_ui,
                                 icon_pack,
                                 menu_style,
-                                palette.accent,
+                                palette.text_secondary,
                                 item,
                                 &targets,
                             ));
                         });
                     }
                 });
+                if entries.is_empty() {
+                    paint_empty_listing(ui, palette, &self.search_query);
+                }
             });
 
         // (The grid empty-canvas context menu is registered FIRST inside the
@@ -6428,12 +6484,8 @@ impl ExplorerView {
                                             item.is_dir,
                                         );
 
-                                        let symlink_suffix =
-                                            if item.is_symlink { " ->" } else { "" };
-                                        let display_name = truncate_middle(
-                                            &format!("{}{}", item.name, symlink_suffix),
-                                            (col_w / 8.5) as usize,
-                                        );
+                                        let display_name =
+                                            truncate_middle(&item.name, (col_w / 8.5) as usize);
 
                                         let (row_rect, resp) = ui.allocate_exact_size(
                                             Vec2::new(col_w - 6.0, 30.0),
@@ -6550,6 +6602,9 @@ impl ExplorerView {
                                         crate::core::icon_packs::paint_icon(
                                             ui, icon_pack, icon_glyph, icon_rect, accent_rgb,
                                         );
+                                        if item.is_symlink {
+                                            paint_alias_badge(ui.painter(), icon_rect);
+                                        }
                                         // Name text right of icon, tag dots before it
                                         let name_color = if is_selected {
                                             palette.text_primary
@@ -6662,7 +6717,7 @@ impl ExplorerView {
                                                 menu_ui,
                                                 icon_pack,
                                                 menu_style,
-                                                palette.accent,
+                                                palette.text_secondary,
                                                 item,
                                                 &targets,
                                             ));
@@ -6743,7 +6798,7 @@ impl ExplorerView {
                         menu_ui,
                         icon_pack,
                         menu_style,
-                        palette.accent,
+                        palette.text_secondary,
                         has_clipboard,
                         !entries.is_empty(),
                         self.sort_column,
@@ -7742,9 +7797,11 @@ impl ExplorerView {
 
         // Left: selection REPLACES the item count (Finder semantics).
         let items_text = if sel_count > 0 {
+            // Finder: "2 of 53 selected, 4.1 MB".
             format!(
-                "{} selected, {}",
+                "{} of {} selected, {}",
                 sel_count,
+                total_items,
                 format_file_size(total_selected_bytes)
             )
         } else {
@@ -7760,16 +7817,11 @@ impl ExplorerView {
             text
         };
 
-        let mut items_label = egui::RichText::new(items_text)
+        // Informational text stays neutral: the accent (often red) on
+        // status text read like an error.
+        let items_label = egui::RichText::new(items_text)
             .size(11.5)
-            .color(if sel_count > 0 {
-                palette.accent
-            } else {
-                palette.text_secondary
-            });
-        if sel_count > 0 {
-            items_label = items_label.strong();
-        }
+            .color(palette.text_secondary);
 
         ui.allocate_ui_with_layout(
             Vec2::new(ui.available_width(), bar_h),
@@ -7794,9 +7846,9 @@ impl ExplorerView {
 
                     if self.show_hidden_files {
                         ui.label(
-                            egui::RichText::new("Dotfiles visible")
+                            egui::RichText::new("Hidden files shown")
                                 .size(11.0)
-                                .color(palette.accent),
+                                .color(palette.text_muted),
                         );
                     }
                 });
@@ -8932,7 +8984,9 @@ impl ExplorerView {
     pub fn show_status_note(&mut self, note: Result<String, String>) {
         let text = match note {
             Ok(message) => message,
-            Err(error) => format!("Drag-out failed: {}", error),
+            // Callers word their own errors (rename, undo, fs ops, drag-out);
+            // a fixed "Drag-out failed:" prefix mislabelled all of them.
+            Err(error) => error,
         };
         self.status_note = Some((text, Instant::now()));
     }
@@ -9342,7 +9396,7 @@ impl ExplorerView {
 
         menu_ui.separator();
         // -- Sort by submenu (re-picking the active column reverses order) --
-        menu_ui.menu_button("Sort by", |sub_ui| {
+        menu_ui.menu_button(egui::RichText::new("Sort by").size(15.0), |sub_ui| {
             sub_ui.set_min_width(170.0);
             for (col, label) in [
                 (SortColumn::Name, "Name"),
@@ -9370,7 +9424,7 @@ impl ExplorerView {
             }
         });
         // -- View submenu (Details / Grid / Columns) --
-        menu_ui.menu_button("View", |sub_ui| {
+        menu_ui.menu_button(egui::RichText::new("View").size(15.0), |sub_ui| {
             sub_ui.set_min_width(170.0);
             for (vm, label) in [
                 (ViewMode::Details, "Details / List"),
@@ -9605,7 +9659,7 @@ impl ExplorerView {
             // irrelevant formats never appear.
             let sectors = crate::core::registry::UniversalRegistry::get_sectors_for_file(&path);
             let in_ext = item.extension.to_ascii_uppercase();
-            menu_ui.menu_button("Convert", |sub_ui| {
+            menu_ui.menu_button(egui::RichText::new("Convert").size(15.0), |sub_ui| {
                 sub_ui.set_min_width(210.0);
                 for fmt in &sectors {
                     match *fmt {
@@ -9673,40 +9727,43 @@ impl ExplorerView {
             }
             if !multi {
                 let candidates = crate::gui::context_menu::open_with_candidates(&path);
-                menu_ui.menu_button(fm::MenuAction::OpenWith.label(style), |sub_ui| {
-                    sub_ui.set_min_width(170.0);
-                    for (label, command) in candidates.iter() {
+                menu_ui.menu_button(
+                    egui::RichText::new(fm::MenuAction::OpenWith.label(style)).size(15.0),
+                    |sub_ui| {
+                        sub_ui.set_min_width(170.0);
+                        for (label, command) in candidates.iter() {
+                            if fm::menu_item_labeled(
+                                sub_ui,
+                                pack,
+                                fm::MenuAction::OpenWith,
+                                label,
+                                style,
+                                tint,
+                            )
+                            .clicked()
+                            {
+                                intent.open_with_launch = Some((command.clone(), path.clone()));
+                                sub_ui.close_menu();
+                            }
+                        }
+                        if !candidates.is_empty() {
+                            sub_ui.separator();
+                        }
                         if fm::menu_item_labeled(
                             sub_ui,
                             pack,
                             fm::MenuAction::OpenWith,
-                            label,
+                            "Choose another app...",
                             style,
                             tint,
                         )
                         .clicked()
                         {
-                            intent.open_with_launch = Some((command.clone(), path.clone()));
+                            intent.open_with = Some(path.clone());
                             sub_ui.close_menu();
                         }
-                    }
-                    if !candidates.is_empty() {
-                        sub_ui.separator();
-                    }
-                    if fm::menu_item_labeled(
-                        sub_ui,
-                        pack,
-                        fm::MenuAction::OpenWith,
-                        "Choose another app...",
-                        style,
-                        tint,
-                    )
-                    .clicked()
-                    {
-                        intent.open_with = Some(path.clone());
-                        sub_ui.close_menu();
-                    }
-                });
+                    },
+                );
             }
         }
         if menu_row(menu_ui, true, pack, fm::MenuAction::Duplicate, style, tint).clicked() {
@@ -9718,30 +9775,33 @@ impl ExplorerView {
         // -- Send to (Windows SendTo folder entries) --
         let send_dests = crate::gui::context_menu::send_to_targets();
         if !send_dests.is_empty() {
-            menu_ui.menu_button(fm::MenuAction::SendTo.label(style), |sub_ui| {
-                sub_ui.set_min_width(170.0);
-                for (label, dest) in send_dests.iter().take(12) {
-                    if fm::menu_item_glyph(
-                        sub_ui,
-                        pack,
-                        IconGlyph::ActionShortcut,
-                        label,
-                        style,
-                        tint,
-                    )
-                    .clicked()
-                    {
-                        intent.send_to = Some((targets.to_vec(), dest.clone(), label.clone()));
-                        sub_ui.close_menu();
+            menu_ui.menu_button(
+                egui::RichText::new(fm::MenuAction::SendTo.label(style)).size(15.0),
+                |sub_ui| {
+                    sub_ui.set_min_width(170.0);
+                    for (label, dest) in send_dests.iter().take(12) {
+                        if fm::menu_item_glyph(
+                            sub_ui,
+                            pack,
+                            IconGlyph::ActionShortcut,
+                            label,
+                            style,
+                            tint,
+                        )
+                        .clicked()
+                        {
+                            intent.send_to = Some((targets.to_vec(), dest.clone(), label.clone()));
+                            sub_ui.close_menu();
+                        }
                     }
-                }
-            });
+                },
+            );
         }
 
         menu_ui.separator();
 
         // -- Shell helpers --
-        menu_ui.menu_button("Copy as path", |sub_ui| {
+        menu_ui.menu_button(egui::RichText::new("Copy as path").size(15.0), |sub_ui| {
             sub_ui.set_min_width(190.0);
             for (kind, label) in [
                 (CopyPathKind::Full, "Native separators"),
@@ -9820,34 +9880,37 @@ impl ExplorerView {
         {
             // Current tags of the clicked item drive the checkbox state.
             let current_tags = crate::core::tags::read_tags_cache(&path);
-            menu_ui.menu_button(fm::MenuAction::Tags.label(style), |sub_ui| {
-                sub_ui.set_min_width(190.0);
-                for tag_name in crate::core::tags::TAG_PRESETS {
-                    let is_tagged = current_tags.iter().any(|t| t == tag_name);
-                    let label = if is_tagged {
-                        format!("Remove {tag_name}")
-                    } else {
-                        format!("Add {tag_name}")
-                    };
-                    if fm::menu_item_labeled(
-                        sub_ui,
-                        pack,
-                        fm::MenuAction::Tags,
-                        &label,
-                        style,
-                        tint,
-                    )
-                    .clicked()
-                    {
-                        if is_tagged {
-                            intent.clear_tag = Some((targets.to_vec(), tag_name.to_string()));
+            menu_ui.menu_button(
+                egui::RichText::new(fm::MenuAction::Tags.label(style)).size(15.0),
+                |sub_ui| {
+                    sub_ui.set_min_width(190.0);
+                    for tag_name in crate::core::tags::TAG_PRESETS {
+                        let is_tagged = current_tags.iter().any(|t| t == tag_name);
+                        let label = if is_tagged {
+                            format!("Remove {tag_name}")
                         } else {
-                            intent.set_tag = Some((targets.to_vec(), tag_name.to_string()));
+                            format!("Add {tag_name}")
+                        };
+                        if fm::menu_item_labeled(
+                            sub_ui,
+                            pack,
+                            fm::MenuAction::Tags,
+                            &label,
+                            style,
+                            tint,
+                        )
+                        .clicked()
+                        {
+                            if is_tagged {
+                                intent.clear_tag = Some((targets.to_vec(), tag_name.to_string()));
+                            } else {
+                                intent.set_tag = Some((targets.to_vec(), tag_name.to_string()));
+                            }
+                            sub_ui.close_menu();
                         }
-                        sub_ui.close_menu();
                     }
-                }
-            });
+                },
+            );
         }
 
         // -- Pin to Sidebar (folders only) --
@@ -9996,3 +10059,110 @@ impl ExplorerView {
 }
 
 // ======= end of explorer_view.rs shared-menu engine =======
+
+/// Tab / window title for a folder: its name, or the drive label for a
+/// root such as `C:\` (which has no file name and used to show "Folder").
+fn folder_title(dir: &Path) -> String {
+    match dir.file_name().and_then(|n| n.to_str()) {
+        Some(name) => name.to_string(),
+        None => {
+            let s = dir.to_string_lossy();
+            let trimmed = s.trim_end_matches(['\\', '/']);
+            if trimmed.is_empty() {
+                s.into_owned()
+            } else {
+                trimmed.to_string()
+            }
+        }
+    }
+}
+
+/// Finder alias badge: a small arrow chip on the icon's bottom-left corner
+/// marks symlinks and junctions (replaces the old " ->" name suffix).
+fn paint_alias_badge(painter: &egui::Painter, icon_rect: Rect) {
+    let r = (icon_rect.width() * 0.2).clamp(4.5, 12.0);
+    let c = Pos2::new(icon_rect.left() + r, icon_rect.bottom() - r);
+    painter.circle_filled(c, r, Color32::from_rgb(248, 248, 250));
+    painter.circle_stroke(
+        c,
+        r,
+        Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(0, 0, 0, 90)),
+    );
+    let s = r * 0.45;
+    let ink = Stroke::new((r * 0.22).max(1.2), Color32::from_rgb(40, 40, 46));
+    let tail = Pos2::new(c.x - s, c.y + s);
+    let tip = Pos2::new(c.x + s, c.y - s);
+    painter.line_segment([tail, tip], ink);
+    painter.line_segment([tip, Pos2::new(tip.x - s * 1.1, tip.y)], ink);
+    painter.line_segment([tip, Pos2::new(tip.x, tip.y + s * 1.1)], ink);
+}
+
+/// Centered placeholder for an empty listing: either the search matched
+/// nothing or the folder really has no (visible) items.
+fn paint_empty_listing(ui: &mut Ui, palette: &ThemePalette, query: &str) {
+    let q = query.trim();
+    let (title, hint) = if q.is_empty() {
+        ("This folder is empty".to_string(), String::new())
+    } else {
+        (
+            format!("No items match \"{q}\""),
+            "Search looks in this folder only. Press Esc to clear it.".to_string(),
+        )
+    };
+    ui.add_space(72.0);
+    ui.vertical_centered(|ui| {
+        ui.label(
+            egui::RichText::new(title)
+                .size(15.0)
+                .color(palette.text_secondary),
+        );
+        if !hint.is_empty() {
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(hint)
+                    .size(12.0)
+                    .color(palette.text_muted),
+            );
+        }
+    });
+}
+
+#[cfg(test)]
+mod ux_helper_tests {
+    use super::*;
+
+    #[test]
+    fn folder_title_uses_drive_label_for_roots() {
+        assert_eq!(folder_title(Path::new("C:\\")), "C:");
+        assert_eq!(folder_title(Path::new("/")), "/");
+        assert_eq!(folder_title(Path::new("C:\\Users\\haris")), "haris");
+    }
+}
+
+/// Characters of `name` that a rename pre-selects: the stem without the
+/// final extension for files ("report.final.pdf" -> "report.final"), the
+/// whole name for folders and dotfiles (".gitignore").
+fn rename_stem_chars(name: &str, is_dir: bool) -> usize {
+    if !is_dir {
+        if let Some(idx) = name.rfind('.') {
+            if idx > 0 {
+                return name[..idx].chars().count();
+            }
+        }
+    }
+    name.chars().count()
+}
+
+#[cfg(test)]
+mod rename_stem_tests {
+    use super::rename_stem_chars;
+
+    #[test]
+    fn stem_excludes_only_the_last_extension() {
+        assert_eq!(rename_stem_chars("alpha.txt", false), 5);
+        assert_eq!(rename_stem_chars("report.final.pdf", false), 12);
+        assert_eq!(rename_stem_chars(".gitignore", false), 10);
+        assert_eq!(rename_stem_chars("folder.v2", true), 9);
+        assert_eq!(rename_stem_chars("noext", false), 5);
+    }
+}

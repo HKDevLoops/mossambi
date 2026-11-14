@@ -743,7 +743,7 @@ fn page_emblem(glyph: IconGlyph, st: &PackStyle, accent: &str) -> Option<String>
         IconGlyph::PagePdf => format!(
             "<rect x='26' y='44' width='48' height='13' rx='3' fill='{a}'/> \
              <rect x='26' y='44' width='48' height='4' rx='2' fill='#FFFFFF' opacity='0.28'/> \
-             <rect x='34' y='60' width='22' height='2.8' rx='1.4' fill='{l}' opacity='0.55'/></svg>",
+             <rect x='34' y='60' width='22' height='2.8' rx='1.4' fill='{l}' opacity='0.55'/>",
             a = a,
             l = ln
         ),
@@ -1374,4 +1374,42 @@ pub fn paint_icon_padded(
     accent_rgb: [u8; 3],
 ) {
     paint_icon(ui, pack, glyph, rect.shrink(pad), accent_rgb)
+}
+
+#[cfg(test)]
+mod page_svg_tests {
+    use super::*;
+
+    /// Every page glyph must produce exactly one well-formed SVG document
+    /// (a stray `</svg>` in an emblem once blanked every PDF icon).
+    #[test]
+    fn page_glyph_svgs_are_well_formed() {
+        let pages = [
+            IconGlyph::PageDefault,
+            IconGlyph::PageText,
+            IconGlyph::PageDoc,
+            IconGlyph::PageSheet,
+            IconGlyph::PageSlide,
+            IconGlyph::PagePdf,
+            IconGlyph::PageImage,
+            IconGlyph::PageVideo,
+            IconGlyph::PageAudio,
+            IconGlyph::PageCode,
+            IconGlyph::PageConfig,
+            IconGlyph::PageArchive,
+            IconGlyph::PageExe,
+            IconGlyph::PageLibrary,
+        ];
+        for pack in IconPack::all() {
+            for g in pages {
+                let svg = svg_for(pack, g, [220, 60, 60]);
+                assert_eq!(svg.matches("</svg>").count(), 1, "{pack:?} {g:?}");
+                let opt = resvg::usvg::Options::default();
+                assert!(
+                    resvg::usvg::Tree::from_str(&svg, &opt).is_ok(),
+                    "{pack:?} {g:?} does not parse"
+                );
+            }
+        }
+    }
 }

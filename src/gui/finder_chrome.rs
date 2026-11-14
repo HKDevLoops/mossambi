@@ -552,20 +552,47 @@ pub fn render_sidebar_zone_header(
     let (rect, resp) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::click());
     let painter = ui.painter_at(rect);
-    let chevron = if expanded { "v" } else { ">" };
-    let text = format!("{} {}", chevron, label.to_ascii_uppercase());
+    // Finder section header: Title Case caption, disclosure chevron drawn
+    // as a vector on the right (it used to be a literal "v" / ">").
     let col = if resp.hovered() {
         palette.text_primary
     } else {
         palette.text_muted
     };
     painter.text(
-        Pos2::new(rect.min.x + 2.0, rect.center().y),
+        Pos2::new(rect.min.x + 4.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        text,
-        FontId::proportional(type_scale::CAPTION),
+        label,
+        FontId::proportional(type_scale::CAPTION + 0.5),
         col,
     );
+    let c = Pos2::new(rect.max.x - 10.0, rect.center().y);
+    let s = 3.5_f32;
+    let chevron_col = if resp.hovered() {
+        palette.text_secondary
+    } else {
+        Color32::from_rgba_unmultiplied(
+            palette.text_muted.r(),
+            palette.text_muted.g(),
+            palette.text_muted.b(),
+            140,
+        )
+    };
+    let pts = if expanded {
+        [
+            Pos2::new(c.x - s, c.y - s * 0.5),
+            Pos2::new(c.x, c.y + s * 0.5),
+            Pos2::new(c.x + s, c.y - s * 0.5),
+        ]
+    } else {
+        [
+            Pos2::new(c.x - s * 0.5, c.y - s),
+            Pos2::new(c.x + s * 0.5, c.y),
+            Pos2::new(c.x - s * 0.5, c.y + s),
+        ]
+    };
+    painter.line_segment([pts[0], pts[1]], Stroke::new(1.4_f32, chevron_col));
+    painter.line_segment([pts[1], pts[2]], Stroke::new(1.4_f32, chevron_col));
     ui.add_space(space::XXS);
     resp.clicked()
 }

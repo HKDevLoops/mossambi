@@ -804,11 +804,34 @@ impl eframe::App for MossambiApp {
 
         // Continuous driver honoring the Max-FPS knob: when enabled, drop
         // vsync-driven pacing and repaint at ~500Hz for maximum responsiveness.
+        //
+        // The spring animations have no repaint hook of their own, so the
+        // driver runs fast while the user is interacting (and ~1.5 s after,
+        // for springs to settle) but drops to 5 Hz when the window is idle.
+        // Before, Max-FPS (on by default) repainted at 500 Hz forever and
+        // pinned a CPU core with nothing on screen changing.
         let is_animating = self.is_converting || self.completion_time.is_some();
-        let repaint_interval = if cfg.max_fps {
+        let activity_id = egui::Id::new("mossambi_last_activity_time");
+        let (now, had_input, pointer_still, pointer_down) = ctx.input(|i| {
+            (
+                i.time,
+                !i.events.is_empty(),
+                i.pointer.time_since_last_movement(),
+                i.pointer.any_down(),
+            )
+        });
+        if had_input || pointer_down {
+            ctx.data_mut(|d| d.insert_temp(activity_id, now));
+        }
+        let last_activity = ctx.data(|d| d.get_temp::<f64>(activity_id)).unwrap_or(now);
+        let recently_active = pointer_still < 1.5 || (now - last_activity) < 1.5;
+        let fast = if cfg.max_fps {
             Duration::from_millis(2)
-        } else if is_animating {
+        } else {
             Duration::from_millis(16)
+        };
+        let repaint_interval = if is_animating || recently_active {
+            fast
         } else {
             Duration::from_millis(200)
         };
