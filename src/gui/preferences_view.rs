@@ -2016,24 +2016,32 @@ impl PreferencesView {
                 });
             });
 
-            let mut font = self.cfg.font_family.clone().unwrap_or_default();
-            let font_lbl = if font.is_empty() {
-                "System".to_string()
-            } else {
-                font.clone()
-            };
-            setting_row(ui, palette, "Font family", &font_lbl, dirty, |ui, dirty| {
-                if ui
-                    .add(TextEdit::singleline(&mut font).desired_width(140.0))
-                    .changed()
-                {
-                    self.cfg.font_family = if font.trim().is_empty() {
-                        None
-                    } else {
-                        Some(font.trim().to_string())
-                    };
-                    *dirty = true;
-                }
+            // A real picker (the free-text box was never read by the app).
+            let font_now = self
+                .cfg
+                .font_family
+                .clone()
+                .unwrap_or_else(|| "System".to_string());
+            let font_mut = &mut self.cfg.font_family;
+            setting_row(ui, palette, "Font", "", dirty, |ui, dirty| {
+                egui::ComboBox::from_id_salt("prefs_font_family")
+                    .selected_text(font_now.as_str())
+                    .width(170.0)
+                    .show_ui(ui, |ui| {
+                        for (label, _) in crate::gui::studio_app::UI_FONT_CHOICES {
+                            if ui
+                                .selectable_label(font_now.eq_ignore_ascii_case(label), label)
+                                .clicked()
+                            {
+                                *font_mut = if label == "System" {
+                                    None
+                                } else {
+                                    Some(label.to_string())
+                                };
+                                *dirty = true;
+                            }
+                        }
+                    });
             });
 
             let mut shade = self.cfg.citrus_shade.clone();

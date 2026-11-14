@@ -552,7 +552,7 @@ pub fn apply_theme_visuals(ctx: &egui::Context, palette: &ThemePalette) {
     // which makes every menu (root, submenu, context) about 400 px wide.
     // macOS Finder menus run about 230 px; all menu Areas share this spacing
     // value, so one setting narrows every level including submenus.
-    ctx.style_mut(|style| style.spacing.menu_width = 230.0);
+    ctx.style_mut(|style| style.spacing.menu_width = 260.0);
 
     if palette.is_translucent {
         // Acrylic menu material: menus and popups paint window_fill through

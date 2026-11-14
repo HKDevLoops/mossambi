@@ -153,31 +153,10 @@ impl MossambiApp {
         style.interaction.multi_widget_text_select = false;
         cc.egui_ctx.set_style(style);
 
-        // Configure Embedded Agave Nerd Font
-        let mut fonts = egui::FontDefinitions::default();
-        fonts.font_data.insert(
-            "AgaveNerdFont-Regular".to_owned(),
-            egui::FontData::from_static(include_bytes!(
-                "../../assets/fonts/AgaveNerdFont-Regular.ttf"
-            )),
+        apply_ui_font(
+            &cc.egui_ctx,
+            crate::core::MossambiConfig::load().font_family.as_deref(),
         );
-        fonts.font_data.insert(
-            "AgaveNerdFont-Bold".to_owned(),
-            egui::FontData::from_static(include_bytes!(
-                "../../assets/fonts/AgaveNerdFont-Bold.ttf"
-            )),
-        );
-        fonts
-            .families
-            .entry(egui::FontFamily::Monospace)
-            .or_default()
-            .insert(0, "AgaveNerdFont-Regular".to_owned());
-        fonts
-            .families
-            .entry(egui::FontFamily::Proportional)
-            .or_default()
-            .insert(1, "AgaveNerdFont-Regular".to_owned());
-        cc.egui_ctx.set_fonts(fonts);
 
         let mut app = Self::default();
         if let Some(path) = initial_path {
@@ -813,6 +792,17 @@ impl eframe::App for MossambiApp {
         // explorer's defaults overwrote whatever Preferences saved (icon
         // pack, zoom, checkbox mode, menu style, all animation settings).
         self.pull_explorer_prefs();
+        // Font family (Preferences) applies live.
+        let font_id = egui::Id::new("mossambi_applied_font_family");
+        let want_font = self.config.font_family.clone().unwrap_or_default();
+        match ctx.data(|d| d.get_temp::<String>(font_id)) {
+            Some(ref f) if *f == want_font => {}
+            None => ctx.data_mut(|d| d.insert_temp(font_id, want_font)),
+            Some(_) => {
+                apply_ui_font(ctx, Some(want_font.as_str()).filter(|s| !s.is_empty()));
+                ctx.data_mut(|d| d.insert_temp(font_id, want_font));
+            }
+        }
         // OS integrations follow their Preferences toggles (both were only
         // stored before). Applied on change, never at startup, and off the
         // UI thread because they shell out to reg.exe.
@@ -1246,6 +1236,69 @@ impl eframe::App for MossambiApp {
         // Run last so the resize cursor wins over widgets near the edge.
         edge_resize(ctx);
     }
+}
+
+/// UI font choices offered in Preferences: (label, Windows font file).
+/// "System" is Segoe UI on Windows; "Ubuntu" is egui's built-in face.
+pub const UI_FONT_CHOICES: [(&str, &str); 8] = [
+    ("System", "segoeui.ttf"),
+    ("Segoe UI Variable", "SegUIVar.ttf"),
+    ("Arial", "arial.ttf"),
+    ("Calibri", "calibri.ttf"),
+    ("Tahoma", "tahoma.ttf"),
+    ("Verdana", "verdana.ttf"),
+    ("Consolas", "consola.ttf"),
+    ("Ubuntu", ""),
+];
+
+/// Installs the proportional UI font. The default used to be egui's
+/// Ubuntu Light, a thin face that turns faint and blocky at small sizes
+/// on low-density monitors; Windows now gets its hinted system font.
+/// Agave Nerd Font stays the monospace face and the glyph fallback.
+pub fn apply_ui_font(ctx: &egui::Context, family: Option<&str>) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "AgaveNerdFont-Regular".to_owned(),
+        egui::FontData::from_static(include_bytes!(
+            "../../assets/fonts/AgaveNerdFont-Regular.ttf"
+        )),
+    );
+    fonts.font_data.insert(
+        "AgaveNerdFont-Bold".to_owned(),
+        egui::FontData::from_static(include_bytes!("../../assets/fonts/AgaveNerdFont-Bold.ttf")),
+    );
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .insert(0, "AgaveNerdFont-Regular".to_owned());
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(1, "AgaveNerdFont-Regular".to_owned());
+
+    let label = family.unwrap_or("System");
+    let file = UI_FONT_CHOICES
+        .iter()
+        .find(|(l, _)| l.eq_ignore_ascii_case(label))
+        .map(|(_, f)| *f)
+        .unwrap_or("segoeui.ttf");
+    if !file.is_empty() {
+        let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
+        let path = std::path::Path::new(&windir).join("Fonts").join(file);
+        if let Ok(bytes) = std::fs::read(&path) {
+            fonts
+                .font_data
+                .insert("mossambi-ui".to_owned(), egui::FontData::from_owned(bytes));
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "mossambi-ui".to_owned());
+        }
+    }
+    ctx.set_fonts(fonts);
 }
 
 /// Which window edge/corner (if any) a point is on, `margin` px deep.

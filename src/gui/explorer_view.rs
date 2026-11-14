@@ -9411,51 +9411,81 @@ impl ExplorerView {
 
         menu_ui.separator();
         // -- Sort by submenu (re-picking the active column reverses order) --
-        menu_ui.menu_button(egui::RichText::new("Sort by").size(15.0), |sub_ui| {
-            sub_ui.set_min_width(170.0);
-            for (col, label) in [
-                (SortColumn::Name, "Name"),
-                (SortColumn::Extension, "Kind"),
-                (SortColumn::Size, "Size"),
-                (SortColumn::Date, "Date Modified"),
-                (SortColumn::Permissions, "Permissions"),
-            ] {
-                let mark = if current_sort == col {
-                    if sort_desc {
-                        " (desc)"
+        fm::submenu(
+            menu_ui,
+            "Sort by",
+            pack,
+            style,
+            tint,
+            fm::MenuAction::SortBy,
+            |sub_ui| {
+                sub_ui.set_min_width(170.0);
+                for (col, label) in [
+                    (SortColumn::Name, "Name"),
+                    (SortColumn::Extension, "Kind"),
+                    (SortColumn::Size, "Size"),
+                    (SortColumn::Date, "Date Modified"),
+                    (SortColumn::Permissions, "Permissions"),
+                ] {
+                    let mark = if current_sort == col {
+                        if sort_desc {
+                            " (desc)"
+                        } else {
+                            " (asc)"
+                        }
                     } else {
-                        " (asc)"
+                        ""
+                    };
+                    let item_text = format!("{label}{mark}");
+                    if fm::menu_item_glyph(
+                        sub_ui,
+                        pack,
+                        IconGlyph::ActionSort,
+                        &item_text,
+                        style,
+                        tint,
+                    )
+                    .clicked()
+                    {
+                        intent.sort_by = Some(col);
+                        sub_ui.close_menu();
                     }
-                } else {
-                    ""
-                };
-                let item_text = format!("{label}{mark}");
-                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionSort, &item_text, style, tint)
-                    .clicked()
-                {
-                    intent.sort_by = Some(col);
-                    sub_ui.close_menu();
                 }
-            }
-        });
+            },
+        );
         // -- View submenu (Details / Grid / Columns) --
-        menu_ui.menu_button(egui::RichText::new("View").size(15.0), |sub_ui| {
-            sub_ui.set_min_width(170.0);
-            for (vm, label) in [
-                (ViewMode::Details, "Details / List"),
-                (ViewMode::Grid, "Icons / Grid"),
-                (ViewMode::Columns, "Miller Columns"),
-            ] {
-                let mark = if current_view == vm { " *" } else { "" };
-                let item_text = format!("{label}{mark}");
-                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionView, &item_text, style, tint)
+        fm::submenu(
+            menu_ui,
+            "View",
+            pack,
+            style,
+            tint,
+            fm::MenuAction::ViewMode,
+            |sub_ui| {
+                sub_ui.set_min_width(170.0);
+                for (vm, label) in [
+                    (ViewMode::Details, "Details / List"),
+                    (ViewMode::Grid, "Icons / Grid"),
+                    (ViewMode::Columns, "Miller Columns"),
+                ] {
+                    let mark = if current_view == vm { " *" } else { "" };
+                    let item_text = format!("{label}{mark}");
+                    if fm::menu_item_glyph(
+                        sub_ui,
+                        pack,
+                        IconGlyph::ActionView,
+                        &item_text,
+                        style,
+                        tint,
+                    )
                     .clicked()
-                {
-                    intent.view_mode = Some(vm);
-                    sub_ui.close_menu();
+                    {
+                        intent.view_mode = Some(vm);
+                        sub_ui.close_menu();
+                    }
                 }
-            }
-        });
+            },
+        );
 
         // -- Custom user entries (Phase 4 menu customization) --
         // Background-scope config entries; no target path is passed.
@@ -9674,52 +9704,60 @@ impl ExplorerView {
             // irrelevant formats never appear.
             let sectors = crate::core::registry::UniversalRegistry::get_sectors_for_file(&path);
             let in_ext = item.extension.to_ascii_uppercase();
-            menu_ui.menu_button(egui::RichText::new("Convert").size(15.0), |sub_ui| {
-                sub_ui.set_min_width(210.0);
-                for fmt in &sectors {
-                    match *fmt {
-                        // MORE folds into the full list below; ALL gets its
-                        // own explicit row after the separator.
-                        "MORE" | "ALL" => continue,
-                        // Nothing to extract FROM a directory entry itself.
-                        "EXTRACT" if is_dir => continue,
-                        label => {
-                            let text = if label.eq_ignore_ascii_case(&in_ext) {
-                                format!("Rebuild {label} (zero-loss)")
-                            } else {
-                                format!("Convert to {label}")
-                            };
-                            if fm::menu_item_labeled(
-                                sub_ui,
-                                pack,
-                                fm::MenuAction::Transcode,
-                                &text,
-                                style,
-                                tint,
-                            )
-                            .clicked()
-                            {
-                                intent.transcode = Some((targets.to_vec(), label.to_string()));
-                                sub_ui.close_menu();
+            fm::submenu(
+                menu_ui,
+                "Convert",
+                pack,
+                style,
+                tint,
+                fm::MenuAction::Transcode,
+                |sub_ui| {
+                    sub_ui.set_min_width(210.0);
+                    for fmt in &sectors {
+                        match *fmt {
+                            // MORE folds into the full list below; ALL gets its
+                            // own explicit row after the separator.
+                            "MORE" | "ALL" => continue,
+                            // Nothing to extract FROM a directory entry itself.
+                            "EXTRACT" if is_dir => continue,
+                            label => {
+                                let text = if label.eq_ignore_ascii_case(&in_ext) {
+                                    format!("Rebuild {label} (zero-loss)")
+                                } else {
+                                    format!("Convert to {label}")
+                                };
+                                if fm::menu_item_labeled(
+                                    sub_ui,
+                                    pack,
+                                    fm::MenuAction::Transcode,
+                                    &text,
+                                    style,
+                                    tint,
+                                )
+                                .clicked()
+                                {
+                                    intent.transcode = Some((targets.to_vec(), label.to_string()));
+                                    sub_ui.close_menu();
+                                }
                             }
                         }
                     }
-                }
-                sub_ui.separator();
-                if fm::menu_item_labeled(
-                    sub_ui,
-                    pack,
-                    fm::MenuAction::Transcode,
-                    "All formats (batch)",
-                    style,
-                    tint,
-                )
-                .clicked()
-                {
-                    intent.transcode = Some((targets.to_vec(), "ALL".to_string()));
-                    sub_ui.close_menu();
-                }
-            });
+                    sub_ui.separator();
+                    if fm::menu_item_labeled(
+                        sub_ui,
+                        pack,
+                        fm::MenuAction::Transcode,
+                        "All formats (batch)",
+                        style,
+                        tint,
+                    )
+                    .clicked()
+                    {
+                        intent.transcode = Some((targets.to_vec(), "ALL".to_string()));
+                        sub_ui.close_menu();
+                    }
+                },
+            );
         }
         if !archive_targets.is_empty()
             && menu_row(menu_ui, true, pack, fm::MenuAction::Extract, style, tint).clicked()
@@ -9742,8 +9780,13 @@ impl ExplorerView {
             }
             if !multi {
                 let candidates = crate::gui::context_menu::open_with_candidates(&path);
-                menu_ui.menu_button(
-                    egui::RichText::new(fm::MenuAction::OpenWith.label(style)).size(15.0),
+                fm::submenu(
+                    menu_ui,
+                    fm::MenuAction::OpenWith.label(style),
+                    pack,
+                    style,
+                    tint,
+                    fm::MenuAction::OpenWith,
                     |sub_ui| {
                         sub_ui.set_min_width(170.0);
                         for (label, command) in candidates.iter() {
@@ -9790,8 +9833,13 @@ impl ExplorerView {
         // -- Send to (Windows SendTo folder entries) --
         let send_dests = crate::gui::context_menu::send_to_targets();
         if !send_dests.is_empty() {
-            menu_ui.menu_button(
-                egui::RichText::new(fm::MenuAction::SendTo.label(style)).size(15.0),
+            fm::submenu(
+                menu_ui,
+                fm::MenuAction::SendTo.label(style),
+                pack,
+                style,
+                tint,
+                fm::MenuAction::SendTo,
                 |sub_ui| {
                     sub_ui.set_min_width(170.0);
                     for (label, dest) in send_dests.iter().take(12) {
@@ -9816,23 +9864,31 @@ impl ExplorerView {
         menu_ui.separator();
 
         // -- Shell helpers --
-        menu_ui.menu_button(egui::RichText::new("Copy as path").size(15.0), |sub_ui| {
-            sub_ui.set_min_width(190.0);
-            for (kind, label) in [
-                (CopyPathKind::Full, "Native separators"),
-                (CopyPathKind::Name, "Name only"),
-                (CopyPathKind::Quoted, "Quoted (\"...\")"),
-                (CopyPathKind::ForwardSlashes, "Forward slashes (/)"),
-                (CopyPathKind::Parent, "Containing folder"),
-            ] {
-                if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionPath, label, style, tint)
-                    .clicked()
-                {
-                    intent.copy_path = Some((path.clone(), kind));
-                    sub_ui.close_menu();
+        fm::submenu(
+            menu_ui,
+            "Copy as path",
+            pack,
+            style,
+            tint,
+            fm::MenuAction::CopyPath,
+            |sub_ui| {
+                sub_ui.set_min_width(190.0);
+                for (kind, label) in [
+                    (CopyPathKind::Full, "Native separators"),
+                    (CopyPathKind::Name, "Name only"),
+                    (CopyPathKind::Quoted, "Quoted (\"...\")"),
+                    (CopyPathKind::ForwardSlashes, "Forward slashes (/)"),
+                    (CopyPathKind::Parent, "Containing folder"),
+                ] {
+                    if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionPath, label, style, tint)
+                        .clicked()
+                    {
+                        intent.copy_path = Some((path.clone(), kind));
+                        sub_ui.close_menu();
+                    }
                 }
-            }
-        });
+            },
+        );
         if menu_row(menu_ui, true, pack, fm::MenuAction::Reveal, style, tint).clicked() {
             intent.reveal = Some(path.clone());
             menu_ui.close_menu();
@@ -9895,8 +9951,13 @@ impl ExplorerView {
         {
             // Current tags of the clicked item drive the checkbox state.
             let current_tags = crate::core::tags::read_tags_cache(&path);
-            menu_ui.menu_button(
-                egui::RichText::new(fm::MenuAction::Tags.label(style)).size(15.0),
+            fm::submenu(
+                menu_ui,
+                fm::MenuAction::Tags.label(style),
+                pack,
+                style,
+                tint,
+                fm::MenuAction::Tags,
                 |sub_ui| {
                     sub_ui.set_min_width(190.0);
                     for tag_name in crate::core::tags::TAG_PRESETS {

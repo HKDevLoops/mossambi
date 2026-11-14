@@ -256,6 +256,29 @@ impl MenuAction {
     }
 }
 
+impl MenuAction {
+    /// Keyboard shortcut shown at the right edge of the row (Explorer/Finder
+    /// both show these; they double as discoverability for the bindings).
+    pub fn shortcut(&self) -> Option<&'static str> {
+        use MenuAction::*;
+        Some(match self {
+            Cut => "Ctrl+X",
+            Copy => "Ctrl+C",
+            Paste => "Ctrl+V",
+            Rename => "F2",
+            Delete => "Del",
+            Properties => "Alt+Enter",
+            SelectAll => "Ctrl+A",
+            Refresh => "F5",
+            NewFolder => "Ctrl+Shift+N",
+            NewTab => "Ctrl+T",
+            QuickLook => "Space",
+            Terminal => "Ctrl+Shift+T",
+            _ => return None,
+        })
+    }
+}
+
 /// Convert an egui colour into the `[r, g, b]` triple the icon engine wants.
 pub fn rgb(c: Color32) -> [u8; 3] {
     [c.r(), c.g(), c.b()]
@@ -280,13 +303,16 @@ pub fn menu_item(
 /// style only controls row order/sets at the call sites).
 pub fn menu_item_labeled(
     ui: &mut Ui,
-    _pack: IconPack,
-    _action: MenuAction,
+    pack: IconPack,
+    action: MenuAction,
     label: &str,
-    _style: MenuStyle,
-    _tint: Color32,
+    style: MenuStyle,
+    tint: Color32,
 ) -> Response {
-    menu_row_text(ui, label)
+    // Finder menus are text-only; Windows and Linux menus lead with an icon
+    // from the active icon pack (so changing the pack restyles menus too).
+    let icon = (style != MenuStyle::Finder).then(|| (pack, action.glyph(), tint));
+    menu_row(ui, label, icon, action.shortcut())
 }
 
 /// Render a menu entry with an arbitrary glyph and explicit label - used by
@@ -297,29 +323,46 @@ pub fn menu_item_labeled(
 /// (Phase 3 Finder conformance, resolves the G-1 doc conflict).
 pub fn menu_item_glyph(
     ui: &mut Ui,
-    _pack: IconPack,
-    _glyph: IconGlyph,
+    pack: IconPack,
+    glyph: IconGlyph,
     label: &str,
-    _style: MenuStyle,
-    _tint: Color32,
+    style: MenuStyle,
+    tint: Color32,
 ) -> Response {
-    menu_row_text(ui, label)
+    let icon = (style != MenuStyle::Finder).then_some((pack, glyph, tint));
+    menu_row(ui, label, icon, None)
 }
 
-/// One Finder-style menu row: full-width, text-first, iconless.
-///
-/// The row is a single click-sensed widget (allocation-native fresh id, the
-/// 95cc29a click-registration fix refined), paints the egui widget-state
-/// accent fill behind the label on hover/press (SubMenuButton idiom), and
-/// uses 15 px white type per the macOS Finder design directive.
-fn menu_row_text(ui: &mut Ui, label: &str) -> Response {
-    let font = eframe::egui::FontId::proportional(15.0);
-    let budget = ui.available_width() - 12.0;
+/// One menu row: optional leading icon, label, optional right-aligned
+/// shortcut hint. Text uses the theme's text colour (it was hard-coded
+/// white, which vanished on every light theme).
+fn menu_row(
+    ui: &mut Ui,
+    label: &str,
+    icon: Option<(IconPack, IconGlyph, Color32)>,
+    shortcut: Option<&str>,
+) -> Response {
+    use eframe::egui::{Align2, FontId, Pos2, Rect};
+    // Primary text colour (text_color() is the secondary tier, too faint
+    // for menu labels on light themes).
+    let text_col = ui.visuals().widgets.inactive.fg_stroke.color;
+    let hint_col = ui.visuals().weak_text_color();
+    let font = FontId::proportional(14.0);
+    let hint_font = FontId::proportional(12.0);
+    let lead = if icon.is_some() { 30.0 } else { 10.0 };
+    let hint_w = shortcut
+        .map(|s| {
+            ui.painter()
+                .layout_no_wrap(s.to_owned(), hint_font.clone(), hint_col)
+                .size()
+                .x
+                + 18.0
+        })
+        .unwrap_or(0.0);
+    let budget = ui.available_width() - lead - hint_w - 8.0;
     let label = elide_to_width(ui, label, budget, font.clone());
-    let galley = ui
-        .painter()
-        .layout_no_wrap(label, font, eframe::egui::Color32::WHITE);
-    let row_h = galley.size().y + 8.0;
+    let galley = ui.painter().layout_no_wrap(label, font, text_col);
+    let row_h = (galley.size().y + 10.0).max(26.0);
     let (rect, resp) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::click());
     let visuals = &ui.style().visuals.widgets;
@@ -334,14 +377,56 @@ fn menu_row_text(ui: &mut Ui, label: &str) -> Response {
         ui.painter()
             .rect_filled(rect.expand(v.expansion), v.rounding, v.weak_bg_fill);
     }
-    let pos = eframe::egui::Align2::LEFT_CENTER
-        .align_size_within_rect(galley.size(), rect.shrink2(Vec2::new(6.0, 0.0)))
-        .min;
-    ui.painter()
-        .galley(pos, galley, eframe::egui::Color32::WHITE);
+    if let Some((pack, glyph, tint)) = icon {
+        let r = Rect::from_center_size(
+            Pos2::new(rect.left() + 16.0, rect.center().y),
+            Vec2::splat(16.0),
+        );
+        crate::core::icon_packs::paint_icon(ui, pack, glyph, r, rgb(tint));
+    }
+    let pos = Pos2::new(rect.left() + lead, rect.center().y - galley.size().y * 0.5);
+    ui.painter().galley(pos, galley, text_col);
+    if let Some(s) = shortcut {
+        ui.painter().text(
+            Pos2::new(rect.right() - 10.0, rect.center().y),
+            Align2::RIGHT_CENTER,
+            s,
+            hint_font,
+            hint_col,
+        );
+    }
     // Cursor discipline: menu rows always show the default arrow, never the
     // text pointer (I-beam only in text-editing widgets, per standing rule).
     resp.on_hover_cursor(eframe::egui::CursorIcon::Default)
+}
+
+/// A submenu row that matches [`menu_row`]: same 14 px label and, outside
+/// Finder style, a leading icon from the active pack (egui's plain
+/// menu_button had neither, so submenus looked out of line).
+pub fn submenu<R>(
+    ui: &mut Ui,
+    label: &str,
+    pack: IconPack,
+    style: MenuStyle,
+    tint: Color32,
+    action: MenuAction,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> eframe::egui::InnerResponse<Option<R>> {
+    if style == MenuStyle::Finder {
+        return ui.menu_button(eframe::egui::RichText::new(label).size(14.0), add_contents);
+    }
+    // egui's sub-menu button cannot lead with our vector icons, so reserve
+    // the icon column with leading spaces and paint the icon into it; the
+    // label then lines up with the plain rows above and below.
+    let padded = format!("{}{}", " ".repeat(7), label);
+    let out = ui.menu_button(eframe::egui::RichText::new(padded).size(14.0), add_contents);
+    let r = out.response.rect;
+    let icon_rect = eframe::egui::Rect::from_center_size(
+        eframe::egui::Pos2::new(r.left() + 16.0, r.center().y),
+        Vec2::splat(16.0),
+    );
+    crate::core::icon_packs::paint_icon(ui, pack, action.glyph(), icon_rect, rgb(tint));
+    out
 }
 
 /// A user-defined custom context-menu row (Phase 4 customization).
@@ -349,7 +434,7 @@ fn menu_row_text(ui: &mut Ui, label: &str) -> Response {
 /// Renders identically to built-in actions - the Finder-style text-first
 /// iconless row - with the label coming from the user's configuration.
 pub fn menu_item_custom(ui: &mut Ui, label: &str) -> Response {
-    menu_row_text(ui, label)
+    menu_row(ui, label, None, None)
 }
 
 /// Column-chooser toggle row (accent-highlight method).
