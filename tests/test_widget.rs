@@ -175,3 +175,454 @@ fn test_sub_ring_geometry_and_hit_testing() {
     let inside_point = Pos2::new(geo.center.x, geo.center.y - geo.outer_radius * 0.5);
     assert_eq!(geo.hit_test_sub_petal(inside_point, 0, 4), None);
 }
+
+#[test]
+fn test_pie_diameter_clamping() {
+    use mossambi::widget::{
+        clamp_donut_diameter, DEFAULT_DONUT_DIAMETER, MAX_DONUT_DIAMETER, MIN_DONUT_DIAMETER,
+    };
+
+    assert_eq!(clamp_donut_diameter(200.0), MIN_DONUT_DIAMETER);
+    assert_eq!(clamp_donut_diameter(279.9), MIN_DONUT_DIAMETER);
+    assert_eq!(clamp_donut_diameter(360.0), DEFAULT_DONUT_DIAMETER);
+    assert_eq!(clamp_donut_diameter(450.0), 450.0);
+    assert_eq!(clamp_donut_diameter(480.0), MAX_DONUT_DIAMETER);
+    assert_eq!(clamp_donut_diameter(540.0), MAX_DONUT_DIAMETER);
+    assert_eq!(clamp_donut_diameter(1000.0), MAX_DONUT_DIAMETER);
+}
+
+#[test]
+fn test_hub_hit_functions() {
+    use mossambi::widget::{hub_hit, hub_hit_point};
+
+    let hub_r = 60.0;
+    assert!(hub_hit(0.0, hub_r));
+    assert!(hub_hit(30.0, hub_r));
+    assert!(hub_hit(60.0, hub_r));
+    assert!(!hub_hit(60.1, hub_r));
+    assert!(!hub_hit(100.0, hub_r));
+
+    let center = Pos2::new(180.0, 180.0);
+    assert!(hub_hit_point(center, center, hub_r));
+    assert!(hub_hit_point(Pos2::new(180.0 + 40.0, 180.0), center, hub_r));
+    assert!(hub_hit_point(Pos2::new(180.0, 180.0 - 60.0), center, hub_r));
+    assert!(!hub_hit_point(
+        Pos2::new(180.0 + 61.0, 180.0),
+        center,
+        hub_r
+    ));
+}
+
+#[test]
+fn test_wedge_at_boundaries_and_gaps() {
+    use mossambi::widget::{wedge_at, wedge_at_with_hover, DEFAULT_WEDGE_GAP_PX, HOVER_GROW_PX};
+    use std::f32::consts::PI;
+
+    let inner_r = 50.0;
+    let outer_r = 150.0;
+    let count = 8;
+
+    // Wedge 0 is centered at North (-PI/2)
+    let north = -PI / 2.0;
+
+    // Boundary checks on radius
+    assert_eq!(wedge_at(north, 40.0, count, inner_r, outer_r, 0.0), None);
+    assert_eq!(wedge_at(north, 50.0, count, inner_r, outer_r, 0.0), Some(0));
+    assert_eq!(
+        wedge_at(north, 100.0, count, inner_r, outer_r, 0.0),
+        Some(0)
+    );
+    assert_eq!(
+        wedge_at(north, 150.0, count, inner_r, outer_r, 0.0),
+        Some(0)
+    );
+    assert_eq!(wedge_at(north, 151.0, count, inner_r, outer_r, 0.0), None);
+
+    // Hover grow extends outer_r by HOVER_GROW_PX
+    assert_eq!(
+        wedge_at_with_hover(
+            north,
+            154.0,
+            count,
+            inner_r,
+            outer_r,
+            Some(0),
+            HOVER_GROW_PX,
+            0.0
+        ),
+        Some(0)
+    );
+    assert_eq!(
+        wedge_at_with_hover(
+            north,
+            157.0,
+            count,
+            inner_r,
+            outer_r,
+            Some(0),
+            HOVER_GROW_PX,
+            0.0
+        ),
+        None
+    );
+    // Non-hovered wedge does not get hover grow
+    assert_eq!(
+        wedge_at_with_hover(
+            north,
+            154.0,
+            count,
+            inner_r,
+            outer_r,
+            Some(1),
+            HOVER_GROW_PX,
+            0.0
+        ),
+        None
+    );
+
+    // Gaps: for count = 8, span is PI/4 (45 deg).
+    // Wedge 0 spans [-PI/2 - PI/8, -PI/2 + PI/8] = [-5*PI/8, -3*PI/8].
+    // Boundary between wedge 0 and wedge 1 is at -3*PI/8.
+    let boundary_0_1 = -3.0 * PI / 8.0;
+    let mid_r = 100.0;
+    // Exactly on boundary with gap_px = 2.0 returns None (in gap)
+    assert_eq!(
+        wedge_at(
+            boundary_0_1,
+            mid_r,
+            count,
+            inner_r,
+            outer_r,
+            DEFAULT_WEDGE_GAP_PX
+        ),
+        None
+    );
+
+    // Very close to boundary within half_gap returns None
+    let half_gap_angle = (DEFAULT_WEDGE_GAP_PX * 0.5) / mid_r;
+    assert_eq!(
+        wedge_at(
+            boundary_0_1 - half_gap_angle * 0.5,
+            mid_r,
+            count,
+            inner_r,
+            outer_r,
+            DEFAULT_WEDGE_GAP_PX
+        ),
+        None
+    );
+    assert_eq!(
+        wedge_at(
+            boundary_0_1 + half_gap_angle * 0.5,
+            mid_r,
+            count,
+            inner_r,
+            outer_r,
+            DEFAULT_WEDGE_GAP_PX
+        ),
+        None
+    );
+
+    // Well inside wedge 0 returns Some(0)
+    assert_eq!(
+        wedge_at(
+            boundary_0_1 - half_gap_angle * 3.0,
+            mid_r,
+            count,
+            inner_r,
+            outer_r,
+            DEFAULT_WEDGE_GAP_PX
+        ),
+        Some(0)
+    );
+    // Well inside wedge 1 returns Some(1)
+    assert_eq!(
+        wedge_at(
+            boundary_0_1 + half_gap_angle * 3.0,
+            mid_r,
+            count,
+            inner_r,
+            outer_r,
+            DEFAULT_WEDGE_GAP_PX
+        ),
+        Some(1)
+    );
+}
+
+#[test]
+fn test_wedge_counts_1_to_8() {
+    use mossambi::widget::{mid_angle, wedge_at, wedge_span};
+    use std::f32::consts::PI;
+
+    let inner_r = 50.0;
+    let outer_r = 150.0;
+    let r = 100.0;
+
+    for count in 1..=8 {
+        let span = wedge_span(count);
+        assert!((span - (2.0 * PI / (count as f32))).abs() < 1e-4);
+
+        for idx in 0..count {
+            let angle = mid_angle(idx, count);
+            let hit = wedge_at(angle, r, count, inner_r, outer_r, 0.0);
+            assert_eq!(hit, Some(idx), "Failed for count {} idx {}", count, idx);
+        }
+    }
+}
+
+#[test]
+fn test_outer_ring_submenu_geometry() {
+    use mossambi::widget::{outer_submenu_radii, sub_wedge_at};
+    use std::f32::consts::PI;
+
+    let inner_ring_outer_r = 150.0;
+    let (sub_inner, sub_outer) = outer_submenu_radii(inner_ring_outer_r);
+    assert_eq!(sub_inner, 163.0);
+    assert_eq!(sub_outer, 209.0);
+
+    // Parent wedge 0 is at North (-PI/2) with 4 sub-items
+    let parent_idx = 0;
+    let parent_count = 8;
+    let sub_count = 4;
+    let sub_mid_r = (sub_inner + sub_outer) / 2.0;
+
+    // Radius boundary checks
+    assert_eq!(
+        sub_wedge_at(
+            -PI / 2.0,
+            sub_inner - 10.0,
+            parent_idx,
+            parent_count,
+            sub_count,
+            sub_inner,
+            sub_outer,
+            0.0
+        ),
+        None
+    );
+    assert_eq!(
+        sub_wedge_at(
+            -PI / 2.0,
+            sub_outer + 20.0,
+            parent_idx,
+            parent_count,
+            sub_count,
+            sub_inner,
+            sub_outer,
+            0.0
+        ),
+        None
+    );
+
+    // Center of sub-wedge 0 (leftmost) and sub-wedge 3 (rightmost)
+    let hit_mid = sub_wedge_at(
+        -PI / 2.0 + 0.02,
+        sub_mid_r,
+        parent_idx,
+        parent_count,
+        sub_count,
+        sub_inner,
+        sub_outer,
+        0.0,
+    );
+    assert!(hit_mid.is_some());
+    assert!(hit_mid.unwrap() < sub_count);
+
+    // Far angle outside submenu fan returns None
+    assert_eq!(
+        sub_wedge_at(
+            PI / 2.0,
+            sub_mid_r,
+            parent_idx,
+            parent_count,
+            sub_count,
+            sub_inner,
+            sub_outer,
+            0.0
+        ),
+        None
+    );
+}
+
+#[test]
+fn test_marking_menu_gesture_direction_and_threshold() {
+    use eframe::egui::Vec2;
+    use mossambi::widget::{gesture_direction_to_wedge, MARKING_MENU_MIN_DISTANCE};
+
+    let count = 8;
+
+    // Below distance threshold (24.0px) -> None
+    assert_eq!(
+        gesture_direction_to_wedge(Vec2::new(0.0, 0.0), count, MARKING_MENU_MIN_DISTANCE),
+        None
+    );
+    assert_eq!(
+        gesture_direction_to_wedge(Vec2::new(0.0, -20.0), count, MARKING_MENU_MIN_DISTANCE),
+        None
+    );
+    assert_eq!(
+        gesture_direction_to_wedge(Vec2::new(15.0, 15.0), count, MARKING_MENU_MIN_DISTANCE),
+        None
+    );
+
+    // Exactly at and above threshold:
+    // North (0, -30) -> Wedge 0
+    assert_eq!(
+        gesture_direction_to_wedge(Vec2::new(0.0, -30.0), count, MARKING_MENU_MIN_DISTANCE),
+        Some(0)
+    );
+
+    // North-East (30, -30) -> Wedge 1
+    assert_eq!(
+        gesture_direction_to_wedge(Vec2::new(30.0, -30.0), count, MARKING_MENU_MIN_DISTANCE),
+        Some(1)
+    );
+
+    // East (30, 0) -> Wedge 2
+    assert_eq!(
+        gesture_direction_to_wedge(Vec2::new(30.0, 0.0), count, MARKING_MENU_MIN_DISTANCE),
+        Some(2)
+    );
+
+    // South-East (30, 30) -> Wedge 3
+    assert_eq!(
+        gesture_direction_to_wedge(Vec2::new(30.0, 30.0), count, MARKING_MENU_MIN_DISTANCE),
+        Some(3)
+    );
+
+    // South (0, 30) -> Wedge 4
+    assert_eq!(
+        gesture_direction_to_wedge(Vec2::new(0.0, 30.0), count, MARKING_MENU_MIN_DISTANCE),
+        Some(4)
+    );
+
+    // South-West (-30, 30) -> Wedge 5
+    assert_eq!(
+        gesture_direction_to_wedge(Vec2::new(-30.0, 30.0), count, MARKING_MENU_MIN_DISTANCE),
+        Some(5)
+    );
+
+    // West (-30, 0) -> Wedge 6
+    assert_eq!(
+        gesture_direction_to_wedge(Vec2::new(-30.0, 0.0), count, MARKING_MENU_MIN_DISTANCE),
+        Some(6)
+    );
+
+    // North-West (-30, -30) -> Wedge 7
+    assert_eq!(
+        gesture_direction_to_wedge(Vec2::new(-30.0, -30.0), count, MARKING_MENU_MIN_DISTANCE),
+        Some(7)
+    );
+}
+
+#[test]
+fn test_keyboard_navigation_mapping() {
+    use eframe::egui::Key;
+    use mossambi::widget::{handle_donut_key, DonutKeyAction};
+
+    let count = 8;
+
+    // Keys 1..8 select wedges directly
+    assert_eq!(
+        handle_donut_key(Key::Num1, 0, count, false),
+        DonutKeyAction::SelectWedge(0)
+    );
+    assert_eq!(
+        handle_donut_key(Key::Num2, 0, count, false),
+        DonutKeyAction::SelectWedge(1)
+    );
+    assert_eq!(
+        handle_donut_key(Key::Num3, 0, count, false),
+        DonutKeyAction::SelectWedge(2)
+    );
+    assert_eq!(
+        handle_donut_key(Key::Num4, 0, count, false),
+        DonutKeyAction::SelectWedge(3)
+    );
+    assert_eq!(
+        handle_donut_key(Key::Num5, 0, count, false),
+        DonutKeyAction::SelectWedge(4)
+    );
+    assert_eq!(
+        handle_donut_key(Key::Num6, 0, count, false),
+        DonutKeyAction::SelectWedge(5)
+    );
+    assert_eq!(
+        handle_donut_key(Key::Num7, 0, count, false),
+        DonutKeyAction::SelectWedge(6)
+    );
+    assert_eq!(
+        handle_donut_key(Key::Num8, 0, count, false),
+        DonutKeyAction::SelectWedge(7)
+    );
+
+    // Arrow keys cycle forward/backward
+    assert_eq!(
+        handle_donut_key(Key::ArrowRight, 0, count, false),
+        DonutKeyAction::HoverWedge(1)
+    );
+    assert_eq!(
+        handle_donut_key(Key::ArrowDown, 7, count, false),
+        DonutKeyAction::HoverWedge(0)
+    );
+    assert_eq!(
+        handle_donut_key(Key::ArrowLeft, 0, count, false),
+        DonutKeyAction::HoverWedge(7)
+    );
+    assert_eq!(
+        handle_donut_key(Key::ArrowUp, 3, count, false),
+        DonutKeyAction::HoverWedge(2)
+    );
+
+    // Enter confirms
+    assert_eq!(
+        handle_donut_key(Key::Enter, 2, count, false),
+        DonutKeyAction::Confirm
+    );
+
+    // Esc closes submenu when in submenu, or closes donut when not
+    assert_eq!(
+        handle_donut_key(Key::Escape, 0, count, true),
+        DonutKeyAction::CloseSubmenu
+    );
+    assert_eq!(
+        handle_donut_key(Key::Escape, 0, count, false),
+        DonutKeyAction::Close
+    );
+
+    // Tab toggles face
+    assert_eq!(
+        handle_donut_key(Key::Tab, 0, count, false),
+        DonutKeyAction::ToggleFace
+    );
+}
+
+#[test]
+fn test_wedge_label_bounds_placement() {
+    use eframe::egui::Vec2;
+    use mossambi::widget::{mid_angle, wedge_label_bounds};
+
+    let center = Pos2::new(180.0, 180.0);
+    let inner_r = 60.0;
+    let outer_r = 160.0;
+    let angle0 = mid_angle(0, 8);
+    let text_size = Vec2::new(50.0, 16.0);
+
+    let bounds = wedge_label_bounds(center, angle0, inner_r, outer_r, text_size);
+    // Petal 0 is North: bounds center should be at x = center.x, y < center.y
+    assert!((bounds.center().x - center.x).abs() < 0.1);
+    assert!(bounds.center().y < center.y);
+    assert!(bounds.width() >= 20.0);
+    assert!(bounds.height() >= 12.0);
+}
+
+#[test]
+fn test_scale_for_dpi_helper() {
+    use mossambi::widget::scale_for_dpi;
+
+    assert_eq!(scale_for_dpi(360.0, 1.0), 360.0);
+    assert_eq!(scale_for_dpi(360.0, 1.25), 360.0);
+    assert_eq!(scale_for_dpi(360.0, 1.5), 360.0);
+    assert_eq!(scale_for_dpi(360.0, 2.0), 360.0);
+    assert!((scale_for_dpi(360.333, 1.0) - 360.0).abs() < 1e-4);
+}

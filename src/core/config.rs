@@ -1131,15 +1131,21 @@ fn default_explorer_columns() -> Vec<u8> {
 /// One-time migration for persisted preferences.
 ///
 /// If prefs_version < 1, forces always_on_top to false and updates prefs_version to 1.
+/// Also migrates old donut diameter > 480 or < 280 by clamping into range [280.0, 480.0].
 /// Returns true if migration occurred and changes should be saved.
 pub fn migrate_prefs(cfg: &mut MossambiConfig) -> bool {
+    let mut changed = false;
     if cfg.prefs_version < 1 {
         cfg.always_on_top = false;
         cfg.prefs_version = 1;
-        true
-    } else {
-        false
+        changed = true;
     }
+    let clamped_size = crate::core::donut_config::clamp_donut_diameter(cfg.donut.appearance.size);
+    if (cfg.donut.appearance.size - clamped_size).abs() > 0.001 {
+        cfg.donut.appearance.size = clamped_size;
+        changed = true;
+    }
+    changed
 }
 
 fn default_calculate_checksums() -> bool {

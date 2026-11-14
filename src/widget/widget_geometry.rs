@@ -24,6 +24,265 @@ pub enum WidgetState {
     Success { file_count: usize },
 }
 
+// --------------------------------------------------------------------------
+// Pie & Marking-Menu Geometry Primitives (Pure Functions)
+// --------------------------------------------------------------------------
+
+pub const DEFAULT_DONUT_DIAMETER: f32 = 360.0;
+pub const MIN_DONUT_DIAMETER: f32 = 280.0;
+pub const MAX_DONUT_DIAMETER: f32 = 480.0;
+pub const DEFAULT_WEDGE_GAP_PX: f32 = 2.0;
+pub const HOVER_GROW_PX: f32 = 6.0;
+pub const MARKING_MENU_MIN_DISTANCE: f32 = 24.0;
+pub const MAX_INNER_RING_WEDGES: usize = 8;
+
+/// Clamps donut diameter to the supported range [280.0, 480.0].
+pub fn clamp_donut_diameter(d: f32) -> f32 {
+    d.clamp(MIN_DONUT_DIAMETER, MAX_DONUT_DIAMETER)
+}
+
+/// Center angle in radians for wedge `idx` out of `count` wedges.
+/// Petal 0 is centered at North (-PI/2) and wedges proceed clockwise.
+pub fn mid_angle(idx: usize, count: usize) -> f32 {
+    let n = count.clamp(1, MAX_INNER_RING_WEDGES) as f32;
+    -PI / 2.0 + (idx as f32) * (2.0 * PI / n)
+}
+
+/// Angular span of each wedge for `count` wedges.
+pub fn wedge_span(count: usize) -> f32 {
+    let n = count.clamp(1, MAX_INNER_RING_WEDGES) as f32;
+    2.0 * PI / n
+}
+
+/// Hit-test whether a radius `r` falls inside the central hub.
+pub fn hub_hit(r: f32, hub_r: f32) -> bool {
+    r <= hub_r
+}
+
+/// Hit-test whether a point `pos` falls inside the central hub centered at `center`.
+pub fn hub_hit_point(pos: Pos2, center: Pos2, hub_r: f32) -> bool {
+    (pos - center).length() <= hub_r
+}
+
+/// Hit-test which wedge (0..count-1) the polar point (angle, r) falls into.
+///
+/// Features:
+/// - Supports 1..=8 wedges (clamped to max 8).
+/// - Honors `inner_r` and `outer_r` boundaries (returns None if r < inner_r or r > outer_r).
+/// - Honors `gap_px` linear separation between wedges (returns None if the point lies in the gap).
+pub fn wedge_at(
+    angle: f32,
+    r: f32,
+    count: usize,
+    inner_r: f32,
+    outer_r: f32,
+    gap_px: f32,
+) -> Option<usize> {
+    wedge_at_with_hover(angle, r, count, inner_r, outer_r, None, 0.0, gap_px)
+}
+
+/// Hit-test with hover-grow support (hovered wedge extends outer radius by `hover_grow_px`).
+#[allow(clippy::too_many_arguments)]
+pub fn wedge_at_with_hover(
+    angle: f32,
+    r: f32,
+    count: usize,
+    inner_r: f32,
+    outer_r: f32,
+    hovered: Option<usize>,
+    hover_grow_px: f32,
+    gap_px: f32,
+) -> Option<usize> {
+    if count == 0 || r < inner_r {
+        return None;
+    }
+    let n = count.min(MAX_INNER_RING_WEDGES);
+    let span = 2.0 * PI / (n as f32);
+
+    let offset = angle + (PI / 2.0) + (span / 2.0);
+    let rel_angle = offset.rem_euclid(2.0 * PI);
+    let idx = ((rel_angle / span).floor() as usize).min(n - 1);
+
+    let max_r = if hovered == Some(idx) {
+        outer_r + hover_grow_px
+    } else {
+        outer_r
+    };
+    if r > max_r {
+        return None;
+    }
+
+    if gap_px > 0.0 && n > 1 {
+        let half_gap_angle = (gap_px * 0.5) / r.max(1.0);
+        let offset_in_wedge = rel_angle - (idx as f32) * span;
+        if offset_in_wedge < half_gap_angle || (span - offset_in_wedge) < half_gap_angle {
+            return None;
+        }
+    }
+
+    Some(idx)
+}
+
+/// Hit-test which wedge a 2D screen position `pos` falls into relative to `center`.
+pub fn wedge_at_point(
+    pos: Pos2,
+    center: Pos2,
+    count: usize,
+    inner_r: f32,
+    outer_r: f32,
+    gap_px: f32,
+) -> Option<usize> {
+    let delta = pos - center;
+    let r = delta.length();
+    let angle = delta.y.atan2(delta.x);
+    wedge_at(angle, r, count, inner_r, outer_r, gap_px)
+}
+
+/// Computes inner and outer radii for an outer-arc submenu attached to an inner ring.
+pub fn outer_submenu_radii(inner_ring_outer_r: f32) -> (f32, f32) {
+    let sub_inner = inner_ring_outer_r + 13.0;
+    let sub_outer = sub_inner + 46.0;
+    (sub_inner, sub_outer)
+}
+
+/// Hit-test which sub-wedge of an expanded outer-arc submenu the point falls into.
+#[allow(clippy::too_many_arguments)]
+pub fn sub_wedge_at(
+    angle: f32,
+    r: f32,
+    parent_idx: usize,
+    parent_count: usize,
+    sub_count: usize,
+    sub_inner_r: f32,
+    sub_outer_r: f32,
+    gap_px: f32,
+) -> Option<usize> {
+    if sub_count == 0 || r < sub_inner_r - 2.0 || r > sub_outer_r + 8.0 {
+        return None;
+    }
+    let parent_mid = mid_angle(parent_idx, parent_count);
+    let sector_span = wedge_span(parent_count);
+
+    let sub_span =
+        (sector_span * 1.5 / sub_count as f32).max(44.0 / ((sub_inner_r + sub_outer_r) / 2.0));
+    let total_fan = sub_span * sub_count as f32;
+
+    let diff = (angle - parent_mid + PI).rem_euclid(2.0 * PI) - PI;
+    if diff.abs() > (total_fan / 2.0) + 0.04 {
+        return None;
+    }
+
+    let offset = diff + (total_fan / 2.0);
+    let idx = ((offset / sub_span).floor() as usize).min(sub_count - 1);
+
+    if gap_px > 0.0 && sub_count > 1 {
+        let half_gap_angle = (gap_px * 0.5) / r.max(1.0);
+        let offset_in_sub = offset - (idx as f32) * sub_span;
+        if offset_in_sub < half_gap_angle || (sub_span - offset_in_sub) < half_gap_angle {
+            return None;
+        }
+    }
+
+    Some(idx)
+}
+
+/// Horizontal bounding box for label and icon placement centered strictly inside the wedge.
+pub fn wedge_label_bounds(
+    center: Pos2,
+    mid_angle: f32,
+    inner_r: f32,
+    outer_r: f32,
+    max_text_size: Vec2,
+) -> Rect {
+    let r_mid = (inner_r + outer_r) / 2.0;
+    let mid_pos = Pos2::new(
+        center.x + r_mid * mid_angle.cos(),
+        center.y + r_mid * mid_angle.sin(),
+    );
+    let radial_thickness = outer_r - inner_r;
+    let w = max_text_size.x.min(radial_thickness * 1.6).max(20.0);
+    let h = max_text_size.y.min(radial_thickness * 0.8).max(12.0);
+    Rect::from_center_size(mid_pos, Vec2::new(w, h))
+}
+
+/// Converts a press-drag-release marking-menu delta vector into a selected wedge index.
+/// Returns None if the drag distance is below the `min_threshold` (default 24.0px).
+pub fn gesture_direction_to_wedge(delta: Vec2, count: usize, min_threshold: f32) -> Option<usize> {
+    if delta.length() < min_threshold || count == 0 {
+        return None;
+    }
+    let n = count.min(MAX_INNER_RING_WEDGES);
+    let angle = delta.y.atan2(delta.x);
+    let span = 2.0 * PI / (n as f32);
+    let rel_angle = (angle + (PI / 2.0) + (span / 2.0)).rem_euclid(2.0 * PI);
+    let idx = ((rel_angle / span).floor() as usize).min(n - 1);
+    Some(idx)
+}
+
+/// Action resulting from keyboard input on the radial donut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DonutKeyAction {
+    SelectWedge(usize),
+    HoverWedge(usize),
+    Confirm,
+    Close,
+    CloseSubmenu,
+    ToggleFace,
+    None,
+}
+
+/// Pure handler for keyboard navigation on the donut:
+/// - Keys 1..8 select wedges directly.
+/// - Arrow keys cycle hover wedge forward / backward.
+/// - Enter confirms the hovered wedge.
+/// - Esc closes submenus or dismisses the donut.
+/// - Tab toggles face between Primary Formats and Studio Tools.
+pub fn handle_donut_key(
+    key: eframe::egui::Key,
+    current_wedge: usize,
+    wedge_count: usize,
+    in_sub_menu: bool,
+) -> DonutKeyAction {
+    use eframe::egui::Key;
+    if wedge_count == 0 {
+        return DonutKeyAction::None;
+    }
+    match key {
+        Key::Num1 => DonutKeyAction::SelectWedge(0),
+        Key::Num2 if wedge_count > 1 => DonutKeyAction::SelectWedge(1),
+        Key::Num3 if wedge_count > 2 => DonutKeyAction::SelectWedge(2),
+        Key::Num4 if wedge_count > 3 => DonutKeyAction::SelectWedge(3),
+        Key::Num5 if wedge_count > 4 => DonutKeyAction::SelectWedge(4),
+        Key::Num6 if wedge_count > 5 => DonutKeyAction::SelectWedge(5),
+        Key::Num7 if wedge_count > 6 => DonutKeyAction::SelectWedge(6),
+        Key::Num8 if wedge_count > 7 => DonutKeyAction::SelectWedge(7),
+        Key::ArrowRight | Key::ArrowDown => {
+            let next = (current_wedge + 1) % wedge_count;
+            DonutKeyAction::HoverWedge(next)
+        }
+        Key::ArrowLeft | Key::ArrowUp => {
+            let prev = (current_wedge + wedge_count - 1) % wedge_count;
+            DonutKeyAction::HoverWedge(prev)
+        }
+        Key::Enter => DonutKeyAction::Confirm,
+        Key::Escape => {
+            if in_sub_menu {
+                DonutKeyAction::CloseSubmenu
+            } else {
+                DonutKeyAction::Close
+            }
+        }
+        Key::Tab => DonutKeyAction::ToggleFace,
+        _ => DonutKeyAction::None,
+    }
+}
+
+/// DPI scaling helper: computes pixel-snapped dimensions for a given pixels_per_point.
+pub fn scale_for_dpi(val: f32, ppp: f32) -> f32 {
+    let p = ppp.max(0.1);
+    (val * p).round() / p
+}
+
 pub struct RadialWidgetGeometry {
     pub center: Pos2,
     pub outer_radius: f32, // ~165.0 px (diameter ~330.0)
@@ -58,41 +317,24 @@ impl RadialWidgetGeometry {
 
     /// Hit-test which petal index (0..7) the point lies within.
     pub fn hit_test_petal(&self, point: Pos2) -> Option<usize> {
-        let delta = point - self.center;
-        let dist = delta.length();
-
-        if dist < self.inner_radius || dist > self.outer_radius + 6.0 {
-            return None;
-        }
-
-        // Angle in radians: -PI..PI (0 is +X, -PI/2 is top/North)
-        let angle = delta.y.atan2(delta.x);
-        // Normalize angle so that Petal 0 is centered at the top North (-PI/2)
-        // Petal 0: [-PI/2 - PI/8, -PI/2 + PI/8]
-        let sector_span = (2.0 * PI) / 8.0;
-        let offset = angle + (PI / 2.0) + (sector_span / 2.0);
-        let mut normalized = offset % (2.0 * PI);
-        if normalized < 0.0 {
-            normalized += 2.0 * PI;
-        }
-
-        let idx = (normalized / sector_span).floor() as usize;
-        if idx < 8 {
-            Some(idx)
-        } else {
-            None
-        }
+        wedge_at_point(
+            point,
+            self.center,
+            8,
+            self.inner_radius,
+            self.outer_radius + HOVER_GROW_PX,
+            0.0,
+        )
     }
 
     /// Hit-test if cursor is inside the central hub.
     pub fn hit_test_hub(&self, point: Pos2) -> bool {
-        (point - self.center).length() <= self.hub_radius
+        hub_hit_point(point, self.center, self.hub_radius)
     }
 
     /// Get midpoint coordinates for a petal (useful for popovers or tooltips).
     pub fn petal_center(&self, index: usize) -> Pos2 {
-        let sector_span = (2.0 * PI) / 8.0;
-        let angle = -PI / 2.0 + (index as f32) * sector_span;
+        let angle = mid_angle(index, 8);
         let r_mid = (self.inner_radius + self.outer_radius) / 2.0;
         Pos2::new(
             self.center.x + r_mid * angle.cos(),
@@ -102,9 +344,7 @@ impl RadialWidgetGeometry {
 
     /// Calculate inner and outer radii for the group fan-out sub-ring.
     pub fn sub_radii(&self) -> (f32, f32) {
-        let sub_inner = self.outer_radius + 13.0;
-        let sub_outer = sub_inner + 46.0;
-        (sub_inner, sub_outer)
+        outer_submenu_radii(self.outer_radius)
     }
 
     /// Hit-test which sub-petal of an expanded group (0..sub_count - 1) the point lies within.
@@ -114,38 +354,13 @@ impl RadialWidgetGeometry {
         group_idx: usize,
         sub_count: usize,
     ) -> Option<usize> {
-        if sub_count == 0 {
-            return None;
-        }
         let delta = point - self.center;
         let dist = delta.length();
-        let (sub_inner, sub_outer) = self.sub_radii();
-
-        if dist < sub_inner - 2.0 || dist > sub_outer + 8.0 {
-            return None;
-        }
-
         let angle = delta.y.atan2(delta.x);
-        let sector_span = (2.0 * PI) / 8.0;
-        let parent_mid = -PI / 2.0 + (group_idx as f32) * sector_span;
-
-        // Sub-span covers parent span * 1.5 spread across children
-        let sub_span =
-            (sector_span * 1.5 / sub_count as f32).max(44.0 / ((sub_inner + sub_outer) / 2.0));
-        let total_fan = sub_span * sub_count as f32;
-
-        let diff = (angle - parent_mid + PI).rem_euclid(2.0 * PI) - PI;
-        if diff.abs() > (total_fan / 2.0) + 0.04 {
-            return None;
-        }
-
-        let offset = diff + (total_fan / 2.0);
-        let idx = (offset / sub_span).floor() as usize;
-        if idx < sub_count {
-            Some(idx)
-        } else {
-            None
-        }
+        let (sub_inner, sub_outer) = self.sub_radii();
+        sub_wedge_at(
+            angle, dist, group_idx, 8, sub_count, sub_inner, sub_outer, 0.0,
+        )
     }
 
     /// Render the complete radial widget according to the visual specification of `Image reference.png`.

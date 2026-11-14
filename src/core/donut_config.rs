@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Visual appearance controls for the Sweet Lime radial donut widget.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct DonutAppearance {
-    /// Overall diameter of the radial donut in pixels. Default 440.0. Range 320.0..540.0.
+    /// Overall diameter of the radial donut in pixels. Default 360.0. Range 280.0..480.0.
     #[serde(default = "default_donut_size")]
     pub size: f32,
     /// Center columella hole radius in pixels. Default 52.0. Range 30.0..80.0.
@@ -19,8 +19,17 @@ pub struct DonutAppearance {
     pub opacity: f32,
 }
 
+pub const DEFAULT_DONUT_DIAMETER: f32 = 360.0;
+pub const MIN_DONUT_DIAMETER: f32 = 280.0;
+pub const MAX_DONUT_DIAMETER: f32 = 480.0;
+
+/// Clamps donut diameter to the supported range (280.0..=480.0).
+pub fn clamp_donut_diameter(d: f32) -> f32 {
+    d.clamp(MIN_DONUT_DIAMETER, MAX_DONUT_DIAMETER)
+}
+
 fn default_donut_size() -> f32 {
-    440.0
+    DEFAULT_DONUT_DIAMETER
 }
 
 fn default_donut_hole() -> f32 {
@@ -681,7 +690,7 @@ mod tests {
     #[test]
     fn test_appearance_defaults() {
         let app = DonutAppearance::default();
-        assert_eq!(app.size, 440.0);
+        assert_eq!(app.size, DEFAULT_DONUT_DIAMETER);
         assert_eq!(app.hole, 52.0);
         assert_eq!(app.opacity, 0.95);
     }

@@ -1378,7 +1378,7 @@ impl PreferencesView {
                             .add(
                                 egui::Slider::new(
                                     &mut self.cfg.donut.appearance.size,
-                                    320.0..=540.0,
+                                    280.0..=480.0,
                                 )
                                 .suffix(" px"),
                             )
