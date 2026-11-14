@@ -4382,7 +4382,8 @@ impl ExplorerView {
                         }
 
                         let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
-                        let (glyph_ast, accent_rgb) = crate::core::icon_packs::IconGlyph::resolve(
+                        let (glyph_ast, accent_rgb) = crate::core::icon_packs::IconGlyph::resolve_with_path(
+                            Some(&item.path),
                             &item.name,
                             &item.extension,
                             item.is_dir,
@@ -4799,17 +4800,19 @@ impl ExplorerView {
                     }
 
                     let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
-                    let (icon_glyph, icon_accent) = crate::core::icon_packs::IconGlyph::resolve(
-                        &item.name,
-                        &item.extension,
-                        item.is_dir,
-                        icon_spec.is_image,
-                        icon_spec.is_media,
-                        icon_spec.is_archive,
-                        icon_spec.is_document,
-                        icon_spec.is_code,
-                        icon_spec.color_rgb,
-                    );
+                    let (icon_glyph, icon_accent) =
+                        crate::core::icon_packs::IconGlyph::resolve_with_path(
+                            Some(&item.path),
+                            &item.name,
+                            &item.extension,
+                            item.is_dir,
+                            icon_spec.is_image,
+                            icon_spec.is_media,
+                            icon_spec.is_archive,
+                            icon_spec.is_document,
+                            icon_spec.is_code,
+                            icon_spec.color_rgb,
+                        );
 
                     let row_tags = crate::core::tags::read_tags_cache(&item.path);
                     let dots_w = tag_dots_width(&row_tags);
@@ -5788,7 +5791,8 @@ impl ExplorerView {
                                 for c in children.iter() {
                                     let spec = resolve_file_icon(&c.name, &c.extension, c.is_dir);
                                     let (cglyph, caccent) =
-                                        crate::core::icon_packs::IconGlyph::resolve(
+                                        crate::core::icon_packs::IconGlyph::resolve_with_path(
+                                            Some(&c.path),
                                             &c.name,
                                             &c.extension,
                                             c.is_dir,
@@ -5843,7 +5847,8 @@ impl ExplorerView {
                                         egui::Sense::hover(),
                                     );
                                     let (mglyph, maccent) =
-                                        crate::core::icon_packs::IconGlyph::resolve(
+                                        crate::core::icon_packs::IconGlyph::resolve_with_path(
+                                            Some(&item.path),
                                             &item.name,
                                             &item.extension,
                                             item.is_dir,
@@ -6300,17 +6305,19 @@ impl ExplorerView {
                                 ),
                             );
                         } else {
-                            let (glyph, accent) = crate::core::icon_packs::IconGlyph::resolve(
-                                &item.name,
-                                &item.extension,
-                                item.is_dir,
-                                icon_spec.is_image,
-                                icon_spec.is_media,
-                                icon_spec.is_archive,
-                                icon_spec.is_document,
-                                icon_spec.is_code,
-                                icon_spec.color_rgb,
-                            );
+                            let (glyph, accent) =
+                                crate::core::icon_packs::IconGlyph::resolve_with_path(
+                                    Some(&item.path),
+                                    &item.name,
+                                    &item.extension,
+                                    item.is_dir,
+                                    icon_spec.is_image,
+                                    icon_spec.is_media,
+                                    icon_spec.is_archive,
+                                    icon_spec.is_document,
+                                    icon_spec.is_code,
+                                    icon_spec.color_rgb,
+                                );
                             let irect =
                                 Rect::from_center_size(icon_center, Vec2::splat(icon_box_side));
                             crate::core::icon_packs::paint_icon(
@@ -6819,7 +6826,8 @@ impl ExplorerView {
                                         }
                                         // Pack vector icon on left
                                         let (icon_glyph, accent_rgb) =
-                                            crate::core::icon_packs::IconGlyph::resolve(
+                                            crate::core::icon_packs::IconGlyph::resolve_with_path(
+                                                Some(&item.path),
                                                 &item.name,
                                                 &item.extension,
                                                 item.is_dir,
@@ -7646,7 +7654,8 @@ impl ExplorerView {
     ) {
         ui.vertical_centered(|ui| {
             ui.add_space(6.0);
-            let (glyph, accent) = crate::core::icon_packs::IconGlyph::resolve(
+            let (glyph, accent) = crate::core::icon_packs::IconGlyph::resolve_with_path(
+                Some(&item.path),
                 &item.name,
                 &item.extension,
                 item.is_dir,
@@ -8483,7 +8492,8 @@ impl ExplorerView {
                 ui.horizontal(|ui| {
                     let (picon_rect, _) =
                         ui.allocate_exact_size(Vec2::splat(64.0), egui::Sense::hover());
-                    let (pglyph, paccent) = crate::core::icon_packs::IconGlyph::resolve(
+                    let (pglyph, paccent) = crate::core::icon_packs::IconGlyph::resolve_with_path(
+                        Some(&item.path),
                         &item.name,
                         &item.extension,
                         item.is_dir,

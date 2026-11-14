@@ -4,8 +4,10 @@
 
 use eframe::egui::{Context, Pos2, RawInput, Rect, Vec2};
 use mossambi::core::icon_packs::{
-    mix_hex, shade_hex, snapped_icon_quad, svg_for, IconGlyph, IconPack,
+    mix_hex, shade_hex, snapped_icon_quad, special_folder_svg, special_folder_svg_sized, svg_for,
+    IconGlyph, IconPack,
 };
+use mossambi::core::SpecialFolder;
 
 /// Fresh headless egui context with pixels-per-point APPLIED.
 /// set_pixels_per_point only takes effect at the next begin_pass
@@ -113,4 +115,108 @@ fn finder_folder_svg_has_glass_anatomy() {
     assert!(svg.contains("url(#ggfront)"), "front glass fill missing");
     assert!(svg.contains("opacity='0.35'"), "specular top edge missing");
     assert!(svg.contains("opacity='0.14'"), "bottom catch missing");
+}
+
+#[test]
+fn test_every_pack_x_every_kind_parses_and_differs_from_generic() {
+    let opt = resvg::usvg::Options::default();
+    let packs = IconPack::all();
+    let kinds = SpecialFolder::all();
+
+    for pack in packs {
+        let generic_svg = svg_for(pack, IconGlyph::Folder, [0, 0, 0]);
+
+        for kind in kinds {
+            // 1. Regular size SVG
+            let svg = special_folder_svg(pack, *kind);
+            assert_eq!(
+                svg.matches("</svg>").count(),
+                1,
+                "SVG must contain exactly one </svg> for {pack:?} {kind:?}"
+            );
+            let tree = resvg::usvg::Tree::from_str(&svg, &opt);
+            assert!(
+                tree.is_ok(),
+                "Failed to parse regular SVG for {pack:?} {kind:?}: {:?}",
+                tree.err()
+            );
+            assert_ne!(
+                svg, generic_svg,
+                "Special folder {kind:?} must differ from generic folder in {pack:?}"
+            );
+
+            // 2. Small size (<= 20px) simplified thicker stroke SVG
+            let small_svg = special_folder_svg_sized(pack, *kind, true);
+            assert_eq!(
+                small_svg.matches("</svg>").count(),
+                1,
+                "Small SVG must contain exactly one </svg> for {pack:?} {kind:?}"
+            );
+            let small_tree = resvg::usvg::Tree::from_str(&small_svg, &opt);
+            assert!(
+                small_tree.is_ok(),
+                "Failed to parse small SVG for {pack:?} {kind:?}: {:?}",
+                small_tree.err()
+            );
+        }
+    }
+}
+
+#[test]
+fn test_known_folder_path_lookup() {
+    let desktop = mossambi::core::platform_paths::desktop_dir();
+    assert_eq!(
+        mossambi::core::special_folders::lookup_path(&desktop),
+        Some(SpecialFolder::Desktop)
+    );
+
+    let downloads = mossambi::core::platform_paths::downloads_dir();
+    assert_eq!(
+        mossambi::core::special_folders::lookup_path(&downloads),
+        Some(SpecialFolder::Downloads)
+    );
+
+    let documents = mossambi::core::platform_paths::documents_dir();
+    assert_eq!(
+        mossambi::core::special_folders::lookup_path(&documents),
+        Some(SpecialFolder::Documents)
+    );
+}
+
+#[test]
+fn test_folder_name_fallback() {
+    let cases = [
+        ("Desktop", SpecialFolder::Desktop),
+        ("Downloads", SpecialFolder::Downloads),
+        ("My Documents", SpecialFolder::Documents),
+        ("Pictures", SpecialFolder::Pictures),
+        ("Videos", SpecialFolder::Videos),
+        ("Music", SpecialFolder::Music),
+        ("OneDrive", SpecialFolder::OneDrive),
+        ("$Recycle.Bin", SpecialFolder::RecycleBin),
+        ("Favorites", SpecialFolder::Favorites),
+        ("Saved Games", SpecialFolder::SavedGames),
+        ("Links", SpecialFolder::Links),
+        ("Contacts", SpecialFolder::Contacts),
+        ("Searches", SpecialFolder::Searches),
+        ("3D Objects", SpecialFolder::Objects3D),
+        ("Program Files", SpecialFolder::ProgramFiles),
+        ("Users", SpecialFolder::Users),
+    ];
+
+    for (name, expected) in cases {
+        let resolved = mossambi::core::special_folders::lookup_name(name);
+        assert_eq!(
+            resolved,
+            Some(expected),
+            "Name fallback failed for '{name}'"
+        );
+
+        let glyph = IconGlyph::folder_special(name);
+        assert_eq!(
+            glyph,
+            Some(IconGlyph::FolderSpecial(expected)),
+            "folder_special glyph failed for '{name}'"
+        );
+    }
 }

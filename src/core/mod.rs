@@ -34,6 +34,7 @@ pub mod registry;
 pub mod route_planner;
 pub mod scripting;
 pub mod sound;
+pub mod special_folders;
 pub mod state_db;
 pub mod tabs;
 pub mod tags;
@@ -92,6 +93,7 @@ pub use registry::{
     DynamicWheelSector, FileCategory, FormatInfo, FormatNature, FormatSpecification,
     UniversalRegistry,
 };
+pub use special_folders::SpecialFolder;
 pub use tabs::{close_target, CloseAction};
 pub use tool_console::{ToolConsole, ToolEvent};
 pub use window_level::{should_apply_window_level, DesiredWindowLevel};

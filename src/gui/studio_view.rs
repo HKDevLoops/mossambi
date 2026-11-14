@@ -472,6 +472,10 @@ impl StudioView {
                         // Real vector tab icon
                         let tab_glyph = if tab.is_home {
                             IconGlyph::Home
+                        } else if let Some(sf) =
+                            crate::core::special_folders::lookup_path(&tab.path)
+                        {
+                            IconGlyph::FolderSpecial(sf)
                         } else {
                             IconGlyph::Folder
                         };
@@ -799,6 +803,10 @@ impl StudioView {
                             };
                             let glyph = if is_home {
                                 IconGlyph::Home
+                            } else if let Some(sf) =
+                                crate::core::special_folders::lookup_path(&self.explorer_view.current_dir)
+                            {
+                                IconGlyph::FolderSpecial(sf)
                             } else if self.explorer_view.current_dir.parent().is_none() {
                                 IconGlyph::Drive
                             } else {
@@ -935,6 +943,13 @@ impl StudioView {
                                                     || seg.label.contains(':'));
                                             let glyph = if is_root {
                                                 IconGlyph::Drive
+                                            } else if let Some(sf) =
+                                                crate::core::special_folders::lookup(
+                                                    &seg.label,
+                                                    Some(&seg.target_path),
+                                                )
+                                            {
+                                                IconGlyph::FolderSpecial(sf)
                                             } else if seg.label.eq_ignore_ascii_case("home")
                                                 || seg.label.eq_ignore_ascii_case("users")
                                             {
@@ -1513,10 +1528,21 @@ impl StudioView {
                                     } else {
                                         [79, 168, 255]
                                     };
+                                    let pin_glyph = if is_dir {
+                                        if let Some(sf) =
+                                            crate::core::special_folders::lookup(&name, Some(&path))
+                                        {
+                                            IconGlyph::FolderSpecial(sf)
+                                        } else {
+                                            IconGlyph::Folder
+                                        }
+                                    } else {
+                                        IconGlyph::PageDefault
+                                    };
                                     crate::core::icon_packs::paint_icon(
                                         ui,
                                         pack,
-                                        IconGlyph::Folder,
+                                        pin_glyph,
                                         icon_rect,
                                         icon_rgb,
                                     );

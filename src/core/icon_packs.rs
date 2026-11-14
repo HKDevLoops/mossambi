@@ -17,6 +17,7 @@
 //! - Textures are cached per (pack, glyph, physical pixel size); rendering is
 //!   done once per size with full antialiasing and LINEAR filtering.
 
+use crate::core::SpecialFolder;
 use eframe::egui::{Color32, ColorImage, Rect, TextureHandle, TextureOptions, Ui};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -131,6 +132,7 @@ impl IconPack {
 pub enum IconGlyph {
     // Folders
     Folder,
+    FolderSpecial(crate::core::SpecialFolder),
     FolderDesktop,
     FolderDownloads,
     FolderDocuments,
@@ -139,6 +141,17 @@ pub enum IconGlyph {
     FolderMusic,
     FolderRepo,
     FolderCode,
+    FolderHome,
+    FolderOneDrive,
+    FolderRecycleBin,
+    FolderFavorites,
+    FolderSavedGames,
+    FolderLinks,
+    FolderContacts,
+    FolderSearches,
+    FolderObjects3D,
+    FolderProgramFiles,
+    FolderUsers,
     // System places
     Home,
     RecycleBin,
@@ -210,8 +223,49 @@ pub enum IconGlyph {
 }
 
 impl IconGlyph {
-    /// Special folder names follow the existing resolver (case-insensitive)
-    fn folder_special(name: &str) -> Option<IconGlyph> {
+    /// Associated special folder kind if this glyph represents one.
+    pub fn special_folder(&self) -> Option<crate::core::SpecialFolder> {
+        match self {
+            IconGlyph::FolderSpecial(k) => Some(*k),
+            IconGlyph::FolderDesktop => Some(crate::core::SpecialFolder::Desktop),
+            IconGlyph::FolderDownloads => Some(crate::core::SpecialFolder::Downloads),
+            IconGlyph::FolderDocuments => Some(crate::core::SpecialFolder::Documents),
+            IconGlyph::FolderPictures => Some(crate::core::SpecialFolder::Pictures),
+            IconGlyph::FolderVideos => Some(crate::core::SpecialFolder::Videos),
+            IconGlyph::FolderMusic => Some(crate::core::SpecialFolder::Music),
+            IconGlyph::FolderHome | IconGlyph::Home => Some(crate::core::SpecialFolder::Home),
+            IconGlyph::FolderOneDrive | IconGlyph::Cloud => {
+                Some(crate::core::SpecialFolder::OneDrive)
+            }
+            IconGlyph::FolderRecycleBin | IconGlyph::RecycleBin => {
+                Some(crate::core::SpecialFolder::RecycleBin)
+            }
+            IconGlyph::FolderFavorites => Some(crate::core::SpecialFolder::Favorites),
+            IconGlyph::FolderSavedGames => Some(crate::core::SpecialFolder::SavedGames),
+            IconGlyph::FolderLinks => Some(crate::core::SpecialFolder::Links),
+            IconGlyph::FolderContacts => Some(crate::core::SpecialFolder::Contacts),
+            IconGlyph::FolderSearches => Some(crate::core::SpecialFolder::Searches),
+            IconGlyph::FolderObjects3D => Some(crate::core::SpecialFolder::Objects3D),
+            IconGlyph::FolderProgramFiles => Some(crate::core::SpecialFolder::ProgramFiles),
+            IconGlyph::FolderUsers => Some(crate::core::SpecialFolder::Users),
+            _ => None,
+        }
+    }
+
+    /// Creates an IconGlyph for a special folder kind.
+    pub fn from_special_folder(kind: crate::core::SpecialFolder) -> IconGlyph {
+        IconGlyph::FolderSpecial(kind)
+    }
+
+    /// Special folder names follow exact path match first, then name lookup
+    pub fn folder_special(name: &str) -> Option<IconGlyph> {
+        Self::folder_special_with_path(name, None)
+    }
+
+    fn folder_special_with_path(name: &str, path: Option<&std::path::Path>) -> Option<IconGlyph> {
+        if let Some(kind) = crate::core::special_folders::lookup(name, path) {
+            return Some(IconGlyph::FolderSpecial(kind));
+        }
         Self::folder_name_lookup(name.to_lowercase().as_str())
     }
 
@@ -227,20 +281,8 @@ impl IconGlyph {
             || matches("code")
         {
             Some(IconGlyph::FolderCode)
-        } else if matches("desktop") {
-            Some(IconGlyph::FolderDesktop)
-        } else if matches("downloads") || matches("download") {
-            Some(IconGlyph::FolderDownloads)
-        } else if matches("documents") || matches("document") || matches("my documents") {
-            Some(IconGlyph::FolderDocuments)
-        } else if matches("pictures") || matches("photos") || matches("wallpaper") {
-            Some(IconGlyph::FolderPictures)
-        } else if matches("videos") || matches("movies") {
-            Some(IconGlyph::FolderVideos)
-        } else if matches("music") || matches("audio") {
-            Some(IconGlyph::FolderMusic)
         } else {
-            None
+            crate::core::special_folders::lookup_name(lower).map(IconGlyph::FolderSpecial)
         }
     }
 
@@ -257,8 +299,39 @@ impl IconGlyph {
         is_code: bool,
         color_rgb: [u8; 3],
     ) -> (IconGlyph, [u8; 3]) {
+        Self::resolve_with_path(
+            None,
+            name,
+            extension,
+            is_dir,
+            is_image,
+            is_media,
+            is_archive,
+            is_document,
+            is_code,
+            color_rgb,
+        )
+    }
+
+    /// Map with explicit path for exact known-folder matching.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_with_path(
+        path: Option<&std::path::Path>,
+        name: &str,
+        extension: &str,
+        is_dir: bool,
+        is_image: bool,
+        is_media: bool,
+        is_archive: bool,
+        is_document: bool,
+        is_code: bool,
+        color_rgb: [u8; 3],
+    ) -> (IconGlyph, [u8; 3]) {
         if is_dir {
-            return match Self::folder_special(name) {
+            if let Some(sf) = crate::core::special_folders::lookup(name, path) {
+                return (IconGlyph::FolderSpecial(sf), sf.default_color());
+            }
+            return match Self::folder_special_with_path(name, path) {
                 Some(g) => (g, color_rgb),
                 None => (IconGlyph::Folder, color_rgb),
             };
@@ -534,6 +607,280 @@ impl IconPack {
 // ──────────────────────────────────────────────────────────────────────────
 // SVG template builders
 // ──────────────────────────────────────────────────────────────────────────
+
+/// Default folder tint colors per SpecialFolder (front, back, tab).
+fn type_colors(kind: SpecialFolder) -> (&'static str, &'static str, &'static str) {
+    match kind {
+        SpecialFolder::Desktop => ("#20B2AA", "#168B85", "#1B9C95"),
+        SpecialFolder::Documents => ("#2B88D8", "#1E6BB8", "#2479C8"),
+        SpecialFolder::Downloads => ("#28A745", "#1E7E34", "#23923C"),
+        SpecialFolder::Music => ("#F7630C", "#D83B01", "#E75006"),
+        SpecialFolder::Pictures => ("#0078D7", "#005A9E", "#0068B8"),
+        SpecialFolder::Videos => ("#881798", "#681174", "#771485"),
+        SpecialFolder::Home => ("#0078D4", "#005A9E", "#0068B8"),
+        SpecialFolder::OneDrive => ("#0078D4", "#005A9E", "#0068B8"),
+        SpecialFolder::Favorites => ("#EAA300", "#C68500", "#D89400"),
+        SpecialFolder::SavedGames => ("#7C3AED", "#5B21B6", "#6D28D9"),
+        SpecialFolder::Links => ("#4F46E5", "#3730A3", "#4338CA"),
+        SpecialFolder::Contacts => ("#DB2777", "#9D174D", "#BE185D"),
+        SpecialFolder::Searches => ("#475569", "#334155", "#3E4C5F"),
+        SpecialFolder::Objects3D => ("#0891B2", "#0E7490", "#0B82A1"),
+        SpecialFolder::ProgramFiles => ("#2563EB", "#1D4ED8", "#2159E5"),
+        SpecialFolder::Users => ("#475569", "#334155", "#3E4C5F"),
+        SpecialFolder::RecycleBin => ("#64748B", "#475569", "#56667C"),
+    }
+}
+
+/// Computes the folder PackStyle and emblem foreground / emboss colors for a pack + kind.
+fn special_folder_styling(
+    pack: IconPack,
+    kind: SpecialFolder,
+) -> (PackStyle, &'static str, Option<&'static str>) {
+    let mut st = pack.style();
+    let (t_front, t_back, t_tab) = type_colors(kind);
+
+    match pack {
+        // Win11 / Win10 / Fluent: colored per type + white emblem
+        IconPack::Windows11 | IconPack::Windows10 | IconPack::Fluent => {
+            st.front = t_front;
+            st.back = t_back;
+            st.tab = t_tab;
+            (st, "#FFFFFF", None)
+        }
+        // macOS: blue folder with darker embossed emblem (#1B5EAA + #BAE6FD highlight)
+        IconPack::MacosFinder => (st, "#1B5EAA", Some("#BAE6FD")),
+        // Gnome / Adwaita / Cinnamon: pack folder + symbolic emblem (#2C3E50)
+        IconPack::Gnome | IconPack::Adwaita | IconPack::Cinnamon => (st, "#2C3E50", None),
+        // KDE: blue folder + white emblem (#FFFFFF)
+        IconPack::Kde => (st, "#FFFFFF", None),
+        // Material / Android: per-type folder color + white emblem
+        IconPack::Material | IconPack::Android => {
+            st.front = t_front;
+            st.back = t_back;
+            st.tab = t_tab;
+            (st, "#FFFFFF", None)
+        }
+        // Win7 / XP / 8: pack folder (classic yellow) + colored emblem
+        IconPack::Windows7 | IconPack::WindowsXp | IconPack::Windows8 => (st, t_front, None),
+        // Hyprland: dark body + cyan outline emblem (#7BD4F5)
+        IconPack::Hyprland => (st, "#7BD4F5", None),
+    }
+}
+
+/// Raw vector geometry for each kind of special folder emblem.
+fn raw_emblem(kind: SpecialFolder, is_small: bool, f: &str) -> String {
+    match kind {
+        SpecialFolder::Home => {
+            let sw = if is_small { "4.6" } else { "3.0" };
+            format!(
+                "<path d='M33 55 L50 41 L67 55' stroke='{f}' stroke-width='{sw}' fill='none' stroke-linecap='round' stroke-linejoin='round'/>\
+                 <path d='M38 53 L38 73 L62 73 L62 53' stroke='{f}' stroke-width='{sw}' fill='none' stroke-linecap='round' stroke-linejoin='round'/>\
+                 <rect x='46' y='63' width='8' height='10' fill='{f}'/>"
+            )
+        }
+        SpecialFolder::Desktop => {
+            if is_small {
+                format!(
+                    "<rect x='33' y='44' width='34' height='21' rx='2.5' fill='none' stroke='{f}' stroke-width='4.5'/>\
+                     <rect x='41' y='69' width='18' height='3.5' rx='1.5' fill='{f}'/>\
+                     <rect x='48' y='64' width='4' height='5' fill='{f}'/>"
+                )
+            } else {
+                format!(
+                    "<rect x='33' y='43' width='34' height='22' rx='2.5' fill='none' stroke='{f}' stroke-width='2.8'/>\
+                     <rect x='42' y='69' width='16' height='2.5' rx='1.2' fill='{f}'/>\
+                     <rect x='48' y='65' width='4' height='4' fill='{f}'/>"
+                )
+            }
+        }
+        SpecialFolder::Documents => {
+            if is_small {
+                format!(
+                    "<path d='M36 43 L56 43 L64 51 L64 73 L36 73 Z' fill='none' stroke='{f}' stroke-width='4.2' stroke-linejoin='round'/>\
+                     <path d='M56 43 L56 51 L64 51' fill='none' stroke='{f}' stroke-width='4.2' stroke-linejoin='round'/>\
+                     <rect x='42' y='57' width='16' height='3.5' rx='1.7' fill='{f}'/>\
+                     <rect x='42' y='64' width='11' height='3.5' rx='1.7' fill='{f}'/>"
+                )
+            } else {
+                format!(
+                    "<path d='M36 43 L56 43 L64 51 L64 73 L36 73 Z' fill='none' stroke='{f}' stroke-width='2.6' stroke-linejoin='round'/>\
+                     <path d='M56 43 L56 51 L64 51' fill='none' stroke='{f}' stroke-width='2.6' stroke-linejoin='round'/>\
+                     <rect x='41' y='55' width='18' height='2.4' rx='1.2' fill='{f}'/>\
+                     <rect x='41' y='60.5' width='18' height='2.4' rx='1.2' fill='{f}'/>\
+                     <rect x='41' y='66' width='11' height='2.4' rx='1.2' fill='{f}'/>"
+                )
+            }
+        }
+        SpecialFolder::Downloads => {
+            let sw = if is_small { "4.8" } else { "3.2" };
+            format!(
+                "<path d='M50 43 L50 64 M41 55 L50 64 L59 55' stroke='{f}' stroke-width='{sw}' fill='none' stroke-linecap='round' stroke-linejoin='round'/>\
+                 <path d='M35 63 L35 72 L65 72 L65 63' stroke='{f}' stroke-width='{sw}' fill='none' stroke-linecap='round' stroke-linejoin='round'/>"
+            )
+        }
+        SpecialFolder::Pictures => {
+            if is_small {
+                format!(
+                    "<rect x='33' y='45' width='34' height='24' rx='3' fill='none' stroke='{f}' stroke-width='4.2'/>\
+                     <circle cx='41' cy='52' r='3.2' fill='{f}'/>\
+                     <path d='M35 67 L48 55 L65 67' stroke='{f}' stroke-width='4.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/>"
+                )
+            } else {
+                format!(
+                    "<rect x='33' y='45' width='34' height='24' rx='3' fill='none' stroke='{f}' stroke-width='2.6'/>\
+                     <circle cx='41' cy='52' r='2.8' fill='{f}'/>\
+                     <path d='M35 67 L44 56 L50 62 L56 54 L65 65' stroke='{f}' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/>"
+                )
+            }
+        }
+        SpecialFolder::Music => {
+            if is_small {
+                format!(
+                    "<path d='M46 65 L46 45 M62 61 L62 41' stroke='{f}' stroke-width='4.5' stroke-linecap='round'/>\
+                     <path d='M44 46 L64 42 L64 47 L44 51 Z' fill='{f}'/>\
+                     <ellipse cx='42' cy='66' rx='4.8' ry='3.6' fill='{f}'/>\
+                     <ellipse cx='58' cy='62' rx='4.8' ry='3.6' fill='{f}'/>"
+                )
+            } else {
+                format!(
+                    "<path d='M45.5 66 L45.5 46 M61.5 62 L61.5 42' stroke='{f}' stroke-width='2.8' stroke-linecap='round'/>\
+                     <path d='M44 47 L63 43 L63 48 L44 52 Z' fill='{f}'/>\
+                     <ellipse cx='42' cy='66' rx='4.2' ry='3.2' fill='{f}'/>\
+                     <ellipse cx='58' cy='62' rx='4.2' ry='3.2' fill='{f}'/>"
+                )
+            }
+        }
+        SpecialFolder::Videos => {
+            let sw = if is_small { "4.4" } else { "2.8" };
+            format!(
+                "<rect x='33' y='45' width='34' height='24' rx='3.5' fill='none' stroke='{f}' stroke-width='{sw}'/>\
+                 <path d='M47 51 L47 63 L57 57 Z' fill='{f}'/>"
+            )
+        }
+        SpecialFolder::Favorites => {
+            let sw = if is_small { "1.5" } else { "0" };
+            format!(
+                "<path d='M50 43 L53.8 52.8 L63.3 53.7 L56.1 60.1 L58.2 69.5 L50 64.7 L41.8 69.5 L43.9 60.1 L36.7 53.7 L46.2 52.8 Z' fill='{f}' stroke='{f}' stroke-width='{sw}' stroke-linejoin='round'/>"
+            )
+        }
+        SpecialFolder::SavedGames => {
+            let sw = if is_small { "4.2" } else { "2.8" };
+            let bsw = if is_small { "3.6" } else { "2.4" };
+            let br = if is_small { "2.4" } else { "1.8" };
+            format!(
+                "<path d='M36 50 C33 50 31 53 31 57 C31 64 35 73 39 73 C42 73 44 68 46 68 L54 68 C56 68 58 73 61 73 C65 73 69 64 69 57 C69 53 67 50 64 50 Z' fill='none' stroke='{f}' stroke-width='{sw}' stroke-linejoin='round'/>\
+                 <path d='M38 59 L44 59 M41 56 L41 62' stroke='{f}' stroke-width='{bsw}' stroke-linecap='round'/>\
+                 <circle cx='59' cy='57' r='{br}' fill='{f}'/><circle cx='63' cy='61' r='{br}' fill='{f}'/>"
+            )
+        }
+        SpecialFolder::Links => {
+            let sw = if is_small { "4.6" } else { "3.0" };
+            format!(
+                "<rect x='34' y='52' width='18' height='10' rx='5' transform='rotate(-30 43 57)' fill='none' stroke='{f}' stroke-width='{sw}'/>\
+                 <rect x='48' y='52' width='18' height='10' rx='5' transform='rotate(-30 57 57)' fill='none' stroke='{f}' stroke-width='{sw}'/>"
+            )
+        }
+        SpecialFolder::Contacts => {
+            let sw = if is_small { "4.5" } else { "2.8" };
+            format!(
+                "<circle cx='50' cy='49' r='6' fill='none' stroke='{f}' stroke-width='{sw}'/>\
+                 <path d='M37 72 C37 62 43 59 50 59 C57 59 63 62 63 72' fill='none' stroke='{f}' stroke-width='{sw}' stroke-linecap='round'/>"
+            )
+        }
+        SpecialFolder::Searches => {
+            let (csw, hsw) = if is_small {
+                ("4.8", "6.0")
+            } else {
+                ("3.2", "4.5")
+            };
+            format!(
+                "<circle cx='46' cy='53' r='10' fill='none' stroke='{f}' stroke-width='{csw}'/>\
+                 <path d='M54 61 L65 72' stroke='{f}' stroke-width='{hsw}' stroke-linecap='round'/>"
+            )
+        }
+        SpecialFolder::Objects3D => {
+            let sw = if is_small { "4.2" } else { "2.6" };
+            format!(
+                "<path d='M50 43 L65 50 L50 57 L35 50 Z' fill='none' stroke='{f}' stroke-width='{sw}' stroke-linejoin='round'/>\
+                 <path d='M35 50 L35 67 L50 74 L50 57 Z' fill='none' stroke='{f}' stroke-width='{sw}' stroke-linejoin='round'/>\
+                 <path d='M65 50 L65 67 L50 74 L50 57 Z' fill='none' stroke='{f}' stroke-width='{sw}' stroke-linejoin='round'/>"
+            )
+        }
+        SpecialFolder::OneDrive => {
+            if is_small {
+                format!(
+                    "<path d='M36 68 C30 68 28 62 31 57 C31 49 39 46 45 49 C48 44 58 44 61 49 C67 48 71 54 69 60 C71 63 70 68 64 68 Z' fill='{f}'/>"
+                )
+            } else {
+                format!(
+                    "<path d='M36 68 C30 68 28 62 31 57 C31 49 39 46 45 49 C48 44 58 44 61 49 C67 48 71 54 69 60 C71 63 70 68 64 68 Z' fill='none' stroke='{f}' stroke-width='3.0' stroke-linejoin='round'/>"
+                )
+            }
+        }
+        SpecialFolder::ProgramFiles => {
+            let sw = if is_small { "4.2" } else { "2.8" };
+            format!(
+                "<circle cx='50' cy='58' r='5.5' fill='none' stroke='{f}' stroke-width='{sw}'/>\
+                 <circle cx='50' cy='58' r='11' fill='none' stroke='{f}' stroke-width='{sw}' stroke-dasharray='4.6 4.1'/>"
+            )
+        }
+        SpecialFolder::Users => {
+            let sw = if is_small { "4.2" } else { "2.6" };
+            format!(
+                "<circle cx='46' cy='51' r='5' fill='none' stroke='{f}' stroke-width='{sw}'/>\
+                 <path d='M36 71 C36 63 41 60 46 60 C51 60 56 63 56 71' fill='none' stroke='{f}' stroke-width='{sw}' stroke-linecap='round'/>\
+                 <circle cx='58' cy='48' r='4' fill='none' stroke='{f}' stroke-width='{sw}' opacity='0.75'/>\
+                 <path d='M56 60 C59 58 63 58 65 60 C68 63 68 66 68 70' fill='none' stroke='{f}' stroke-width='{sw}' stroke-linecap='round' opacity='0.75'/>"
+            )
+        }
+        SpecialFolder::RecycleBin => {
+            let sw = if is_small { "4.2" } else { "2.6" };
+            format!(
+                "<rect x='37' y='46' width='26' height='3.2' rx='1.6' fill='{f}'/>\
+                 <path d='M46 46 L46 43 L54 43 L54 46' stroke='{f}' stroke-width='{sw}' fill='none' stroke-linecap='round'/>\
+                 <path d='M39 51 L41 72 C41 74 43 75 45 75 L55 75 C57 75 59 74 59 72 L61 51 Z' fill='none' stroke='{f}' stroke-width='{sw}' stroke-linejoin='round'/>\
+                 <line x1='46' y1='56' x2='46' y2='70' stroke='{f}' stroke-width='{sw}' stroke-linecap='round'/>\
+                 <line x1='54' y1='56' x2='54' y2='70' stroke='{f}' stroke-width='{sw}' stroke-linecap='round'/>"
+            )
+        }
+    }
+}
+
+/// Generates the complete emblem SVG fragment, with optional macOS emboss highlight.
+fn emblem_path_data(
+    kind: SpecialFolder,
+    is_small: bool,
+    fg: &str,
+    emboss_hl: Option<&str>,
+) -> String {
+    let fg_art = raw_emblem(kind, is_small, fg);
+    if let Some(hl) = emboss_hl {
+        let hl_art = raw_emblem(kind, is_small, hl);
+        format!("<g transform='translate(0, 0.9)' opacity='0.75'>{hl_art}</g><g>{fg_art}</g>")
+    } else {
+        format!("<g>{fg_art}</g>")
+    }
+}
+
+/// Full 100x100 SVG for a special folder in the requested pack and size mode.
+pub fn special_folder_svg_sized(pack: IconPack, kind: SpecialFolder, is_small: bool) -> String {
+    let (st, fg, emboss_hl) = special_folder_styling(pack, kind);
+    let head =
+        "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'>\n";
+    let shapes = folder_shapes(&st);
+    let gloss = if st.gloss {
+        gloss_overlay(36.0, 64.0)
+    } else {
+        String::new()
+    };
+    let emblem = emblem_path_data(kind, is_small, fg, emboss_hl);
+    format!("{head}{shapes}{gloss}{emblem}</svg>")
+}
+
+/// Full 100x100 SVG for a special folder in the requested pack (default size).
+pub fn special_folder_svg(pack: IconPack, kind: SpecialFolder) -> String {
+    special_folder_svg_sized(pack, kind, false)
+}
 
 /// "paper stack" emblem inside special folders (documents/documents style)
 fn emblem_for(glyph: IconGlyph, fg: &str, fg_soft: &str) -> Option<String> {
@@ -830,8 +1177,11 @@ fn page_emblem(glyph: IconGlyph, st: &PackStyle, accent: &str) -> Option<String>
     })
 }
 
-/// Full 100×100 SVG for a glyph in the requested pack
+/// Full 100x100 SVG for a glyph in the requested pack
 pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String {
+    if let Some(sf) = glyph.special_folder() {
+        return special_folder_svg(pack, sf);
+    }
     let st = pack.style();
     let accent = format!(
         "#{:02X}{:02X}{:02X}",
@@ -840,13 +1190,35 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
     let head =
         "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'>\n";
     match glyph {
-        // ── Folders ──
-        IconGlyph::Folder | IconGlyph::FolderDesktop | IconGlyph::FolderDownloads
-        | IconGlyph::FolderDocuments | IconGlyph::FolderPictures | IconGlyph::FolderVideos
-        | IconGlyph::FolderMusic | IconGlyph::FolderRepo | IconGlyph::FolderCode => {
+        IconGlyph::FolderSpecial(_)
+        | IconGlyph::FolderDesktop
+        | IconGlyph::FolderDownloads
+        | IconGlyph::FolderDocuments
+        | IconGlyph::FolderPictures
+        | IconGlyph::FolderVideos
+        | IconGlyph::FolderMusic
+        | IconGlyph::FolderHome
+        | IconGlyph::FolderOneDrive
+        | IconGlyph::FolderRecycleBin
+        | IconGlyph::FolderFavorites
+        | IconGlyph::FolderSavedGames
+        | IconGlyph::FolderLinks
+        | IconGlyph::FolderContacts
+        | IconGlyph::FolderSearches
+        | IconGlyph::FolderObjects3D
+        | IconGlyph::FolderProgramFiles
+        | IconGlyph::FolderUsers => {
+            if let Some(sf) = glyph.special_folder() {
+                special_folder_svg(pack, sf)
+            } else {
+                special_folder_svg(pack, SpecialFolder::Home)
+            }
+        }
+
+        // Folders
+        IconGlyph::Folder | IconGlyph::FolderRepo | IconGlyph::FolderCode => {
             let shapes = folder_shapes(&st);
-            // Neutral folder gets a subtle paper peek; special folders get a
-            // white emblem in the accent's contrast channel
+            // Neutral folder gets a subtle paper peek; repo/code get their emblem
             let emblem_final = if glyph == IconGlyph::Folder {
                 "<rect x='30' y='44' width='34' height='2.4' rx='1.2' fill='#FFFFFF' opacity='0.32'/>".to_string()
             } else {
@@ -1247,6 +1619,56 @@ type CacheKey = (IconPack, IconGlyph, u32, [u8; 3]);
 static ICON_CACHE: std::sync::LazyLock<Mutex<HashMap<CacheKey, Option<TextureHandle>>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
+type SpecialFolderCacheKey = (IconPack, SpecialFolder, u32);
+static SPECIAL_FOLDER_CACHE: std::sync::LazyLock<
+    Mutex<HashMap<SpecialFolderCacheKey, Option<TextureHandle>>>,
+> = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Renders a special folder at `css_px` logical size and caches the texture by `(pack, kind, size)`.
+pub fn special_folder_texture(
+    ctx: &eframe::egui::Context,
+    pack: IconPack,
+    kind: SpecialFolder,
+    css_px: f32,
+) -> Option<TextureHandle> {
+    let ppp = ctx.pixels_per_point();
+    let phys = ((css_px * ppp).round() as u32).clamp(12, 512);
+    let key = (pack, kind, phys);
+
+    if let Ok(cache) = SPECIAL_FOLDER_CACHE.lock() {
+        if let Some(hit) = cache.get(&key) {
+            return hit.clone();
+        }
+    }
+
+    let is_small = css_px <= 20.0;
+    let svg = special_folder_svg_sized(pack, kind, is_small);
+    let tex = rasterize(ctx, &svg, phys, pack).ok();
+
+    if let Ok(mut cache) = SPECIAL_FOLDER_CACHE.lock() {
+        cache.insert(key, tex.clone());
+        if cache.len() > 4096 {
+            cache.clear();
+        }
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(1));
+    tex
+}
+
+/// Convenience painter for special folders.
+pub fn paint_special_folder(ui: &Ui, pack: IconPack, kind: SpecialFolder, rect: Rect) {
+    let size = rect.width().min(rect.height());
+    if size < 4.0 {
+        return;
+    }
+    let Some(tex) = special_folder_texture(ui.ctx(), pack, kind, size) else {
+        return;
+    };
+    let sq = snapped_icon_quad(ui.ctx(), rect, size);
+    let uv = Rect::from_min_max(eframe::egui::pos2(0.0, 0.0), eframe::egui::pos2(1.0, 1.0));
+    ui.painter().image(tex.id(), sq, uv, Color32::WHITE);
+}
+
 /// Renders the glyph at `css_px` logical size (physical px computed internally)
 /// and caches the result. Returns None while the rasterizer is busy (rare).
 pub fn icon_texture(
@@ -1256,6 +1678,9 @@ pub fn icon_texture(
     css_px: f32,
     accent_rgb: [u8; 3],
 ) -> Option<TextureHandle> {
+    if let Some(kind) = glyph.special_folder() {
+        return special_folder_texture(ctx, pack, kind, css_px);
+    }
     let ppp = ctx.pixels_per_point();
     let phys = ((css_px * ppp).round() as u32).clamp(12, 512);
     let key = (pack, glyph, phys, accent_rgb);
