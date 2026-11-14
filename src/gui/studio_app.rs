@@ -810,6 +810,35 @@ impl eframe::App for MossambiApp {
         // explorer's defaults overwrote whatever Preferences saved (icon
         // pack, zoom, checkbox mode, menu style, all animation settings).
         self.pull_explorer_prefs();
+        // OS integrations follow their Preferences toggles (both were only
+        // stored before). Applied on change, never at startup, and off the
+        // UI thread because they shell out to reg.exe.
+        for (key, on, apply) in [
+            (
+                "mossambi_applied_autostart",
+                self.config.launch_at_login,
+                crate::core::MossambiConfig::set_autostart as fn(bool) -> anyhow::Result<()>,
+            ),
+            (
+                "mossambi_applied_shell_menu",
+                self.config.shell_context_menu,
+                crate::core::MossambiConfig::set_shell_context_menu,
+            ),
+        ] {
+            let id = egui::Id::new(key);
+            match ctx.data(|d| d.get_temp::<bool>(id)) {
+                None => ctx.data_mut(|d| d.insert_temp(id, on)),
+                Some(prev) if prev != on => {
+                    ctx.data_mut(|d| d.insert_temp(id, on));
+                    std::thread::spawn(move || {
+                        if let Err(e) = apply(on) {
+                            log::warn!("{key}: {e}");
+                        }
+                    });
+                }
+                _ => {}
+            }
+        }
         // Always-on-top was only honoured by the CLI.
         let aot_id = egui::Id::new("mossambi_applied_always_on_top");
         let aot = self.config.always_on_top;

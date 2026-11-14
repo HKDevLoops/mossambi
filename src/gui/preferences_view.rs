@@ -695,54 +695,27 @@ impl PreferencesView {
     // ---- category renderers ----
 
     fn render_general(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
+        // Only rows that do something. The static "Language" and "When I
+        // close the window" labels and the no-op "Remove from the main
+        // menu" button are gone.
         card(ui, palette, |ui| {
-            ui.label(
-                egui::RichText::new("Language")
-                    .size(design::type_scale::BODY)
-                    .color(palette.text_primary),
-            );
-            ui.label(
-                egui::RichText::new("System default")
-                    .size(design::type_scale::BODY_SM)
-                    .color(palette.text_muted),
-            );
-            ui.add_space(design::space::SM);
-
             toggle_row(
                 ui,
                 palette,
                 "Start Mossambi when I sign in",
-                "",
+                "Runs the background helper (tray, radial widget hotkeys) at sign-in.",
                 &mut self.cfg.launch_at_login,
                 dirty,
             );
-
             ui.add_space(design::space::XS);
-            ui.label(
-                egui::RichText::new("When I close the window")
-                    .size(design::type_scale::BODY)
-                    .color(palette.text_primary),
-            );
-            ui.label(
-                egui::RichText::new("Ask every time")
-                    .size(design::type_scale::BODY_SM)
-                    .color(palette.text_muted),
-            );
-            ui.add_space(design::space::SM);
-
-            let mut context_menu = true;
             toggle_row(
                 ui,
                 palette,
                 "Show \"Convert with Mossambi\" in the Explorer context menu",
-                "\"Convert with Mossambi\" is registered in the native shell menu.",
-                &mut context_menu,
+                "Adds the entry for files in Windows Explorer (Show more options on Windows 11).",
+                &mut self.cfg.shell_context_menu,
                 dirty,
             );
-
-            if ui.button("Remove from the main menu").clicked() {
-                // Shell hook update
-            }
         });
 
         ui.add_space(design::space::MD);

@@ -1832,6 +1832,7 @@ impl ExplorerView {
             || self.properties_item.is_some()
             || is_search_focused
             || text_field_focused;
+        let finder_keybindings = crate::core::MossambiConfig::load().keybinding_profile == 0;
         // Focus changes must happen outside `ui.input`: calling
         // `ui.memory_mut` while the input lock is held deadlocks egui.
         let mut surrender_search_focus = false;
@@ -1873,7 +1874,9 @@ impl ExplorerView {
                             && !i.modifiers.command
                             && !i.modifiers.ctrl
                             && !i.modifiers.alt)
-                            || i.key_pressed(egui::Key::ArrowDown))
+                            || (i.key_pressed(egui::Key::ArrowDown)
+                                && !i.modifiers.ctrl
+                                && !i.modifiers.command))
                     {
                         self.focused_row = (self.focused_row + 1).min(total_nav_items - 1);
                         if let Some(item) = nav_entries.get(self.focused_row) {
@@ -1917,14 +1920,26 @@ impl ExplorerView {
                         }
                     }
 
-                    // Vim `l` / Right / Enter / Emacs `Ctrl+F`: Enter Directory or Open File (Finder parity)
+                    // Keybinding profile (Preferences): Finder = Enter renames,
+                    // Ctrl+Down / Ctrl+O opens; Windows Explorer = Enter opens.
+                    // (Ctrl+F no longer opens the item: it is Find.)
+                    let finder_keys = finder_keybindings;
+                    let enter = i.key_pressed(egui::Key::Enter) && !i.modifiers.alt;
+                    if finder_keys && enter {
+                        if let Some(item) = nav_entries.get(self.focused_row) {
+                            if let Some(name) = item.path.file_name() {
+                                self.renaming_path =
+                                    Some((item.path.clone(), name.to_string_lossy().to_string()));
+                            }
+                        }
+                    }
                     if (i.key_pressed(egui::Key::L)
                         && !i.modifiers.command
                         && !i.modifiers.ctrl
                         && !i.modifiers.alt)
-                        || i.key_pressed(egui::Key::Enter)
+                        || (!finder_keys && enter)
                         || ((i.modifiers.ctrl || i.modifiers.command)
-                            && i.key_pressed(egui::Key::F))
+                            && (i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::O)))
                     {
                         if let Some(item) = nav_entries.get(self.focused_row) {
                             if item.is_dir {

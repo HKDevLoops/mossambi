@@ -639,6 +639,9 @@ pub struct MossambiConfig {
     pub glass_effect: GlassEffect,
     #[serde(default)]
     pub appearance: Appearance,
+    /// "Convert with Mossambi" entry in the Windows Explorer file menu.
+    #[serde(default)]
+    pub shell_context_menu: bool,
     #[serde(default = "default_window_opacity")]
     pub window_opacity: f32, // 0.20 to 1.00 (translucency)
     pub citrus_shade: String, // "rawpeel", "sweetzest", "ripepulp", "citrusgold", "deepforest", "tangerine"
@@ -914,6 +917,7 @@ impl Default for MossambiConfig {
             theme_mode: ThemeMode::Rangalipi,
             glass_effect: GlassEffect::FrostedGlass,
             appearance: Appearance::default(),
+            shell_context_menu: false,
             window_opacity: 0.92,
             citrus_shade: "classicblue".to_string(),
             output_mode: OutputMode::Sibling,
@@ -1123,6 +1127,36 @@ impl MossambiConfig {
             let stamp = Self::file_stamp(&path);
             *guard = Some((path, stamp, self.clone()));
         }
+        Ok(())
+    }
+
+    /// Adds or removes the per-user "Convert with Mossambi" verb for all
+    /// files in Windows Explorer (HKCU only, no admin rights needed).
+    #[cfg(target_os = "windows")]
+    pub fn set_shell_context_menu(enabled: bool) -> anyhow::Result<()> {
+        use std::process::Command;
+        let key = "HKCU\\Software\\Classes\\*\\shell\\Mossambi";
+        if enabled {
+            let exe = std::env::current_exe()?;
+            let exe = exe.to_string_lossy();
+            let cmd = format!("\"{exe}\" widget \"%1\"");
+            Command::new("reg")
+                .args(["add", key, "/ve", "/d", "Convert with Mossambi", "/f"])
+                .output()?;
+            Command::new("reg")
+                .args(["add", key, "/v", "Icon", "/d", &exe, "/f"])
+                .output()?;
+            Command::new("reg")
+                .args(["add", &format!("{key}\\command"), "/ve", "/d", &cmd, "/f"])
+                .output()?;
+        } else {
+            let _ = Command::new("reg").args(["delete", key, "/f"]).output()?;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub fn set_shell_context_menu(_enabled: bool) -> anyhow::Result<()> {
         Ok(())
     }
 
