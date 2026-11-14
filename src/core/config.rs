@@ -397,6 +397,37 @@ impl RowDensity {
     }
 }
 
+/// User preference for handling dropped files in the explorer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DropActionPreference {
+    #[default]
+    SmartDefault,
+    AlwaysAsk,
+    AlwaysCopy,
+    AlwaysMove,
+}
+
+impl DropActionPreference {
+    pub fn all() -> [DropActionPreference; 4] {
+        [
+            Self::SmartDefault,
+            Self::AlwaysAsk,
+            Self::AlwaysCopy,
+            Self::AlwaysMove,
+        ]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::SmartDefault => "Smart default",
+            Self::AlwaysAsk => "Always ask",
+            Self::AlwaysCopy => "Always copy",
+            Self::AlwaysMove => "Always move",
+        }
+    }
+}
+
 /// Visual style applied to the sidebar panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -931,6 +962,9 @@ pub struct MossambiConfig {
     /// Explorer style: macOS Finder vs Windows Explorer.
     #[serde(default)]
     pub explorer_style: ExplorerStyle,
+    /// Action to take when dropping files: Smart default, Always ask, Always copy, Always move.
+    #[serde(default)]
+    pub drop_action_pref: DropActionPreference,
     /// Keybinding profile: 0 = macOS Finder, 1 = Windows Explorer
     #[serde(default = "default_keybinding_profile")]
     pub keybinding_profile: u8,
@@ -1164,6 +1198,7 @@ impl Default for MossambiConfig {
             row_density: RowDensity::default(),
             corner_style: CornerStyle::default(),
             explorer_style: ExplorerStyle::default(),
+            drop_action_pref: DropActionPreference::default(),
             keybinding_profile: default_keybinding_profile(),
             conv_image_quality: default_conv_image_quality(),
             conv_image_lossless: false,
@@ -1558,5 +1593,28 @@ mod tests {
         assert_eq!(CornerStyle::Subtle.radius_sm(), 4.0);
         assert_eq!(CornerStyle::Rounded.radius_sm(), 6.0);
         assert_eq!(CornerStyle::Spacious.radius_sm(), 8.0);
+    }
+
+    #[test]
+    fn test_drop_action_preference_serde_and_default() {
+        assert_eq!(
+            DropActionPreference::default(),
+            DropActionPreference::SmartDefault
+        );
+        assert_eq!(DropActionPreference::all().len(), 4);
+
+        // Deserializing without drop_action_pref uses default
+        let mut val = serde_json::to_value(MossambiConfig::default()).unwrap();
+        if let Some(obj) = val.as_object_mut() {
+            obj.remove("drop_action_pref");
+        }
+        let parsed: MossambiConfig = serde_json::from_value(val).unwrap();
+        assert_eq!(parsed.drop_action_pref, DropActionPreference::SmartDefault);
+
+        // Explicit round-trip
+        let serialized = serde_json::to_string(&DropActionPreference::AlwaysAsk).unwrap();
+        assert_eq!(serialized, "\"always_ask\"");
+        let deserialized: DropActionPreference = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, DropActionPreference::AlwaysAsk);
     }
 }

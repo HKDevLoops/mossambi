@@ -16,6 +16,7 @@ use crate::core::icon_packs::IconGlyph;
 use crate::core::{FileCategory, UniversalRegistry};
 use crate::gui::command_palette::{CommandPalette, PaletteAction};
 use crate::gui::design::{layout, radius, type_scale};
+use crate::gui::explorer_view::ExplorerView;
 use crate::gui::finder_chrome::{render_sidebar_row, render_sidebar_zone_header, SidebarRowSpec};
 use crate::gui::macos_theme::*;
 use crate::gui::quick_settings::QuickSettingsState;
@@ -47,6 +48,38 @@ fn studio_tab_label(tab: StudioTab) -> (&'static str, IconGlyph) {
         StudioTab::Preferences => ("Preferences", IconGlyph::Gear),
         StudioTab::FileExplorer => ("File Explorer", IconGlyph::Folder),
     }
+}
+
+fn dispatch_sidebar_drop(
+    explorer: &mut ExplorerView,
+    ui: &egui::Ui,
+    dest: &Path,
+    payload: crate::gui::explorer_view::FileDragPayload,
+) {
+    let (ctrl, shift, alt) = ui.input(|i| {
+        (
+            i.modifiers.ctrl || i.modifiers.command,
+            i.modifiers.shift,
+            i.modifiers.alt,
+        )
+    });
+    let released_right = ui.input(|i| i.pointer.button_released(egui::PointerButton::Secondary));
+    let button =
+        if released_right || payload.button == crate::core::drop_action::DropMouseButton::Right {
+            crate::core::drop_action::DropMouseButton::Right
+        } else {
+            crate::core::drop_action::DropMouseButton::Left
+        };
+    let drop_pos = ui
+        .input(|i| i.pointer.hover_pos())
+        .unwrap_or(egui::Pos2::new(100.0, 100.0));
+    explorer.handle_drop(crate::gui::explorer_view::PendingDrop {
+        dest_dir: dest.to_path_buf(),
+        sources: payload.paths,
+        button,
+        modifiers: crate::core::drop_action::DropModifiers { ctrl, shift, alt },
+        position: drop_pos,
+    });
 }
 
 /// True when `events` contains a key press matching a stored display binding
@@ -1174,6 +1207,14 @@ impl StudioView {
                                     show_pin: false,
                                 };
                                 let row_click = render_sidebar_row(ui, &palette, &spec);
+                                if let Some(payload) = row_click.dropped {
+                                    dispatch_sidebar_drop(
+                                        &mut self.explorer_view,
+                                        ui,
+                                        &path,
+                                        payload,
+                                    );
+                                }
                                 if row_click.row {
                                     if path.to_string_lossy().contains("$Recycle.Bin") {
                                         self.explorer_view.show_hidden_files = true;
@@ -1206,6 +1247,14 @@ impl StudioView {
                                         show_pin: true,
                                     };
                                     let row_click = render_sidebar_row(ui, &palette, &spec);
+                                    if let Some(payload) = row_click.dropped {
+                                        dispatch_sidebar_drop(
+                                            &mut self.explorer_view,
+                                            ui,
+                                            &path,
+                                            payload,
+                                        );
+                                    }
                                     if row_click.pin {
                                         // Real unpin action: remove + persist.
                                         cfg.pinned_custom.retain(|p| p != &raw);
@@ -1265,6 +1314,14 @@ impl StudioView {
                                     show_pin: false,
                                 };
                                 let drive_click = render_sidebar_row(ui, &palette, &spec);
+                                if let Some(payload) = drive_click.dropped {
+                                    dispatch_sidebar_drop(
+                                        &mut self.explorer_view,
+                                        ui,
+                                        &drive.path,
+                                        payload,
+                                    );
+                                }
                                 if drive_click.row {
                                     self.current_tab = StudioTab::FileExplorer;
                                     self.explorer_view.navigate_to(drive.path.clone());
@@ -1286,6 +1343,14 @@ impl StudioView {
                                         show_pin: false,
                                     };
                                     let cloud_click = render_sidebar_row(ui, &palette, &spec);
+                                    if let Some(payload) = cloud_click.dropped {
+                                        dispatch_sidebar_drop(
+                                            &mut self.explorer_view,
+                                            ui,
+                                            &od,
+                                            payload,
+                                        );
+                                    }
                                     if cloud_click.row {
                                         self.current_tab = StudioTab::FileExplorer;
                                         self.explorer_view.navigate_to(od);

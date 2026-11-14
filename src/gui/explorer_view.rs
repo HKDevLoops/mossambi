@@ -760,6 +760,9 @@ pub struct ExplorerView {
     // Finder-style long-hover preview (files & folders)
     hover_preview: Option<HoverPreviewState>,
 
+    // Drop action menu (Windows/Finder style drag-and-drop popup)
+    pub drop_menu: Option<DropMenuState>,
+
     // Lazy image thumbnail cache used by Grid tiles & hover previews
     thumb_cache: std::collections::HashMap<PathBuf, CachedThumb>,
     thumb_decode_budget: (u32, Instant),
@@ -1101,6 +1104,7 @@ impl Default for ExplorerView {
             secondary_dir_watcher: crate::core::DirWatcher::new(),
             row_density: cfg.row_density,
             calculate_checksums: cfg.calculate_checksums,
+            drop_menu: None,
         };
 
         view.navigate_to(current_dir);
@@ -3400,7 +3404,7 @@ impl ExplorerView {
         if segments.is_empty() {
             return;
         }
-        let mut breadcrumb_drop: Option<(PathBuf, Vec<PathBuf>, bool)> = None;
+        let mut breadcrumb_drop: Option<PendingDrop> = None;
         let mut breadcrumb_nav: Option<PathBuf> = None;
         let current_dir = self.current_dir.clone();
 
@@ -3547,9 +3551,38 @@ impl ExplorerView {
                                 );
                             }
                             if let Some(payload) = resp.dnd_release_payload::<FileDragPayload>() {
-                                let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-                                breadcrumb_drop =
-                                    Some((seg.target_path.clone(), payload.paths.to_vec(), copy));
+                                let (ctrl, shift, alt) = ui.input(|i| {
+                                    (
+                                        i.modifiers.ctrl || i.modifiers.command,
+                                        i.modifiers.shift,
+                                        i.modifiers.alt,
+                                    )
+                                });
+                                let released_right = ui.input(|i| {
+                                    i.pointer.button_released(egui::PointerButton::Secondary)
+                                });
+                                let button = if released_right
+                                    || payload.button
+                                        == crate::core::drop_action::DropMouseButton::Right
+                                {
+                                    crate::core::drop_action::DropMouseButton::Right
+                                } else {
+                                    crate::core::drop_action::DropMouseButton::Left
+                                };
+                                let drop_pos = ui
+                                    .input(|i| i.pointer.hover_pos())
+                                    .unwrap_or(resp.rect.center());
+                                breadcrumb_drop = Some(PendingDrop {
+                                    dest_dir: seg.target_path.clone(),
+                                    sources: payload.paths.to_vec(),
+                                    button,
+                                    modifiers: crate::core::drop_action::DropModifiers {
+                                        ctrl,
+                                        shift,
+                                        alt,
+                                    },
+                                    position: drop_pos,
+                                });
                             }
                         }
                     }
@@ -3563,8 +3596,8 @@ impl ExplorerView {
                 }
             });
 
-        if let Some((dest_dir, paths, copy)) = breadcrumb_drop {
-            self.perform_drop(dest_dir, &paths, copy);
+        if let Some(pending) = breadcrumb_drop {
+            self.handle_drop(pending);
         }
         if let Some(target) = breadcrumb_nav {
             self.navigate_to(target);
@@ -3990,33 +4023,59 @@ impl ExplorerView {
             ),
         }
 
-        // Drag ghost badge hovering at the pointer: ">" for move, "+" for
-        // copy (Explorer/Finder convention while Ctrl/Cmd is held).
+        // Drag ghost badge hovering at the pointer: live text "Move" / "Copy" / "Link"
+        // based on active modifiers and user preference.
         if egui::DragAndDrop::has_payload_of_type::<FileDragPayload>(ui.ctx()) {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(16));
-            let copying = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
+            let (ctrl, shift, alt) = ui.input(|i| {
+                (
+                    i.modifiers.ctrl || i.modifiers.command,
+                    i.modifiers.shift,
+                    i.modifiers.alt,
+                )
+            });
+            let cfg = crate::core::MossambiConfig::load();
+            let badge_text = if alt || (ctrl && shift) {
+                "Link"
+            } else if shift {
+                "Move"
+            } else if ctrl {
+                "Copy"
+            } else {
+                match cfg.drop_action_pref {
+                    crate::core::DropActionPreference::AlwaysCopy => "Copy",
+                    crate::core::DropActionPreference::AlwaysMove => "Move",
+                    crate::core::DropActionPreference::AlwaysAsk => "Ask",
+                    crate::core::DropActionPreference::SmartDefault => "Move",
+                }
+            };
             if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
                 let bp = ui.painter().clone().with_layer_id(egui::LayerId::new(
                     egui::Order::Tooltip,
                     egui::Id::new("mossambi_dnd_badge"),
                 ));
-                let r = Rect::from_center_size(pos + Vec2::new(16.0, 16.0), Vec2::splat(20.0));
-                bp.rect_filled(r, Rounding::same(10.0), palette.card_bg);
-                bp.rect_stroke(
-                    r,
-                    Rounding::same(10.0),
-                    Stroke::new(1.0_f32, palette.accent),
-                );
-                bp.text(
-                    r.center(),
-                    egui::Align2::CENTER_CENTER,
-                    if copying { "+" } else { ">" },
-                    egui::FontId::proportional(17.0),
+                let font = egui::FontId::proportional(13.0);
+                let galley = ui.painter().layout_no_wrap(
+                    badge_text.to_string(),
+                    font.clone(),
                     palette.text_primary,
                 );
+                let pill_w = (galley.size().x + 16.0).max(28.0);
+                let pill_h = 22.0;
+                let r = Rect::from_min_size(pos + Vec2::new(14.0, 14.0), Vec2::new(pill_w, pill_h));
+                bp.rect_filled(r, Rounding::same(6.0), palette.card_bg);
+                bp.rect_stroke(r, Rounding::same(6.0), Stroke::new(1.0_f32, palette.accent));
+                let text_pos = Pos2::new(
+                    r.center().x - galley.size().x * 0.5,
+                    r.center().y - galley.size().y * 0.5,
+                );
+                bp.galley(text_pos, galley, palette.text_primary);
             }
         }
+
+        // Drop Action Menu popup
+        self.render_drop_menu(ui, palette, on_transcode_target);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4957,7 +5016,9 @@ impl ExplorerView {
                     // Drag source (Explorer rule): dragging a selected item
                     // drags the whole selection; an unselected item is
                     // selected first, then dragged alone.
-                    if row_resp.drag_started_by(egui::PointerButton::Primary) {
+                    let primary_drag = row_resp.drag_started_by(egui::PointerButton::Primary);
+                    let secondary_drag = row_resp.drag_started_by(egui::PointerButton::Secondary);
+                    if primary_drag || secondary_drag {
                         if !is_selected {
                             self.selected_paths.clear();
                             self.selected_paths.insert(item.path.clone());
@@ -4965,7 +5026,12 @@ impl ExplorerView {
                         }
                         let paths: Vec<PathBuf> =
                             self.selected_paths.iter().cloned().collect::<Vec<_>>();
-                        egui::DragAndDrop::set_payload(ui.ctx(), FileDragPayload { paths });
+                        let button = if secondary_drag {
+                            crate::core::drop_action::DropMouseButton::Right
+                        } else {
+                            crate::core::drop_action::DropMouseButton::Left
+                        };
+                        egui::DragAndDrop::set_payload(ui.ctx(), FileDragPayload { paths, button });
                     }
 
                     // Folder rows double as drop targets (move into dir,
@@ -5002,8 +5068,38 @@ impl ExplorerView {
                             );
                         }
                         if let Some(payload) = row_resp.dnd_release_payload::<FileDragPayload>() {
-                            let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-                            drop_ops.push((item.path.clone(), payload.paths.to_vec(), copy));
+                            let (ctrl, shift, alt) = ui.input(|i| {
+                                (
+                                    i.modifiers.ctrl || i.modifiers.command,
+                                    i.modifiers.shift,
+                                    i.modifiers.alt,
+                                )
+                            });
+                            let released_right = ui.input(|i| {
+                                i.pointer.button_released(egui::PointerButton::Secondary)
+                            });
+                            let button = if released_right
+                                || payload.button
+                                    == crate::core::drop_action::DropMouseButton::Right
+                            {
+                                crate::core::drop_action::DropMouseButton::Right
+                            } else {
+                                crate::core::drop_action::DropMouseButton::Left
+                            };
+                            let drop_pos = ui
+                                .input(|i| i.pointer.hover_pos())
+                                .unwrap_or(row_resp.rect.center());
+                            drop_ops.push(PendingDrop {
+                                dest_dir: item.path.clone(),
+                                sources: payload.paths.to_vec(),
+                                button,
+                                modifiers: crate::core::drop_action::DropModifiers {
+                                    ctrl,
+                                    shift,
+                                    alt,
+                                },
+                                position: drop_pos,
+                            });
                         }
                     }
 
@@ -5046,8 +5142,32 @@ impl ExplorerView {
         // pointer let go over empty space.
         if ui.input(|i| i.pointer.any_released()) {
             if let Some(payload) = egui::DragAndDrop::take_payload::<FileDragPayload>(ui.ctx()) {
-                let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-                drop_ops.push((self.current_dir.clone(), payload.paths.to_vec(), copy));
+                let (ctrl, shift, alt) = ui.input(|i| {
+                    (
+                        i.modifiers.ctrl || i.modifiers.command,
+                        i.modifiers.shift,
+                        i.modifiers.alt,
+                    )
+                });
+                let released_right =
+                    ui.input(|i| i.pointer.button_released(egui::PointerButton::Secondary));
+                let button = if released_right
+                    || payload.button == crate::core::drop_action::DropMouseButton::Right
+                {
+                    crate::core::drop_action::DropMouseButton::Right
+                } else {
+                    crate::core::drop_action::DropMouseButton::Left
+                };
+                let drop_pos = ui
+                    .input(|i| i.pointer.hover_pos())
+                    .unwrap_or_else(|| ui.available_rect_before_wrap().center());
+                drop_ops.push(PendingDrop {
+                    dest_dir: self.current_dir.clone(),
+                    sources: payload.paths.to_vec(),
+                    button,
+                    modifiers: crate::core::drop_action::DropModifiers { ctrl, shift, alt },
+                    position: drop_pos,
+                });
             }
         }
 
@@ -5106,8 +5226,8 @@ impl ExplorerView {
 
         // Commit completed drops (rows push dir targets; empty canvas falls
         // back to the current directory above).
-        for (dest_dir, paths, copy) in drop_ops {
-            self.perform_drop(dest_dir, &paths, copy);
+        for pending in drop_ops {
+            self.handle_drop(pending);
         }
 
         // Apply menu intents (mutations live OUTSIDE the popup closures).
@@ -6031,14 +6151,24 @@ impl ExplorerView {
 
                         // Drag source (Explorer rule: selected set or the
                         // single tile) + folder-tile drop targets.
-                        if resp.drag_started_by(egui::PointerButton::Primary) {
+                        let primary_drag = resp.drag_started_by(egui::PointerButton::Primary);
+                        let secondary_drag = resp.drag_started_by(egui::PointerButton::Secondary);
+                        if primary_drag || secondary_drag {
                             if !is_checked {
                                 self.selected_paths.clear();
                                 self.selected_paths.insert(item.path.clone());
                             }
                             let paths: Vec<PathBuf> =
                                 self.selected_paths.iter().cloned().collect::<Vec<_>>();
-                            egui::DragAndDrop::set_payload(ui.ctx(), FileDragPayload { paths });
+                            let button = if secondary_drag {
+                                crate::core::drop_action::DropMouseButton::Right
+                            } else {
+                                crate::core::drop_action::DropMouseButton::Left
+                            };
+                            egui::DragAndDrop::set_payload(
+                                ui.ctx(),
+                                FileDragPayload { paths, button },
+                            );
                         }
                         if item.is_dir {
                             let drop_hl = drop_highlight_id(&item.path);
@@ -6077,8 +6207,38 @@ impl ExplorerView {
                                 );
                             }
                             if let Some(payload) = resp.dnd_release_payload::<FileDragPayload>() {
-                                let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-                                drop_ops.push((item.path.clone(), payload.paths.to_vec(), copy));
+                                let (ctrl, shift, alt) = ui.input(|i| {
+                                    (
+                                        i.modifiers.ctrl || i.modifiers.command,
+                                        i.modifiers.shift,
+                                        i.modifiers.alt,
+                                    )
+                                });
+                                let released_right = ui.input(|i| {
+                                    i.pointer.button_released(egui::PointerButton::Secondary)
+                                });
+                                let button = if released_right
+                                    || payload.button
+                                        == crate::core::drop_action::DropMouseButton::Right
+                                {
+                                    crate::core::drop_action::DropMouseButton::Right
+                                } else {
+                                    crate::core::drop_action::DropMouseButton::Left
+                                };
+                                let drop_pos = ui
+                                    .input(|i| i.pointer.hover_pos())
+                                    .unwrap_or(resp.rect.center());
+                                drop_ops.push(PendingDrop {
+                                    dest_dir: item.path.clone(),
+                                    sources: payload.paths.to_vec(),
+                                    button,
+                                    modifiers: crate::core::drop_action::DropModifiers {
+                                        ctrl,
+                                        shift,
+                                        alt,
+                                    },
+                                    position: drop_pos,
+                                });
                             }
                         }
 
@@ -6279,8 +6439,32 @@ impl ExplorerView {
         // Drop onto empty canvas targets the current directory.
         if ui.input(|i| i.pointer.any_released()) {
             if let Some(payload) = egui::DragAndDrop::take_payload::<FileDragPayload>(ui.ctx()) {
-                let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-                drop_ops.push((self.current_dir.clone(), payload.paths.to_vec(), copy));
+                let (ctrl, shift, alt) = ui.input(|i| {
+                    (
+                        i.modifiers.ctrl || i.modifiers.command,
+                        i.modifiers.shift,
+                        i.modifiers.alt,
+                    )
+                });
+                let released_right =
+                    ui.input(|i| i.pointer.button_released(egui::PointerButton::Secondary));
+                let button = if released_right
+                    || payload.button == crate::core::drop_action::DropMouseButton::Right
+                {
+                    crate::core::drop_action::DropMouseButton::Right
+                } else {
+                    crate::core::drop_action::DropMouseButton::Left
+                };
+                let drop_pos = ui
+                    .input(|i| i.pointer.hover_pos())
+                    .unwrap_or_else(|| ui.available_rect_before_wrap().center());
+                drop_ops.push(PendingDrop {
+                    dest_dir: self.current_dir.clone(),
+                    sources: payload.paths.to_vec(),
+                    button,
+                    modifiers: crate::core::drop_action::DropModifiers { ctrl, shift, alt },
+                    position: drop_pos,
+                });
             }
         }
 
@@ -6333,8 +6517,8 @@ impl ExplorerView {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(16));
         }
-        for (dest_dir, paths, copy) in drop_ops {
-            self.perform_drop(dest_dir, &paths, copy);
+        for pending in drop_ops {
+            self.handle_drop(pending);
         }
 
         // Apply menu intents (mutations live OUTSIDE the popup closures).
@@ -6512,7 +6696,9 @@ impl ExplorerView {
                                             egui::Sense::click_and_drag(),
                                         );
                                         // Drag source + folder-row drop targets
-                                        if resp.drag_started_by(egui::PointerButton::Primary) {
+                                        let primary_drag = resp.drag_started_by(egui::PointerButton::Primary);
+                                        let secondary_drag = resp.drag_started_by(egui::PointerButton::Secondary);
+                                        if primary_drag || secondary_drag {
                                             if !is_selected {
                                                 self.selected_paths.clear();
                                                 self.selected_paths.insert(item.path.clone());
@@ -6522,9 +6708,14 @@ impl ExplorerView {
                                                 .iter()
                                                 .cloned()
                                                 .collect::<Vec<_>>();
+                                            let button = if secondary_drag {
+                                                crate::core::drop_action::DropMouseButton::Right
+                                            } else {
+                                                crate::core::drop_action::DropMouseButton::Left
+                                            };
                                             egui::DragAndDrop::set_payload(
                                                 ui.ctx(),
-                                                FileDragPayload { paths },
+                                                FileDragPayload { paths, button },
                                             );
                                         }
                                         if item.is_dir {
@@ -6565,14 +6756,38 @@ impl ExplorerView {
                                             if let Some(payload) =
                                                 resp.dnd_release_payload::<FileDragPayload>()
                                             {
-                                                let copy = ui.input(|i| {
-                                                    i.modifiers.ctrl || i.modifiers.command
+                                                let (ctrl, shift, alt) = ui.input(|i| {
+                                                    (
+                                                        i.modifiers.ctrl || i.modifiers.command,
+                                                        i.modifiers.shift,
+                                                        i.modifiers.alt,
+                                                    )
                                                 });
-                                                *column_drop = Some((
-                                                    item.path.clone(),
-                                                    payload.paths.to_vec(),
-                                                    copy,
-                                                ));
+                                                let released_right = ui.input(|i| {
+                                                    i.pointer.button_released(egui::PointerButton::Secondary)
+                                                });
+                                                let button = if released_right
+                                                    || payload.button
+                                                        == crate::core::drop_action::DropMouseButton::Right
+                                                {
+                                                    crate::core::drop_action::DropMouseButton::Right
+                                                } else {
+                                                    crate::core::drop_action::DropMouseButton::Left
+                                                };
+                                                let drop_pos = ui
+                                                    .input(|i| i.pointer.hover_pos())
+                                                    .unwrap_or(resp.rect.center());
+                                                *column_drop = Some(PendingDrop {
+                                                    dest_dir: item.path.clone(),
+                                                    sources: payload.paths.to_vec(),
+                                                    button,
+                                                    modifiers: crate::core::drop_action::DropModifiers {
+                                                        ctrl,
+                                                        shift,
+                                                        alt,
+                                                    },
+                                                    position: drop_pos,
+                                                });
                                             }
                                         }
                                         // Row band: hover/selected/opened chain row
@@ -6990,8 +7205,8 @@ impl ExplorerView {
         if let Some(peek_item) = peek_to_open {
             self.peek_item = Some(peek_item);
         }
-        if let Some((dest_dir, paths, copy)) = column_drop {
-            self.perform_drop(dest_dir, &paths, copy);
+        if let Some(pending) = column_drop {
+            self.handle_drop(pending);
         }
         if let Some(new_dir) = nav_into_dir {
             self.navigate_to(new_dir);
@@ -8628,14 +8843,33 @@ fn log_result<T, E: std::fmt::Display>(what: &str, path: &Path, res: Result<T, E
 /// parity: drag to move, Ctrl-drag to copy). When such a drag leaves the
 /// window bounds, the render loop hands it to the native drag mechanism
 /// (Windows OLE / Linux file clipboard) via `begin_file_drag_out`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FileDragPayload {
     pub paths: Vec<PathBuf>,
+    pub button: crate::core::drop_action::DropMouseButton,
 }
 
-/// One completed drop: (destination dir, sources, copy?) - collected during
-/// frame, applied after the ScrollArea via `perform_drop`.
-type DropOp = (PathBuf, Vec<PathBuf>, bool);
+/// One pending drop: collected during a render frame, then dispatched
+/// to `handle_drop`.
+#[derive(Clone, Debug)]
+pub struct PendingDrop {
+    pub dest_dir: PathBuf,
+    pub sources: Vec<PathBuf>,
+    pub button: crate::core::drop_action::DropMouseButton,
+    pub modifiers: crate::core::drop_action::DropModifiers,
+    pub position: egui::Pos2,
+}
+
+/// Active drop action menu popup state.
+#[derive(Clone, Debug)]
+pub struct DropMenuState {
+    pub position: egui::Pos2,
+    pub sources: Vec<PathBuf>,
+    pub target_dir: PathBuf,
+    pub default_action: crate::core::drop_action::DropActionKind,
+}
+
+type DropOp = PendingDrop;
 
 /// True when `child` is `ancestor` itself or lives underneath it.
 fn same_or_within(child: &Path, ancestor: &Path) -> bool {
@@ -9085,6 +9319,314 @@ impl ExplorerView {
                 .send(FsOperation::Move { sources, dest_dir });
         }
         self.selection_anchor = None;
+    }
+
+    /// Dispatches a drop event using the pure decision engine.
+    pub fn handle_drop(&mut self, pending: PendingDrop) {
+        let same_volume =
+            crate::core::drop_action::paths_on_same_volume(&pending.sources, &pending.dest_dir);
+        let cfg = crate::core::MossambiConfig::load();
+        let decision = crate::core::drop_action::decide_drop_action(
+            &pending.sources,
+            &pending.dest_dir,
+            pending.modifiers,
+            pending.button,
+            same_volume,
+            cfg.drop_action_pref,
+        );
+
+        match decision {
+            crate::core::DropDecision::Immediate(crate::core::DropActionKind::Move) => {
+                self.perform_drop(pending.dest_dir, &pending.sources, false);
+            }
+            crate::core::DropDecision::Immediate(crate::core::DropActionKind::Copy) => {
+                self.perform_drop(pending.dest_dir, &pending.sources, true);
+            }
+            crate::core::DropDecision::Immediate(crate::core::DropActionKind::Link) => {
+                self.perform_link(pending.dest_dir, &pending.sources);
+            }
+            crate::core::DropDecision::ShowMenu { default } => {
+                self.drop_menu = Some(DropMenuState {
+                    position: pending.position,
+                    sources: pending.sources,
+                    target_dir: pending.dest_dir,
+                    default_action: default,
+                });
+            }
+            crate::core::DropDecision::Reject(reason) => {
+                log::debug!("Drop rejected: {}", reason.message());
+                if reason != crate::core::DropRejectReason::SameDirectoryMove {
+                    self.show_status_note(Err(reason.message().to_string()));
+                }
+            }
+        }
+    }
+
+    /// Creates shortcuts (.lnk on Windows, symlinks on Unix) for `sources` in `dest_dir`.
+    pub fn perform_link(&mut self, dest_dir: PathBuf, sources: &[PathBuf]) {
+        let mut count = 0;
+        for src in sources {
+            if crate::gui::context_menu::create_shortcut_in(src, &dest_dir) {
+                count += 1;
+            }
+        }
+        if count > 0 {
+            self.show_status_note(Ok(format!("Created shortcut for {} item(s)", count)));
+            let dir = self.current_dir.clone();
+            self.navigate_to(dir);
+        } else {
+            self.show_status_note(Err("Failed to create shortcut".to_string()));
+        }
+    }
+
+    /// Extracts dropped archives into `dest_dir`.
+    pub fn perform_extract_drop(&mut self, dest_dir: PathBuf, sources: &[PathBuf]) {
+        let mut count = 0;
+        for src in sources {
+            if crate::archive::unpack_archive(src, &dest_dir).is_ok() {
+                count += 1;
+            }
+        }
+        if count > 0 {
+            self.show_status_note(Ok(format!("Extracted {} archive(s)", count)));
+            let dir = self.current_dir.clone();
+            self.navigate_to(dir);
+        }
+    }
+
+    /// Renders the Finder/Windows-style drop action menu popup at the drop position.
+    fn render_drop_menu(
+        &mut self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        on_transcode_target: &mut impl FnMut(PathBuf, String),
+    ) {
+        let Some(menu) = self.drop_menu.clone() else {
+            return;
+        };
+
+        let screen = ui.ctx().screen_rect();
+        let menu_w = 260.0;
+        let x = menu
+            .position
+            .x
+            .min(screen.right() - menu_w - 8.0)
+            .max(screen.left() + 8.0);
+        let y = menu
+            .position
+            .y
+            .min(screen.bottom() - 260.0)
+            .max(screen.top() + 8.0);
+
+        let cfg = crate::core::MossambiConfig::load();
+        let pack = crate::core::icon_packs::IconPack::from_config_id(&cfg.icon_pack);
+        let style = cfg.menu_style;
+        let tint = palette.accent;
+
+        let mut action_to_execute: Option<crate::core::DropActionKind> = None;
+        let mut extract_to_execute = false;
+        let mut close_menu = false;
+
+        // Keyboard navigation: Enter = default, Esc = cancel
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            close_menu = true;
+        } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            action_to_execute = Some(menu.default_action);
+        }
+
+        let area_id = egui::Id::new("mossambi_drop_action_menu");
+        let area_resp = egui::Area::new(area_id)
+            .fixed_pos(egui::pos2(x, y))
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                let frame = egui::Frame::menu(ui.style())
+                    .fill(palette.card_bg)
+                    .stroke(Stroke::new(1.0_f32, palette.border))
+                    .rounding(Rounding::same(cfg.corner_style.radius_sm()))
+                    .inner_margin(egui::Margin::symmetric(6.0, 6.0));
+
+                frame.show(ui, |ui| {
+                    ui.set_width(menu_w);
+
+                    // Header: count + first filename
+                    let first_name = menu
+                        .sources
+                        .first()
+                        .and_then(|p| p.file_name())
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "item".to_string());
+                    let header_text = if menu.sources.len() == 1 {
+                        format!("1 item: {}", first_name)
+                    } else {
+                        format!("{} items ({})", menu.sources.len(), first_name)
+                    };
+                    fm::menu_header(ui, &header_text, tint);
+                    ui.separator();
+
+                    // 1. Move here
+                    let move_is_default = menu.default_action == crate::core::DropActionKind::Move;
+                    if fm::menu_item_labeled_bold(
+                        ui,
+                        pack,
+                        fm::MenuAction::Cut,
+                        "Move here",
+                        style,
+                        tint,
+                        move_is_default,
+                    )
+                    .clicked()
+                    {
+                        action_to_execute = Some(crate::core::DropActionKind::Move);
+                    }
+
+                    // 2. Copy here
+                    let copy_is_default = menu.default_action == crate::core::DropActionKind::Copy;
+                    if fm::menu_item_labeled_bold(
+                        ui,
+                        pack,
+                        fm::MenuAction::Copy,
+                        "Copy here",
+                        style,
+                        tint,
+                        copy_is_default,
+                    )
+                    .clicked()
+                    {
+                        action_to_execute = Some(crate::core::DropActionKind::Copy);
+                    }
+
+                    // 3. Create shortcut here
+                    let link_is_default = menu.default_action == crate::core::DropActionKind::Link;
+                    if fm::menu_item_labeled_bold(
+                        ui,
+                        pack,
+                        fm::MenuAction::Shortcut,
+                        "Create shortcut here",
+                        style,
+                        tint,
+                        link_is_default,
+                    )
+                    .clicked()
+                    {
+                        action_to_execute = Some(crate::core::DropActionKind::Link);
+                    }
+
+                    // 4. Convert here > (only if sources are convertible)
+                    let mut convertible_formats: Vec<String> = Vec::new();
+                    for src in &menu.sources {
+                        let sectors =
+                            crate::core::registry::UniversalRegistry::get_sectors_for_file(src);
+                        for fmt in sectors {
+                            if fmt != "MORE" && fmt != "ALL" && fmt != "EXTRACT" {
+                                let fmt_str = fmt.to_string();
+                                if !convertible_formats.contains(&fmt_str) {
+                                    convertible_formats.push(fmt_str);
+                                }
+                            }
+                        }
+                    }
+
+                    if !convertible_formats.is_empty() {
+                        fm::submenu(
+                            ui,
+                            "Convert here",
+                            pack,
+                            style,
+                            tint,
+                            fm::MenuAction::Transcode,
+                            |sub_ui| {
+                                sub_ui.set_min_width(200.0);
+                                for fmt in &convertible_formats {
+                                    let label = format!("Convert to {fmt}");
+                                    if fm::menu_item_labeled(
+                                        sub_ui,
+                                        pack,
+                                        fm::MenuAction::Transcode,
+                                        &label,
+                                        style,
+                                        tint,
+                                    )
+                                    .clicked()
+                                    {
+                                        for src in &menu.sources {
+                                            on_transcode_target(src.clone(), fmt.clone());
+                                        }
+                                        close_menu = true;
+                                        sub_ui.close_menu();
+                                    }
+                                }
+                            },
+                        );
+                    }
+
+                    // 5. Extract here (only for archives)
+                    let has_archive = menu.sources.iter().any(|p| {
+                        p.extension()
+                            .and_then(|e| e.to_str())
+                            .and_then(crate::archive::ArchiveType::from_extension)
+                            .is_some()
+                    });
+                    if has_archive
+                        && fm::menu_item_labeled_bold(
+                            ui,
+                            pack,
+                            fm::MenuAction::Extract,
+                            "Extract here",
+                            style,
+                            tint,
+                            false,
+                        )
+                        .clicked()
+                    {
+                        extract_to_execute = true;
+                    }
+
+                    ui.separator();
+
+                    // 6. Cancel
+                    if fm::menu_item_glyph(
+                        ui,
+                        pack,
+                        crate::core::icon_packs::IconGlyph::ActionClose,
+                        "Cancel",
+                        style,
+                        tint,
+                    )
+                    .clicked()
+                    {
+                        close_menu = true;
+                    }
+                });
+            });
+
+        // Dismiss on click outside
+        if ui.input(|i| i.pointer.any_pressed()) {
+            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                if !area_resp.response.rect.contains(pos) {
+                    close_menu = true;
+                }
+            }
+        }
+
+        if let Some(action) = action_to_execute {
+            self.drop_menu = None;
+            match action {
+                crate::core::DropActionKind::Move => {
+                    self.perform_drop(menu.target_dir, &menu.sources, false);
+                }
+                crate::core::DropActionKind::Copy => {
+                    self.perform_drop(menu.target_dir, &menu.sources, true);
+                }
+                crate::core::DropActionKind::Link => {
+                    self.perform_link(menu.target_dir, &menu.sources);
+                }
+            }
+        } else if extract_to_execute {
+            self.drop_menu = None;
+            self.perform_extract_drop(menu.target_dir, &menu.sources);
+        } else if close_menu {
+            self.drop_menu = None;
+        }
     }
 
     /// Applies one item menu's intents. All filesystem side effects are

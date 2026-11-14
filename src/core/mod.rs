@@ -12,6 +12,7 @@ pub mod dnd_backend;
 pub mod donut_config;
 pub mod drag_listener;
 pub mod drag_out;
+pub mod drop_action;
 pub mod fields_config;
 pub mod file_icons;
 pub mod fs_utils;
@@ -42,8 +43,8 @@ pub use action_journal::{
 };
 pub use async_worker::{AsyncWorkerPool, ItemOutcome, TaskUpdate};
 pub use config::{
-    Appearance, CornerStyle, ExplorerStyle, GlassEffect, LookPreset, MossambiConfig, OutputMode,
-    RowDensity, SidebarStyle, ThemeMode,
+    Appearance, CornerStyle, DropActionPreference, ExplorerStyle, GlassEffect, LookPreset,
+    MossambiConfig, OutputMode, RowDensity, SidebarStyle, ThemeMode,
 };
 pub use conversion_queue::{
     ConversionQueue, QueueAction, QueueItem, QueueItemStatus, QueueSummary,
@@ -54,6 +55,10 @@ pub use donut_config::{DonutAppearance, DonutConfig, DonutProfile, DonutSlicePre
 pub use drag_listener::query_active_explorer_files;
 pub use drag_listener::{extract_clipboard_files, DragGestureEvent, DragGestureListener};
 pub use drag_out::begin_file_drag_out;
+pub use drop_action::{
+    decide_drop_action, is_same_volume, paths_on_same_volume, DropActionKind, DropDecision,
+    DropModifiers, DropMouseButton, DropRejectReason,
+};
 pub use fields_config::{FieldItemSpec, FieldsConfig};
 pub use file_icons::{resolve_file_icon, FileIconSpec};
 pub use fs_utils::{

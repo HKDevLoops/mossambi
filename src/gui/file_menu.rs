@@ -342,12 +342,31 @@ fn menu_row(
     icon: Option<(IconPack, IconGlyph, Color32)>,
     shortcut: Option<&str>,
 ) -> Response {
+    menu_row_styled(ui, label, icon, shortcut, false)
+}
+
+/// Menu row with optional bold styling (used for default actions in drop action menu).
+fn menu_row_styled(
+    ui: &mut Ui,
+    label: &str,
+    icon: Option<(IconPack, IconGlyph, Color32)>,
+    shortcut: Option<&str>,
+    bold: bool,
+) -> Response {
     use eframe::egui::{Align2, FontId, Pos2, Rect};
     // Primary text colour (text_color() is the secondary tier, too faint
     // for menu labels on light themes).
-    let text_col = ui.visuals().widgets.inactive.fg_stroke.color;
+    let text_col = if bold {
+        ui.visuals().strong_text_color()
+    } else {
+        ui.visuals().widgets.inactive.fg_stroke.color
+    };
     let hint_col = ui.visuals().weak_text_color();
-    let font = FontId::proportional(14.0);
+    let font = if bold {
+        FontId::proportional(14.5)
+    } else {
+        FontId::proportional(14.0)
+    };
     let hint_font = FontId::proportional(12.0);
     let lead = if icon.is_some() { 30.0 } else { 10.0 };
     let hint_w = shortcut
@@ -385,7 +404,11 @@ fn menu_row(
         crate::core::icon_packs::paint_icon(ui, pack, glyph, r, rgb(tint));
     }
     let pos = Pos2::new(rect.left() + lead, rect.center().y - galley.size().y * 0.5);
-    ui.painter().galley(pos, galley, text_col);
+    ui.painter().galley(pos, galley.clone(), text_col);
+    if bold {
+        ui.painter()
+            .galley(pos + Vec2::new(0.5, 0.0), galley, text_col);
+    }
     if let Some(s) = shortcut {
         ui.painter().text(
             Pos2::new(rect.right() - 10.0, rect.center().y),
@@ -398,6 +421,20 @@ fn menu_row(
     // Cursor discipline: menu rows always show the default arrow, never the
     // text pointer (I-beam only in text-editing widgets, per standing rule).
     resp.on_hover_cursor(eframe::egui::CursorIcon::Default)
+}
+
+/// Render a menu entry with an explicit override label and optional bold styling.
+pub fn menu_item_labeled_bold(
+    ui: &mut Ui,
+    pack: IconPack,
+    action: MenuAction,
+    label: &str,
+    style: MenuStyle,
+    tint: Color32,
+    bold: bool,
+) -> Response {
+    let icon = (style != MenuStyle::Finder).then(|| (pack, action.glyph(), tint));
+    menu_row_styled(ui, label, icon, action.shortcut(), bold)
 }
 
 /// A submenu row that matches [`menu_row`]: same 14 px label and, outside

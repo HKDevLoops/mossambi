@@ -617,6 +617,13 @@ impl PreferencesView {
             setting_label: "Enforce zero loss",
             value_label: on_off(self.cfg.enforce_zero_loss).to_string(),
         });
+        // General
+        out.push(PreferenceHit {
+            category_id: "general",
+            category_title: "General",
+            setting_label: "When dropping files",
+            value_label: self.cfg.drop_action_pref.label().to_string(),
+        });
         out
     }
 
@@ -643,6 +650,59 @@ impl PreferencesView {
                 "Adds the entry for files in Windows Explorer (Show more options on Windows 11).",
                 &mut self.cfg.shell_context_menu,
                 dirty,
+            );
+        });
+
+        ui.add_space(design::space::MD);
+
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("When dropping files")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.add_space(design::space::XS);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Action on drop")
+                        .size(design::type_scale::BODY)
+                        .color(palette.text_primary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let cur_label = match self.cfg.drop_action_pref {
+                        crate::core::DropActionPreference::SmartDefault => {
+                            "Smart default (default)"
+                        }
+                        other => other.label(),
+                    };
+                    egui::ComboBox::from_id_salt("pref_drop_action")
+                        .selected_text(cur_label)
+                        .show_ui(ui, |ui| {
+                            for opt in crate::core::DropActionPreference::all() {
+                                let text = match opt {
+                                    crate::core::DropActionPreference::SmartDefault => {
+                                        "Smart default (default)"
+                                    }
+                                    other => other.label(),
+                                };
+                                if ui
+                                    .selectable_value(&mut self.cfg.drop_action_pref, opt, text)
+                                    .changed()
+                                {
+                                    *dirty = true;
+                                }
+                            }
+                        });
+                });
+            });
+            ui.add_space(design::space::XS);
+            ui.label(
+                egui::RichText::new(
+                    "Smart default moves on the same drive and copies across drives. Always ask shows an action menu at drop position.",
+                )
+                .size(design::type_scale::CAPTION)
+                .color(palette.text_secondary),
             );
         });
 
@@ -3535,6 +3595,7 @@ pub fn setting_value_label(key: &str, cfg: &MossambiConfig) -> Option<String> {
         "output_mode" => Some(output_mode_label(cfg.output_mode).to_string()),
         "worker_threads" => Some(format!("{}", cfg.worker_threads)),
         "icon_pack" => Some(IconPack::from_config_id(&cfg.icon_pack).label().to_string()),
+        "drop_action_pref" => Some(cfg.drop_action_pref.label().to_string()),
         _ => None,
     }
 }
@@ -3564,11 +3625,13 @@ pub fn search_preferences(query: &str, cfg: &MossambiConfig) -> Vec<PreferenceHi
         ("Enforce zero loss", "enforce_zero_loss"),
         ("Worker threads", "worker_threads"),
         ("Output mode", "output_mode"),
+        ("When dropping files", "drop_action_pref"),
     ] {
         let v = setting_value_label(key, cfg).unwrap_or_default();
         if q.is_empty() || label.to_lowercase().contains(&q) || v.to_lowercase().contains(&q) {
             // map key -> category title
             let cat_title = match key {
+                "drop_action_pref" => "General",
                 "glass_effect" | "window_opacity" | "menu_style" | "checkbox_mode"
                 | "icon_pack" => "Appearance",
                 "show_hidden_files"

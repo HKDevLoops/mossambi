@@ -825,6 +825,54 @@ pub fn create_shortcut(target: &Path) -> bool {
     }
 }
 
+/// Create a shortcut (.lnk on Windows, symlink on Unix) to `target` inside `dest_dir`.
+pub fn create_shortcut_in(target: &Path, dest_dir: &Path) -> bool {
+    let name = match target.file_name() {
+        Some(n) => n,
+        None => return false,
+    };
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let file_stem = name.to_string_lossy();
+        let candidate = dest_dir.join(format!("{}.lnk", file_stem));
+        let shortcut = crate::core::fs_utils::resolve_unique_paste_path(&candidate);
+        let cmd = format!(
+            "$ws=New-Object -ComObject WScript.Shell;$s=$ws.CreateShortcut('{}');$s.TargetPath='{}';$s.WorkingDirectory='{}';$s.Save()",
+            shortcut.to_string_lossy().replace('\'', "''"),
+            target.to_string_lossy().replace('\'', "''"),
+            target.parent().map(|p| p.to_string_lossy().replace('\'', "''")).unwrap_or_default(),
+        );
+        let success = std::process::Command::new("powershell")
+            .arg("-NoProfile")
+            .arg("-WindowStyle")
+            .arg("Hidden")
+            .arg("-Command")
+            .arg(cmd)
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn()
+            .is_ok();
+        if success {
+            crate::core::action_journal::record_copy(target.to_path_buf(), shortcut);
+        }
+        success
+    }
+    #[cfg(unix)]
+    {
+        let link_path = crate::core::fs_utils::resolve_unique_paste_path(&dest_dir.join(name));
+        let success = std::os::unix::fs::symlink(target, &link_path).is_ok();
+        if success {
+            crate::core::action_journal::record_copy(target.to_path_buf(), link_path);
+        }
+        success
+    }
+    #[cfg(not(any(target_os = "windows", unix)))]
+    {
+        let _ = (target, dest_dir);
+        false
+    }
+}
+
 /// Run a Microsoft Defender custom scan on `path` (fire and forget, hidden)
 pub fn scan_with_defender(path: &Path) -> bool {
     #[cfg(target_os = "windows")]

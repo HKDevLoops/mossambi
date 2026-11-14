@@ -636,12 +636,14 @@ pub struct SidebarRowSpec<'a> {
 ///
 /// The pin strip is its own hit region, so a row action and a pin toggle
 /// can never fire from the same click.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SidebarRowClick {
     /// The row body was clicked (navigate/activate).
     pub row: bool,
     /// The pin strip was clicked (toggle the pin).
     pub pin: bool,
+    /// Dragged files dropped onto this row.
+    pub dropped: Option<crate::gui::explorer_view::FileDragPayload>,
 }
 
 /// A standard sidebar row with a real vector icon, a label, and an
@@ -701,6 +703,16 @@ pub fn render_sidebar_row(
             painter.rect_stroke(rect, rounding, Stroke::new(1.0_f32, palette.accent));
         }
     }
+
+    let is_drop_hovered = row_resp
+        .dnd_hover_payload::<crate::gui::explorer_view::FileDragPayload>()
+        .is_some();
+    if is_drop_hovered {
+        painter.rect_stroke(rect, rounding, Stroke::new(1.5_f32, palette.accent));
+    }
+    let dropped = row_resp
+        .dnd_release_payload::<crate::gui::explorer_view::FileDragPayload>()
+        .map(|p| (*p).clone());
 
     if spec.selected && draw_accent_bar {
         let bar_rect = Rect::from_min_size(
@@ -781,6 +793,7 @@ pub fn render_sidebar_row(
     SidebarRowClick {
         row: row_resp.clicked(),
         pin: pin_clicked,
+        dropped,
     }
 }
 
