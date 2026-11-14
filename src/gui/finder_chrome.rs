@@ -611,6 +611,108 @@ pub fn render_sidebar_zone_header(
     resp.clicked()
 }
 
+/// Variant of `render_sidebar_zone_header` that also detects dropped files/folders.
+pub fn render_sidebar_zone_header_with_drop(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    label: &str,
+    expanded: bool,
+) -> (bool, Option<crate::gui::explorer_view::FileDragPayload>) {
+    let cfg = crate::core::MossambiConfig::load();
+    let style = cfg.sidebar_style;
+    if style == crate::core::SidebarStyle::Finder {
+        let line_col = Color32::from_rgba_unmultiplied(
+            palette.border.r(),
+            palette.border.g(),
+            palette.border.b(),
+            if palette.is_dark { 40 } else { 25 },
+        );
+        let div_y = ui.cursor().top() + 4.0;
+        let left_x = ui.min_rect().min.x + 8.0;
+        let right_x = ui.max_rect().max.x - 8.0;
+        ui.painter().line_segment(
+            [Pos2::new(left_x, div_y), Pos2::new(right_x, div_y)],
+            Stroke::new(1.0_f32, line_col),
+        );
+    }
+    ui.add_space(space::XS);
+    let row_h = if style == crate::core::SidebarStyle::Thunar {
+        20.0
+    } else {
+        22.0
+    };
+    let (rect, resp) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::click());
+    let painter = ui.painter_at(rect);
+
+    let is_drop_hovered = resp
+        .dnd_hover_payload::<crate::gui::explorer_view::FileDragPayload>()
+        .is_some();
+    if is_drop_hovered {
+        painter.rect_stroke(
+            rect,
+            Rounding::same(radius::XS),
+            Stroke::new(1.5_f32, palette.accent),
+        );
+    }
+    let dropped = resp
+        .dnd_release_payload::<crate::gui::explorer_view::FileDragPayload>()
+        .map(|p| (*p).clone());
+
+    let col = if is_drop_hovered {
+        palette.accent
+    } else if resp.hovered() {
+        palette.text_primary
+    } else {
+        palette.text_muted
+    };
+    let text_x = if style == crate::core::SidebarStyle::Windows {
+        rect.min.x + 16.0
+    } else {
+        rect.min.x + 4.0
+    };
+    painter.text(
+        Pos2::new(text_x, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(type_scale::CAPTION + 0.5),
+        col,
+    );
+    let c = if style == crate::core::SidebarStyle::Windows {
+        Pos2::new(rect.min.x + 6.0, rect.center().y)
+    } else {
+        Pos2::new(rect.max.x - 10.0, rect.center().y)
+    };
+    let s = 3.5_f32;
+    let chevron_col = if resp.hovered() {
+        palette.text_secondary
+    } else {
+        Color32::from_rgba_unmultiplied(
+            palette.text_muted.r(),
+            palette.text_muted.g(),
+            palette.text_muted.b(),
+            140,
+        )
+    };
+    let pts = if expanded {
+        [
+            Pos2::new(c.x - s, c.y - s * 0.5),
+            Pos2::new(c.x, c.y + s * 0.5),
+            Pos2::new(c.x + s, c.y - s * 0.5),
+        ]
+    } else {
+        [
+            Pos2::new(c.x - s * 0.5, c.y - s),
+            Pos2::new(c.x + s * 0.5, c.y),
+            Pos2::new(c.x - s * 0.5, c.y + s),
+        ]
+    };
+    painter.line_segment([pts[0], pts[1]], Stroke::new(1.4_f32, chevron_col));
+    painter.line_segment([pts[1], pts[2]], Stroke::new(1.4_f32, chevron_col));
+    ui.add_space(space::XXS);
+    (resp.clicked(), dropped)
+}
+
 /// Everything a sidebar row needs to draw itself.
 ///
 /// Grouping these into one struct keeps the call sites readable and keeps the
@@ -630,6 +732,8 @@ pub struct SidebarRowSpec<'a> {
     pub selected: bool,
     /// Whether to draw the pin affordance on the right.
     pub show_pin: bool,
+    /// Whether the row is dimmed (e.g. missing folder).
+    pub dimmed: bool,
 }
 
 /// What the user clicked on a sidebar row.
@@ -644,6 +748,8 @@ pub struct SidebarRowClick {
     pub pin: bool,
     /// Dragged files dropped onto this row.
     pub dropped: Option<crate::gui::explorer_view::FileDragPayload>,
+    /// Secondary (right) click on the row body.
+    pub secondary_clicked: bool,
 }
 
 /// A standard sidebar row with a real vector icon, a label, and an
@@ -727,7 +833,16 @@ pub fn render_sidebar_row(
         Pos2::new(rect.min.x + 10.0 + icon_side / 2.0, rect.center().y),
         Vec2::splat(icon_side),
     );
-    crate::core::icon_packs::paint_icon(ui, spec.pack, spec.glyph, icon_rect, spec.accent_rgb);
+    let icon_rgb = if spec.dimmed {
+        [
+            palette.text_muted.r(),
+            palette.text_muted.g(),
+            palette.text_muted.b(),
+        ]
+    } else {
+        spec.accent_rgb
+    };
+    crate::core::icon_packs::paint_icon(ui, spec.pack, spec.glyph, icon_rect, icon_rgb);
 
     let label_x = rect.min.x + 10.0 + icon_side + space::MD;
     let label_max_w = (rect.max.x - label_x - pin_strip_w - space::SM).max(space::LG);
@@ -737,7 +852,9 @@ pub fn render_sidebar_row(
     // label itself always keeps primary contrast. Painting the label in
     // palette.accent over an accent-tinted row read as blue-on-blue in dark
     // themes (the Drives sidebar rows defect).
-    let text_color = if spec.selected || is_hovered {
+    let text_color = if spec.dimmed {
+        palette.text_muted
+    } else if spec.selected || is_hovered {
         palette.text_primary
     } else {
         palette.text_secondary
@@ -794,6 +911,7 @@ pub fn render_sidebar_row(
         row: row_resp.clicked(),
         pin: pin_clicked,
         dropped,
+        secondary_clicked: row_resp.secondary_clicked(),
     }
 }
 

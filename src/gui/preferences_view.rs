@@ -531,12 +531,6 @@ impl PreferencesView {
         out.push(PreferenceHit {
             category_id: "explorer",
             category_title: "Explorer",
-            setting_label: "Show custom pinned folders",
-            value_label: on_off(self.cfg.show_custom_pinned).to_string(),
-        });
-        out.push(PreferenceHit {
-            category_id: "explorer",
-            category_title: "Explorer",
             setting_label: "Calculate checksums",
             value_label: on_off(self.cfg.calculate_checksums).to_string(),
         });
@@ -861,21 +855,37 @@ impl PreferencesView {
     }
 
     fn render_donut_toolbar(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
+        let avail_w = ui.available_width();
+        if avail_w < 760.0 {
+            // Single column stacked layout when detail width < 760px
+            let col_w = (avail_w - 8.0).max(280.0);
+            self.render_donut_col1(ui, col_w, palette, dirty);
+            ui.add_space(design::space::MD);
+            let div1_rect = ui.allocate_space(Vec2::new(col_w, 1.0)).1;
+            ui.painter()
+                .rect_filled(div1_rect, Rounding::ZERO, palette.border);
+            ui.add_space(design::space::MD);
+            self.render_donut_col2(ui, col_w, palette, dirty);
+            ui.add_space(design::space::MD);
+            let div2_rect = ui.allocate_space(Vec2::new(col_w, 1.0)).1;
+            ui.painter()
+                .rect_filled(div2_rect, Rounding::ZERO, palette.border);
+            ui.add_space(design::space::MD);
+            self.render_donut_col3(ui, col_w, palette, dirty);
+            return;
+        }
+
         // Tailwind CSS-grade fluid 3-column responsive layout with horizontal scroll safety
-        let avail_w = ui.available_width().max(680.0);
         let (col1_w, col2_w, col3_w) = if avail_w >= 880.0 {
             let c1 = (avail_w * 0.22).clamp(170.0, 210.0);
             let c3 = (avail_w * 0.32).clamp(220.0, 300.0);
             let c2 = (avail_w - c1 - c3 - 36.0).max(300.0);
             (c1, c2, c3)
-        } else if avail_w >= 740.0 {
+        } else {
             let c1 = 165.0;
             let c2 = 310.0;
             let c3 = (avail_w - c1 - c2 - 36.0).max(210.0);
             (c1, c2, c3)
-        } else {
-            // Narrow fallback: reserve 16px for the two 8px inter-column gaps.
-            (165.0, 284.0, 215.0)
         };
 
         ScrollArea::horizontal()
@@ -883,552 +893,723 @@ impl PreferencesView {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
-                    // ---- COLUMN 1: 1. Choose a profile ----
-                    ui.allocate_ui_with_layout(Vec2::new(col1_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
-                        ui.label(
-                            egui::RichText::new("1. Choose a profile")
-                                .size(design::type_scale::TITLE_SM)
-                                .strong()
-                                .color(palette.text_primary),
-                        );
-                        ui.add_space(design::space::XS);
-
-                        ui.add(
-                            TextEdit::singleline(&mut self.donut_profile_search)
-                                .hint_text("Search")
-                                .desired_width(col1_w - 12.0),
-                        );
-                        ui.add_space(design::space::SM);
-
-                        let search_q = self.donut_profile_search.trim().to_lowercase();
-                        let num_profiles = self.cfg.donut.profiles.len();
-
-                        ScrollArea::vertical()
-                            .id_salt("donut_profiles_scroll")
-                            .max_height(480.0)
-                            .show(ui, |ui| {
-                                for i in 0..num_profiles {
-                                    let (name, front_len, back_len, is_mixed) = {
-                                        let p = &self.cfg.donut.profiles[i];
-                                        (p.name.clone(), p.front_slices.len(), p.back_slices.len(), p.is_mixed_selection)
-                                    };
-
-                                    if !search_q.is_empty() && !name.to_lowercase().contains(&search_q) {
-                                        continue;
-                                    }
-
-                                    let is_selected = self.selected_donut_profile_idx == i;
-                                    let card_rect = ui.allocate_space(Vec2::new(col1_w - 14.0, 32.0)).1;
-                                    let is_hovered = ui.rect_contains_pointer(card_rect);
-
-                                    let bg_color = if is_selected {
-                                        palette.card_hover
-                                    } else if is_hovered {
-                                        Color32::from_rgba_unmultiplied(palette.card_hover.r(), palette.card_hover.g(), palette.card_hover.b(), 70)
-                                    } else {
-                                        Color32::TRANSPARENT
-                                    };
-
-                                    ui.painter().rect_filled(card_rect, Rounding::same(design::radius::SM), bg_color);
-                                    if is_selected {
-                                        ui.painter().rect_stroke(card_rect, Rounding::same(design::radius::SM), Stroke::new(1.0_f32, palette.accent));
-                                    }
-
-                                    let text_color = if is_selected { palette.accent } else { palette.text_primary };
-                                    let label_pos = egui::pos2(card_rect.min.x + 8.0, card_rect.center().y - 7.0);
-                                    ui.painter().text(
-                                        label_pos,
-                                        Align2::LEFT_TOP,
-                                        &name,
-                                        egui::FontId::proportional(design::type_scale::BODY_SM),
-                                        text_color,
-                                    );
-
-                                    let badge_str = if is_mixed {
-                                        format!("M {}-{}", front_len, back_len)
-                                    } else {
-                                        format!("{}-{}", front_len, back_len)
-                                    };
-                                    let badge_pos = egui::pos2(card_rect.max.x - 8.0, card_rect.center().y - 6.0);
-                                    ui.painter().text(
-                                        badge_pos,
-                                        Align2::RIGHT_TOP,
-                                        badge_str,
-                                        egui::FontId::proportional(design::type_scale::MICRO),
-                                        palette.text_muted,
-                                    );
-
-                                    if ui.interact(card_rect, ui.id().with(i), Sense::click()).clicked() {
-                                        self.selected_donut_profile_idx = i;
-                                    }
-                                    ui.add_space(2.0);
-                                }
-                            });
-
-                        ui.add_space(design::space::SM);
-                        ui.horizontal_wrapped(|ui| {
-                            if ui.button("+ New profile").clicked() {
-                                let new_id = format!("custom_{}", self.cfg.donut.profiles.len() + 1);
-                                let new_prof = DonutProfile::new(
-                                    &new_id,
-                                    "New Profile",
-                                    &[".txt"],
-                                    &["PNG", "PDF", "WEBP", "JPG"],
-                                    &["CROP", "RENAME", "ZIP", "EXPLORE"],
-                                );
-                                self.cfg.donut.profiles.push(new_prof);
-                                self.selected_donut_profile_idx = self.cfg.donut.profiles.len() - 1;
-                                *dirty = true;
-                            }
-                            if ui.button("Alt+Up").clicked() && self.selected_donut_profile_idx > 0 {
-                                self.cfg.donut.move_profile_up(self.selected_donut_profile_idx);
-                                self.selected_donut_profile_idx -= 1;
-                                *dirty = true;
-                            }
-                            if ui.button("Alt+Down").clicked()
-                                && self.selected_donut_profile_idx + 1 < self.cfg.donut.profiles.len()
-                            {
-                                self.cfg.donut.move_profile_down(self.selected_donut_profile_idx);
-                                self.selected_donut_profile_idx += 1;
-                                *dirty = true;
-                            }
-                        });
-
-                        ui.add_space(design::space::XS);
-                        ui.label(
-                            egui::RichText::new("When two profiles share an extension, the higher one opens. Alt+Up / Alt+Down moves the selected profile.")
-                                .size(design::type_scale::MICRO)
-                                .color(palette.text_muted),
-                        );
-                    });
-
+                    self.render_donut_col1(ui, col1_w, palette, dirty);
                     ui.add_space(design::space::SM);
                     // Vertical divider line between col 1 and col 2
                     let div1_rect = ui.allocate_space(Vec2::new(1.0, 560.0)).1;
-                    ui.painter().rect_filled(div1_rect, Rounding::ZERO, palette.border);
+                    ui.painter()
+                        .rect_filled(div1_rect, Rounding::ZERO, palette.border);
                     ui.add_space(design::space::SM);
-
-                    // ---- COLUMN 2: 2. Arrange presets ----
-                    ui.allocate_ui_with_layout(Vec2::new(col2_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
-                        ui.label(
-                            egui::RichText::new("2. Arrange presets")
-                                .size(design::type_scale::TITLE_SM)
-                                .strong()
-                                .color(palette.text_primary),
-                        );
-                        ui.add_space(design::space::XS);
-
-                        if self.selected_donut_profile_idx >= self.cfg.donut.profiles.len() {
-                            self.selected_donut_profile_idx = 0;
-                        }
-                        let (profile_name, profile_id, front_len, back_len, slices_copy) = {
-                            let p = &self.cfg.donut.profiles[self.selected_donut_profile_idx];
-                            let slices = if self.donut_view_back { &p.back_slices } else { &p.front_slices };
-                            (p.name.clone(), p.id.clone(), p.front_slices.len(), p.back_slices.len(), slices.clone())
-                        };
-
-                        // Front / Back toggle pills
-                        ui.horizontal_wrapped(|ui| {
-                            let front_btn = egui::Button::new(
-                                egui::RichText::new(format!("Front {}", front_len))
-                                    .size(design::type_scale::BODY_SM)
-                                    .color(if !self.donut_view_back { palette.accent } else { palette.text_secondary }),
-                            )
-                            .fill(if !self.donut_view_back { palette.card_hover } else { palette.card_bg })
-                            .stroke(Stroke::new(1.0_f32, if !self.donut_view_back { palette.accent } else { palette.border }))
-                            .rounding(Rounding::same(design::radius::PILL));
-                            let front_resp = ui.add(front_btn);
-                            design::paint_pill_ring(
-                                ui.painter(),
-                                front_resp.rect,
-                                Rounding::same(design::radius::PILL),
-                                design::pill_state(&front_resp, !self.donut_view_back),
-                                palette.accent,
-                            );
-                            if front_resp.clicked() {
-                                self.donut_view_back = false;
-                            }
-
-                            let back_btn = egui::Button::new(
-                                egui::RichText::new(format!("Back {}", back_len))
-                                    .size(design::type_scale::BODY_SM)
-                                    .color(if self.donut_view_back { palette.accent } else { palette.text_secondary }),
-                            )
-                            .fill(if self.donut_view_back { palette.card_hover } else { palette.card_bg })
-                            .stroke(Stroke::new(1.0_f32, if self.donut_view_back { palette.accent } else { palette.border }))
-                            .rounding(Rounding::same(design::radius::PILL));
-                            let back_resp = ui.add(back_btn);
-                            design::paint_pill_ring(
-                                ui.painter(),
-                                back_resp.rect,
-                                Rounding::same(design::radius::PILL),
-                                design::pill_state(&back_resp, self.donut_view_back),
-                                palette.accent,
-                            );
-                            if back_resp.clicked() {
-                                self.donut_view_back = true;
-                            }
-                        });
-
-                        ui.label(
-                            egui::RichText::new("Flip the open donut: Tab / mouse wheel")
-                                .size(design::type_scale::MICRO)
-                                .color(palette.text_muted),
-                        );
-                        ui.add_space(design::space::SM);
-
-                        // Live Vector Radial Donut Preview (Dynamically scaled to col2_w)
-                        let canvas_w = (col2_w - 24.0).clamp(210.0, 270.0);
-                        let canvas_h = (canvas_w * 0.90).clamp(190.0, 245.0);
-                        let (preview_rect, _) = ui.allocate_exact_size(Vec2::new(canvas_w, canvas_h), Sense::hover());
-                        let center = preview_rect.center();
-                        let painter = ui.painter_at(preview_rect);
-
-                        let n_slices = slices_copy.len().max(1);
-                        let outer_r = (canvas_w * 0.38).clamp(70.0, 100.0);
-                        let inner_r = (outer_r * 0.44).clamp(32.0, 46.0);
-
-                        use std::f32::consts::PI;
-                        let step_angle = 2.0 * PI / (n_slices as f32);
-
-                        for (idx, slice) in slices_copy.iter().enumerate() {
-                            let a0 = -PI / 2.0 + (idx as f32) * step_angle;
-                            let a1 = a0 + step_angle;
-                            let seg_steps = 16;
-                            let mut points = Vec::new();
-
-                            for s in 0..=seg_steps {
-                                let t = (s as f32) / (seg_steps as f32);
-                                let a = a0 + t * (a1 - a0);
-                                points.push(egui::pos2(center.x + outer_r * a.cos(), center.y + outer_r * a.sin()));
-                            }
-                            for s in (0..=seg_steps).rev() {
-                                let t = (s as f32) / (seg_steps as f32);
-                                let a = a0 + t * (a1 - a0);
-                                points.push(egui::pos2(center.x + inner_r * a.cos(), center.y + inner_r * a.sin()));
-                            }
-
-                            painter.add(egui::Shape::convex_polygon(
-                                points,
-                                palette.card_bg,
-                                Stroke::new(1.0_f32, palette.border),
-                            ));
-
-                            let mid_a = (a0 + a1) * 0.5;
-                            let label_r = (inner_r + outer_r) * 0.5;
-                            let text_pos = egui::pos2(center.x + label_r * mid_a.cos(), center.y + label_r * mid_a.sin());
-                            painter.text(
-                                text_pos,
-                                Align2::CENTER_CENTER,
-                                &slice.label,
-                                egui::FontId::proportional(design::type_scale::BODY_SM),
-                                palette.text_primary,
-                            );
-                        }
-
-                        // Center columella hub
-                        painter.circle_filled(center, inner_r, palette.card_hover);
-                        painter.circle_stroke(center, inner_r, Stroke::new(1.5_f32, palette.accent));
-                        painter.text(
-                            center,
-                            Align2::CENTER_CENTER,
-                            format!("{}\n{}/12", profile_name, slices_copy.len()),
-                            egui::FontId::proportional(design::type_scale::BODY_SM),
-                            palette.accent,
-                        );
-
-                        ui.add_space(design::space::SM);
-
-                        let mut do_reset = false;
-                        let mut do_delete = false;
-
-                        // Profile Configuration Card
-                        card(ui, palette, |ui| {
-                            let prof = &mut self.cfg.donut.profiles[self.selected_donut_profile_idx];
-                            ui.label(egui::RichText::new("Name").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                            if ui.add(TextEdit::singleline(&mut prof.name).desired_width(f32::INFINITY)).changed() {
-                                *dirty = true;
-                            }
-                            ui.add_space(design::space::XS);
-
-                            ui.horizontal_wrapped(|ui| {
-                                if ui.checkbox(&mut prof.is_mixed_selection, "Use for mixed selections (files of different types)").changed() {
-                                    *dirty = true;
-                                }
-                            });
-                            ui.add_space(design::space::XS);
-
-                            ui.label(egui::RichText::new("Used for these extensions").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                            let mut ext_to_remove = None;
-
-                            ScrollArea::vertical()
-                                .id_salt("ext_tags_scroll")
-                                .max_height(100.0)
-                                .show(ui, |ui| {
-                                    ui.horizontal_wrapped(|ui| {
-                                        for (ext_idx, ext) in prof.extensions.iter().enumerate() {
-                                            // Theme-styled removal pill: true pill
-                                            // radius, card fill, hairline border, and
-                                            // automatic gaps from the restored spacing.
-                                            let pill_btn = egui::Button::new(
-                                                egui::RichText::new(format!("{} x", ext))
-                                                    .size(design::type_scale::BODY_SM)
-                                                    .color(palette.text_secondary),
-                                            )
-                                            .fill(palette.card_bg)
-                                            .stroke(Stroke::new(1.0_f32, palette.border))
-                                            .rounding(Rounding::same(design::radius::PILL));
-                                            let pill_resp = ui.add(pill_btn);
-                                            design::paint_pill_ring(
-                                                ui.painter(),
-                                                pill_resp.rect,
-                                                Rounding::same(design::radius::PILL),
-                                                design::pill_state(&pill_resp, false),
-                                                palette.accent,
-                                            );
-                                            if pill_resp.clicked() {
-                                                ext_to_remove = Some(ext_idx);
-                                            }
-                                        }
-                                    });
-                                });
-
-                            if let Some(idx) = ext_to_remove {
-                                if idx < prof.extensions.len() {
-                                    prof.extensions.remove(idx);
-                                    *dirty = true;
-                                }
-                            }
-
-                            ui.horizontal_wrapped(|ui| {
-                                ui.add(TextEdit::singleline(&mut self.new_ext_input).hint_text(".jpg").desired_width(100.0));
-                                if ui.button("+ Add extension").clicked() {
-                                    let clean = self.new_ext_input.trim();
-                                    if !clean.is_empty() {
-                                        let formatted = if clean.starts_with('.') { clean.to_string() } else { format!(".{}", clean) };
-                                        if !prof.extensions.contains(&formatted) {
-                                            prof.extensions.push(formatted);
-                                            self.new_ext_input.clear();
-                                            *dirty = true;
-                                        }
-                                    }
-                                }
-                            });
-
-                            ui.add_space(design::space::XS);
-                            ui.horizontal_wrapped(|ui| {
-                                if ui.button("Reset to default").clicked() {
-                                    do_reset = true;
-                                }
-                                if profile_id != "images" && ui.button("Delete profile").clicked() {
-                                    do_delete = true;
-                                }
-                            });
-                        });
-
-                        if do_reset {
-                            let default_cfg = DonutConfig::default();
-                            if let Some(def_p) = default_cfg.profiles.get(self.selected_donut_profile_idx) {
-                                self.cfg.donut.profiles[self.selected_donut_profile_idx] = def_p.clone();
-                                *dirty = true;
-                            }
-                        }
-                        if do_delete && self.cfg.donut.profiles.len() > 1 {
-                            self.cfg.donut.profiles.remove(self.selected_donut_profile_idx);
-                            self.selected_donut_profile_idx = 0;
-                            *dirty = true;
-                        }
-
-                        ui.add_space(design::space::SM);
-
-                        // Appearance Card
-                        card(ui, palette, |ui| {
-                            ui.label(egui::RichText::new("Appearance").size(design::type_scale::TITLE_SM).strong().color(palette.text_primary));
-                            ui.add_space(design::space::XS);
-
-                            let slider_w = (col2_w - 90.0).clamp(110.0, 180.0);
-                            ui.spacing_mut().slider_width = slider_w;
-
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("Size").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                                if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.size, 320.0..=540.0).suffix(" px")).changed() {
-                                    *dirty = true;
-                                }
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("Hole").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                                if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.hole, 30.0..=80.0).suffix(" px")).changed() {
-                                    *dirty = true;
-                                }
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("Opacity").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                                if ui.add(egui::Slider::new(&mut self.cfg.donut.appearance.opacity, 0.20..=1.00)).changed() {
-                                    *dirty = true;
-                                }
-                            });
-                        });
-                    });
-
+                    self.render_donut_col2(ui, col2_w, palette, dirty);
                     ui.add_space(design::space::SM);
                     // Vertical divider line between col 2 and col 3
                     let div2_rect = ui.allocate_space(Vec2::new(1.0, 560.0)).1;
-                    ui.painter().rect_filled(div2_rect, Rounding::ZERO, palette.border);
+                    ui.painter()
+                        .rect_filled(div2_rect, Rounding::ZERO, palette.border);
                     ui.add_space(design::space::SM);
-
-                    // ---- COLUMN 3: Available presets catalog ----
-                    ui.allocate_ui_with_layout(Vec2::new(col3_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
-                        ui.label(
-                            egui::RichText::new("Available presets")
-                                .size(design::type_scale::TITLE_SM)
-                                .strong()
-                                .color(palette.text_primary),
-                        );
-                        ui.add_space(design::space::XS);
-
-                        ui.horizontal_wrapped(|ui| {
-                            let _ = ui.button("+ New preset");
-                            let _ = ui.button("New group");
-                            let _ = ui.button("Copy to folder");
-                        });
-                        ui.add_space(design::space::XS);
-
-                        ui.add(
-                            TextEdit::singleline(&mut self.donut_preset_search)
-                                .hint_text("Search presets")
-                                .desired_width(col3_w - 12.0),
-                        );
-                        ui.add_space(design::space::XS);
-
-                        // Category filter pills
-                        let categories = ["All", "Image", "Document", "Video & audio", "Edit", "3D & CAD"];
-                        ui.horizontal_wrapped(|ui| {
-                            for cat in categories {
-                                let active = self.donut_preset_category == cat;
-                                let btn = egui::Button::new(
-                                    egui::RichText::new(cat)
-                                        .size(design::type_scale::MICRO)
-                                        .color(if active { palette.accent } else { palette.text_secondary }),
-                                )
-                                .fill(if active { palette.card_hover } else { palette.card_bg })
-                                .stroke(Stroke::new(1.0_f32, if active { palette.accent } else { palette.border }))
-                                .rounding(Rounding::same(design::radius::PILL));
-                                let cat_resp = ui.add(btn);
-                                design::paint_pill_ring(
-                                    ui.painter(),
-                                    cat_resp.rect,
-                                    Rounding::same(design::radius::PILL),
-                                    design::pill_state(&cat_resp, active),
-                                    palette.accent,
-                                );
-                                if cat_resp.clicked() {
-                                    self.donut_preset_category = cat.to_string();
-                                }
-                            }
-                        });
-                        ui.add_space(design::space::SM);
-
-                        let available_catalog = [
-                            ("Edit Group of 6", "Edit", true),
-                            ("Pages per sheet Group of 5", "Document", true),
-                            ("Flip Group of 2", "Edit", true),
-                            ("Crop video Group of 6", "Video & audio", true),
-                            ("JPG 70%", "Image", false),
-                            ("TIFF", "Image", false),
-                            ("BMP", "Image", false),
-                            ("ICO", "Image", false),
-                            ("AVIF", "Image", false),
-                            ("HEIC", "Image", false),
-                            ("Grayscale Same format", "Edit", true),
-                            ("Trim transparent borders", "Edit", true),
-                            ("Pixelate / blur Same format", "Edit", true),
-                            ("Annotate Same format", "Edit", true),
-                            ("Rotate left PDF", "Document", true),
-                            ("Rotate right PDF", "Document", true),
-                            ("2 pages per sheet PDF", "Document", true),
-                            ("4 pages per sheet PDF", "Document", true),
-                            ("6 pages per sheet PDF", "Document", true),
-                            ("8 pages per sheet PDF", "Document", true),
-                            ("9 pages per sheet PDF", "Document", true),
-                            ("Rotate left Same format", "Edit", true),
-                            ("Rotate right Same format", "Edit", true),
-                            ("Rotate 180 Same format", "Edit", true),
-                            ("Flip horizontal Same format", "Edit", true),
-                            ("Flip vertical Same format", "Edit", true),
-                            ("TIFF 300dpi", "Image", false),
-                            ("Merge PDF", "Document", true),
-                            ("Long image PNG", "Image", false),
-                            ("Split PDF", "Document", true),
-                            ("Compress PDF", "Document", true),
-                            ("Searchable PDF", "Document", true),
-                            ("STL", "3D & CAD", false),
-                            ("OBJ", "3D & CAD", false),
-                            ("PLY", "3D & CAD", false),
-                            ("DXF", "3D & CAD", false),
-                            ("DWG", "3D & CAD", false),
-                        ];
-
-                        let search_p = self.donut_preset_search.trim().to_lowercase();
-                        let cat_filter = &self.donut_preset_category;
-
-                        ScrollArea::vertical()
-                            .id_salt("donut_presets_catalog_scroll")
-                            .max_height(420.0)
-                            .show(ui, |ui| {
-                                for (preset_name, cat, is_action) in available_catalog {
-                                    if cat_filter != "All" && cat != cat_filter {
-                                        continue;
-                                    }
-                                    if !search_p.is_empty() && !preset_name.to_lowercase().contains(&search_p) {
-                                        continue;
-                                    }
-
-                                    let card_w = (col3_w - 16.0).max(180.0);
-                                    let btn = egui::Button::new(
-                                        egui::RichText::new(preset_name)
-                                            .size(design::type_scale::BODY_SM)
-                                            .color(palette.text_primary),
-                                    )
-                                    .wrap()
-                                    .fill(palette.card_bg)
-                                    .stroke(Stroke::new(1.0_f32, palette.border))
-                                    .rounding(Rounding::same(design::radius::SM));
-
-                                    if ui.add_sized(Vec2::new(card_w, 28.0), btn).clicked()
-                                        && self.selected_donut_profile_idx < self.cfg.donut.profiles.len()
-                                    {
-                                        let prof = &mut self.cfg.donut.profiles[self.selected_donut_profile_idx];
-                                        let target_list = if self.donut_view_back {
-                                            &mut prof.back_slices
-                                        } else {
-                                            &mut prof.front_slices
-                                        };
-                                        let max_s = if self.donut_view_back {
-                                            prof.max_back_slices
-                                        } else {
-                                            prof.max_front_slices
-                                        };
-                                        if target_list.len() < max_s {
-                                            target_list.push(if is_action {
-                                                DonutSlicePreset::action(
-                                                    preset_name,
-                                                    preset_name,
-                                                    preset_name,
-                                                )
-                                            } else {
-                                                DonutSlicePreset::format(preset_name)
-                                            });
-                                            *dirty = true;
-                                        }
-                                    }
-                                    ui.add_space(2.0);
-                                }
-                            });
-                    });
+                    self.render_donut_col3(ui, col3_w, palette, dirty);
                 });
             });
+    }
+
+    fn render_donut_col1(
+        &mut self,
+        ui: &mut Ui,
+        col1_w: f32,
+        palette: &ThemePalette,
+        dirty: &mut bool,
+    ) {
+        ui.allocate_ui_with_layout(Vec2::new(col1_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
+            ui.label(
+                egui::RichText::new("1. Choose a profile")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.add_space(design::space::XS);
+
+            ui.add(
+                TextEdit::singleline(&mut self.donut_profile_search)
+                    .hint_text("Search")
+                    .desired_width(col1_w - 12.0),
+            );
+            ui.add_space(design::space::SM);
+
+            let search_q = self.donut_profile_search.trim().to_lowercase();
+            let num_profiles = self.cfg.donut.profiles.len();
+
+            ScrollArea::vertical()
+                .id_salt("donut_profiles_scroll")
+                .max_height(480.0)
+                .show(ui, |ui| {
+                    for i in 0..num_profiles {
+                        let (name, front_len, back_len, is_mixed) = {
+                            let p = &self.cfg.donut.profiles[i];
+                            (p.name.clone(), p.front_slices.len(), p.back_slices.len(), p.is_mixed_selection)
+                        };
+
+                        if !search_q.is_empty() && !name.to_lowercase().contains(&search_q) {
+                            continue;
+                        }
+
+                        let is_selected = self.selected_donut_profile_idx == i;
+                        let card_rect = ui.allocate_space(Vec2::new(col1_w - 14.0, 32.0)).1;
+                        let is_hovered = ui.rect_contains_pointer(card_rect);
+
+                        let bg_color = if is_selected {
+                            palette.card_hover
+                        } else if is_hovered {
+                            Color32::from_rgba_unmultiplied(palette.card_hover.r(), palette.card_hover.g(), palette.card_hover.b(), 70)
+                        } else {
+                            Color32::TRANSPARENT
+                        };
+
+                        ui.painter().rect_filled(card_rect, Rounding::same(design::radius::SM), bg_color);
+                        if is_selected {
+                            ui.painter().rect_stroke(card_rect, Rounding::same(design::radius::SM), Stroke::new(1.0_f32, palette.accent));
+                        }
+
+                        let text_color = if is_selected { palette.accent } else { palette.text_primary };
+                        let label_pos = egui::pos2(card_rect.min.x + 8.0, card_rect.center().y - 7.0);
+                        ui.painter().text(
+                            label_pos,
+                            Align2::LEFT_TOP,
+                            &name,
+                            egui::FontId::proportional(design::type_scale::BODY_SM),
+                            text_color,
+                        );
+
+                        let badge_str = if is_mixed {
+                            format!("M {}-{}", front_len, back_len)
+                        } else {
+                            format!("{}-{}", front_len, back_len)
+                        };
+                        let badge_pos = egui::pos2(card_rect.max.x - 8.0, card_rect.center().y - 6.0);
+                        ui.painter().text(
+                            badge_pos,
+                            Align2::RIGHT_TOP,
+                            badge_str,
+                            egui::FontId::proportional(design::type_scale::MICRO),
+                            palette.text_muted,
+                        );
+
+                        if ui.interact(card_rect, ui.id().with(i), Sense::click()).clicked() {
+                            self.selected_donut_profile_idx = i;
+                        }
+                        ui.add_space(2.0);
+                    }
+                });
+
+            ui.add_space(design::space::SM);
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("+ New profile").clicked() {
+                    let new_id = format!("custom_{}", self.cfg.donut.profiles.len() + 1);
+                    let new_prof = DonutProfile::new(
+                        &new_id,
+                        "New Profile",
+                        &[".txt"],
+                        &["PNG", "PDF", "WEBP", "JPG"],
+                        &["CROP", "RENAME", "ZIP", "EXPLORE"],
+                    );
+                    self.cfg.donut.profiles.push(new_prof);
+                    self.selected_donut_profile_idx = self.cfg.donut.profiles.len() - 1;
+                    *dirty = true;
+                }
+                if ui.button("Alt+Up").clicked() && self.selected_donut_profile_idx > 0 {
+                    self.cfg.donut.move_profile_up(self.selected_donut_profile_idx);
+                    self.selected_donut_profile_idx -= 1;
+                    *dirty = true;
+                }
+                if ui.button("Alt+Down").clicked()
+                    && self.selected_donut_profile_idx + 1 < self.cfg.donut.profiles.len()
+                {
+                    self.cfg.donut.move_profile_down(self.selected_donut_profile_idx);
+                    self.selected_donut_profile_idx += 1;
+                    *dirty = true;
+                }
+            });
+
+            ui.add_space(design::space::XS);
+            ui.label(
+                egui::RichText::new("When two profiles share an extension, the higher one opens. Alt+Up / Alt+Down moves the selected profile.")
+                    .size(design::type_scale::MICRO)
+                    .color(palette.text_muted),
+            );
+        });
+    }
+
+    fn render_donut_col2(
+        &mut self,
+        ui: &mut Ui,
+        col2_w: f32,
+        palette: &ThemePalette,
+        dirty: &mut bool,
+    ) {
+        ui.allocate_ui_with_layout(
+            Vec2::new(col2_w, ui.available_height()),
+            Layout::top_down(Align::Min),
+            |ui| {
+                ui.label(
+                    egui::RichText::new("2. Arrange presets")
+                        .size(design::type_scale::TITLE_SM)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.add_space(design::space::XS);
+
+                if self.selected_donut_profile_idx >= self.cfg.donut.profiles.len() {
+                    self.selected_donut_profile_idx = 0;
+                }
+                let (profile_name, profile_id, front_len, back_len, slices_copy) = {
+                    let p = &self.cfg.donut.profiles[self.selected_donut_profile_idx];
+                    let slices = if self.donut_view_back {
+                        &p.back_slices
+                    } else {
+                        &p.front_slices
+                    };
+                    (
+                        p.name.clone(),
+                        p.id.clone(),
+                        p.front_slices.len(),
+                        p.back_slices.len(),
+                        slices.clone(),
+                    )
+                };
+
+                // Front / Back toggle pills
+                ui.horizontal_wrapped(|ui| {
+                    let front_btn = egui::Button::new(
+                        egui::RichText::new(format!("Front {}", front_len))
+                            .size(design::type_scale::BODY_SM)
+                            .color(if !self.donut_view_back {
+                                palette.accent
+                            } else {
+                                palette.text_secondary
+                            }),
+                    )
+                    .fill(if !self.donut_view_back {
+                        palette.card_hover
+                    } else {
+                        palette.card_bg
+                    })
+                    .stroke(Stroke::new(
+                        1.0_f32,
+                        if !self.donut_view_back {
+                            palette.accent
+                        } else {
+                            palette.border
+                        },
+                    ))
+                    .rounding(Rounding::same(design::radius::PILL));
+                    let front_resp = ui.add(front_btn);
+                    design::paint_pill_ring(
+                        ui.painter(),
+                        front_resp.rect,
+                        Rounding::same(design::radius::PILL),
+                        design::pill_state(&front_resp, !self.donut_view_back),
+                        palette.accent,
+                    );
+                    if front_resp.clicked() {
+                        self.donut_view_back = false;
+                    }
+
+                    let back_btn = egui::Button::new(
+                        egui::RichText::new(format!("Back {}", back_len))
+                            .size(design::type_scale::BODY_SM)
+                            .color(if self.donut_view_back {
+                                palette.accent
+                            } else {
+                                palette.text_secondary
+                            }),
+                    )
+                    .fill(if self.donut_view_back {
+                        palette.card_hover
+                    } else {
+                        palette.card_bg
+                    })
+                    .stroke(Stroke::new(
+                        1.0_f32,
+                        if self.donut_view_back {
+                            palette.accent
+                        } else {
+                            palette.border
+                        },
+                    ))
+                    .rounding(Rounding::same(design::radius::PILL));
+                    let back_resp = ui.add(back_btn);
+                    design::paint_pill_ring(
+                        ui.painter(),
+                        back_resp.rect,
+                        Rounding::same(design::radius::PILL),
+                        design::pill_state(&back_resp, self.donut_view_back),
+                        palette.accent,
+                    );
+                    if back_resp.clicked() {
+                        self.donut_view_back = true;
+                    }
+                });
+
+                ui.label(
+                    egui::RichText::new("Flip the open donut: Tab / mouse wheel")
+                        .size(design::type_scale::MICRO)
+                        .color(palette.text_muted),
+                );
+                ui.add_space(design::space::SM);
+
+                // Live Vector Radial Donut Preview (Dynamically scaled to col2_w)
+                let canvas_w = (col2_w - 24.0).clamp(210.0, 270.0);
+                let canvas_h = (canvas_w * 0.90).clamp(190.0, 245.0);
+                let (preview_rect, _) =
+                    ui.allocate_exact_size(Vec2::new(canvas_w, canvas_h), Sense::hover());
+                let center = preview_rect.center();
+                let painter = ui.painter_at(preview_rect);
+
+                let n_slices = slices_copy.len().max(1);
+                let outer_r = (canvas_w * 0.38).clamp(70.0, 100.0);
+                let inner_r = (outer_r * 0.44).clamp(32.0, 46.0);
+
+                use std::f32::consts::PI;
+                let step_angle = 2.0 * PI / (n_slices as f32);
+
+                for (idx, slice) in slices_copy.iter().enumerate() {
+                    let a0 = -PI / 2.0 + (idx as f32) * step_angle;
+                    let a1 = a0 + step_angle;
+                    let seg_steps = 16;
+                    let mut points = Vec::new();
+
+                    for s in 0..=seg_steps {
+                        let t = (s as f32) / (seg_steps as f32);
+                        let a = a0 + t * (a1 - a0);
+                        points.push(egui::pos2(
+                            center.x + outer_r * a.cos(),
+                            center.y + outer_r * a.sin(),
+                        ));
+                    }
+                    for s in (0..=seg_steps).rev() {
+                        let t = (s as f32) / (seg_steps as f32);
+                        let a = a0 + t * (a1 - a0);
+                        points.push(egui::pos2(
+                            center.x + inner_r * a.cos(),
+                            center.y + inner_r * a.sin(),
+                        ));
+                    }
+
+                    painter.add(egui::Shape::convex_polygon(
+                        points,
+                        palette.card_bg,
+                        Stroke::new(1.0_f32, palette.border),
+                    ));
+
+                    let mid_a = (a0 + a1) * 0.5;
+                    let label_r = (inner_r + outer_r) * 0.5;
+                    let text_pos = egui::pos2(
+                        center.x + label_r * mid_a.cos(),
+                        center.y + label_r * mid_a.sin(),
+                    );
+                    painter.text(
+                        text_pos,
+                        Align2::CENTER_CENTER,
+                        &slice.label,
+                        egui::FontId::proportional(design::type_scale::BODY_SM),
+                        palette.text_primary,
+                    );
+                }
+
+                // Center columella hub
+                painter.circle_filled(center, inner_r, palette.card_hover);
+                painter.circle_stroke(center, inner_r, Stroke::new(1.5_f32, palette.accent));
+                painter.text(
+                    center,
+                    Align2::CENTER_CENTER,
+                    format!("{}\n{}/12", profile_name, slices_copy.len()),
+                    egui::FontId::proportional(design::type_scale::BODY_SM),
+                    palette.accent,
+                );
+
+                ui.add_space(design::space::SM);
+
+                let mut do_reset = false;
+                let mut do_delete = false;
+
+                // Profile Configuration Card
+                card(ui, palette, |ui| {
+                    let prof = &mut self.cfg.donut.profiles[self.selected_donut_profile_idx];
+                    ui.label(
+                        egui::RichText::new("Name")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_secondary),
+                    );
+                    if ui
+                        .add(TextEdit::singleline(&mut prof.name).desired_width(f32::INFINITY))
+                        .changed()
+                    {
+                        *dirty = true;
+                    }
+                    ui.add_space(design::space::XS);
+
+                    ui.horizontal_wrapped(|ui| {
+                        if ui
+                            .checkbox(
+                                &mut prof.is_mixed_selection,
+                                "Use for mixed selections (files of different types)",
+                            )
+                            .changed()
+                        {
+                            *dirty = true;
+                        }
+                    });
+                    ui.add_space(design::space::XS);
+
+                    ui.label(
+                        egui::RichText::new("Used for these extensions")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_secondary),
+                    );
+                    let mut ext_to_remove = None;
+
+                    ScrollArea::vertical()
+                        .id_salt("ext_tags_scroll")
+                        .max_height(100.0)
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                for (ext_idx, ext) in prof.extensions.iter().enumerate() {
+                                    let pill_btn = egui::Button::new(
+                                        egui::RichText::new(format!("{} x", ext))
+                                            .size(design::type_scale::BODY_SM)
+                                            .color(palette.text_secondary),
+                                    )
+                                    .fill(palette.card_bg)
+                                    .stroke(Stroke::new(1.0_f32, palette.border))
+                                    .rounding(Rounding::same(design::radius::PILL));
+                                    let pill_resp = ui.add(pill_btn);
+                                    design::paint_pill_ring(
+                                        ui.painter(),
+                                        pill_resp.rect,
+                                        Rounding::same(design::radius::PILL),
+                                        design::pill_state(&pill_resp, false),
+                                        palette.accent,
+                                    );
+                                    if pill_resp.clicked() {
+                                        ext_to_remove = Some(ext_idx);
+                                    }
+                                }
+                            });
+                        });
+
+                    if let Some(idx) = ext_to_remove {
+                        if idx < prof.extensions.len() {
+                            prof.extensions.remove(idx);
+                            *dirty = true;
+                        }
+                    }
+
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add(
+                            TextEdit::singleline(&mut self.new_ext_input)
+                                .hint_text(".jpg")
+                                .desired_width(100.0),
+                        );
+                        if ui.button("+ Add extension").clicked() {
+                            let clean = self.new_ext_input.trim();
+                            if !clean.is_empty() {
+                                let formatted = if clean.starts_with('.') {
+                                    clean.to_string()
+                                } else {
+                                    format!(".{}", clean)
+                                };
+                                if !prof.extensions.contains(&formatted) {
+                                    prof.extensions.push(formatted);
+                                    self.new_ext_input.clear();
+                                    *dirty = true;
+                                }
+                            }
+                        }
+                    });
+
+                    ui.add_space(design::space::XS);
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("Reset to default").clicked() {
+                            do_reset = true;
+                        }
+                        if profile_id != "images" && ui.button("Delete profile").clicked() {
+                            do_delete = true;
+                        }
+                    });
+                });
+
+                if do_reset {
+                    let default_cfg = DonutConfig::default();
+                    if let Some(def_p) = default_cfg.profiles.get(self.selected_donut_profile_idx) {
+                        self.cfg.donut.profiles[self.selected_donut_profile_idx] = def_p.clone();
+                        *dirty = true;
+                    }
+                }
+                if do_delete && self.cfg.donut.profiles.len() > 1 {
+                    self.cfg
+                        .donut
+                        .profiles
+                        .remove(self.selected_donut_profile_idx);
+                    self.selected_donut_profile_idx = 0;
+                    *dirty = true;
+                }
+
+                ui.add_space(design::space::SM);
+
+                // Appearance Card
+                card(ui, palette, |ui| {
+                    ui.label(
+                        egui::RichText::new("Appearance")
+                            .size(design::type_scale::TITLE_SM)
+                            .strong()
+                            .color(palette.text_primary),
+                    );
+                    ui.add_space(design::space::XS);
+
+                    let slider_w = (col2_w - 90.0).clamp(110.0, 180.0);
+                    ui.spacing_mut().slider_width = slider_w;
+
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Size")
+                                .size(design::type_scale::BODY_SM)
+                                .color(palette.text_secondary),
+                        );
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut self.cfg.donut.appearance.size,
+                                    320.0..=540.0,
+                                )
+                                .suffix(" px"),
+                            )
+                            .changed()
+                        {
+                            *dirty = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Hole")
+                                .size(design::type_scale::BODY_SM)
+                                .color(palette.text_secondary),
+                        );
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut self.cfg.donut.appearance.hole, 30.0..=80.0)
+                                    .suffix(" px"),
+                            )
+                            .changed()
+                        {
+                            *dirty = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Opacity")
+                                .size(design::type_scale::BODY_SM)
+                                .color(palette.text_secondary),
+                        );
+                        if ui
+                            .add(egui::Slider::new(
+                                &mut self.cfg.donut.appearance.opacity,
+                                0.20..=1.00,
+                            ))
+                            .changed()
+                        {
+                            *dirty = true;
+                        }
+                    });
+                });
+            },
+        );
+    }
+
+    fn render_donut_col3(
+        &mut self,
+        ui: &mut Ui,
+        col3_w: f32,
+        palette: &ThemePalette,
+        dirty: &mut bool,
+    ) {
+        ui.allocate_ui_with_layout(
+            Vec2::new(col3_w, ui.available_height()),
+            Layout::top_down(Align::Min),
+            |ui| {
+                ui.label(
+                    egui::RichText::new("Available presets")
+                        .size(design::type_scale::TITLE_SM)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.add_space(design::space::XS);
+
+                ui.horizontal_wrapped(|ui| {
+                    let _ = ui.button("+ New preset");
+                    let _ = ui.button("New group");
+                    let _ = ui.button("Copy to folder");
+                });
+                ui.add_space(design::space::XS);
+
+                ui.add(
+                    TextEdit::singleline(&mut self.donut_preset_search)
+                        .hint_text("Search presets")
+                        .desired_width(col3_w - 12.0),
+                );
+                ui.add_space(design::space::XS);
+
+                // Category filter pills
+                let categories = [
+                    "All",
+                    "Image",
+                    "Document",
+                    "Video & audio",
+                    "Edit",
+                    "3D & CAD",
+                ];
+                ui.horizontal_wrapped(|ui| {
+                    for cat in categories {
+                        let active = self.donut_preset_category == cat;
+                        let btn = egui::Button::new(
+                            egui::RichText::new(cat)
+                                .size(design::type_scale::MICRO)
+                                .color(if active {
+                                    palette.accent
+                                } else {
+                                    palette.text_secondary
+                                }),
+                        )
+                        .fill(if active {
+                            palette.card_hover
+                        } else {
+                            palette.card_bg
+                        })
+                        .stroke(Stroke::new(
+                            1.0_f32,
+                            if active {
+                                palette.accent
+                            } else {
+                                palette.border
+                            },
+                        ))
+                        .rounding(Rounding::same(design::radius::PILL));
+                        let cat_resp = ui.add(btn);
+                        design::paint_pill_ring(
+                            ui.painter(),
+                            cat_resp.rect,
+                            Rounding::same(design::radius::PILL),
+                            design::pill_state(&cat_resp, active),
+                            palette.accent,
+                        );
+                        if cat_resp.clicked() {
+                            self.donut_preset_category = cat.to_string();
+                        }
+                    }
+                });
+                ui.add_space(design::space::SM);
+
+                let available_catalog = [
+                    ("Edit Group of 6", "Edit", true),
+                    ("Pages per sheet Group of 5", "Document", true),
+                    ("Flip Group of 2", "Edit", true),
+                    ("Crop video Group of 6", "Video & audio", true),
+                    ("JPG 70%", "Image", false),
+                    ("TIFF", "Image", false),
+                    ("BMP", "Image", false),
+                    ("ICO", "Image", false),
+                    ("AVIF", "Image", false),
+                    ("HEIC", "Image", false),
+                    ("Grayscale Same format", "Edit", true),
+                    ("Trim transparent borders", "Edit", true),
+                    ("Pixelate / blur Same format", "Edit", true),
+                    ("Annotate Same format", "Edit", true),
+                    ("Rotate left PDF", "Document", true),
+                    ("Rotate right PDF", "Document", true),
+                    ("2 pages per sheet PDF", "Document", true),
+                    ("4 pages per sheet PDF", "Document", true),
+                    ("6 pages per sheet PDF", "Document", true),
+                    ("8 pages per sheet PDF", "Document", true),
+                    ("9 pages per sheet PDF", "Document", true),
+                    ("Rotate left Same format", "Edit", true),
+                    ("Rotate right Same format", "Edit", true),
+                    ("Rotate 180 Same format", "Edit", true),
+                    ("Flip horizontal Same format", "Edit", true),
+                    ("Flip vertical Same format", "Edit", true),
+                    ("TIFF 300dpi", "Image", false),
+                    ("Merge PDF", "Document", true),
+                    ("Long image PNG", "Image", false),
+                    ("Split PDF", "Document", true),
+                    ("Compress PDF", "Document", true),
+                    ("Searchable PDF", "Document", true),
+                    ("STL", "3D & CAD", false),
+                    ("OBJ", "3D & CAD", false),
+                    ("PLY", "3D & CAD", false),
+                    ("DXF", "3D & CAD", false),
+                    ("DWG", "3D & CAD", false),
+                ];
+
+                let search_p = self.donut_preset_search.trim().to_lowercase();
+                let cat_filter = &self.donut_preset_category;
+
+                ScrollArea::vertical()
+                    .id_salt("donut_presets_catalog_scroll")
+                    .max_height(420.0)
+                    .show(ui, |ui| {
+                        for (preset_name, cat, is_action) in available_catalog {
+                            if cat_filter != "All" && cat != cat_filter {
+                                continue;
+                            }
+                            if !search_p.is_empty()
+                                && !preset_name.to_lowercase().contains(&search_p)
+                            {
+                                continue;
+                            }
+
+                            let card_w = (col3_w - 16.0).max(180.0);
+                            let btn = egui::Button::new(
+                                egui::RichText::new(preset_name)
+                                    .size(design::type_scale::BODY_SM)
+                                    .color(palette.text_primary),
+                            )
+                            .wrap()
+                            .fill(palette.card_bg)
+                            .stroke(Stroke::new(1.0_f32, palette.border))
+                            .rounding(Rounding::same(design::radius::SM));
+
+                            if ui.add_sized(Vec2::new(card_w, 28.0), btn).clicked()
+                                && self.selected_donut_profile_idx < self.cfg.donut.profiles.len()
+                            {
+                                let prof =
+                                    &mut self.cfg.donut.profiles[self.selected_donut_profile_idx];
+                                let target_list = if self.donut_view_back {
+                                    &mut prof.back_slices
+                                } else {
+                                    &mut prof.front_slices
+                                };
+                                let max_s = if self.donut_view_back {
+                                    prof.max_back_slices
+                                } else {
+                                    prof.max_front_slices
+                                };
+                                if target_list.len() < max_s {
+                                    target_list.push(if is_action {
+                                        DonutSlicePreset::action(
+                                            preset_name,
+                                            preset_name,
+                                            preset_name,
+                                        )
+                                    } else {
+                                        DonutSlicePreset::format(preset_name)
+                                    });
+                                    *dirty = true;
+                                }
+                            }
+                            ui.add_space(2.0);
+                        }
+                    });
+            },
+        );
     }
 
     fn render_shortcuts(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
@@ -2544,22 +2725,6 @@ impl PreferencesView {
                     }
                 },
             );
-
-            let scp = self.cfg.show_custom_pinned;
-            let scp_lbl = on_off(scp).to_string();
-            let scp_mut = &mut self.cfg.show_custom_pinned;
-            setting_row(
-                ui,
-                palette,
-                "Show custom pinned folders",
-                &scp_lbl,
-                dirty,
-                |ui, dirty| {
-                    if ui.checkbox(scp_mut, "").changed() {
-                        *dirty = true;
-                    }
-                },
-            );
         });
 
         section(ui, palette, "Custom pinned folders");
@@ -3404,8 +3569,12 @@ fn key_binding_display(modifiers: egui::Modifiers, key: egui::Key) -> String {
 }
 
 fn card<R>(ui: &mut Ui, palette: &ThemePalette, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    let mut bg = palette.card_bg;
+    bg = Color32::from_rgb(bg.r(), bg.g(), bg.b());
+    let avail = ui.available_width();
+    ui.set_max_width(avail);
     Frame::none()
-        .fill(palette.card_bg)
+        .fill(bg)
         .stroke(Stroke::new(1.0_f32, palette.border))
         .rounding(Rounding::same(10.0))
         .inner_margin(Margin::symmetric(16.0, 12.0))
@@ -3507,50 +3676,19 @@ fn setting_row(
     body: impl FnOnce(&mut Ui, &mut bool),
 ) {
     let w = ui.available_width();
-    let pos = ui.input(|i| i.pointer.hover_pos());
-    ui.allocate_ui_with_layout(
-        Vec2::new(w, 34.0),
-        Layout::left_to_right(Align::Center),
-        |ui| {
-            let r = ui.max_rect();
-            ui.set_clip_rect(r);
-            if let Some(p) = pos {
-                if r.contains(p) {
-                    ui.painter().rect_filled(
-                        r,
-                        Rounding::same(design::radius::SM),
-                        Color32::from_rgba_unmultiplied(
-                            palette.card_hover.r(),
-                            palette.card_hover.g(),
-                            palette.card_hover.b(),
-                            50,
-                        ),
-                    );
-                }
-            }
-            let ctrl_width = 240.0_f32;
-            let left_w = (ui.available_width() - ctrl_width - 8.0).max(120.0);
-            ui.allocate_ui_with_layout(
-                Vec2::new(left_w, 34.0),
-                Layout::left_to_right(Align::Center),
-                |ui| {
-                    ui.add_space(design::space::XS);
-                    ui.label(
-                        egui::RichText::new(label)
-                            .size(design::type_scale::BODY)
-                            .color(palette.text_primary),
-                    );
-                },
+    if w < 440.0 {
+        // Narrow viewports: wrap into two stacked rows
+        ui.vertical(|ui| {
+            ui.add_space(2.0);
+            ui.label(
+                egui::RichText::new(label)
+                    .size(design::type_scale::BODY)
+                    .color(palette.text_primary),
             );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add_space(6.0);
-                let x0 = ui.cursor().right();
+            ui.add_space(2.0);
+            ui.horizontal_wrapped(|ui| {
                 body(ui, dirty);
-                // Wide controls (segmented choices, pickers) already show the
-                // value; echoing it beside them read as clutter ("256k" next
-                // to a highlighted 256k). Narrow ones (slider, checkbox) keep it.
-                let control_w = x0 - ui.cursor().right();
-                if !value.is_empty() && control_w < 150.0 {
+                if !value.is_empty() {
                     ui.add_space(design::space::XS);
                     ui.label(
                         egui::RichText::new(value)
@@ -3559,8 +3697,47 @@ fn setting_row(
                     );
                 }
             });
-        },
-    );
+            ui.add_space(4.0);
+        });
+    } else {
+        // Standard wide viewport: label left, control right-aligned
+        ui.allocate_ui_with_layout(
+            Vec2::new(w, 34.0),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                let r = ui.max_rect();
+                ui.set_clip_rect(r);
+                let ctrl_width = 240.0_f32;
+                let left_w = (ui.available_width() - ctrl_width - 8.0).max(120.0);
+                ui.allocate_ui_with_layout(
+                    Vec2::new(left_w, 34.0),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.add_space(design::space::XS);
+                        ui.label(
+                            egui::RichText::new(label)
+                                .size(design::type_scale::BODY)
+                                .color(palette.text_primary),
+                        );
+                    },
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(6.0);
+                    let x0 = ui.cursor().right();
+                    body(ui, dirty);
+                    let control_w = x0 - ui.cursor().right();
+                    if !value.is_empty() && control_w < 150.0 {
+                        ui.add_space(design::space::XS);
+                        ui.label(
+                            egui::RichText::new(value)
+                                .size(design::type_scale::SMALL)
+                                .color(palette.text_muted),
+                        );
+                    }
+                });
+            },
+        );
+    }
     ui.add_space(design::space::XS);
 }
 
@@ -3613,7 +3790,6 @@ pub fn search_preferences(query: &str, cfg: &MossambiConfig) -> Vec<PreferenceHi
         ("Icon pack", "icon_pack"),
         ("Show hidden files", "show_hidden_files"),
         ("Show tags section", "show_tags_section"),
-        ("Show custom pinned folders", "show_custom_pinned"),
         ("Calculate checksums", "calculate_checksums"),
         ("Always on top", "always_on_top"),
         ("Play sound", "play_sound"),
@@ -3634,10 +3810,7 @@ pub fn search_preferences(query: &str, cfg: &MossambiConfig) -> Vec<PreferenceHi
                 "drop_action_pref" => "General",
                 "glass_effect" | "window_opacity" | "menu_style" | "checkbox_mode"
                 | "icon_pack" => "Appearance",
-                "show_hidden_files"
-                | "show_tags_section"
-                | "show_custom_pinned"
-                | "calculate_checksums" => "Explorer",
+                "show_hidden_files" | "show_tags_section" | "calculate_checksums" => "Explorer",
                 "always_on_top" | "play_sound" | "launch_at_login" | "background_work"
                 | "max_fps" => "Behavior",
                 "enable_gesture_wakeup" | "enable_hotkey_wakeup" => "Input & Gestures",

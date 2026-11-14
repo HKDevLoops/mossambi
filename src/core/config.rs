@@ -862,6 +862,8 @@ pub struct MossambiConfig {
     pub output_mode: OutputMode,
     pub custom_output_dir: Option<PathBuf>,
     pub always_on_top: bool,
+    #[serde(default)]
+    pub prefs_version: u32,
     pub play_sound: bool,
     pub launch_at_login: bool,
     pub wheel_size: u32, // 380, 440, 500
@@ -941,6 +943,8 @@ pub struct MossambiConfig {
     /// sidebar keeps its shape across restarts; all zones default expanded.
     #[serde(default = "default_true")]
     pub sidebar_favorites_expanded: bool,
+    #[serde(default = "default_true")]
+    pub sidebar_pinned_expanded: bool,
     #[serde(default = "default_true")]
     pub sidebar_locations_expanded: bool,
     #[serde(default = "default_true")]
@@ -1116,6 +1120,20 @@ fn default_explorer_columns() -> Vec<u8> {
     vec![0, 1, 2, 3]
 }
 
+/// One-time migration for persisted preferences.
+///
+/// If prefs_version < 1, forces always_on_top to false and updates prefs_version to 1.
+/// Returns true if migration occurred and changes should be saved.
+pub fn migrate_prefs(cfg: &mut MossambiConfig) -> bool {
+    if cfg.prefs_version < 1 {
+        cfg.always_on_top = false;
+        cfg.prefs_version = 1;
+        true
+    } else {
+        false
+    }
+}
+
 fn default_calculate_checksums() -> bool {
     true
 }
@@ -1156,7 +1174,8 @@ impl Default for MossambiConfig {
             citrus_shade: "classicblue".to_string(),
             output_mode: OutputMode::Sibling,
             custom_output_dir: None,
-            always_on_top: true,
+            always_on_top: false,
+            prefs_version: 1,
             play_sound: true,
             launch_at_login: false,
             wheel_size: 440,
@@ -1190,6 +1209,7 @@ impl Default for MossambiConfig {
             show_custom_pinned: false,
             pinned_custom: Vec::new(),
             sidebar_favorites_expanded: true,
+            sidebar_pinned_expanded: true,
             sidebar_locations_expanded: true,
             sidebar_tags_expanded: true,
             sidebar_tools_expanded: true,
@@ -1351,6 +1371,9 @@ impl MossambiConfig {
                                 raw_threads,
                                 parsed.worker_threads
                             );
+                        }
+                        if migrate_prefs(&mut parsed) {
+                            let _ = parsed.save();
                         }
                         parsed
                     }
@@ -1616,5 +1639,22 @@ mod tests {
         assert_eq!(serialized, "\"always_ask\"");
         let deserialized: DropActionPreference = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, DropActionPreference::AlwaysAsk);
+    }
+
+    #[test]
+    fn test_prefs_version_and_migration() {
+        let mut cfg = MossambiConfig::default();
+        assert_eq!(cfg.prefs_version, 1);
+        assert!(!cfg.always_on_top);
+
+        // Version 0 migration forces always_on_top false and sets version 1
+        cfg.prefs_version = 0;
+        cfg.always_on_top = true;
+        assert!(migrate_prefs(&mut cfg));
+        assert_eq!(cfg.prefs_version, 1);
+        assert!(!cfg.always_on_top);
+
+        // Version 1 already migrated, returns false
+        assert!(!migrate_prefs(&mut cfg));
     }
 }

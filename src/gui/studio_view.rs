@@ -15,15 +15,23 @@ use crate::core::conversion_queue::{ConversionQueue, QueueAction, QueueItemStatu
 use crate::core::icon_packs::IconGlyph;
 use crate::core::{FileCategory, UniversalRegistry};
 use crate::gui::command_palette::{CommandPalette, PaletteAction};
-use crate::gui::design::{layout, radius, type_scale};
+use crate::gui::design::{self, layout, radius, type_scale};
 use crate::gui::explorer_view::ExplorerView;
-use crate::gui::finder_chrome::{render_sidebar_row, render_sidebar_zone_header, SidebarRowSpec};
+use crate::gui::finder_chrome::{
+    render_sidebar_row, render_sidebar_zone_header, render_sidebar_zone_header_with_drop,
+    SidebarRowSpec,
+};
 use crate::gui::macos_theme::*;
 use crate::gui::quick_settings::QuickSettingsState;
 use eframe::egui::{
-    self, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2, ViewportCommand,
+    self, Align2, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2, ViewportCommand,
 };
 use std::path::{Path, PathBuf};
+
+#[derive(Clone, Debug)]
+pub struct PinnedRowDragPayload {
+    pub from_index: usize,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StudioTab {
@@ -125,6 +133,7 @@ fn shortcut_pressed(events: &[egui::Event], binding: &str) -> bool {
 
 pub struct StudioView {
     pub current_tab: StudioTab,
+    pub previous_tab: StudioTab,
     pub explorer_view: crate::gui::explorer_view::ExplorerView,
     pub exam_status: String,
     pub last_exam_output: Option<PathBuf>,
@@ -175,6 +184,7 @@ impl Default for StudioView {
     fn default() -> Self {
         Self {
             current_tab: StudioTab::FileExplorer,
+            previous_tab: StudioTab::FileExplorer,
             explorer_view: crate::gui::explorer_view::ExplorerView::default(),
             exam_status: "Ready to optimize for portal boundaries.".to_string(),
             last_exam_output: None,
@@ -207,6 +217,15 @@ impl Default for StudioView {
 }
 
 impl StudioView {
+    /// Switches the current studio view tab, recording the previous tab
+    /// so Ctrl+W or close can restore it.
+    pub fn switch_to_tab(&mut self, tab: StudioTab) {
+        if self.current_tab != tab {
+            self.previous_tab = self.current_tab;
+            self.current_tab = tab;
+        }
+    }
+
     /// Sibling-folder menu listing, loaded once per directory and
     /// cached (F-2 fix): the context-menu closure re-runs every frame
     /// while open, so a synchronous re-list each frame would freeze
@@ -330,15 +349,47 @@ impl StudioView {
 
         let open_new_tab = !capturing && shortcut_pressed(&events, &config.shortcut_for("new_tab"));
         if open_new_tab && !self.command_palette.is_open {
-            self.current_tab = StudioTab::FileExplorer;
+            self.switch_to_tab(StudioTab::FileExplorer);
             self.explorer_view
                 .add_tab(self.explorer_view.current_dir.clone());
         }
 
         let close_tab = !capturing && shortcut_pressed(&events, &config.shortcut_for("close_tab"));
-        if close_tab && !self.command_palette.is_open && self.explorer_view.tabs.len() > 1 {
-            self.explorer_view
-                .close_tab(self.explorer_view.active_tab_index);
+        if close_tab && !self.command_palette.is_open {
+            let action = crate::core::close_target(
+                self.current_tab == StudioTab::FileExplorer,
+                self.explorer_view.tabs.len(),
+                self.explorer_view.active_tab_index,
+            );
+            match action {
+                crate::core::CloseAction::LeaveToolView => {
+                    self.current_tab = if self.previous_tab != self.current_tab
+                        && self.previous_tab != StudioTab::Preferences
+                    {
+                        self.previous_tab
+                    } else {
+                        StudioTab::FileExplorer
+                    };
+                }
+                crate::core::CloseAction::CloseExplorerTab(idx) => {
+                    self.explorer_view.close_tab(idx);
+                }
+                crate::core::CloseAction::Nothing => {}
+            }
+        }
+
+        // Esc closes Preferences when no text field has focus
+        if self.current_tab == StudioTab::Preferences
+            && !ctx.wants_keyboard_input()
+            && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        {
+            self.current_tab = if self.previous_tab != self.current_tab
+                && self.previous_tab != StudioTab::Preferences
+            {
+                self.previous_tab
+            } else {
+                StudioTab::FileExplorer
+            };
         }
 
         // 1. Unified Top Panel (Windows 11 Fluent Tabs + Navigation Toolbar)
@@ -510,6 +561,7 @@ impl StudioView {
                     // B-3: when a non-explorer view is on screen the
                     // strip must show what is actually displayed
                     // instead of only stale explorer pills.
+                    let mut close_tool_tab = false;
                     if self.current_tab != StudioTab::FileExplorer {
                         let (label, glyph) = studio_tab_label(self.current_tab);
                         let (p_rect, _) =
@@ -532,7 +584,7 @@ impl StudioView {
                             pill_icon_rect,
                             [79, 168, 255],
                         );
-                        let max_title_chars = 12;
+                        let max_title_chars = 10;
                         let title_display = if label.chars().count() > max_title_chars {
                             format!(
                                 "{}...",
@@ -548,9 +600,49 @@ impl StudioView {
                             egui::FontId::proportional(13.5),
                             palette.text_primary,
                         );
+
+                        // Close button "x" on tool/preferences pill
+                        let close_rect = Rect::from_center_size(
+                            p_rect.right_center() + Vec2::new(-12.0, 0.0),
+                            Vec2::splat(14.0),
+                        );
+                        let close_resp = ui.interact(
+                            close_rect,
+                            ui.make_persistent_id("tool_tab_close_btn"),
+                            Sense::click(),
+                        );
+                        if close_resp.hovered() {
+                            ui.painter().circle_filled(
+                                close_rect.center(),
+                                7.0,
+                                palette.card_hover,
+                            );
+                        }
+                        ui.painter().text(
+                            close_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "x",
+                            egui::FontId::proportional(11.0),
+                            if close_resp.hovered() {
+                                palette.text_primary
+                            } else {
+                                palette.text_muted
+                            },
+                        );
+                        if close_resp.clicked() {
+                            close_tool_tab = true;
+                        }
                     }
 
-                    if let Some(idx) = tab_to_close {
+                    if close_tool_tab {
+                        self.current_tab = if self.previous_tab != self.current_tab
+                            && self.previous_tab != StudioTab::Preferences
+                        {
+                            self.previous_tab
+                        } else {
+                            StudioTab::FileExplorer
+                        };
+                    } else if let Some(idx) = tab_to_close {
                         self.explorer_view.close_tab(idx);
                     } else if let Some(idx) = tab_to_select {
                         self.current_tab = StudioTab::FileExplorer;
@@ -1004,7 +1096,7 @@ impl StudioView {
                                 "Preferences & Settings (Cmd+,)",
                                 false,
                             ) {
-                                self.current_tab = StudioTab::Preferences;
+                                self.switch_to_tab(StudioTab::Preferences);
                             }
 
                             // 4. New Window Button (Ctrl+N)
@@ -1087,6 +1179,7 @@ impl StudioView {
                             label: "Home",
                             selected: is_home_active,
                             show_pin: false,
+                            dimmed: false,
                         };
                         let home_click = render_sidebar_row(ui, &palette, &home_spec);
                         if home_click.row {
@@ -1205,6 +1298,7 @@ impl StudioView {
                                     label: name,
                                     selected: is_active,
                                     show_pin: false,
+                                    dimmed: false,
                                 };
                                 let row_click = render_sidebar_row(ui, &palette, &spec);
                                 if let Some(payload) = row_click.dropped {
@@ -1225,54 +1319,397 @@ impl StudioView {
                                 }
                                 ui.add_space(1.0);
                             }
+                        }
 
-                            // User pins live inline in the Favorites zone
-                            // (Finder semantics); the pin strip is a real
-                            // unpin control.
-                            if cfg.show_custom_pinned && !cfg.pinned_custom.is_empty() {
-                                let custom = cfg.pinned_custom.clone();
-                                for raw in custom {
-                                    let path = PathBuf::from(&raw);
+                        // 2.5 PINNED Zone (shows when pins exist or during folder drag)
+                        let is_file_drag = egui::DragAndDrop::has_payload_of_type::<
+                            crate::gui::explorer_view::FileDragPayload,
+                        >(ui.ctx());
+                        let show_pinned_section = !cfg.pinned_custom.is_empty() || is_file_drag;
+
+                        if show_pinned_section {
+                            ui.add_space(2.0);
+                            // Drop gap between Favorites and Pinned
+                            if is_file_drag {
+                                let gap_rect =
+                                    ui.allocate_space(Vec2::new(ui.available_width(), 6.0)).1;
+                                let gap_resp = ui.interact(
+                                    gap_rect,
+                                    ui.id().with("gap_pinned_top"),
+                                    Sense::hover(),
+                                );
+                                if let Some(payload) = gap_resp.dnd_release_payload::<
+                                    crate::gui::explorer_view::FileDragPayload,
+                                >() {
+                                    let mut changed = false;
+                                    for path in &payload.paths {
+                                        if path.is_dir()
+                                            && crate::core::pin_add(&mut cfg.pinned_custom, path)
+                                        {
+                                            changed = true;
+                                        }
+                                    }
+                                    if changed {
+                                        let _ = cfg.save();
+                                    }
+                                }
+                            }
+
+                            let (header_clicked, header_drop) =
+                                render_sidebar_zone_header_with_drop(
+                                    ui,
+                                    &palette,
+                                    "Pinned",
+                                    cfg.sidebar_pinned_expanded,
+                                );
+                            if header_clicked {
+                                cfg.sidebar_pinned_expanded = !cfg.sidebar_pinned_expanded;
+                                let _ = cfg.save();
+                            }
+                            if let Some(payload) = header_drop {
+                                let mut changed = false;
+                                for path in &payload.paths {
+                                    if path.is_dir()
+                                        && crate::core::pin_add(&mut cfg.pinned_custom, path)
+                                    {
+                                        changed = true;
+                                    }
+                                }
+                                if changed {
+                                    let _ = cfg.save();
+                                }
+                            }
+
+                            if cfg.sidebar_pinned_expanded {
+                                let custom_pins = cfg.pinned_custom.clone();
+                                let mut unpin_path: Option<PathBuf> = None;
+                                let mut open_new_tab_path: Option<PathBuf> = None;
+                                let mut reorder_move: Option<(usize, usize)> = None;
+
+                                for (idx, raw) in custom_pins.iter().enumerate() {
+                                    let path = PathBuf::from(raw);
+                                    let is_dir = path.is_dir();
                                     let name = path
                                         .file_name()
                                         .map(|n| n.to_string_lossy().into_owned())
                                         .unwrap_or_else(|| raw.clone());
                                     let is_active = is_sidebar_active(&path);
-                                    let spec = SidebarRowSpec {
-                                        pack,
-                                        glyph: IconGlyph::Folder,
-                                        accent_rgb: [79, 168, 255],
-                                        label: &name,
-                                        selected: is_active,
-                                        show_pin: true,
-                                    };
-                                    let row_click = render_sidebar_row(ui, &palette, &spec);
-                                    if let Some(payload) = row_click.dropped {
-                                        dispatch_sidebar_drop(
-                                            &mut self.explorer_view,
-                                            ui,
-                                            &path,
-                                            payload,
+
+                                    let row_h = cfg.sidebar_style.sidebar_row_height();
+                                    let desired_size = Vec2::new(ui.available_width(), row_h);
+                                    let (rect, hover_resp) =
+                                        ui.allocate_exact_size(desired_size, Sense::hover());
+
+                                    let pin_strip_w = 26.0_f32;
+                                    let row_hit_rect = Rect::from_min_max(
+                                        rect.min,
+                                        Pos2::new(rect.max.x - pin_strip_w, rect.max.y),
+                                    );
+                                    let row_id = ui.make_persistent_id(("pinned_row", idx, raw));
+                                    let row_resp =
+                                        ui.interact(row_hit_rect, row_id, Sense::click_and_drag());
+                                    let is_hovered = hover_resp.hovered() || row_resp.hovered();
+                                    let painter = ui.painter_at(rect);
+
+                                    // Drag to reorder
+                                    if row_resp.drag_started() {
+                                        egui::DragAndDrop::set_payload(
+                                            ui.ctx(),
+                                            PinnedRowDragPayload { from_index: idx },
                                         );
                                     }
-                                    if row_click.pin {
-                                        // Real unpin action: remove + persist.
-                                        cfg.pinned_custom.retain(|p| p != &raw);
-                                        if let Err(e) = cfg.save() {
-                                            log::warn!("Could not persist sidebar pins: {e}");
-                                        } else {
-                                            log::info!(
-                                                "Unpinned {} from the sidebar",
-                                                path.display()
+                                    if let Some(payload) =
+                                        row_resp.dnd_hover_payload::<PinnedRowDragPayload>()
+                                    {
+                                        if payload.from_index != idx {
+                                            painter.rect_stroke(
+                                                rect,
+                                                Rounding::same(design::radius::SM),
+                                                Stroke::new(1.5_f32, palette.accent),
                                             );
                                         }
                                     }
-                                    if row_click.row {
+                                    if let Some(payload) =
+                                        row_resp.dnd_release_payload::<PinnedRowDragPayload>()
+                                    {
+                                        if payload.from_index != idx {
+                                            reorder_move = Some((payload.from_index, idx));
+                                        }
+                                    }
+
+                                    // Drop files into folder
+                                    let is_file_drop_hovered = row_resp
+                                        .dnd_hover_payload::<crate::gui::explorer_view::FileDragPayload>()
+                                        .is_some();
+                                    if is_file_drop_hovered {
+                                        painter.rect_stroke(
+                                            rect,
+                                            Rounding::same(design::radius::SM),
+                                            Stroke::new(1.5_f32, palette.accent),
+                                        );
+                                    }
+                                    if let Some(payload) = row_resp.dnd_release_payload::<
+                                        crate::gui::explorer_view::FileDragPayload,
+                                    >() {
+                                        if is_dir {
+                                            dispatch_sidebar_drop(
+                                                &mut self.explorer_view,
+                                                ui,
+                                                &path,
+                                                (*payload).clone(),
+                                            );
+                                        }
+                                    }
+
+                                    // Background
+                                    let bg_color = if is_active {
+                                        Color32::from_rgba_unmultiplied(
+                                            palette.accent.r(),
+                                            palette.accent.g(),
+                                            palette.accent.b(),
+                                            if palette.is_dark { 45 } else { 26 },
+                                        )
+                                    } else if is_hovered {
+                                        palette.card_hover
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    };
+
+                                    if bg_color != Color32::TRANSPARENT {
+                                        painter.rect_filled(
+                                            rect,
+                                            Rounding::same(design::radius::SM),
+                                            bg_color,
+                                        );
+                                    }
+
+                                    if is_active {
+                                        let bar_rect = Rect::from_min_size(
+                                            rect.min + Vec2::new(2.0, 4.0),
+                                            Vec2::new(3.0, (row_h - 8.0).max(4.0)),
+                                        );
+                                        painter.rect_filled(
+                                            bar_rect,
+                                            Rounding::same(1.5),
+                                            palette.accent,
+                                        );
+                                    }
+
+                                    // Icon (dimmed if !is_dir)
+                                    let icon_side = 24.0;
+                                    let icon_rect = Rect::from_center_size(
+                                        Pos2::new(
+                                            rect.min.x + 10.0 + icon_side / 2.0,
+                                            rect.center().y,
+                                        ),
+                                        Vec2::splat(icon_side),
+                                    );
+                                    let icon_rgb = if !is_dir {
+                                        [
+                                            palette.text_muted.r(),
+                                            palette.text_muted.g(),
+                                            palette.text_muted.b(),
+                                        ]
+                                    } else {
+                                        [79, 168, 255]
+                                    };
+                                    crate::core::icon_packs::paint_icon(
+                                        ui,
+                                        pack,
+                                        IconGlyph::Folder,
+                                        icon_rect,
+                                        icon_rgb,
+                                    );
+
+                                    // Label (dimmed if !is_dir)
+                                    let label_x =
+                                        rect.min.x + 10.0 + icon_side + design::space::MD;
+                                    let label_max_w = (rect.max.x
+                                        - label_x
+                                        - pin_strip_w
+                                        - design::space::SM)
+                                        .max(design::space::LG);
+                                    let font_id = FontId::proportional(14.0);
+                                    let display_label =
+                                        design::elide_end(ui, &name, &font_id, label_max_w);
+                                    let text_color = if !is_dir {
+                                        palette.text_muted
+                                    } else if is_active || is_hovered {
+                                        palette.text_primary
+                                    } else {
+                                        palette.text_secondary
+                                    };
+                                    painter.text(
+                                        Pos2::new(label_x, rect.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        display_label,
+                                        font_id,
+                                        text_color,
+                                    );
+
+                                    // Pin button on right edge
+                                    let pin_rect = Rect::from_min_max(
+                                        Pos2::new(rect.max.x - pin_strip_w, rect.min.y),
+                                        rect.max,
+                                    );
+                                    let pin_id =
+                                        ui.make_persistent_id(("pinned_pin_btn", idx, raw));
+                                    let pin_resp = ui.interact(pin_rect, pin_id, Sense::click());
+                                    let pin_rect_glyph = Rect::from_center_size(
+                                        Pos2::new(rect.max.x - pin_strip_w / 2.0, rect.center().y),
+                                        Vec2::splat(16.0),
+                                    );
+                                    let pin_color = if pin_resp.hovered() {
+                                        [
+                                            palette.text_primary.r(),
+                                            palette.text_primary.g(),
+                                            palette.text_primary.b(),
+                                        ]
+                                    } else if is_hovered {
+                                        [
+                                            palette.text_secondary.r(),
+                                            palette.text_secondary.g(),
+                                            palette.text_secondary.b(),
+                                        ]
+                                    } else {
+                                        [
+                                            palette.text_muted.r(),
+                                            palette.text_muted.g(),
+                                            palette.text_muted.b(),
+                                        ]
+                                    };
+                                    crate::core::icon_packs::paint_icon(
+                                        ui,
+                                        pack,
+                                        IconGlyph::ActionPin,
+                                        pin_rect_glyph,
+                                        pin_color,
+                                    );
+                                    if pin_resp.clicked() {
+                                        unpin_path = Some(path.clone());
+                                    }
+
+                                    // Context menu
+                                    row_resp.context_menu(|menu_ui| {
+                                        menu_ui.set_min_width(140.0);
+                                        if is_dir && menu_ui.button("Open in new tab").clicked() {
+                                            open_new_tab_path = Some(path.clone());
+                                            menu_ui.close_menu();
+                                        }
+                                        if menu_ui.button("Unpin from Sidebar").clicked() {
+                                            unpin_path = Some(path.clone());
+                                            menu_ui.close_menu();
+                                        }
+                                        if !is_dir
+                                            && menu_ui.button("Remove (missing folder)").clicked()
+                                        {
+                                            unpin_path = Some(path.clone());
+                                            menu_ui.close_menu();
+                                        }
+                                    });
+
+                                    // Row click
+                                    if row_resp.clicked() && is_dir {
                                         self.current_tab = StudioTab::FileExplorer;
                                         self.explorer_view.navigate_to(path);
                                         self.explorer_view.is_home_view = false;
                                     }
+
                                     ui.add_space(1.0);
+                                }
+
+                                if let Some((from, to)) = reorder_move {
+                                    crate::core::pin_move_item(&mut cfg.pinned_custom, from, to);
+                                    let _ = cfg.save();
+                                }
+                                if let Some(p) = unpin_path {
+                                    crate::core::pin_remove(&mut cfg.pinned_custom, &p);
+                                    let _ = cfg.save();
+                                }
+                                if let Some(p) = open_new_tab_path {
+                                    self.current_tab = StudioTab::FileExplorer;
+                                    self.explorer_view.add_tab(p);
+                                }
+
+                                // "Drop to pin" strip when dragging
+                                if is_file_drag {
+                                    let strip_size = Vec2::new(ui.available_width(), 28.0);
+                                    let (strip_rect, strip_resp) =
+                                        ui.allocate_exact_size(strip_size, Sense::hover());
+                                    let is_strip_hovered = strip_resp
+                                        .dnd_hover_payload::<crate::gui::explorer_view::FileDragPayload>()
+                                        .is_some();
+                                    let border_color = if is_strip_hovered {
+                                        palette.accent
+                                    } else {
+                                        palette.border
+                                    };
+                                    let bg_color = if is_strip_hovered {
+                                        palette.card_hover
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    };
+                                    ui.painter().rect(
+                                        strip_rect.shrink(2.0),
+                                        Rounding::same(design::radius::SM),
+                                        bg_color,
+                                        Stroke::new(1.0_f32, border_color),
+                                    );
+                                    ui.painter().text(
+                                        strip_rect.center(),
+                                        Align2::CENTER_CENTER,
+                                        "+ Drop folder to pin",
+                                        FontId::proportional(12.0),
+                                        if is_strip_hovered {
+                                            palette.text_primary
+                                        } else {
+                                            palette.text_muted
+                                        },
+                                    );
+                                    if let Some(payload) = strip_resp.dnd_release_payload::<
+                                        crate::gui::explorer_view::FileDragPayload,
+                                    >() {
+                                        let mut changed = false;
+                                        for path in &payload.paths {
+                                            if path.is_dir()
+                                                && crate::core::pin_add(
+                                                    &mut cfg.pinned_custom,
+                                                    path,
+                                                )
+                                            {
+                                                changed = true;
+                                            }
+                                        }
+                                        if changed {
+                                            let _ = cfg.save();
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Drop gap between Pinned and Locations
+                            if is_file_drag {
+                                let gap_rect =
+                                    ui.allocate_space(Vec2::new(ui.available_width(), 6.0)).1;
+                                let gap_resp = ui.interact(
+                                    gap_rect,
+                                    ui.id().with("gap_pinned_bottom"),
+                                    Sense::hover(),
+                                );
+                                if let Some(payload) = gap_resp.dnd_release_payload::<
+                                    crate::gui::explorer_view::FileDragPayload,
+                                >() {
+                                    let mut changed = false;
+                                    for path in &payload.paths {
+                                        if path.is_dir()
+                                            && crate::core::pin_add(&mut cfg.pinned_custom, path)
+                                        {
+                                            changed = true;
+                                        }
+                                    }
+                                    if changed {
+                                        let _ = cfg.save();
+                                    }
                                 }
                             }
                         }
@@ -1312,6 +1749,7 @@ impl StudioView {
                                     label: &drive.display_name,
                                     selected: is_active,
                                     show_pin: false,
+                                    dimmed: false,
                                 };
                                 let drive_click = render_sidebar_row(ui, &palette, &spec);
                                 if let Some(payload) = drive_click.dropped {
@@ -1341,6 +1779,7 @@ impl StudioView {
                                         label: "OneDrive",
                                         selected: is_active,
                                         show_pin: false,
+                                        dimmed: false,
                                     };
                                     let cloud_click = render_sidebar_row(ui, &palette, &spec);
                                     if let Some(payload) = cloud_click.dropped {
@@ -1499,10 +1938,11 @@ impl StudioView {
                                     label,
                                     selected: is_active,
                                     show_pin: false,
+                                    dimmed: false,
                                 };
                                 let tool_click = render_sidebar_row(ui, &palette, &spec);
                                 if tool_click.row {
-                                    self.current_tab = tab;
+                                    self.switch_to_tab(tab);
                                     if tab == StudioTab::ExamStudio {
                                         quick_settings.exam_mode_enabled = true;
                                     }
@@ -1747,22 +2187,22 @@ impl StudioView {
                 self.explorer_view.toggle_inspector_pane();
             }
             PaletteAction::TabTranscoder => {
-                self.current_tab = StudioTab::Transcoder;
+                self.switch_to_tab(StudioTab::Transcoder);
             }
             PaletteAction::TabExamStudio => {
-                self.current_tab = StudioTab::ExamStudio;
+                self.switch_to_tab(StudioTab::ExamStudio);
             }
             PaletteAction::TabQualityInspector => {
-                self.current_tab = StudioTab::QualityInspector;
+                self.switch_to_tab(StudioTab::QualityInspector);
             }
             PaletteAction::TabArchiveSuite => {
-                self.current_tab = StudioTab::ArchiveSuite;
+                self.switch_to_tab(StudioTab::ArchiveSuite);
             }
             PaletteAction::TabHardwareTelemetry => {
-                self.current_tab = StudioTab::HardwareTelemetry;
+                self.switch_to_tab(StudioTab::HardwareTelemetry);
             }
             PaletteAction::TabPreferences => {
-                self.current_tab = StudioTab::Preferences;
+                self.switch_to_tab(StudioTab::Preferences);
             }
             PaletteAction::ToggleHiddenFiles => {
                 self.explorer_view.show_hidden_files = !self.explorer_view.show_hidden_files;

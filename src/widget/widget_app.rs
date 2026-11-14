@@ -609,6 +609,22 @@ impl eframe::App for MossambiWidgetApp {
                     close_requested = true;
                 }
             }
+
+            // Auto-dismiss on focus loss
+            if i.viewport().focused == Some(false) {
+                close_requested = true;
+            }
+
+            // Auto-dismiss on click outside the widget geometry (window size 480x480, center at 240,240)
+            if i.pointer.any_pressed() {
+                if let Some(pos) = i.pointer.interact_pos() {
+                    let center = Pos2::new(240.0, 240.0);
+                    let dist = (pos - center).length();
+                    if dist > 200.0 {
+                        close_requested = true;
+                    }
+                }
+            }
         });
         // Sent outside `ctx.input`: a viewport command issued while the
         // input lock is held deadlocks egui.

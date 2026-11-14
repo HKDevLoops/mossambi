@@ -26,6 +26,49 @@ const CF_HDROP: u16 = 15;
 const DROPEFFECT_COPY: u32 = 1;
 /// Hot state while files hover the puck (drives the repaint color).
 static HOT_STATE: AtomicBool = AtomicBool::new(false);
+static OVERLAY_HWND: Mutex<isize> = Mutex::new(0);
+
+unsafe fn show_overlay_topmost() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOW,
+    };
+    if let Ok(guard) = OVERLAY_HWND.lock() {
+        let hwnd = *guard;
+        if hwnd != 0 {
+            SetWindowPos(
+                hwnd as _,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+            ShowWindow(hwnd as _, SW_SHOW);
+        }
+    }
+}
+
+unsafe fn hide_overlay_notopmost() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, ShowWindow, HWND_NOTOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE,
+    };
+    if let Ok(guard) = OVERLAY_HWND.lock() {
+        let hwnd = *guard;
+        if hwnd != 0 {
+            SetWindowPos(
+                hwnd as _,
+                HWND_NOTOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+            ShowWindow(hwnd as _, SW_HIDE);
+        }
+    }
+}
 
 /// Per-category default conversion target for AUTO mode.
 fn auto_target(path: &std::path::Path) -> &'static str {
@@ -105,6 +148,7 @@ unsafe extern "system" fn dt_drag_enter(
     effect: *mut u32,
 ) -> HResult {
     HOT_STATE.store(true, Ordering::Relaxed);
+    show_overlay_topmost();
     if !effect.is_null() {
         *effect = DROPEFFECT_COPY;
     }
@@ -125,6 +169,7 @@ unsafe extern "system" fn dt_drag_over(
 
 unsafe extern "system" fn dt_drag_leave(_this: *mut std::ffi::c_void) -> HResult {
     HOT_STATE.store(false, Ordering::Relaxed);
+    hide_overlay_notopmost();
     S_OK
 }
 
@@ -212,6 +257,7 @@ unsafe extern "system" fn dt_drop(
         *effect = DROPEFFECT_COPY;
     }
     HOT_STATE.store(false, Ordering::Relaxed);
+    hide_overlay_notopmost();
     if files.is_empty() {
         return S_OK;
     }
@@ -476,6 +522,9 @@ unsafe fn run_overlay_thread(shutdown: Arc<AtomicBool>, hwnd_out: Arc<Mutex<isiz
         return;
     }
     if let Ok(mut h) = hwnd_out.lock() {
+        *h = hwnd as isize;
+    }
+    if let Ok(mut h) = OVERLAY_HWND.lock() {
         *h = hwnd as isize;
     }
     log::info!("Drop overlay live: drag files from any app onto the lime puck to convert");

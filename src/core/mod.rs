@@ -26,6 +26,7 @@ pub mod mouse_nav;
 pub mod ole_drag_out;
 pub mod ole_drop_target;
 pub mod pantone;
+pub mod pins;
 pub mod platform_paths;
 pub mod preview;
 pub mod registry;
@@ -33,9 +34,11 @@ pub mod route_planner;
 pub mod scripting;
 pub mod sound;
 pub mod state_db;
+pub mod tabs;
 pub mod tags;
 pub mod tool_console;
 pub mod web_drop;
+pub mod window_level;
 
 pub use action_journal::{
     record_copy, record_create_dir, record_move, record_rename, record_tag_set, stage_delete,
@@ -77,11 +80,16 @@ pub use pantone::{
     all_pantone_themes, get_pantone_theme, CitrusShade, PantoneColor, PantonePalette, PantoneTheme,
     THEMES,
 };
+pub use pins::{
+    add as pin_add, contains as pin_contains, move_item as pin_move_item, remove as pin_remove,
+};
 pub use registry::{
     DynamicWheelSector, FileCategory, FormatInfo, FormatNature, FormatSpecification,
     UniversalRegistry,
 };
+pub use tabs::{close_target, CloseAction};
 pub use tool_console::{ToolConsole, ToolEvent};
+pub use window_level::{should_apply_window_level, DesiredWindowLevel};
 
 use std::path::{Path, PathBuf};
 

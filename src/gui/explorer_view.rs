@@ -9901,10 +9901,10 @@ impl ExplorerView {
         // -- Pin / Unpin to the sidebar --
         if let Some((path, pin)) = intent.pin_sidebar {
             let mut cfg = crate::core::MossambiConfig::load();
-            let raw = path.to_string_lossy().to_string();
-            cfg.pinned_custom.retain(|p| p != &raw);
             if pin {
-                cfg.pinned_custom.push(raw);
+                crate::core::pin_add(&mut cfg.pinned_custom, &path);
+            } else {
+                crate::core::pin_remove(&mut cfg.pinned_custom, &path);
             }
             if let Err(e) = cfg.save() {
                 log::warn!("Could not persist sidebar pins: {e}");
@@ -10568,10 +10568,10 @@ impl ExplorerView {
 
         // -- Pin to Sidebar (folders only) --
         if is_dir {
-            let is_pinned = crate::core::MossambiConfig::load()
-                .pinned_custom
-                .iter()
-                .any(|p| Path::new(p) == path);
+            let is_pinned = {
+                let cfg = crate::core::MossambiConfig::load();
+                crate::core::pin_contains(&cfg.pinned_custom, &path)
+            };
             let label = if is_pinned {
                 "Unpin from Sidebar"
             } else {

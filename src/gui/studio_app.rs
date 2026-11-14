@@ -833,16 +833,18 @@ impl eframe::App for MossambiApp {
                 _ => {}
             }
         }
-        // Always-on-top was only honoured by the CLI.
+        // Window level / topmost applied only on change
         let aot_id = egui::Id::new("mossambi_applied_always_on_top");
-        let aot = self.config.always_on_top;
-        if ctx.data(|d| d.get_temp::<bool>(aot_id)) != Some(aot) {
-            ctx.data_mut(|d| d.insert_temp(aot_id, aot));
-            ctx.send_viewport_cmd(ViewportCommand::WindowLevel(if aot {
-                egui::WindowLevel::AlwaysOnTop
-            } else {
-                egui::WindowLevel::Normal
-            }));
+        let last_aot = ctx.data(|d| d.get_temp::<bool>(aot_id));
+        if let Some(desired) =
+            crate::core::should_apply_window_level(self.config.always_on_top, last_aot)
+        {
+            ctx.data_mut(|d| d.insert_temp(aot_id, self.config.always_on_top));
+            let level = match desired {
+                crate::core::DesiredWindowLevel::AlwaysOnTop => egui::WindowLevel::AlwaysOnTop,
+                crate::core::DesiredWindowLevel::Normal => egui::WindowLevel::Normal,
+            };
+            ctx.send_viewport_cmd(ViewportCommand::WindowLevel(level));
         }
         let cfg = &self.config;
         // Sync grid icon size from config (Preferences -> live view).
