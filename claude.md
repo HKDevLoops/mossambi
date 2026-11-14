@@ -1841,3 +1841,40 @@ MOSSAMBI SETTINGS/CONFIG/LUA WAVE CLOSED (2026-11-13): feat ab8fab2 (feat(gui) s
   ConversionRoute::display_path -> set_planned_route); the queue
   summary counts line is monospace.
 - HEAD after feat: 636c371. Ledger hash recorded in Honcho (not here).
+
+## 2026-11-14 - Directives Wave: Chooser Accent + Chip Budget + Zoom Ladder (feat cbe33ce)
+- Plan: docs(plan) 7fb3072 (directives wave - accent chooser, chip overlap, zoom ladder).
+- Scope: three live-round directives in one wave - column chooser accent
+  highlight (Image 1 looked bad; accent-colour highlight method), toolbar
+  selection-chip overlap fix (chip painted over Delete), Ctrl+Scroll
+  view-mode zoom ladder (four user-confirmed decisions).
+- Files (4): docs/superpowers/plans/2026-11-14-directives-wave.md (new),
+  src/gui/file_menu.rs, src/gui/explorer_view.rs, src/gui/studio_app.rs.
+- Gates: fmt OK; clippy --all-targets -D warnings OK (first pass exit 101,
+  fixed 5: Rect min/max are fields not methods (2, chip-budget code),
+  Stroke::new width literals need f32 suffix (3, menu_item_toggle));
+  cargo test OK (exit 0, re-run after the zoom edits); cargo build
+  --release OK (52.98s, exit 0); ASCII 0 in src/gui; tree: feat staged 3
+  expected files only after docs(plan) staged 1.
+- Notes: menu_item_toggle carries chooser state by accent colour, not
+  [x]/[ ] text glyphs - shown rows paint the accent selection fill (45
+  alpha dark / 26 light, hover 65/42) with a painted check square +
+  2-segment check, hidden rows flat + outlined empty square, locked rows
+  pinned non-interactive chip, text_primary over fills / text_muted flat
+  (2026-11-10 legibility rule), 3px row gaps, default arrow cursor; the
+  toolbar RTL group has no width arbitration vs the left pills, so the
+  chip budget = clear_left - buttons_right - 12 with elide "N selected |
+  size" -> "N selected" -> hide (status bar already reports the same);
+  zoom ladder per user decisions: five multiplier levels [0.60, 0.85,
+  1.0, 1.30, 1.70] kept, one notch below the smallest grid size crosses
+  into Details and one notch up from Details returns to the smallest
+  grid size, Columns excluded, view-mode auto-switch session-only while
+  explorer_zoom stays persisted in config.json; zoom_ladder_step +
+  zoom_cross_gate (ZOOM_CROSS_DEBOUNCE 150ms) guard touchpad wiggle at
+  the boundary; level 0 relabelled honestly "Extra small icons" (the
+  old "Details" label never switched modes); studio_app Ctrl+wheel
+  handler delegated to zoom_ladder_step, Ctrl+0 reset and
+  Ctrl+Shift+wheel UI scale unchanged, command palette keeps owning the
+  wheel while open (B-1); stray untracked package-lock.json deleted per
+  user decision (no package.json exists anywhere).
+- HEAD after feat: cbe33ce. Ledger hash recorded in Honcho (not here).
