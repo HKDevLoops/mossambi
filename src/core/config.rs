@@ -639,6 +639,10 @@ pub struct MossambiConfig {
     pub glass_effect: GlassEffect,
     #[serde(default)]
     pub appearance: Appearance,
+    /// Interface size multiplier (1.0 = native). Larger values render text
+    /// and icons with more pixels, which helps on low-density monitors.
+    #[serde(default = "default_ui_scale")]
+    pub ui_scale: f32,
     /// "Convert with Mossambi" entry in the Windows Explorer file menu.
     #[serde(default)]
     pub shell_context_menu: bool,
@@ -907,6 +911,10 @@ fn default_deep_drag() -> bool {
     true
 }
 
+fn default_ui_scale() -> f32 {
+    1.0
+}
+
 fn default_window_opacity() -> f32 {
     0.88
 }
@@ -918,6 +926,7 @@ impl Default for MossambiConfig {
             glass_effect: GlassEffect::FrostedGlass,
             appearance: Appearance::default(),
             shell_context_menu: false,
+            ui_scale: default_ui_scale(),
             window_opacity: 0.92,
             citrus_shade: "classicblue".to_string(),
             output_mode: OutputMode::Sibling,

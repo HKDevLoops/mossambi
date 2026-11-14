@@ -726,8 +726,6 @@ impl eframe::App for MossambiApp {
             self.studio_view.explorer_view.zoom_ladder_step(step);
         } else if ui_zoom_reset {
             self.ui_zoom = 1.0;
-            let native = ctx.native_pixels_per_point().unwrap_or(1.0).max(0.5);
-            ctx.set_pixels_per_point(native);
             self.last_applied_theme = None;
         } else if ui_zoom_scroll != 0.0 {
             let step = if ui_zoom_scroll > 0.0 {
@@ -736,9 +734,14 @@ impl eframe::App for MossambiApp {
                 1.0_f32 / 1.08
             };
             self.ui_zoom = (self.ui_zoom * step).clamp(0.6, 2.5);
-            let native = ctx.native_pixels_per_point().unwrap_or(1.0).max(0.5);
-            ctx.set_pixels_per_point(native * self.ui_zoom);
             self.last_applied_theme = None;
+        }
+        // Zoom = Preferences "Interface size" x the Ctrl+Shift+wheel session
+        // zoom. zoom_factor (not a fixed pixels_per_point) keeps following
+        // the monitor's own DPI when the window moves between screens.
+        let zoom = (self.config.ui_scale.clamp(0.75, 2.0) * self.ui_zoom).clamp(0.5, 3.0);
+        if (ctx.zoom_factor() - zoom).abs() > 0.001 {
+            ctx.set_zoom_factor(zoom);
         }
 
         // -- Mouse history navigation (thumb buttons / middle-drag swipe) ---

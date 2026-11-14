@@ -1833,6 +1833,27 @@ impl PreferencesView {
 
         section(ui, palette, "Glass & window");
         card(ui, palette, |ui| {
+            let sc = self.cfg.ui_scale;
+            let sc_mut = &mut self.cfg.ui_scale;
+            setting_row(
+                ui,
+                palette,
+                "Interface size",
+                &format!("{:.0}%", sc * 100.0),
+                dirty,
+                |ui, dirty| {
+                    for v in [1.5_f32, 1.25, 1.1, 1.0, 0.9] {
+                        let label = format!("{:.0}%", v * 100.0);
+                        if ui
+                            .selectable_label((*sc_mut - v).abs() < 0.01, label)
+                            .clicked()
+                        {
+                            *sc_mut = v;
+                            *dirty = true;
+                        }
+                    }
+                },
+            );
             let glass_mut = &mut self.cfg.glass_effect;
             setting_row(ui, palette, "Glass effect", "", dirty, |ui, dirty| {
                 for (v, lab) in [
