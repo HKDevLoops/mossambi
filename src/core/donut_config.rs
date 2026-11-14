@@ -573,10 +573,35 @@ impl Default for DonutConfig {
 
 impl DonutConfig {
     pub fn find_profile_for_extension(&self, ext: &str) -> Option<&DonutProfile> {
+        self.find_profile_for_extension_filtered(ext, None)
+    }
+
+    pub fn find_profile_for_extension_filtered(
+        &self,
+        ext: &str,
+        fields: Option<&crate::core::fields_config::FieldsConfig>,
+    ) -> Option<&DonutProfile> {
         let clean = ext.trim_start_matches('.').to_ascii_lowercase();
-        self.profiles
-            .iter()
-            .find(|p| !p.is_mixed_selection && p.matches_extension(&clean))
+        self.profiles.iter().find(|p| {
+            if p.is_mixed_selection || !p.matches_extension(&clean) {
+                return false;
+            }
+            if let Some(f) = fields {
+                let domain_key = match p.id.as_str() {
+                    "cad" => "cad",
+                    "fonts" => "fonts",
+                    "models3d" => "models_3d",
+                    "geospatial" => "maps",
+                    "audio" => "pro_audio",
+                    "video" => "video_broadcast",
+                    _ => "",
+                };
+                if !domain_key.is_empty() && !f.is_field_enabled(domain_key) {
+                    return false;
+                }
+            }
+            true
+        })
     }
 
     pub fn active_profile(&self) -> &DonutProfile {

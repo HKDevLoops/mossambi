@@ -366,6 +366,7 @@ pub fn run_daemon_loop() -> Result<()> {
             allow_shake,
             allow_circle,
             cfg.shake_sensitivity_px,
+            cfg.deep_drag_detection_only,
         ))
     } else {
         None
@@ -518,6 +519,7 @@ pub fn run_daemon_loop() -> Result<()> {
             allow_shake,
             allow_circle,
             cfg.shake_sensitivity_px,
+            cfg.deep_drag_detection_only,
         ))
     } else {
         None

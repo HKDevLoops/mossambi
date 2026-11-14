@@ -531,42 +531,56 @@ pub fn render_sidebar_zone_header(
     label: &str,
     expanded: bool,
 ) -> bool {
-    ui.add_space(space::SM);
-    // Zone identity boundary: hairline across the content width.
-    let cursor = ui.cursor();
-    let line_col = Color32::from_rgba_unmultiplied(
-        palette.border.r(),
-        palette.border.g(),
-        palette.border.b(),
-        90,
-    );
-    ui.painter().line_segment(
-        [
-            Pos2::new(cursor.min.x + 2.0, cursor.top() + 0.5),
-            Pos2::new(cursor.max.x - 2.0, cursor.top() + 0.5),
-        ],
-        Stroke::new(1.0_f32, line_col),
-    );
+    let style = crate::core::MossambiConfig::load().sidebar_style;
+    if style != crate::core::SidebarStyle::Thunar {
+        ui.add_space(space::SM);
+        // Zone identity boundary: hairline across the content width.
+        let cursor = ui.cursor();
+        let line_col = Color32::from_rgba_unmultiplied(
+            palette.border.r(),
+            palette.border.g(),
+            palette.border.b(),
+            90,
+        );
+        ui.painter().line_segment(
+            [
+                Pos2::new(cursor.min.x + 2.0, cursor.top() + 0.5),
+                Pos2::new(cursor.max.x - 2.0, cursor.top() + 0.5),
+            ],
+            Stroke::new(1.0_f32, line_col),
+        );
+    }
     ui.add_space(space::XS);
-    let row_h = 22.0;
+    let row_h = if style == crate::core::SidebarStyle::Thunar {
+        20.0
+    } else {
+        22.0
+    };
     let (rect, resp) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::click());
     let painter = ui.painter_at(rect);
-    // Finder section header: Title Case caption, disclosure chevron drawn
-    // as a vector on the right (it used to be a literal "v" / ">").
     let col = if resp.hovered() {
         palette.text_primary
     } else {
         palette.text_muted
     };
+    let text_x = if style == crate::core::SidebarStyle::Windows {
+        rect.min.x + 16.0
+    } else {
+        rect.min.x + 4.0
+    };
     painter.text(
-        Pos2::new(rect.min.x + 4.0, rect.center().y),
+        Pos2::new(text_x, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
         FontId::proportional(type_scale::CAPTION + 0.5),
         col,
     );
-    let c = Pos2::new(rect.max.x - 10.0, rect.center().y);
+    let c = if style == crate::core::SidebarStyle::Windows {
+        Pos2::new(rect.min.x + 6.0, rect.center().y)
+    } else {
+        Pos2::new(rect.max.x - 10.0, rect.center().y)
+    };
     let s = 3.5_f32;
     let chevron_col = if resp.hovered() {
         palette.text_secondary
@@ -642,7 +656,9 @@ pub fn render_sidebar_row(
     palette: &ThemePalette,
     spec: &SidebarRowSpec<'_>,
 ) -> SidebarRowClick {
-    let row_h = 30.0;
+    let cfg = crate::core::MossambiConfig::load();
+    let style = cfg.sidebar_style;
+    let row_h = style.sidebar_row_height();
     let desired_size = Vec2::new(ui.available_width(), row_h);
     let (rect, hover_resp) = ui.allocate_exact_size(desired_size, Sense::hover());
 
@@ -672,11 +688,21 @@ pub fn render_sidebar_row(
         Color32::TRANSPARENT
     };
 
+    let (rounding, draw_accent_bar) = match style {
+        crate::core::SidebarStyle::Finder => (Rounding::same(radius::SM), true),
+        crate::core::SidebarStyle::Windows => (Rounding::same(radius::XS), false),
+        crate::core::SidebarStyle::Nautilus => (Rounding::same(8.0), false),
+        crate::core::SidebarStyle::Thunar => (Rounding::same(2.0), false),
+    };
+
     if bg_color != Color32::TRANSPARENT {
-        painter.rect_filled(rect, Rounding::same(radius::SM), bg_color);
+        painter.rect_filled(rect, rounding, bg_color);
+        if style == crate::core::SidebarStyle::Thunar && spec.selected {
+            painter.rect_stroke(rect, rounding, Stroke::new(1.0_f32, palette.accent));
+        }
     }
 
-    if spec.selected {
+    if spec.selected && draw_accent_bar {
         let bar_rect = Rect::from_min_size(
             rect.min + Vec2::new(2.0, 4.0),
             Vec2::new(3.0, (row_h - 8.0).max(4.0)),

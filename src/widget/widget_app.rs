@@ -157,7 +157,10 @@ impl MossambiWidgetApp {
         let (cat, ext) = UniversalRegistry::classify_file(&path);
         self.current_category = cat;
         let cfg = crate::core::MossambiConfig::load();
-        if let Some(prof) = cfg.donut.find_profile_for_extension(&ext) {
+        if let Some(prof) = cfg
+            .donut
+            .find_profile_for_extension_filtered(&ext, Some(&cfg.fields))
+        {
             let front_names: Vec<&'static str> = prof
                 .front_slices
                 .iter()

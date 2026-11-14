@@ -34,7 +34,12 @@ pub struct DragGestureListener {
 
 impl DragGestureListener {
     /// Start listening for system-level file drag gestures
-    pub fn start(allow_shake: bool, allow_circle: bool, sensitivity_px: f32) -> Self {
+    pub fn start(
+        allow_shake: bool,
+        allow_circle: bool,
+        sensitivity_px: f32,
+        deep_drag_only: bool,
+    ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let (tx, rx) = channel();
 
@@ -48,6 +53,7 @@ impl DragGestureListener {
                     allow_shake,
                     allow_circle,
                     sensitivity_px,
+                    deep_drag_only,
                 );
             })
             .ok();
@@ -97,6 +103,7 @@ struct HookContext {
     sender: Sender<DragGestureEvent>,
     shutdown: Arc<AtomicBool>,
     cached_files: Vec<PathBuf>,
+    deep_drag_only: bool,
 }
 
 #[cfg(target_os = "windows")]
@@ -109,6 +116,7 @@ fn run_listener_loop(
     allow_shake: bool,
     allow_circle: bool,
     sensitivity_px: f32,
+    deep_drag_only: bool,
 ) {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -149,6 +157,7 @@ fn run_listener_loop(
             sender: tx,
             shutdown: Arc::clone(&shutdown),
             cached_files: Vec::new(),
+            deep_drag_only,
         });
     }
 
@@ -208,7 +217,7 @@ fn run_listener_loop(
                                     files.push(pp);
                                 }
                             }
-                            if !files.is_empty() {
+                            if !files.is_empty() || !ctx.deep_drag_only {
                                 maybe_event = Some(DragGestureEvent {
                                     gesture,
                                     cursor_pos: (pt.x as f32, pt.y as f32),
@@ -721,6 +730,7 @@ fn run_listener_loop(
     _allow_shake: bool,
     _allow_circle: bool,
     _sensitivity_px: f32,
+    _deep_drag_only: bool,
 ) {
     // Linux background thread - sleeps while awaiting events
     while !shutdown.load(Ordering::Relaxed) {
@@ -735,7 +745,7 @@ mod tests {
     #[test]
     fn test_drag_listener_lifecycle() {
         let handle = std::thread::spawn(|| {
-            let mut listener = DragGestureListener::start(true, true, 25.0);
+            let mut listener = DragGestureListener::start(true, true, 25.0, true);
             std::thread::sleep(std::time::Duration::from_millis(60));
             assert!(listener.try_recv().is_none());
             listener.stop();

@@ -257,6 +257,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
             allow_shake,
             allow_circle,
             cfg.shake_sensitivity_px,
+            cfg.deep_drag_detection_only,
         ))
     } else {
         None

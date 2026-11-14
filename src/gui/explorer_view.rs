@@ -817,6 +817,8 @@ pub struct ExplorerView {
     // Real-Time Filesystem Directory Watchers
     pub dir_watcher: crate::core::DirWatcher,
     pub secondary_dir_watcher: crate::core::DirWatcher,
+    pub row_density: crate::core::config::RowDensity,
+    pub calculate_checksums: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1000,6 +1002,7 @@ impl Default for ExplorerView {
             search_query: String::new(),
         };
 
+        let cfg = crate::core::MossambiConfig::load();
         let mut view = Self {
             current_dir: current_dir.clone(),
             entries: Vec::new(),
@@ -1012,7 +1015,7 @@ impl Default for ExplorerView {
             next_tab_id: 2,
             history: vec![current_dir.clone()],
             history_idx: 0,
-            view_mode: match crate::core::MossambiConfig::load().default_explorer_layout {
+            view_mode: match cfg.default_explorer_layout {
                 2 => ViewMode::Grid,
                 3 => ViewMode::Columns,
                 _ => ViewMode::Details,
@@ -1020,10 +1023,10 @@ impl Default for ExplorerView {
             icon_size: 96.0,
             sort_column: SortColumn::Name,
             column_filters: std::collections::BTreeMap::new(),
-            column_layout: {
-                let cfg0 = crate::core::MossambiConfig::load();
-                ColumnLayout::from_config(&cfg0.explorer_columns, &cfg0.explorer_column_widths)
-            },
+            column_layout: ColumnLayout::from_config(
+                &cfg.explorer_columns,
+                &cfg.explorer_column_widths,
+            ),
             sort_direction: SortDirection::Ascending,
             category_filter: CategoryFilter::All,
             active_tag: None,
@@ -1096,6 +1099,8 @@ impl Default for ExplorerView {
             batch_rename: BatchRenameState::default(),
             dir_watcher: crate::core::DirWatcher::new(),
             secondary_dir_watcher: crate::core::DirWatcher::new(),
+            row_density: cfg.row_density,
+            calculate_checksums: cfg.calculate_checksums,
         };
 
         view.navigate_to(current_dir);
@@ -4680,7 +4685,7 @@ impl ExplorerView {
 
                 for (idx, item) in entries.iter().enumerate() {
                     let is_selected = self.selected_paths.contains(&item.path);
-                    let row_height = 30.0_f32;
+                    let row_height = self.row_density.details_row_height();
 
                     let (row_rect, row_resp) = ui.allocate_exact_size(
                         Vec2::new(content_width, row_height),
@@ -7320,7 +7325,26 @@ impl ExplorerView {
                                         .size(12.0)
                                         .color(palette.text_muted),
                                 );
-                                if let Some((cached_p, hash)) = &self.peek_hash_cache {
+                                if !self.calculate_checksums {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new("Off in Settings")
+                                                .size(11.0)
+                                                .italics()
+                                                .color(palette.text_muted),
+                                        );
+                                        if ui
+                                            .button(egui::RichText::new("Compute").size(10.5))
+                                            .clicked()
+                                        {
+                                            let h =
+                                                crate::codec::calculate_sha256(&item_clone.path)
+                                                    .unwrap_or_else(|_| "Error".into());
+                                            self.peek_hash_cache =
+                                                Some((item_clone.path.clone(), h));
+                                        }
+                                    });
+                                } else if let Some((cached_p, hash)) = &self.peek_hash_cache {
                                     if cached_p == &item_clone.path {
                                         let short_hash = if hash.len() > 16 {
                                             format!("{}...", &hash[..16])
@@ -7333,14 +7357,15 @@ impl ExplorerView {
                                                 .monospace()
                                                 .color(palette.accent),
                                         );
-                                    } else if ui
-                                        .button(egui::RichText::new("Compute").size(10.5))
-                                        .clicked()
-                                    {
+                                    } else {
                                         let h = crate::codec::calculate_sha256(&item_clone.path)
                                             .unwrap_or_else(|_| "Error".into());
                                         self.peek_hash_cache = Some((item_clone.path.clone(), h));
                                     }
+                                } else if item_clone.size_bytes <= 16 * 1024 * 1024 {
+                                    let h = crate::codec::calculate_sha256(&item_clone.path)
+                                        .unwrap_or_else(|_| "Error".into());
+                                    self.peek_hash_cache = Some((item_clone.path.clone(), h));
                                 } else if ui
                                     .button(egui::RichText::new("Compute").size(10.5))
                                     .clicked()
@@ -8077,27 +8102,37 @@ impl ExplorerView {
                             .color(palette.text_primary),
                     );
 
-                    if self.peek_hash_cache.as_ref().map(|(p, _)| p) != Some(&item.path) {
-                        let hash = if item.size_bytes <= 8 * 1024 * 1024 {
-                            crate::codec::calculate_sha256(&item.path)
-                                .unwrap_or_else(|_| "Unavailable".to_string())
-                        } else {
-                            format!(
-                                "{:.1} MB binary (SHA-256 deferred to avoid UI freeze)",
-                                item.size_bytes as f64 / (1024.0 * 1024.0)
-                            )
-                        };
-                        self.peek_hash_cache = Some((item.path.clone(), hash));
-                    }
-
-                    if let Some((_, ref hash)) = self.peek_hash_cache {
+                    if !self.calculate_checksums {
                         ui.add_space(6.0);
                         ui.label(
-                            egui::RichText::new(format!("SHA-256: {}", hash))
+                            egui::RichText::new("SHA-256: Off in Settings")
                                 .size(11.5)
-                                .monospace()
-                                .color(palette.accent),
+                                .italics()
+                                .color(palette.text_muted),
                         );
+                    } else {
+                        if self.peek_hash_cache.as_ref().map(|(p, _)| p) != Some(&item.path) {
+                            let hash = if item.size_bytes <= 8 * 1024 * 1024 {
+                                crate::codec::calculate_sha256(&item.path)
+                                    .unwrap_or_else(|_| "Unavailable".to_string())
+                            } else {
+                                format!(
+                                    "{:.1} MB binary (SHA-256 deferred to avoid UI freeze)",
+                                    item.size_bytes as f64 / (1024.0 * 1024.0)
+                                )
+                            };
+                            self.peek_hash_cache = Some((item.path.clone(), hash));
+                        }
+
+                        if let Some((_, ref hash)) = self.peek_hash_cache {
+                            ui.add_space(6.0);
+                            ui.label(
+                                egui::RichText::new(format!("SHA-256: {}", hash))
+                                    .size(11.5)
+                                    .monospace()
+                                    .color(palette.accent),
+                            );
+                        }
                     }
 
                     if let Ok(bytes) = std::fs::read(&item.path) {

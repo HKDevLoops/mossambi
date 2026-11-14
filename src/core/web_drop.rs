@@ -13,7 +13,10 @@ use std::path::PathBuf;
 
 /// Directory where dropped web assets are staged for conversion.
 pub fn staging_directory() -> PathBuf {
-    let base = std::env::temp_dir().join(".mossambi_staging");
+    let cfg = crate::core::MossambiConfig::load();
+    let base = cfg
+        .browser_staging_dir
+        .unwrap_or_else(|| std::env::temp_dir().join(".mossambi_staging"));
     let _ = fs::create_dir_all(&base);
     base
 }

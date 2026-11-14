@@ -310,7 +310,173 @@ pub enum CheckboxMode {
     Off,
 }
 
-/// Explorer chrome style: macOS Finder vs Windows Explorer.
+/// Look presets bundling operating-system styles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LookPreset {
+    #[serde(alias = "mac", alias = "macos")]
+    Finder,
+    #[serde(alias = "windows", alias = "win", alias = "explorer")]
+    WindowsExplorer,
+    #[serde(alias = "gnome")]
+    Nautilus,
+    #[serde(alias = "xfce")]
+    Thunar,
+}
+
+impl LookPreset {
+    pub fn all() -> [LookPreset; 4] {
+        [
+            Self::Finder,
+            Self::WindowsExplorer,
+            Self::Nautilus,
+            Self::Thunar,
+        ]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Finder => "Finder",
+            Self::WindowsExplorer => "Windows Explorer",
+            Self::Nautilus => "Nautilus/GNOME",
+            Self::Thunar => "Thunar",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Finder => "macOS Finder: Miller columns, 28px density, Sonoma icons, rounded corners, Rangalipi theme",
+            Self::WindowsExplorer => "Windows 11: Details view, 32px density, Win11 icons, subtle corners, Dark+ theme",
+            Self::Nautilus => "Linux GNOME: Grid view, 36px density, Adwaita icons, spacious corners, Tokyo Night theme",
+            Self::Thunar => "Linux XFCE: Compact list, 24px density, classic icons, sharp corners, Kanagawa theme",
+        }
+    }
+}
+
+/// Visual row density across explorer lists and tables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RowDensity {
+    Compact, // 24px (Thunar)
+    #[default]
+    Default, // 28px (Finder)
+    Standard, // 32px (Windows Explorer)
+    Spacious, // 36px (Nautilus)
+}
+
+impl RowDensity {
+    pub fn all() -> [RowDensity; 4] {
+        [Self::Compact, Self::Default, Self::Standard, Self::Spacious]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Compact => "Compact (24px)",
+            Self::Default => "Default (28px)",
+            Self::Standard => "Standard (32px)",
+            Self::Spacious => "Spacious (36px)",
+        }
+    }
+
+    pub fn details_row_height(&self) -> f32 {
+        match self {
+            Self::Compact => 24.0,
+            Self::Default => 28.0,
+            Self::Standard => 32.0,
+            Self::Spacious => 36.0,
+        }
+    }
+
+    pub fn sidebar_row_height(&self) -> f32 {
+        match self {
+            Self::Compact => 24.0,
+            Self::Default => 30.0,
+            Self::Standard => 32.0,
+            Self::Spacious => 36.0,
+        }
+    }
+}
+
+/// Visual style applied to the sidebar panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SidebarStyle {
+    #[default]
+    Finder,
+    Windows,
+    Nautilus,
+    Thunar,
+}
+
+impl SidebarStyle {
+    pub fn all() -> [SidebarStyle; 4] {
+        [Self::Finder, Self::Windows, Self::Nautilus, Self::Thunar]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Finder => "macOS Finder",
+            Self::Windows => "Windows Explorer",
+            Self::Nautilus => "Linux (Nautilus)",
+            Self::Thunar => "Linux (Thunar)",
+        }
+    }
+
+    pub fn sidebar_row_height(&self) -> f32 {
+        match self {
+            Self::Thunar => 24.0,
+            Self::Finder => 30.0,
+            Self::Windows => 32.0,
+            Self::Nautilus => 34.0,
+        }
+    }
+}
+
+/// Corner radius styling presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerStyle {
+    Sharp,  // 2px (Thunar)
+    Subtle, // 4px (Windows Explorer)
+    #[default]
+    Rounded, // 8px (Finder)
+    Spacious, // 12px (Nautilus)
+}
+
+impl CornerStyle {
+    pub fn all() -> [CornerStyle; 4] {
+        [Self::Sharp, Self::Subtle, Self::Rounded, Self::Spacious]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Sharp => "Sharp (2px)",
+            Self::Subtle => "Subtle (4px)",
+            Self::Rounded => "Rounded (8px)",
+            Self::Spacious => "Spacious (12px)",
+        }
+    }
+
+    pub fn radius_sm(&self) -> f32 {
+        match self {
+            Self::Sharp => 2.0,
+            Self::Subtle => 4.0,
+            Self::Rounded => 6.0,
+            Self::Spacious => 8.0,
+        }
+    }
+
+    pub fn radius_card(&self) -> f32 {
+        match self {
+            Self::Sharp => 3.0,
+            Self::Subtle => 6.0,
+            Self::Rounded => 10.0,
+            Self::Spacious => 14.0,
+        }
+    }
+}
+
+/// Explorer chrome style: macOS Finder vs Windows Explorer vs Linux desktop layouts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ExplorerStyle {
@@ -323,17 +489,30 @@ pub enum ExplorerStyle {
     /// and quick edit mode, status bar at bottom.
     #[serde(alias = "windows", alias = "win")]
     Windows,
+    /// Linux GNOME Nautilus layout: top pill breadcrumb path bar with centered controls.
+    #[serde(alias = "nautilus", alias = "gnome")]
+    Nautilus,
+    /// Linux XFCE Thunar layout: classic compact path bar and tool buttons.
+    #[serde(alias = "thunar", alias = "xfce")]
+    Thunar,
 }
 
 impl ExplorerStyle {
     pub fn all() -> &'static [ExplorerStyle] {
-        &[ExplorerStyle::MacOS, ExplorerStyle::Windows]
+        &[
+            ExplorerStyle::MacOS,
+            ExplorerStyle::Windows,
+            ExplorerStyle::Nautilus,
+            ExplorerStyle::Thunar,
+        ]
     }
 
     pub fn name(&self) -> &'static str {
         match self {
             Self::MacOS => "macOS Finder",
             Self::Windows => "Windows Explorer",
+            Self::Nautilus => "Linux (Nautilus)",
+            Self::Thunar => "Linux (Thunar)",
         }
     }
 }
@@ -737,6 +916,18 @@ pub struct MossambiConfig {
     pub sidebar_tags_expanded: bool,
     #[serde(default = "default_true")]
     pub sidebar_tools_expanded: bool,
+    /// Look preset: Finder, Windows Explorer, Nautilus/GNOME, Thunar
+    #[serde(default)]
+    pub look_preset: Option<LookPreset>,
+    /// Sidebar visual style: Finder, Windows, Nautilus, Thunar
+    #[serde(default)]
+    pub sidebar_style: SidebarStyle,
+    /// Row density in file lists and tables
+    #[serde(default)]
+    pub row_density: RowDensity,
+    /// Corner radius styling (Sharp, Subtle, Rounded, Spacious)
+    #[serde(default)]
+    pub corner_style: CornerStyle,
     /// Explorer style: macOS Finder vs Windows Explorer.
     #[serde(default)]
     pub explorer_style: ExplorerStyle,
@@ -968,6 +1159,10 @@ impl Default for MossambiConfig {
             sidebar_locations_expanded: true,
             sidebar_tags_expanded: true,
             sidebar_tools_expanded: true,
+            look_preset: None,
+            sidebar_style: SidebarStyle::default(),
+            row_density: RowDensity::default(),
+            corner_style: CornerStyle::default(),
             explorer_style: ExplorerStyle::default(),
             keybinding_profile: default_keybinding_profile(),
             conv_image_quality: default_conv_image_quality(),
@@ -1006,6 +1201,53 @@ pub const DEFAULT_SHORTCUTS: &[(&str, &str)] = &[
 ];
 
 impl MossambiConfig {
+    /// Applies an operating-system look preset while keeping individual settings overridable.
+    pub fn apply_look_preset(&mut self, preset: LookPreset) {
+        self.look_preset = Some(preset);
+        match preset {
+            LookPreset::Finder => {
+                self.sidebar_style = SidebarStyle::Finder;
+                self.explorer_style = ExplorerStyle::MacOS;
+                self.default_explorer_layout = 3; // Miller columns
+                self.row_density = RowDensity::Default; // 28px
+                self.icon_pack = "macos".to_string();
+                self.corner_style = CornerStyle::Rounded;
+                self.theme_mode = ThemeMode::Rangalipi;
+                self.menu_style = MenuStyle::Finder;
+            }
+            LookPreset::WindowsExplorer => {
+                self.sidebar_style = SidebarStyle::Windows;
+                self.explorer_style = ExplorerStyle::Windows;
+                self.default_explorer_layout = 0; // Details
+                self.row_density = RowDensity::Standard; // 32px
+                self.icon_pack = "win11".to_string();
+                self.corner_style = CornerStyle::Subtle;
+                self.theme_mode = ThemeMode::DarkPlus;
+                self.menu_style = MenuStyle::Windows;
+            }
+            LookPreset::Nautilus => {
+                self.sidebar_style = SidebarStyle::Nautilus;
+                self.explorer_style = ExplorerStyle::Nautilus;
+                self.default_explorer_layout = 2; // Grid
+                self.row_density = RowDensity::Spacious; // 36px
+                self.icon_pack = "adwaita".to_string();
+                self.corner_style = CornerStyle::Spacious;
+                self.theme_mode = ThemeMode::TokyoNight;
+                self.menu_style = MenuStyle::Linux;
+            }
+            LookPreset::Thunar => {
+                self.sidebar_style = SidebarStyle::Thunar;
+                self.explorer_style = ExplorerStyle::Thunar;
+                self.default_explorer_layout = 0; // Details
+                self.row_density = RowDensity::Compact; // 24px
+                self.icon_pack = "cinnamon".to_string();
+                self.corner_style = CornerStyle::Sharp;
+                self.theme_mode = ThemeMode::Kanagawa;
+                self.menu_style = MenuStyle::Linux;
+            }
+        }
+    }
+
     /// Returns the display binding for a rebindable shortcut action id,
     /// falling back to DEFAULT_SHORTCUTS when unset or blank.
     pub fn shortcut_for(&self, id: &str) -> String {
@@ -1252,5 +1494,69 @@ impl MossambiConfig {
             .join("autostart")
             .join("mossambi-daemon.desktop");
         desktop_file.exists()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_look_presets_apply_expected_values() {
+        let mut cfg = MossambiConfig::default();
+
+        cfg.apply_look_preset(LookPreset::Finder);
+        assert_eq!(cfg.sidebar_style, SidebarStyle::Finder);
+        assert_eq!(cfg.explorer_style, ExplorerStyle::MacOS);
+        assert_eq!(cfg.default_explorer_layout, 3);
+        assert_eq!(cfg.row_density, RowDensity::Default);
+        assert_eq!(cfg.icon_pack, "macos");
+        assert_eq!(cfg.corner_style, CornerStyle::Rounded);
+        assert_eq!(cfg.theme_mode, ThemeMode::Rangalipi);
+
+        cfg.apply_look_preset(LookPreset::WindowsExplorer);
+        assert_eq!(cfg.sidebar_style, SidebarStyle::Windows);
+        assert_eq!(cfg.explorer_style, ExplorerStyle::Windows);
+        assert_eq!(cfg.default_explorer_layout, 0);
+        assert_eq!(cfg.row_density, RowDensity::Standard);
+        assert_eq!(cfg.icon_pack, "win11");
+        assert_eq!(cfg.corner_style, CornerStyle::Subtle);
+        assert_eq!(cfg.theme_mode, ThemeMode::DarkPlus);
+
+        cfg.apply_look_preset(LookPreset::Nautilus);
+        assert_eq!(cfg.sidebar_style, SidebarStyle::Nautilus);
+        assert_eq!(cfg.explorer_style, ExplorerStyle::Nautilus);
+        assert_eq!(cfg.default_explorer_layout, 2);
+        assert_eq!(cfg.row_density, RowDensity::Spacious);
+        assert_eq!(cfg.icon_pack, "adwaita");
+        assert_eq!(cfg.corner_style, CornerStyle::Spacious);
+        assert_eq!(cfg.theme_mode, ThemeMode::TokyoNight);
+
+        cfg.apply_look_preset(LookPreset::Thunar);
+        assert_eq!(cfg.sidebar_style, SidebarStyle::Thunar);
+        assert_eq!(cfg.explorer_style, ExplorerStyle::Thunar);
+        assert_eq!(cfg.default_explorer_layout, 0);
+        assert_eq!(cfg.row_density, RowDensity::Compact);
+        assert_eq!(cfg.icon_pack, "cinnamon");
+        assert_eq!(cfg.corner_style, CornerStyle::Sharp);
+        assert_eq!(cfg.theme_mode, ThemeMode::Kanagawa);
+    }
+
+    #[test]
+    fn test_row_density_and_corner_styles() {
+        assert_eq!(RowDensity::Compact.details_row_height(), 24.0);
+        assert_eq!(RowDensity::Default.details_row_height(), 28.0);
+        assert_eq!(RowDensity::Standard.details_row_height(), 32.0);
+        assert_eq!(RowDensity::Spacious.details_row_height(), 36.0);
+
+        assert_eq!(SidebarStyle::Thunar.sidebar_row_height(), 24.0);
+        assert_eq!(SidebarStyle::Finder.sidebar_row_height(), 30.0);
+        assert_eq!(SidebarStyle::Windows.sidebar_row_height(), 32.0);
+        assert_eq!(SidebarStyle::Nautilus.sidebar_row_height(), 34.0);
+
+        assert_eq!(CornerStyle::Sharp.radius_sm(), 2.0);
+        assert_eq!(CornerStyle::Subtle.radius_sm(), 4.0);
+        assert_eq!(CornerStyle::Rounded.radius_sm(), 6.0);
+        assert_eq!(CornerStyle::Spacious.radius_sm(), 8.0);
     }
 }

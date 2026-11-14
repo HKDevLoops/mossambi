@@ -10,8 +10,9 @@
 // Pure ASCII. No emoji. Uses the shared design tokens from crate::gui::design.
 
 use crate::core::config::{
-    AnimStyle, AnimationSettings, CheckboxMode, CustomMenuItem, CustomMenuKind, CustomMenuScope,
-    GlassEffect, MenuStyle, MossambiConfig, OutputMode,
+    AnimStyle, AnimationSettings, CheckboxMode, CornerStyle, CustomMenuItem, CustomMenuKind,
+    CustomMenuScope, ExplorerStyle, GlassEffect, LookPreset, MenuStyle, MossambiConfig, OutputMode,
+    RowDensity, SidebarStyle,
 };
 use crate::core::donut_config::{DonutConfig, DonutProfile, DonutSlicePreset};
 use crate::core::fields_config::FieldsConfig;
@@ -784,12 +785,14 @@ impl PreferencesView {
             });
 
             ui.add_space(design::space::SM);
+            let history_cnt = crate::core::conversion_history::conversion_history_count();
             ui.horizontal(|ui| {
                 if ui.button("Clear history").clicked() {
-                    // clears history
+                    crate::core::conversion_history::clear_conversion_history();
+                    *dirty = true;
                 }
                 ui.label(
-                    egui::RichText::new("0 conversion(s) in the history")
+                    egui::RichText::new(format!("{history_cnt} conversion(s) in the history"))
                         .size(design::type_scale::BODY_SM)
                         .color(palette.text_muted),
                 );
@@ -1681,6 +1684,36 @@ impl PreferencesView {
         current_theme: &mut ThemeStyle,
         dirty: &mut bool,
     ) {
+        section(ui, palette, "Look Presets");
+        ui.label(
+            egui::RichText::new("Choose an operating-system look preset to set sidebar, toolbar, layout, density, icon pack, corner radius, and accent. Individual settings stay overridable.")
+                .size(design::type_scale::BODY_SM)
+                .color(palette.text_secondary),
+        );
+        ui.add_space(design::space::SM);
+        card(ui, palette, |ui| {
+            let active_preset = self.cfg.look_preset;
+            setting_row(ui, palette, "Look preset", "", dirty, |ui, dirty| {
+                for preset in LookPreset::all() {
+                    let is_active = active_preset == Some(preset);
+                    if ui.selectable_label(is_active, preset.label()).clicked() {
+                        self.cfg.apply_look_preset(preset);
+                        *current_theme = ThemeStyle::from(self.cfg.theme_mode);
+                        *dirty = true;
+                    }
+                }
+            });
+            if let Some(p) = self.cfg.look_preset {
+                ui.add_space(design::space::XS);
+                ui.label(
+                    egui::RichText::new(p.description())
+                        .size(design::type_scale::SMALL)
+                        .color(palette.text_secondary),
+                );
+            }
+        });
+        ui.add_space(design::space::SM);
+
         section(ui, palette, "Theme");
         ui.label(
             egui::RichText::new("Pick a theme. Every theme has a light and a dark version.")
@@ -1873,6 +1906,50 @@ impl PreferencesView {
                         .clicked()
                     {
                         *ms_mut = v;
+                        *dirty = true;
+                    }
+                }
+            });
+
+            let cs_mut = &mut self.cfg.corner_style;
+            setting_row(ui, palette, "Corner style", "", dirty, |ui, dirty| {
+                for v in CornerStyle::all() {
+                    let active = *cs_mut == v;
+                    if ui.selectable_label(active, v.label()).clicked() {
+                        *cs_mut = v;
+                        *dirty = true;
+                    }
+                }
+            });
+
+            let rd_mut = &mut self.cfg.row_density;
+            setting_row(ui, palette, "Row density", "", dirty, |ui, dirty| {
+                for v in RowDensity::all() {
+                    let active = *rd_mut == v;
+                    if ui.selectable_label(active, v.label()).clicked() {
+                        *rd_mut = v;
+                        *dirty = true;
+                    }
+                }
+            });
+
+            let ss_mut = &mut self.cfg.sidebar_style;
+            setting_row(ui, palette, "Sidebar style", "", dirty, |ui, dirty| {
+                for v in SidebarStyle::all() {
+                    let active = *ss_mut == v;
+                    if ui.selectable_label(active, v.label()).clicked() {
+                        *ss_mut = v;
+                        *dirty = true;
+                    }
+                }
+            });
+
+            let es_mut = &mut self.cfg.explorer_style;
+            setting_row(ui, palette, "Toolbar layout", "", dirty, |ui, dirty| {
+                for v in ExplorerStyle::all() {
+                    let active = *es_mut == *v;
+                    if ui.selectable_label(active, v.name()).clicked() {
+                        *es_mut = *v;
                         *dirty = true;
                     }
                 }

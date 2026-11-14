@@ -159,6 +159,7 @@ impl MossambiApp {
         );
 
         let mut app = Self::default();
+        let _ = crate::core::action_journal::clean_expired_trash(app.config.retention_days);
         if let Some(path) = initial_path {
             if path.is_dir() {
                 app.studio_view.explorer_view.navigate_to(path);
@@ -1484,6 +1485,8 @@ impl MossambiApp {
         ev.menu_style = from_cfg.menu_style;
         ev.animations = from_cfg.animations;
         ev.show_hidden_files = from_cfg.show_hidden_files;
+        ev.row_density = from_cfg.row_density;
+        ev.calculate_checksums = from_cfg.calculate_checksums;
         self.explorer_pref_mirror = Some(from_cfg);
     }
 
@@ -1546,6 +1549,8 @@ pub struct ExplorerPrefMirror {
     menu_style: crate::core::config::MenuStyle,
     animations: crate::core::config::AnimationSettings,
     show_hidden_files: bool,
+    row_density: crate::core::config::RowDensity,
+    calculate_checksums: bool,
 }
 
 impl ExplorerPrefMirror {
@@ -1557,6 +1562,8 @@ impl ExplorerPrefMirror {
             menu_style: e.menu_style,
             animations: e.animations,
             show_hidden_files: e.show_hidden_files,
+            row_density: e.row_density,
+            calculate_checksums: e.calculate_checksums,
         }
     }
 
@@ -1568,6 +1575,8 @@ impl ExplorerPrefMirror {
             menu_style: c.menu_style,
             animations: c.animations,
             show_hidden_files: c.show_hidden_files,
+            row_density: c.row_density,
+            calculate_checksums: c.calculate_checksums,
         }
     }
 }

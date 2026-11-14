@@ -233,7 +233,55 @@ pub fn stage_delete(paths: &[PathBuf]) -> Result<(), String> {
     }
 
     push_action(RecordedAction::Delete { trashed });
+    let _ = clean_expired_trash(crate::core::MossambiConfig::load().retention_days);
     Ok(())
+}
+
+/// Prune deletion batches in ~/.mossambi/Trash/ that are older than `retention_days`.
+pub fn clean_expired_trash(retention_days: u32) -> usize {
+    if retention_days == 0 {
+        return 0;
+    }
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    let trash_root = PathBuf::from(&home).join(".mossambi").join("Trash");
+    let Ok(entries) = std::fs::read_dir(&trash_root) else {
+        return 0;
+    };
+    let now = now_ms();
+    let max_age_ms = (retention_days as u64) * 86_400_000;
+    let mut pruned = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let folder_name = entry.file_name().to_string_lossy().into_owned();
+        let folder_stamp: Option<u64> = folder_name.parse().ok();
+        let is_expired = if let Some(stamp) = folder_stamp {
+            now.saturating_sub(stamp) > max_age_ms
+        } else if let Ok(meta) = entry.metadata() {
+            if let Ok(mtime) = meta.modified() {
+                if let Ok(age) = mtime.elapsed() {
+                    age.as_millis() as u64 > max_age_ms
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if is_expired {
+            if let Ok(()) = std::fs::remove_dir_all(&path) {
+                pruned += 1;
+                log::info!("Cleaned expired trash batch: {}", path.display());
+            }
+        }
+    }
+    pruned
 }
 
 /// Undo the most recent undoable action, returning a human-readable note.
@@ -391,5 +439,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         // Journal already recorded stage_delete; pop it so the test leaves a clean stack.
         let _ = JOURNAL.lock().unwrap().actions.pop_back();
+    }
+
+    #[test]
+    fn test_clean_expired_trash_zero_days() {
+        assert_eq!(clean_expired_trash(0), 0);
     }
 }

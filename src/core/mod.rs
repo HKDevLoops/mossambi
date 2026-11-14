@@ -4,6 +4,7 @@
 pub mod action_journal;
 pub mod async_worker;
 pub mod config;
+pub mod conversion_history;
 pub mod conversion_queue;
 pub mod default_explorer;
 pub mod dir_watcher;
@@ -29,6 +30,7 @@ pub mod preview;
 pub mod registry;
 pub mod route_planner;
 pub mod scripting;
+pub mod sound;
 pub mod state_db;
 pub mod tags;
 pub mod tool_console;
@@ -39,7 +41,10 @@ pub use action_journal::{
     undo_last,
 };
 pub use async_worker::{AsyncWorkerPool, ItemOutcome, TaskUpdate};
-pub use config::{Appearance, ExplorerStyle, GlassEffect, MossambiConfig, OutputMode, ThemeMode};
+pub use config::{
+    Appearance, CornerStyle, ExplorerStyle, GlassEffect, LookPreset, MossambiConfig, OutputMode,
+    RowDensity, SidebarStyle, ThemeMode,
+};
 pub use conversion_queue::{
     ConversionQueue, QueueAction, QueueItem, QueueItemStatus, QueueSummary,
 };

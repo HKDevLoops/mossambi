@@ -368,10 +368,45 @@ pub fn transcode_file_ctx(
                 output_path.display(),
                 t0.elapsed()
             );
+            let cfg = crate::core::MossambiConfig::load();
+            if cfg.keep_original_file_dates {
+                if let Ok(meta) = fs::metadata(input) {
+                    if let Ok(mtime) = meta.modified() {
+                        if let Ok(f) = fs::File::options().write(true).open(&output_path) {
+                            let _ = f.set_modified(mtime);
+                        }
+                    }
+                }
+            }
+            if cfg.calculate_checksums {
+                if let Ok(hash) = remux::calculate_sha256(&output_path) {
+                    log::info!("Output SHA-256 for {}: {}", output_path.display(), hash);
+                }
+            }
+            let out_size = fs::metadata(&output_path).map(|m| m.len()).unwrap_or(0);
+            crate::core::conversion_history::record_conversion(
+                &input.to_string_lossy(),
+                &output_path.to_string_lossy(),
+                &target_upper,
+                out_size,
+                true,
+            );
+            if cfg.browser_save_converted_only {
+                let staging = crate::core::web_drop::staging_directory();
+                if input.starts_with(&staging) {
+                    let _ = fs::remove_file(input);
+                }
+            }
+            if cfg.play_sound {
+                crate::core::sound::play_success_sound();
+            }
             Ok(output_path)
         }
         Err(e) => {
             discard_part(&work_path);
+            if crate::core::MossambiConfig::load().play_sound {
+                crate::core::sound::play_error_sound();
+            }
             log::error!(
                 "convert failed: {} -> {} after {:.2?}: {:#}",
                 input.display(),
@@ -476,7 +511,11 @@ pub fn transcode_single_step(
         FileCategory::Subtitle => subtitles::transcode_subtitles(input, output),
         FileCategory::Cad => cad::transcode_cad(input, output),
         FileCategory::Models3D => models_3d::transcode_3d_model(input, output),
-        FileCategory::Geo => geo::transcode_geo(input, output, false),
+        FileCategory::Geo => geo::transcode_geo(
+            input,
+            output,
+            crate::core::MossambiConfig::load().save_geospatial_as_zip,
+        ),
         FileCategory::Fonts => fonts::transcode_font(input, output),
         FileCategory::Data => data_exchange::transcode_data_exchange(input, output),
         FileCategory::Email => email::transcode_email(input, output),
@@ -678,9 +717,11 @@ fn convert_image_zero_loss(
     match target_format {
         "PNG" => {
             img.save_with_format(output, image::ImageFormat::Png)?;
-            // Inject Photoshop-standard 300 DPI pHYs chunk
+            let dpi = crate::core::MossambiConfig::load()
+                .conv_image_dpi
+                .clamp(72, 2400);
             if let Ok(raw) = fs::read(output) {
-                let enriched = inject_png_dpi(&raw, 300);
+                let enriched = inject_png_dpi(&raw, dpi);
                 let _ = fs::write(output, enriched);
             }
         }
@@ -731,9 +772,11 @@ fn convert_image_zero_loss(
                     .encode_image(&rgb_canvas)?;
                 std::io::Write::flush(&mut w)?;
             }
-            // Inject Photoshop-standard 300 DPI JFIF APP0 header
+            let dpi = crate::core::MossambiConfig::load()
+                .conv_image_dpi
+                .clamp(72, 2400);
             if let Ok(raw) = fs::read(output) {
-                let enriched = inject_jfif_dpi(&raw, 300);
+                let enriched = inject_jfif_dpi(&raw, dpi);
                 let _ = fs::write(output, enriched);
             }
         }
