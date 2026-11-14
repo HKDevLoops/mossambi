@@ -1789,3 +1789,28 @@ MOSSAMBI SETTINGS/CONFIG/LUA WAVE CLOSED (2026-11-13): feat ab8fab2 (feat(gui) s
   inspector/bench on plain threads, telemetry cache + real thread count,
   rfd dialogs on background thread).
 - HEAD after feat: 43edeb5. Ledger hash recorded in Honcho (not here).
+
+## 2026-11-14 - W-7 Batch B: Async Tool Ops (feat 58b5681)
+- Plan: docs(plan) 118dee8 (tools/converters redesign wave).
+- Scope: UI-freezing synchronous tool calls moved off the render thread.
+- Files (6): src/core/tool_console.rs (new, 101 lines), src/core/mod.rs,
+  src/core/conversion_queue.rs, src/exam/mod.rs, src/gui/studio_app.rs,
+  src/gui/studio_view.rs.
+- Gates: fmt OK; clippy --all-targets -D warnings OK (fixed 2 issues: 2x
+  collapsible_if in bench/inspect buttons - click conditions merged with
+  &&); cargo test OK (all suites green incl. 12-test test_queue and 73
+  lib tests); cargo build --release OK (50.23s, exit 0); tree: staged 6
+  expected files only.
+- Notes: new ToolConsole/ToolEvent (ScriptConsole pattern, plain threads,
+  boxed report payloads keep the enum small); exam pipeline gained ctx
+  variants (cancel + progress checkpoints: entry bail, 0.05 decode,
+  0.10 decoded, per-pass 0.15-0.75, 0.95 write, 1.0 done) with
+  None-wrappers keeping tui/main callers working; exam jobs flow through
+  the conversion queue via QueueAction::RunExam -> start_conversion_batch
+  ("EXAM") with ItemResult mirroring to exam_status/last_exam_output;
+  exam output renamed {stem}_conformed.jpg; hardware telemetry detected
+  once into a StudioView cache (one-shot trigger at render top, Refresh
+  row, "Detecting..." early return); "16 Threads Ready" replaced with
+  real optimal_thread_count; rfd file picker moved to a background
+  thread (picker_sender/receiver/in_flight, drained per frame).
+- HEAD after feat: 58b5681. Ledger hash recorded in Honcho (not here).
