@@ -365,7 +365,18 @@ pub fn optimize_exam_media(
     output: &Path,
     constraint: &ExamConstraint,
 ) -> Result<PathBuf> {
-    ExamOptimizer::optimize_file(input, output, constraint)
+    optimize_exam_media_ctx(input, output, constraint, None)
+}
+
+/// Cancel/progress-aware exam optimization (W-7 Batch B): `handle` carries
+/// the worker-pool cancel token and progress callback through the pipeline.
+pub fn optimize_exam_media_ctx(
+    input: &Path,
+    output: &Path,
+    constraint: &ExamConstraint,
+    handle: Option<&crate::codec::EncodeHandle>,
+) -> Result<PathBuf> {
+    ExamOptimizer::optimize_file_ctx(input, output, constraint, handle)
 }
 
 /// Safely opens and decodes an image with strict Decompression Bomb and Memory Safety limits:
@@ -439,6 +450,33 @@ impl ExamOptimizer {
         output: &Path,
         constraint: &ExamConstraint,
     ) -> Result<UploadReadyReport> {
+        Self::process_upload_ready_ctx(input, output, constraint, None)
+    }
+
+    /// Cancel/progress-aware variant of [`Self::process_upload_ready`]
+    /// (W-7 Batch B): `handle` threads the worker-pool cancel token and
+    /// progress callback through the exam pipeline.
+    pub fn process_upload_ready_ctx(
+        input: &Path,
+        output: &Path,
+        constraint: &ExamConstraint,
+        handle: Option<&crate::codec::EncodeHandle>,
+    ) -> Result<UploadReadyReport> {
+        let cancelled = || {
+            handle
+                .map(|h| h.cancel.load(std::sync::atomic::Ordering::Relaxed))
+                .unwrap_or(false)
+        };
+        let report_progress = |fraction: f32, status: &str| {
+            if let Some(h) = handle {
+                h.report(fraction, status);
+            }
+        };
+
+        if cancelled() {
+            bail!("Exam optimization cancelled by user");
+        }
+
         // Validate constraints before touching file
         if let Err(conflict) = Self::validate_constraints(constraint) {
             return Ok(UploadReadyReport {
@@ -461,8 +499,10 @@ impl ExamOptimizer {
             });
         }
 
+        report_progress(0.05, "decoding input");
         let original_img =
             open_image_safe(input).context("Failed to open input file for exam optimization")?;
+        report_progress(0.10, "input decoded");
 
         let mut best_bytes: Vec<u8> = Vec::new();
         let mut best_scorecard = UploadReadyScorecard {
@@ -477,6 +517,13 @@ impl ExamOptimizer {
 
         // 5-Iteration Adaptive Tuning Loop
         for iteration in 1..=5 {
+            if cancelled() {
+                bail!("Exam optimization cancelled by user");
+            }
+            report_progress(
+                0.15 + 0.15 * (iteration - 1) as f32,
+                &format!("refining pass {} of 5", iteration),
+            );
             let processed_img = match iteration {
                 1 => {
                     // Iteration 1: Standard contrast normalization + Lanczos3
@@ -606,7 +653,9 @@ impl ExamOptimizer {
             }
         }
 
+        report_progress(0.95, "writing output");
         std::fs::write(output, &best_bytes)?;
+        report_progress(1.0, "done");
 
         let final_size = best_bytes.len() as u64;
         let satisfied = final_size >= constraint.min_bytes && final_size <= constraint.max_bytes;
@@ -642,7 +691,18 @@ impl ExamOptimizer {
         output: &Path,
         constraint: &ExamConstraint,
     ) -> Result<PathBuf> {
-        let report = Self::process_upload_ready(input, output, constraint)?;
+        Self::optimize_file_ctx(input, output, constraint, None)
+    }
+
+    /// Cancel/progress-aware variant of [`Self::optimize_file`]
+    /// (W-7 Batch B).
+    pub fn optimize_file_ctx(
+        input: &Path,
+        output: &Path,
+        constraint: &ExamConstraint,
+        handle: Option<&crate::codec::EncodeHandle>,
+    ) -> Result<PathBuf> {
+        let report = Self::process_upload_ready_ctx(input, output, constraint, handle)?;
         if let Some(conflict) = report.conflict {
             bail!("Exam constraint conflict: {}", conflict.explanation);
         }

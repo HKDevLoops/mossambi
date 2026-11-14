@@ -8,7 +8,7 @@ use crate::codec::{
 use crate::core::conversion_queue::QueueAction;
 use crate::core::mouse_nav::{MouseNavEvent, MouseNavListener};
 use crate::core::{AsyncWorkerPool, FileCategory, ItemOutcome, TaskUpdate, UniversalRegistry};
-use crate::exam::{optimize_exam_media, ExamConstraint};
+use crate::exam::{optimize_exam_media_ctx, ExamConstraint};
 use crate::gui::macos_theme::*;
 use crate::gui::quick_settings::QuickSettingsState;
 use crate::gui::studio_view::StudioView;
@@ -53,6 +53,12 @@ pub struct MossambiApp {
     // panel's Cancel button; the encode stops gracefully, then is killed.
     pub active_cancel: Option<Arc<AtomicBool>>,
 
+    // File-picker dialog runs on a plain background thread (W-7 Batch B):
+    // rfd blocks its own thread, never the UI frame.
+    pub picker_sender: Sender<Option<PathBuf>>,
+    pub picker_receiver: Receiver<Option<PathBuf>>,
+    pub picker_in_flight: bool,
+
     // System-wide mouse thumb-button / swipe history navigation (Windows
     // low-level hook; a harmless no-op on other platforms).
     pub mouse_nav: MouseNavListener,
@@ -77,6 +83,7 @@ pub struct MossambiApp {
 impl Default for MossambiApp {
     fn default() -> Self {
         let (tx, rx) = channel();
+        let (pick_tx, pick_rx) = channel();
         let default_cat = FileCategory::Document;
         let default_sectors = UniversalRegistry::get_widget_sectors_for_category(default_cat);
 
@@ -102,6 +109,9 @@ impl Default for MossambiApp {
 
             worker_pool: AsyncWorkerPool::new(),
             active_cancel: None,
+            picker_sender: pick_tx,
+            picker_receiver: pick_rx,
+            picker_in_flight: false,
             mouse_nav: MouseNavListener::new(),
 
             frame_count: 0,
@@ -493,9 +503,14 @@ pub fn execute_conversion_ctx(
             background_color: [255, 255, 255],
         };
 
-        let out = crate::core::resolve_clean_sibling_output_path(input, "jpg", None);
+        let parent = input.parent().unwrap_or_else(|| Path::new("."));
+        let stem = input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+        let out = parent.join(format!("{}_conformed.jpg", stem));
 
-        match optimize_exam_media(input, &out, &constraint) {
+        match optimize_exam_media_ctx(input, &out, &constraint, handle) {
             Ok(p) => return ConversionResult::Success(vec![p]),
             Err(e) => return ConversionResult::Failure(format!("Exam tuning failed: {}", e)),
         }
@@ -797,11 +812,28 @@ impl eframe::App for MossambiApp {
                     if let Some(item_id) = item {
                         match outcome {
                             ItemOutcome::Done { outputs, message } => {
+                                // Mirror exam jobs back to the exam tab
+                                // status line (W-7 Batch B).
+                                let is_exam = self.studio_view.queue.items().iter().any(|i| {
+                                    i.id == item_id && i.target.eq_ignore_ascii_case("EXAM")
+                                });
+                                if is_exam {
+                                    self.studio_view.exam_status =
+                                        format!("Exam complete: {}", message);
+                                    self.studio_view.last_exam_output = outputs.first().cloned();
+                                }
                                 self.studio_view
                                     .queue
                                     .on_item_done(item_id, outputs, &message);
                             }
                             ItemOutcome::Failed { error } => {
+                                let is_exam = self.studio_view.queue.items().iter().any(|i| {
+                                    i.id == item_id && i.target.eq_ignore_ascii_case("EXAM")
+                                });
+                                if is_exam {
+                                    self.studio_view.exam_status =
+                                        format!("Exam failed: {}", error);
+                                }
                                 self.studio_view.queue.on_item_failed(item_id, &error);
                             }
                             ItemOutcome::Cancelled { message } => {
@@ -821,6 +853,15 @@ impl eframe::App for MossambiApp {
                     self.status_message = format!("Conversion stalled: {}", error);
                     log::error!("worker reported failure: {}", error);
                 }
+            }
+        }
+
+        // Drain the background file-picker thread (W-7 Batch B): the rfd
+        // dialog blocks its own thread, never the UI frame.
+        while let Ok(picked) = self.picker_receiver.try_recv() {
+            self.picker_in_flight = false;
+            if let Some(path) = picked {
+                self.select_file(path);
             }
         }
 
@@ -984,10 +1025,13 @@ impl eframe::App for MossambiApp {
             self.select_file(path);
         }
 
-        if file_to_pick {
-            if let Some(path) = rfd::FileDialog::new().pick_file() {
-                self.select_file(path);
-            }
+        if file_to_pick && !self.picker_in_flight {
+            self.picker_in_flight = true;
+            let pick_tx = self.picker_sender.clone();
+            std::thread::spawn(move || {
+                let picked = rfd::FileDialog::new().pick_file();
+                let _ = pick_tx.send(picked);
+            });
         }
         if let Some((paths, target)) = convert_batch {
             // Single batched pipeline for N files -> one format (the old path
@@ -1015,6 +1059,13 @@ impl eframe::App for MossambiApp {
                 QueueAction::Reveal(path) => {
                     if let Some(parent) = path.parent() {
                         open_in_file_manager(parent);
+                    }
+                }
+                QueueAction::RunExam(path) => {
+                    if self.is_converting {
+                        self.status_message = "Conversion busy - exam job skipped.".to_string();
+                    } else {
+                        self.start_conversion_batch(vec![path], "EXAM");
                     }
                 }
             }

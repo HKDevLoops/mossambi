@@ -31,6 +31,7 @@ pub mod route_planner;
 pub mod scripting;
 pub mod state_db;
 pub mod tags;
+pub mod tool_console;
 pub mod web_drop;
 
 pub use action_journal::{
@@ -70,6 +71,7 @@ pub use registry::{
     DynamicWheelSector, FileCategory, FormatInfo, FormatNature, FormatSpecification,
     UniversalRegistry,
 };
+pub use tool_console::{ToolConsole, ToolEvent};
 
 use std::path::{Path, PathBuf};
 

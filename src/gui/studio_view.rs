@@ -14,13 +14,11 @@ use crate::core::config::MossambiConfig;
 use crate::core::conversion_queue::{ConversionQueue, QueueAction, QueueItemStatus};
 use crate::core::icon_packs::IconGlyph;
 use crate::core::{FileCategory, UniversalRegistry};
-use crate::exam::{optimize_exam_media, ExamConstraint};
 use crate::gui::command_palette::{CommandPalette, PaletteAction};
 use crate::gui::design::{layout, radius, type_scale};
 use crate::gui::finder_chrome::{render_sidebar_row, render_sidebar_zone_header, SidebarRowSpec};
 use crate::gui::macos_theme::*;
 use crate::gui::quick_settings::QuickSettingsState;
-use crate::hwaccel::detect_hardware_capabilities;
 use eframe::egui::{
     self, Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2, ViewportCommand,
 };
@@ -126,6 +124,15 @@ pub struct StudioView {
     pub queue_actions: Vec<QueueAction>,
     pub batch_progress: Option<f32>,
 
+    // Background tool operations (W-7 Batch B): inspection, benchmarking,
+    // and hardware telemetry run on plain threads and drain once per frame.
+    pub tool_console: crate::core::tool_console::ToolConsole,
+    pub telemetry_hw: Option<crate::hwaccel::HwCapabilities>,
+    pub telemetry_specs: Option<crate::hwaccel::SystemSpecs>,
+    pub telemetry_detecting: bool,
+    pub inspection_busy: bool,
+    pub bench_busy: bool,
+
     // Once-per-open listings for the sibling-folder context menu
     // (F-2 fix): cleared when a navigation target is applied.
     pub sibling_menu_cache: std::collections::HashMap<PathBuf, Vec<crate::core::FileItem>>,
@@ -155,6 +162,12 @@ impl Default for StudioView {
             queue: ConversionQueue::new(),
             queue_actions: Vec::new(),
             batch_progress: None,
+            tool_console: crate::core::tool_console::ToolConsole::default(),
+            telemetry_hw: None,
+            telemetry_specs: None,
+            telemetry_detecting: false,
+            inspection_busy: false,
+            bench_busy: false,
             sibling_menu_cache: std::collections::HashMap::new(),
         }
     }
@@ -195,6 +208,48 @@ impl StudioView {
         on_open_folder: impl FnMut(&Path),
     ) {
         let palette = current_theme.colors();
+
+        // Drain tool-console events from background threads (W-7 Batch B):
+        // inspection, benchmarking, and telemetry finish off the UI thread
+        // and land here.
+        for event in self.tool_console.drain() {
+            match event {
+                crate::core::tool_console::ToolEvent::Inspected { path, result } => {
+                    self.inspection_busy = false;
+                    match result {
+                        Ok(rep) => {
+                            self.quality_report = Some(*rep);
+                            self.inspected_file_path = Some(path);
+                            self.inspection_status = "Inspection complete.".to_string();
+                        }
+                        Err(e) => {
+                            self.inspection_status = format!("Inspection failed: {}", e);
+                        }
+                    }
+                }
+                crate::core::tool_console::ToolEvent::Benchmarked { result, .. } => {
+                    self.bench_busy = false;
+                    match result {
+                        Ok(bench) => self.bench_report = Some(*bench),
+                        Err(e) => {
+                            self.inspection_status = format!("Benchmark failed: {}", e);
+                        }
+                    }
+                }
+                crate::core::tool_console::ToolEvent::Telemetry { hw, specs } => {
+                    self.telemetry_hw = Some(*hw);
+                    self.telemetry_specs = Some(*specs);
+                    self.telemetry_detecting = false;
+                }
+            }
+        }
+
+        // Hardware telemetry is probed once, on a plain thread, then cached
+        // on the view for the transcoder header and the telemetry tab.
+        if self.telemetry_hw.is_none() && !self.telemetry_detecting {
+            self.telemetry_detecting = true;
+            crate::core::tool_console::detect_telemetry_async(self.tool_console.sender());
+        }
 
         // Rebindable studio shortcuts: match this frame's raw key events
         // against the stored display bindings. While the Shortcuts page is
@@ -1390,8 +1445,13 @@ impl StudioView {
                     if let Some(p) = inspect_req {
                         on_stage_file(p.clone());
                         self.current_tab = StudioTab::QualityInspector;
-                        if let Ok(rep) = crate::codec::FileQualityChecker::inspect_file(&p) {
-                            self.quality_report = Some(rep);
+                        if !self.inspection_busy {
+                            self.inspection_busy = true;
+                            self.inspection_status = "Inspecting in background...".to_string();
+                            crate::core::tool_console::inspect_file_async(
+                                self.tool_console.sender(),
+                                p,
+                            );
                         }
                     }
                 }
@@ -1642,7 +1702,16 @@ impl StudioView {
                 ui.label(egui::RichText::new("0.00% Zero-Loss Standard | 200+ Formats | Multi-Threaded Rayon Concurrency").size(12.0).color(palette.text_secondary));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new("16 Threads Ready").size(12.0).color(palette.accent));
+                let threads_label = if let Some(hw) = &self.telemetry_hw {
+                    format!("{} Threads Ready", hw.optimal_thread_count)
+                } else {
+                    "Detecting threads...".to_string()
+                };
+                ui.label(
+                    egui::RichText::new(threads_label)
+                        .size(12.0)
+                        .color(palette.accent),
+                );
             });
         });
 
@@ -2885,43 +2954,11 @@ impl StudioView {
                     );
 
                     if optimize_btn.clicked() {
-                        let constraint = ExamConstraint {
-                            name: settings.exam_preset_name.clone(),
-                            target_format: "JPG".to_string(),
-                            min_bytes: settings.exam_min_kb * 1024,
-                            max_bytes: settings.exam_max_kb * 1024,
-                            width_px: settings.exam_width,
-                            height_px: settings.exam_height,
-                            dpi: settings.exam_dpi,
-                            normalize_white_balance: settings.exam_whiten,
-                            positioning: crate::exam::PositioningMode::CenterCrop,
-                            background_color: [255, 255, 255],
-                        };
-
-                        let parent = path.parent().unwrap_or_else(|| Path::new("."));
-                        let stem = path
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("output");
-                        let out_file = parent.join(format!("{}_conformed.jpg", stem));
-
-                        match optimize_exam_media(path, &out_file, &constraint) {
-                            Ok(res) => {
-                                let len = std::fs::metadata(&res).map(|m| m.len()).unwrap_or(0);
-                                self.exam_status = format!(
-                                    "PASS: Generated {} ({:.1} KB) fitting [{} - {} KB] @ {} DPI",
-                                    res.file_name().unwrap_or_default().to_string_lossy(),
-                                    len as f64 / 1024.0,
-                                    settings.exam_min_kb,
-                                    settings.exam_max_kb,
-                                    settings.exam_dpi
-                                );
-                                self.last_exam_output = Some(res);
-                            }
-                            Err(e) => {
-                                self.exam_status = format!("FAIL: Optimization failed: {}", e);
-                            }
-                        }
+                        // Defer to the conversion queue (W-7 Batch B): the
+                        // exam job runs on the worker pool with live progress
+                        // and cooperative cancel instead of freezing the UI.
+                        self.exam_status = "Queued for optimization...".to_string();
+                        self.queue_actions.push(QueueAction::RunExam(path.clone()));
                     }
 
                     if let Some(ref out) = self.last_exam_output {
@@ -3031,7 +3068,6 @@ impl StudioView {
 
     /// Tab 4: Hardware & AI Telemetry
     fn render_telemetry_tab(&mut self, ui: &mut Ui, palette: &ThemePalette) {
-        let hw = detect_hardware_capabilities();
         ui.label(
             egui::RichText::new("Hardware Acceleration & Neural Telemetry")
                 .size(12.0)
@@ -3047,7 +3083,20 @@ impl StudioView {
         );
         ui.add_space(14.0);
 
-        let specs = crate::hwaccel::detect_system_specs();
+        // Hardware telemetry is probed once on a plain background thread
+        // and cached on the view (W-7 Batch B); Refresh re-runs detection.
+        let cache = match (self.telemetry_hw.clone(), self.telemetry_specs.clone()) {
+            (Some(hw), Some(specs)) => (hw, specs),
+            _ => {
+                ui.label(
+                    egui::RichText::new("Detecting hardware capabilities...")
+                        .size(13.0)
+                        .color(palette.text_secondary),
+                );
+                return;
+            }
+        };
+        let (hw, specs) = cache;
         let suggestions = crate::hwaccel::get_system_auto_suggestions(&specs);
 
         let card_frame = egui::Frame::none()
@@ -3190,6 +3239,18 @@ impl StudioView {
             });
             ui.add_space(6.0);
         }
+
+        ui.add_space(12.0);
+        if ui
+            .button("Refresh Detection")
+            .on_hover_text("Re-probe GPU encoders, NPU engines, and CPU topology")
+            .clicked()
+        {
+            self.telemetry_hw = None;
+            self.telemetry_specs = None;
+            self.telemetry_detecting = true;
+            crate::core::tool_console::detect_telemetry_async(self.tool_console.sender());
+        }
     }
 
     /// Tab 5: Preferences & Certified Pantone Swatches & Themes
@@ -3289,13 +3350,14 @@ impl StudioView {
                                 "Benchmark conversion speed against Online and CLI converters",
                             )
                             .clicked()
+                            && !self.bench_busy
                         {
-                            match crate::codec::BenchmarkEngine::benchmark_file(path, None) {
-                                Ok(bench) => self.bench_report = Some(bench),
-                                Err(e) => {
-                                    self.inspection_status = format!("Benchmark failed: {}", e)
-                                }
-                            }
+                            self.bench_busy = true;
+                            self.inspection_status = "Benchmarking in background...".to_string();
+                            crate::core::tool_console::benchmark_file_async(
+                                self.tool_console.sender(),
+                                path.clone(),
+                            );
                         }
 
                         let inspect_btn = ui.add(
@@ -3308,17 +3370,13 @@ impl StudioView {
                             .fill(palette.accent)
                             .rounding(Rounding::same(8.0)),
                         );
-                        if inspect_btn.clicked() {
-                            match crate::codec::FileQualityChecker::inspect_file(path) {
-                                Ok(rep) => {
-                                    self.quality_report = Some(rep);
-                                    self.inspected_file_path = Some(path.clone());
-                                    self.inspection_status = "Inspection complete.".to_string();
-                                }
-                                Err(e) => {
-                                    self.inspection_status = format!("Inspection failed: {}", e);
-                                }
-                            }
+                        if inspect_btn.clicked() && !self.inspection_busy {
+                            self.inspection_busy = true;
+                            self.inspection_status = "Inspecting in background...".to_string();
+                            crate::core::tool_console::inspect_file_async(
+                                self.tool_console.sender(),
+                                path.clone(),
+                            );
                         }
                     });
                 } else {

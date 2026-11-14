@@ -95,6 +95,9 @@ pub enum QueueAction {
     ClearFinished,
     /// Open the folder containing this output (Reveal).
     Reveal(PathBuf),
+    /// Run one exam-optimization job through the conversion queue
+    /// (W-7 Batch B): worker pool, progress, and cancel for free.
+    RunExam(PathBuf),
 }
 
 /// Pure queue state. Mutated only on the UI thread via the frame drain.
