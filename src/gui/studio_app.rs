@@ -860,8 +860,10 @@ impl eframe::App for MossambiApp {
             pal_now.window_bg.to_array(),
             pal_now.sidebar_bg.to_array(),
             pal_now.is_dark,
+            (cfg.window_opacity * 100.0).round() as i32,
         );
-        let sig_changed = ctx.data(|d| d.get_temp::<([u8; 4], [u8; 4], bool)>(sig_id)) != Some(sig);
+        let sig_changed =
+            ctx.data(|d| d.get_temp::<([u8; 4], [u8; 4], bool, i32)>(sig_id)) != Some(sig);
         if self.frame_count == 1
             || sig_changed
             || self.last_applied_theme != Some(self.theme)
@@ -870,7 +872,11 @@ impl eframe::App for MossambiApp {
             ctx.data_mut(|d| d.insert_temp(sig_id, sig));
             let palette = self.theme.colors();
             crate::gui::macos_theme::apply_theme_visuals(ctx, &palette);
-            crate::gui::dwm_helper::apply_system_backdrop(pal_now.is_dark, current_glass);
+            crate::gui::dwm_helper::apply_system_backdrop(
+                pal_now.is_dark,
+                current_glass,
+                cfg.window_opacity,
+            );
             self.last_applied_theme = Some(self.theme);
             self.last_applied_glass = Some(current_glass);
         }
@@ -1238,23 +1244,84 @@ impl eframe::App for MossambiApp {
     }
 }
 
-/// UI font choices offered in Preferences: (label, Windows font file).
-/// "System" is Segoe UI on Windows; "Ubuntu" is egui's built-in face.
-pub const UI_FONT_CHOICES: [(&str, &str); 8] = [
-    ("System", "segoeui.ttf"),
-    ("Segoe UI Variable", "SegUIVar.ttf"),
-    ("Arial", "arial.ttf"),
-    ("Calibri", "calibri.ttf"),
-    ("Tahoma", "tahoma.ttf"),
-    ("Verdana", "verdana.ttf"),
-    ("Consolas", "consola.ttf"),
-    ("Ubuntu", ""),
-];
+/// Where a UI font comes from.
+#[derive(Debug, Clone)]
+pub enum UiFontSource {
+    /// egui's built-in Ubuntu face.
+    EguiDefault,
+    /// The Agave Nerd Font embedded in the binary.
+    BundledAgave,
+    /// A font file on disk (system font or an installed Nerd Font).
+    File(std::path::PathBuf),
+}
+
+/// Fonts offered in Preferences: a few system faces, the bundled Agave
+/// Nerd Font, and every installed Nerd Font's proportional ("Propo")
+/// variant, which keeps the Nerd icon glyphs but spaces text for UI use.
+/// Scanned once per run.
+pub fn ui_font_choices() -> &'static [(String, UiFontSource)] {
+    static CHOICES: std::sync::OnceLock<Vec<(String, UiFontSource)>> = std::sync::OnceLock::new();
+    CHOICES.get_or_init(|| {
+        let mut out: Vec<(String, UiFontSource)> = Vec::new();
+        let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
+        let sys_fonts = std::path::Path::new(&windir).join("Fonts");
+        for (label, file) in [
+            ("System", "segoeui.ttf"),
+            ("Segoe UI Variable", "SegUIVar.ttf"),
+            ("Arial", "arial.ttf"),
+            ("Calibri", "calibri.ttf"),
+            ("Tahoma", "tahoma.ttf"),
+            ("Verdana", "verdana.ttf"),
+        ] {
+            let p = sys_fonts.join(file);
+            if p.is_file() {
+                out.push((label.to_string(), UiFontSource::File(p)));
+            }
+        }
+        out.push(("Agave Nerd Font".to_string(), UiFontSource::BundledAgave));
+        let mut dirs = vec![sys_fonts];
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            dirs.push(std::path::Path::new(&local).join("Microsoft\\Windows\\Fonts"));
+        }
+        let mut nerd: Vec<(String, UiFontSource)> = Vec::new();
+        for d in dirs {
+            let Ok(rd) = std::fs::read_dir(&d) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if let Some(family) = nerd_propo_family(&name) {
+                    let label = format!("{family} Nerd Font");
+                    if label != "Agave Nerd Font" && !nerd.iter().any(|(l, _)| *l == label) {
+                        nerd.push((label, UiFontSource::File(e.path())));
+                    }
+                }
+            }
+        }
+        nerd.sort_by_key(|a| a.0.to_lowercase());
+        out.extend(nerd);
+        out.push(("Ubuntu".to_string(), UiFontSource::EguiDefault));
+        out
+    })
+}
+
+/// "JetBrainsMonoNerdFontPropo-Regular.ttf" -> Some("JetBrainsMono").
+fn nerd_propo_family(file_name: &str) -> Option<&str> {
+    let lower = file_name.to_ascii_lowercase();
+    if !(lower.ends_with("nerdfontpropo-regular.ttf")
+        || lower.ends_with("nerdfontpropo-regular.otf"))
+    {
+        return None;
+    }
+    let cut = lower.find("nerdfontpropo-regular")?;
+    Some(&file_name[..cut]).filter(|s| !s.is_empty())
+}
 
 /// Installs the proportional UI font. The default used to be egui's
 /// Ubuntu Light, a thin face that turns faint and blocky at small sizes
 /// on low-density monitors; Windows now gets its hinted system font.
-/// Agave Nerd Font stays the monospace face and the glyph fallback.
+/// Agave Nerd Font stays the monospace face and the glyph fallback, so
+/// Nerd icon glyphs render whatever UI font is picked.
 pub fn apply_ui_font(ctx: &egui::Context, family: Option<&str>) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
@@ -1279,26 +1346,51 @@ pub fn apply_ui_font(ctx: &egui::Context, family: Option<&str>) {
         .insert(1, "AgaveNerdFont-Regular".to_owned());
 
     let label = family.unwrap_or("System");
-    let file = UI_FONT_CHOICES
+    let choices = ui_font_choices();
+    let source = choices
         .iter()
         .find(|(l, _)| l.eq_ignore_ascii_case(label))
-        .map(|(_, f)| *f)
-        .unwrap_or("segoeui.ttf");
-    if !file.is_empty() {
-        let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
-        let path = std::path::Path::new(&windir).join("Fonts").join(file);
-        if let Ok(bytes) = std::fs::read(&path) {
-            fonts
-                .font_data
-                .insert("mossambi-ui".to_owned(), egui::FontData::from_owned(bytes));
-            fonts
-                .families
-                .entry(egui::FontFamily::Proportional)
-                .or_default()
-                .insert(0, "mossambi-ui".to_owned());
-        }
+        .or_else(|| choices.first())
+        .map(|(_, s)| s.clone());
+    let primary: Option<egui::FontData> = match source {
+        Some(UiFontSource::File(p)) => std::fs::read(p).ok().map(egui::FontData::from_owned),
+        Some(UiFontSource::BundledAgave) => Some(egui::FontData::from_static(include_bytes!(
+            "../../assets/fonts/AgaveNerdFont-Regular.ttf"
+        ))),
+        Some(UiFontSource::EguiDefault) | None => None,
+    };
+    if let Some(data) = primary {
+        fonts.font_data.insert("mossambi-ui".to_owned(), data);
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .insert(0, "mossambi-ui".to_owned());
     }
     ctx.set_fonts(fonts);
+}
+
+#[cfg(test)]
+mod nerd_font_tests {
+    use super::nerd_propo_family;
+
+    #[test]
+    fn picks_only_regular_proportional_nerd_files() {
+        assert_eq!(
+            nerd_propo_family("JetBrainsMonoNerdFontPropo-Regular.ttf"),
+            Some("JetBrainsMono")
+        );
+        assert_eq!(
+            nerd_propo_family("HurmitNerdFontPropo-Regular.otf"),
+            Some("Hurmit")
+        );
+        assert_eq!(
+            nerd_propo_family("JetBrainsMonoNerdFontPropo-Bold.ttf"),
+            None
+        );
+        assert_eq!(nerd_propo_family("HackNerdFontMono-Regular.ttf"), None);
+        assert_eq!(nerd_propo_family("segoeui.ttf"), None);
+    }
 }
 
 /// Which window edge/corner (if any) a point is on, `margin` px deep.
@@ -1524,9 +1616,9 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
         .with_inner_size([1120.0, 720.0])
         .with_min_inner_size([920.0, 580.0])
         .with_decorations(false)
-        // Transparent so the DWM Acrylic backdrop can show through in the
-        // Frosted / Liquid glass modes (Opaque paints a solid canvas).
-        .with_transparent(true)
+        // Glass translucency is whole-window layered alpha (dwm_helper);
+        // the GL surface itself is composited opaque on Windows.
+        .with_transparent(false)
         .with_resizable(true)
         .with_visible(true)
         .with_active(true);
@@ -1541,6 +1633,9 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
     let mut options = eframe::NativeOptions {
         viewport: builder,
         vsync: !max_fps,
+        // 4x MSAA smooths vector shapes (rounded cards, chevrons, strokes)
+        // on top of egui's own edge feathering.
+        multisampling: 4,
         ..Default::default()
     };
     // Under Wayland-with-XWayland, force the X11 windowing backend so

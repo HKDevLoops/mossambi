@@ -200,7 +200,7 @@ impl ThemeStyle {
         let (acc_r, acc_g, acc_b) = pt.accent.to_rgb();
         let (hi_r, hi_g, hi_b) = pt.highlight.to_rgb();
 
-        let clamped_opacity = opacity.clamp(0.20, 1.00);
+        let clamped_opacity = opacity.clamp(0.30, 1.00);
 
         match effect {
             crate::core::GlassEffect::Opaque => {
@@ -645,41 +645,20 @@ pub fn render_segmented_switch(
     });
 }
 
-/// Turns an opaque palette into a real glass material. The window is
-/// created transparent and DWM blurs what is behind it, so these
-/// alphas reveal blurred desktop content (Frosted) or a clearer, brighter
-/// pane with strong specular rims (Liquid). Before, both "glass" modes were
-/// 92-99% alpha over an opaque window and looked identical to Opaque.
-/// Where the OS cannot blur (old Windows, other OSes), stay opaque:
-/// unblurred transparency reads as dirty see-through.
-fn glassify(mut p: ThemePalette, effect: crate::core::GlassEffect, opacity: f32) -> ThemePalette {
-    if !crate::gui::dwm_helper::backdrop_supported() {
-        return p;
+/// Glass modes. The GPU surface (OpenGL via glow) is composited opaque by
+/// Windows, so per-pixel alpha in the palette only darkened the panels
+/// against black, and an OS blur behind it never showed. What works is
+/// whole-window translucency (layered window alpha, see dwm_helper), so the
+/// palette stays solid and readable here; the glass look comes from that
+/// window alpha. Liquid additionally gets bright refracted rims on every
+/// card, field and popup edge.
+fn glassify(mut p: ThemePalette, effect: crate::core::GlassEffect, _opacity: f32) -> ThemePalette {
+    if effect == crate::core::GlassEffect::LiquidGlass {
+        let rim = if p.is_dark { 0.30 } else { 0.85 };
+        p.border = Color32::from_rgba_unmultiplied(255, 255, 255, (rim * 255.0) as u8);
+        p.specular =
+            Color32::from_rgba_unmultiplied(255, 255, 255, if p.is_dark { 60 } else { 200 });
     }
-    // (window, sidebar, cards, specular) alpha factors.
-    // Light themes need denser glass: a light pane over a dark desktop
-    // otherwise turns muddy (macOS adds a white luminosity layer for this).
-    let (win, side, card, spec): (f32, f32, f32, f32) = match (effect, p.is_dark) {
-        (crate::core::GlassEffect::FrostedGlass, true) => (0.80, 0.62, 0.90, 0.14),
-        (crate::core::GlassEffect::FrostedGlass, false) => (0.92, 0.80, 0.96, 0.14),
-        (crate::core::GlassEffect::LiquidGlass, true) => (0.62, 0.44, 0.74, 0.34),
-        (crate::core::GlassEffect::LiquidGlass, false) => (0.84, 0.68, 0.88, 0.34),
-        (crate::core::GlassEffect::Opaque, _) => return p,
-    };
-    // The opacity slider scales every layer; a floor keeps text legible.
-    let scale = (opacity / 0.88).clamp(0.5, 1.15);
-    let with_a = |c: Color32, f: f32| {
-        let a = (f * scale).clamp(0.32, 1.0);
-        Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (a * 255.0).round() as u8)
-    };
-    p.window_bg = with_a(p.window_bg, win);
-    p.sidebar_bg = with_a(p.sidebar_bg, side);
-    p.card_bg = with_a(p.card_bg, card);
-    p.card_hover = with_a(p.card_hover, (card + 0.08).min(1.0));
-    p.divider = with_a(p.divider, 0.6);
-    let spec_a = if p.is_dark { spec * 0.6 } else { spec * 1.6 };
-    p.specular = Color32::from_rgba_unmultiplied(255, 255, 255, (spec_a.min(1.0) * 255.0) as u8);
-    p.is_translucent = true;
     p
 }
 

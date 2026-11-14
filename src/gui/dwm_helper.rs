@@ -40,10 +40,17 @@ pub fn backdrop_supported() -> bool {
 
 /// Applies native DWM system backdrop (Acrylic / Mica) and extends frame into client area
 #[allow(unused_variables)]
-pub fn apply_system_backdrop(dark_mode: bool, effect: GlassEffect) {
+pub fn apply_system_backdrop(dark_mode: bool, effect: GlassEffect, opacity: f32) {
     #[cfg(target_os = "windows")]
     {
-        win32_dwm::apply_dwm_attributes(dark_mode, BackdropKind::from(effect));
+        // Whole-window alpha for the glass modes (the only translucency the
+        // OpenGL surface supports); Opaque is fully solid.
+        let alpha = match effect {
+            GlassEffect::Opaque => 255u8,
+            GlassEffect::FrostedGlass => (opacity.clamp(0.30, 1.0).max(0.80) * 255.0) as u8,
+            GlassEffect::LiquidGlass => (opacity.clamp(0.30, 1.0) * 255.0) as u8,
+        };
+        win32_dwm::apply_dwm_attributes(dark_mode, BackdropKind::from(effect), alpha);
     }
 }
 
@@ -81,6 +88,27 @@ mod win32_dwm {
             hwnd: HWND,
             data: *mut WindowCompositionAttribData,
         ) -> BOOL;
+    }
+
+    /// Layered-window alpha: 255 removes WS_EX_LAYERED (fully solid).
+    fn set_window_alpha(hwnd: HWND, alpha: u8) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW, GWL_EXSTYLE,
+            LWA_ALPHA, WS_EX_LAYERED,
+        };
+        unsafe {
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            if alpha == 255 {
+                if ex & WS_EX_LAYERED as isize != 0 {
+                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & !(WS_EX_LAYERED as isize));
+                }
+            } else {
+                if ex & WS_EX_LAYERED as isize == 0 {
+                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED as isize);
+                }
+                SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
+            }
+        }
     }
 
     /// Gaussian blur of whatever is behind the window, under the app's own
@@ -144,8 +172,9 @@ mod win32_dwm {
         EnumWindows, GetClassNameW, GetWindowThreadProcessId,
     };
 
-    pub fn apply_dwm_attributes(dark_mode: bool, backdrop: BackdropKind) {
-        let param = (backdrop as usize) | if dark_mode { 0x100 } else { 0 };
+    pub fn apply_dwm_attributes(dark_mode: bool, backdrop: BackdropKind, alpha: u8) {
+        let param =
+            (backdrop as usize) | if dark_mode { 0x100 } else { 0 } | ((alpha as usize) << 16);
         unsafe {
             EnumWindows(Some(enum_proc), param as LPARAM);
         }
@@ -164,7 +193,6 @@ mod win32_dwm {
             // Matches eframe / winit primary window class (skip internal event targets)
             if class_str == "Window Class" {
                 let dark_mode = (lparam & 0x100) != 0;
-                let backdrop_val = (lparam & 0xFF) as i32;
 
                 // 1. Synchronize Immersive Dark Mode with active theme
                 let dark_val: i32 = if dark_mode { 1 } else { 0 };
@@ -195,7 +223,10 @@ mod win32_dwm {
                     cyBottomHeight: 0,
                 };
                 let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
-                set_blur_behind(hwnd, backdrop_val != none);
+                // The accent blur stays off: it needs per-pixel alpha, which
+                // the GL surface does not provide (verified: no effect).
+                set_blur_behind(hwnd, false);
+                set_window_alpha(hwnd, ((lparam >> 16) & 0xFF) as u8);
 
                 // 4. Windows 11 Rounded Corners (DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2)
                 const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;

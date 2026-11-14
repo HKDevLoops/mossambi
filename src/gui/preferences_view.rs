@@ -1828,7 +1828,7 @@ impl PreferencesView {
                 dirty,
                 |ui, dirty| {
                     if ui
-                        .add(egui::Slider::new(op_mut, 0.5..=1.0).show_value(false))
+                        .add(egui::Slider::new(op_mut, 0.3..=1.0).show_value(false))
                         .changed()
                     {
                         *dirty = true;
@@ -2026,9 +2026,9 @@ impl PreferencesView {
             setting_row(ui, palette, "Font", "", dirty, |ui, dirty| {
                 egui::ComboBox::from_id_salt("prefs_font_family")
                     .selected_text(font_now.as_str())
-                    .width(170.0)
+                    .width(220.0)
                     .show_ui(ui, |ui| {
-                        for (label, _) in crate::gui::studio_app::UI_FONT_CHOICES {
+                        for (label, _) in crate::gui::studio_app::ui_font_choices() {
                             if ui
                                 .selectable_label(font_now.eq_ignore_ascii_case(label), label)
                                 .clicked()
@@ -2036,7 +2036,7 @@ impl PreferencesView {
                                 *font_mut = if label == "System" {
                                     None
                                 } else {
-                                    Some(label.to_string())
+                                    Some(label.clone())
                                 };
                                 *dirty = true;
                             }
