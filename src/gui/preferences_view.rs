@@ -213,7 +213,7 @@ impl PreferencesView {
                                     if self.search.trim().is_empty() {
                                         for (i, cat) in CATEGORIES.iter().enumerate() {
                                             let is_sel = self.selected == i;
-                                            let item_h = 38.0_f32;
+                                            let item_h = 32.0_f32;
                                             let (rect, resp) = ui.allocate_exact_size(
                                                 Vec2::new(sidebar_w - 24.0, item_h),
                                                 Sense::click(),
@@ -251,20 +251,13 @@ impl PreferencesView {
                                             }
                                             let text_x = rect.left() + 8.0;
                                             ui.painter().text(
-                                                Pos2::new(text_x, rect.top() + 11.0),
+                                                Pos2::new(text_x, rect.center().y),
                                                 Align2::LEFT_CENTER,
                                                 *cat,
                                                 egui::FontId::proportional(design::type_scale::BODY_SM),
                                                 // Accent text on the accent-tinted
                                                 // selection fill was unreadable.
                                                 palette.text_primary,
-                                            );
-                                            ui.painter().text(
-                                                Pos2::new(text_x, rect.top() + 26.0),
-                                                Align2::LEFT_CENTER,
-                                                self.category_summary(i),
-                                                egui::FontId::proportional(design::type_scale::MICRO),
-                                                palette.text_muted,
                                             );
                                             ui.add_space(2.0);
                                         }
@@ -409,9 +402,10 @@ impl PreferencesView {
                                     });
                                 });
                             } else {
-                                // Authentic macOS System Settings: bounded 520px width, centered with generous breathing room
-                                let content_w = 520.0_f32.min(ui.available_width() - 48.0);
-                                let pad_x = ((ui.available_width() - content_w) * 0.5).max(24.0);
+                                // System Settings layout: a bounded column next to the
+                                // category list (centering left a ~300 px void between them).
+                                let content_w = 680.0_f32.min(ui.available_width() - 56.0).max(320.0);
+                                let pad_x = 32.0_f32;
                                 ui.horizontal(|ui| {
                                     ui.add_space(pad_x);
                                     ui.vertical(|ui| {
@@ -469,73 +463,6 @@ impl PreferencesView {
             }
         }
     }
-
-    fn category_summary(&self, i: usize) -> String {
-        match i {
-            0 => format!(
-                "Dates: {} - history: {}",
-                if self.cfg.keep_original_file_dates {
-                    "kept"
-                } else {
-                    "normal"
-                },
-                self.cfg.conversion_history_limit
-            ),
-            1 => format!(
-                "{} profiles - size {:.0}px",
-                self.cfg.donut.profiles.len(),
-                self.cfg.donut.appearance.size
-            ),
-            2 => format!(
-                "Tab flip - gestures {}",
-                if self.cfg.enable_gesture_wakeup {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            3 => "12 domain toggles".to_string(),
-            4 => format!(
-                "{} - {}",
-                glass_label(self.cfg.glass_effect),
-                if self.cfg.window_opacity >= 0.99 {
-                    "solid".to_string()
-                } else {
-                    format!("{:.0}%", self.cfg.window_opacity * 100.0)
-                }
-            ),
-            5 => format!(
-                "Layout {} - tags {}",
-                self.cfg.default_explorer_layout,
-                if self.cfg.show_tags_section {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            6 => format!(
-                "Sound {} - autostart {}",
-                if self.cfg.play_sound { "on" } else { "off" },
-                if self.cfg.launch_at_login {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            7 => format!("{} threads", self.cfg.worker_threads),
-            8 => format!(
-                "{} - {}",
-                output_mode_label(self.cfg.output_mode),
-                if self.cfg.enforce_zero_loss {
-                    "lossless"
-                } else {
-                    "standard"
-                }
-            ),
-            _ => "Mossambi v2.1".to_string(),
-        }
-    }
-
     fn category_subtitle(&self, i: usize) -> &'static str {
         match i {
             0 => "Startup, default save locations, browser drag staging, and history.",
@@ -1671,12 +1598,6 @@ impl PreferencesView {
                 },
             );
         });
-
-        ui.add_space(design::space::MD);
-        section(ui, palette, "Gesture physics & sensitivity");
-        card(ui, palette, |ui| {
-            self.render_input(ui, palette, dirty);
-        });
     }
 
     fn render_fields(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
@@ -2557,22 +2478,6 @@ impl PreferencesView {
                     *dirty = true;
                 }
             });
-
-            let lal = self.cfg.launch_at_login;
-            let lal_lbl = on_off(lal).to_string();
-            let lal_mut = &mut self.cfg.launch_at_login;
-            setting_row(
-                ui,
-                palette,
-                "Launch at login",
-                &lal_lbl,
-                dirty,
-                |ui, dirty| {
-                    if ui.checkbox(lal_mut, "").changed() {
-                        *dirty = true;
-                    }
-                },
-            );
         });
 
         section(ui, palette, "Execution & performance");
@@ -2677,220 +2582,6 @@ impl PreferencesView {
                     }
                 },
             );
-        });
-    }
-
-    fn render_input(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
-        let egw = self.cfg.enable_gesture_wakeup;
-        let egw_lbl = on_off(egw).to_string();
-        let egw_mut = &mut self.cfg.enable_gesture_wakeup;
-        setting_row(
-            ui,
-            palette,
-            "Gesture wake-up",
-            &egw_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(egw_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let ehw = self.cfg.enable_hotkey_wakeup;
-        let ehw_lbl = on_off(ehw).to_string();
-        let ehw_mut = &mut self.cfg.enable_hotkey_wakeup;
-        setting_row(
-            ui,
-            palette,
-            "Hotkey wake-up",
-            &ehw_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(ehw_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let gt = self.cfg.gesture_type.clone();
-        let gt_lbl = gesture_type_label(&gt).to_string();
-        let gt_mut = &mut self.cfg.gesture_type;
-        setting_row(ui, palette, "Gesture type", &gt_lbl, dirty, |ui, dirty| {
-            for (v, lab) in [("shake", "Shake"), ("circle", "Circle"), ("both", "Both")] {
-                let active = *gt_mut == v;
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new(lab)
-                                .size(design::type_scale::SMALL)
-                                .color(if active {
-                                    palette.accent
-                                } else {
-                                    palette.text_secondary
-                                }),
-                        )
-                        .fill(if active {
-                            palette.card_hover
-                        } else {
-                            Color32::TRANSPARENT
-                        })
-                        .stroke(Stroke::new(
-                            1.0_f32,
-                            if active {
-                                palette.accent
-                            } else {
-                                palette.border
-                            },
-                        ))
-                        .rounding(Rounding::same(design::radius::XS)),
-                    )
-                    .clicked()
-                {
-                    *gt_mut = v.to_string();
-                    *dirty = true;
-                }
-            }
-        });
-
-        let ss = self.cfg.shake_sensitivity_px;
-        let ss_lbl = format!("{:.0} px", ss);
-        let ss_mut = &mut self.cfg.shake_sensitivity_px;
-        setting_row(
-            ui,
-            palette,
-            "Shake sensitivity",
-            &ss_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui
-                    .add(egui::Slider::new(ss_mut, 4.0..=40.0).show_value(false))
-                    .changed()
-                {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let gt2 = self.cfg.gesture_timeout_ms;
-        let gt2_lbl = format!("{} ms", gt2);
-        let gt2_mut = &mut self.cfg.gesture_timeout_ms;
-        setting_row(
-            ui,
-            palette,
-            "Gesture timeout",
-            &gt2_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui
-                    .add(egui::Slider::new(gt2_mut, 200..=2000).show_value(false))
-                    .changed()
-                {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let dd = self.cfg.deep_drag_detection_only;
-        let dd_lbl = on_off(dd).to_string();
-        let dd_mut = &mut self.cfg.deep_drag_detection_only;
-        setting_row(
-            ui,
-            palette,
-            "Deep-drag detection only",
-            &dd_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.checkbox(dd_mut, "").changed() {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let ws = self.cfg.wheel_size;
-        let ws_lbl = format!("{}", ws);
-        let ws_mut = &mut self.cfg.wheel_size;
-        setting_row(ui, palette, "Wheel size", &ws_lbl, dirty, |ui, dirty| {
-            if ui
-                .add(egui::Slider::new(ws_mut, 1..=8).show_value(false))
-                .changed()
-            {
-                *dirty = true;
-            }
-        });
-
-        let dtd = self.cfg.drop_target_default.clone();
-        let dtd_lbl = if dtd.is_empty() {
-            "Auto".to_string()
-        } else {
-            dtd.clone()
-        };
-        let dtd_mut = &mut self.cfg.drop_target_default;
-        setting_row(
-            ui,
-            palette,
-            "Drop target default",
-            &dtd_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui
-                    .add(TextEdit::singleline(dtd_mut).desired_width(120.0))
-                    .changed()
-                {
-                    *dirty = true;
-                }
-            },
-        );
-
-        let kp = self.cfg.keybinding_profile;
-        let kp_lbl = if kp == 0 {
-            "macOS Finder"
-        } else {
-            "Windows Explorer"
-        };
-        let kp_mut = &mut self.cfg.keybinding_profile;
-        setting_row(
-            ui,
-            palette,
-            "Keybinding profile",
-            kp_lbl,
-            dirty,
-            |ui, dirty| {
-                if ui.selectable_label(*kp_mut == 0, "macOS Finder").clicked() {
-                    *kp_mut = 0;
-                    *dirty = true;
-                }
-                if ui
-                    .selectable_label(*kp_mut == 1, "Windows Explorer")
-                    .clicked()
-                {
-                    *kp_mut = 1;
-                    *dirty = true;
-                }
-            },
-        );
-
-        let es = self.cfg.explorer_style;
-        let es_lbl = es.name();
-        let es_mut = &mut self.cfg.explorer_style;
-        setting_row(ui, palette, "Explorer style", es_lbl, dirty, |ui, dirty| {
-            if ui
-                .selectable_label(*es_mut == crate::core::ExplorerStyle::MacOS, "macOS Finder")
-                .clicked()
-            {
-                *es_mut = crate::core::ExplorerStyle::MacOS;
-                *dirty = true;
-            }
-            if ui
-                .selectable_label(
-                    *es_mut == crate::core::ExplorerStyle::Windows,
-                    "Windows Explorer",
-                )
-                .clicked()
-            {
-                *es_mut = crate::core::ExplorerStyle::Windows;
-                *dirty = true;
-            }
         });
     }
 
@@ -3708,8 +3399,13 @@ fn setting_row(
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(6.0);
+                let x0 = ui.cursor().right();
                 body(ui, dirty);
-                if !value.is_empty() {
+                // Wide controls (segmented choices, pickers) already show the
+                // value; echoing it beside them read as clutter ("256k" next
+                // to a highlighted 256k). Narrow ones (slider, checkbox) keep it.
+                let control_w = x0 - ui.cursor().right();
+                if !value.is_empty() && control_w < 150.0 {
                     ui.add_space(design::space::XS);
                     ui.label(
                         egui::RichText::new(value)
@@ -3855,14 +3551,5 @@ fn output_mode_label(o: OutputMode) -> &'static str {
     match o {
         OutputMode::Sibling => "Sibling folder",
         OutputMode::Custom => "Custom folder",
-    }
-}
-
-fn gesture_type_label(s: &str) -> &'static str {
-    match s {
-        "shake" => "Shake",
-        "circle" => "Circle",
-        "both" => "Both",
-        _ => "Both",
     }
 }
