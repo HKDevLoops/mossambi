@@ -1814,3 +1814,30 @@ MOSSAMBI SETTINGS/CONFIG/LUA WAVE CLOSED (2026-11-13): feat ab8fab2 (feat(gui) s
   real optimal_thread_count; rfd file picker moved to a background
   thread (picker_sender/receiver/in_flight, drained per frame).
 - HEAD after feat: 58b5681. Ledger hash recorded in Honcho (not here).
+
+## 2026-11-14 - W-7 Batch C: Tools/Converters UX Polish (feat 636c371)
+- Plan: docs(plan) 118dee8 (tools/converters redesign wave).
+- Scope: real format catalogue, honest archive labels, per-tab drop
+  zones, route chips, monospace numerals.
+- Files (2): src/gui/studio_view.rs, src/gui/studio_app.rs.
+- Gates: fmt OK; clippy --all-targets -D warnings OK first pass; cargo
+  test OK (73 lib + 12 queue + all suites, exit 0); cargo build
+  --release OK (48.63s, exit 0); tree: staged 2 expected files only.
+- Notes: catalogue chips replaced the hardcoded 24-format sample list
+  with UniversalRegistry::search_catalogue (200+ formats, uppercase
+  contains filter over extension/display_name/container/description,
+  48-chip cap with a "+ N more formats - refine the filter" hint); the
+  fake "Pack to 7Z" button was replaced with real TAR.ZST
+  (ArchiveType::from_extension has no 7Z arm, so the dispatcher's
+  unwrap_or(Zip) silently packed a ZIP named *.7Z; TAR.ZST maps to the
+  real TarZst writer); new render_tab_drop_banner helper shows an
+  accent hover banner on the Transcoder/ExamStudio/QualityInspector/
+  ArchiveSuite tabs; drops are now tab-aware (ArchiveSuite packs ZIP
+  or safe-extracts via a looks_like_archive extension check,
+  QualityInspector runs background inspect with a busy guard,
+  ExamStudio pushes QueueAction::RunExam); enqueue stamps Dijkstra
+  route chips via a process-wide OnceLock RoutePlanner
+  (new_with_standard_matrix, find_route 3 hops,
+  ConversionRoute::display_path -> set_planned_route); the queue
+  summary counts line is monospace.
+- HEAD after feat: 636c371. Ledger hash recorded in Honcho (not here).
