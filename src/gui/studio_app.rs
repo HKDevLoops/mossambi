@@ -670,7 +670,10 @@ impl eframe::App for MossambiApp {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // -- Ctrl + Mouse Wheel ----------------------------------------
-        // Plain Ctrl+wheel    -> Explorer content zoom levels (0..=4, persisted)
+        // Plain Ctrl+wheel    -> Explorer zoom ladder: five Grid icon-size
+        //                       levels (0..=4, persisted); one notch below
+        //                       the smallest crosses into Details and back
+        //                       (session-only, debounced against wiggle)
         // Ctrl+0              -> reset explorer zoom to the default level 2
         // Ctrl+Shift+wheel    -> whole-UI pixel scale (Finder/Explorer parity)
         // Ctrl+Shift+0        -> reset UI scale to native
@@ -703,16 +706,7 @@ impl eframe::App for MossambiApp {
             log::debug!("explorer zoom reset to level 2 (Ctrl+0)");
         } else if explorer_scroll != 0.0 {
             let step = if explorer_scroll > 0.0 { 1 } else { -1 };
-            let next =
-                (self.studio_view.explorer_view.explorer_zoom as i32 + step).clamp(0, 4) as u8;
-            if next != self.studio_view.explorer_view.explorer_zoom {
-                log::debug!(
-                    "explorer zoom level: {} -> {}",
-                    self.studio_view.explorer_view.explorer_zoom,
-                    next
-                );
-                self.studio_view.explorer_view.explorer_zoom = next;
-            }
+            self.studio_view.explorer_view.zoom_ladder_step(step);
         } else if ui_zoom_reset {
             self.ui_zoom = 1.0;
             let native = ctx.native_pixels_per_point().unwrap_or(1.0).max(0.5);

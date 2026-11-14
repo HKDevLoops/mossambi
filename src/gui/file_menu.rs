@@ -11,6 +11,7 @@
 
 use crate::core::config::MenuStyle;
 use crate::core::icon_packs::{IconGlyph, IconPack};
+use crate::gui::macos_theme::ThemePalette;
 use eframe::egui::{Color32, Response, Sense, Ui, Vec2};
 
 /// Every verb Mossambi can offer from a context menu.
@@ -349,6 +350,113 @@ fn menu_row_text(ui: &mut Ui, label: &str) -> Response {
 /// iconless row - with the label coming from the user's configuration.
 pub fn menu_item_custom(ui: &mut Ui, label: &str) -> Response {
     menu_row_text(ui, label)
+}
+
+/// Column-chooser toggle row (accent-highlight method).
+///
+/// State is carried by accent colour, not `[x]`/`[ ]` text glyphs: shown
+/// rows paint the soft accent selection fill (45 alpha dark / 26 light -
+/// the design.rs selection language) with a painted check square, hidden
+/// rows stay flat and muted with an outlined empty square, and locked
+/// rows render as a pinned non-interactive chip. Text keeps full contrast
+/// over the tint (text_primary on fills, text_muted on flat rows) per the
+/// standing legibility rule, and menu rows keep the default arrow cursor.
+pub fn menu_item_toggle(
+    ui: &mut Ui,
+    label: &str,
+    shown: bool,
+    locked: bool,
+    palette: &ThemePalette,
+) -> Response {
+    let font = eframe::egui::FontId::proportional(15.0);
+    let budget = ui.available_width() - 34.0;
+    let label = elide_to_width(ui, label, budget, font.clone());
+    let text_color = if shown && !locked {
+        palette.text_primary
+    } else {
+        palette.text_muted
+    };
+    let galley = ui.painter().layout_no_wrap(label, font, text_color);
+    let row_h = galley.size().y + 8.0;
+    let sense = if locked {
+        Sense::hover()
+    } else {
+        Sense::click()
+    };
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), sense);
+    let (base_alpha, hover_alpha) = if palette.is_dark {
+        (45_u8, 65_u8)
+    } else {
+        (26_u8, 42_u8)
+    };
+    let tinted = |c: Color32, a: u8| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a);
+    if locked {
+        ui.painter().rect_filled(
+            rect,
+            eframe::egui::Rounding::same(4.0),
+            tinted(palette.card_hover, if palette.is_dark { 20 } else { 14 }),
+        );
+    } else if shown {
+        let a = if resp.hovered() || resp.is_pointer_button_down_on() {
+            hover_alpha
+        } else {
+            base_alpha
+        };
+        ui.painter().rect_filled(
+            rect,
+            eframe::egui::Rounding::same(4.0),
+            tinted(palette.accent, a),
+        );
+    } else if resp.hovered() || resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(
+            rect,
+            eframe::egui::Rounding::same(4.0),
+            tinted(palette.card_hover, if palette.is_dark { 45 } else { 28 }),
+        );
+    }
+    if !locked {
+        let sq = eframe::egui::Rect::from_center_size(
+            eframe::egui::Pos2::new(rect.left() + 14.0, rect.center().y),
+            Vec2::splat(10.0),
+        );
+        if shown {
+            ui.painter()
+                .rect_filled(sq, eframe::egui::Rounding::same(3.0), palette.accent);
+            let check = if palette.is_dark {
+                Color32::from_rgb(18, 18, 18)
+            } else {
+                Color32::WHITE
+            };
+            let c = sq.center();
+            ui.painter().line_segment(
+                [
+                    eframe::egui::Pos2::new(c.x - 2.4, c.y + 0.6),
+                    eframe::egui::Pos2::new(c.x - 0.6, c.y + 2.6),
+                ],
+                eframe::egui::Stroke::new(1.6_f32, check),
+            );
+            ui.painter().line_segment(
+                [
+                    eframe::egui::Pos2::new(c.x - 0.6, c.y + 2.6),
+                    eframe::egui::Pos2::new(c.x + 3.2, c.y - 2.4),
+                ],
+                eframe::egui::Stroke::new(1.6_f32, check),
+            );
+        } else {
+            ui.painter().rect_stroke(
+                sq,
+                eframe::egui::Rounding::same(3.0),
+                eframe::egui::Stroke::new(1.0_f32, palette.text_muted),
+            );
+        }
+    }
+    let pos = eframe::egui::Align2::LEFT_CENTER
+        .align_size_within_rect(galley.size(), rect.shrink2(Vec2::new(26.0, 0.0)))
+        .min;
+    ui.painter().galley(pos, galley, text_color);
+    // Cursor discipline: menu rows always show the default arrow, never
+    // the text pointer (standing rule).
+    resp.on_hover_cursor(eframe::egui::CursorIcon::Default)
 }
 
 /// Measures a label and chops it with an ASCII ellipsis until it fits the

@@ -775,8 +775,14 @@ pub struct ExplorerView {
     pub menu_style: crate::core::config::MenuStyle,
     pub animations: crate::core::config::AnimationSettings,
     pub hover_anims: crate::gui::anim::AnimRegistry,
-    /// Windows-Explorer zoom levels: 0 = Details form, 1-4 = Grid icon sizes.
+    /// Windows-Explorer zoom ladder: five Grid icon-size multiplier levels
+    /// (0..=4, persisted). One notch below the smallest level crosses into
+    /// the Details view via `zoom_ladder_step`; the auto-switched view mode
+    /// itself stays session-only per the confirmed design.
     pub explorer_zoom: u8,
+    /// Time of the last Grid<->Details zoom-ladder crossing, used to
+    /// debounce touchpad wiggle at the boundary (`zoom_ladder_step`).
+    zoom_cross_gate: Option<Instant>,
     /// Rubber-band marquee: drag origin + the selection snapshot it modifies.
     /// `Some` while a canvas rubber-band drag is in flight.
     marquee: Option<(Pos2, HashSet<PathBuf>)>,
@@ -1073,6 +1079,7 @@ impl Default for ExplorerView {
             animations: crate::core::config::AnimationSettings::default(),
             hover_anims: crate::gui::anim::AnimRegistry::new(),
             explorer_zoom: 2,
+            zoom_cross_gate: None,
             marquee: None,
             drag_out_in_flight: false,
             status_note: None,
@@ -1097,21 +1104,66 @@ impl Default for ExplorerView {
 }
 
 impl ExplorerView {
-    /// The five Explorer zoom steps (Windows Explorer parity):
-    /// level 0 is the Details/list **form** - the icon-size scale is not
-    /// applied there; levels 1-4 are Grid icon sizes Small -> Medium -> Large ->
-    /// Extra-large, multiplied over the user's base grid icon size.
+    /// The five Grid zoom steps (Windows Explorer parity), multiplied over
+    /// the user's base grid icon size: Extra-small -> Small -> Medium ->
+    /// Large -> Extra-large. The Details form sits one notch below the
+    /// smallest step and is reached through `zoom_ladder_step`.
     pub const EXPLORER_ZOOM_LEVELS: [f32; 5] = [0.60, 0.85, 1.0, 1.30, 1.70];
+
+    /// Debounce window for Grid<->Details zoom-ladder crossings: wheel
+    /// wiggle inside this window is swallowed (touchpad jitter guard).
+    pub const ZOOM_CROSS_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
 
     /// Human readable label for a zoom level (Explorer's status-bar wording).
     pub fn zoom_level_name(level: u8) -> &'static str {
         match level {
-            0 => "Details",
+            0 => "Extra small icons",
             1 => "Small icons",
             2 => "Medium icons",
             3 => "Large icons",
             _ => "Extra large icons",
         }
+    }
+
+    /// One Ctrl+Scroll notch on the zoom ladder (Windows Explorer parity,
+    /// user-confirmed design): five Grid icon-size levels 0..=4; one notch
+    /// below the smallest grid size crosses into the Details view and one
+    /// notch up from Details returns to the smallest grid size. Columns is
+    /// excluded from the ladder entirely, and mode crossings are debounced
+    /// so touchpad wiggle at the boundary cannot flicker between modes.
+    pub fn zoom_ladder_step(&mut self, step: i32) {
+        if step == 0 || self.view_mode == ViewMode::Columns {
+            return; // no-op notch, and Columns stays outside the ladder
+        }
+        if self.view_mode == ViewMode::Details {
+            if step > 0 && self.zoom_cross_open() {
+                self.view_mode = ViewMode::Grid;
+                self.explorer_zoom = 0; // re-enter at the smallest grid size
+                self.zoom_cross_gate = Some(Instant::now());
+                log::debug!("zoom ladder: Details -> Grid (extra small)");
+            }
+            return; // Details is the bottom of the ladder
+        }
+        if step < 0 && self.explorer_zoom == 0 {
+            if self.zoom_cross_open() {
+                self.view_mode = ViewMode::Details;
+                self.zoom_cross_gate = Some(Instant::now());
+                log::debug!("zoom ladder: Grid (extra small) -> Details");
+            }
+            return;
+        }
+        let next = (self.explorer_zoom as i32 + step).clamp(0, 4) as u8;
+        if next != self.explorer_zoom {
+            log::debug!("explorer zoom level: {} -> {}", self.explorer_zoom, next);
+            self.explorer_zoom = next;
+        }
+    }
+
+    /// True when a Grid<->Details crossing may fire: no crossing yet, or the
+    /// previous crossing is older than the wiggle debounce window.
+    fn zoom_cross_open(&self) -> bool {
+        self.zoom_cross_gate
+            .is_none_or(|t| Instant::now().duration_since(t) >= Self::ZOOM_CROSS_DEBOUNCE)
     }
 
     /// Toggle Dual-Pane Split View
@@ -4438,17 +4490,21 @@ impl ExplorerView {
             // Finder parity: right-click a header to choose which columns
             // are shown. Name is locked (always visible, always first).
             resp.context_menu(|menu_ui| {
-                for choice in DetailColumn::all() {
+                for (i, choice) in DetailColumn::all().into_iter().enumerate() {
+                    if i > 0 {
+                        menu_ui.add_space(3.0);
+                    }
                     let shown = self.column_layout.visible.contains(&choice);
-                    let row_label = if ColumnLayout::is_locked(choice) {
+                    let locked = ColumnLayout::is_locked(choice);
+                    let row_label = if locked {
                         format!("{} (locked)", choice.label())
-                    } else if shown {
-                        format!("[x] {}", choice.label())
                     } else {
-                        format!("[ ] {}", choice.label())
+                        choice.label().to_string()
                     };
-                    let row = crate::gui::file_menu::menu_item_custom(menu_ui, &row_label);
-                    if row.clicked() && !ColumnLayout::is_locked(choice) {
+                    let row = crate::gui::file_menu::menu_item_toggle(
+                        menu_ui, &row_label, shown, locked, palette,
+                    );
+                    if row.clicked() && !locked {
                         if shown {
                             self.column_layout.hide(choice);
                         } else {
@@ -5316,6 +5372,13 @@ impl ExplorerView {
                 }
 
                 // -- Right-side: selection summary + select all/clear --
+                // Width arbitration: the RTL group anchors at the row's right
+                // edge with no knowledge of how far the left button pills
+                // extend, so an overflowing item paints straight over them
+                // (same bug class as the retired Select All chip below).
+                // Measure the left group's right extent and budget the
+                // selection chip into the gap between the two groups.
+                let buttons_right = ui.min_rect().max.x;
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
                     if has_sel {
@@ -5338,13 +5401,16 @@ impl ExplorerView {
                     }
 
                     if has_sel {
-                        ui.add_space(10.0);
+                        // Chip budget: space between Clear's left edge and the
+                        // left button group's right extent.
+                        let clear_left = ui.min_rect().min.x;
+                        let budget = clear_left - buttons_right - 12.0;
                         let bytes: u64 = entries
                             .iter()
                             .filter(|e| self.selected_paths.contains(&e.path) && !e.is_dir)
                             .map(|e| e.size_bytes)
                             .sum();
-                        let label = if bytes > 0 {
+                        let full = if bytes > 0 {
                             format!(
                                 "{} selected | {}",
                                 pluralize_items(all_sel.len()),
@@ -5353,12 +5419,39 @@ impl ExplorerView {
                         } else {
                             format!("{} selected", pluralize_items(all_sel.len()))
                         };
-                        ui.label(
-                            egui::RichText::new(label)
-                                .size(12.0)
-                                .strong()
-                                .color(palette.accent),
-                        );
+                        let short = format!("{} selected", pluralize_items(all_sel.len()));
+                        let font = egui::FontId::proportional(12.0);
+                        let full_w = ui
+                            .painter()
+                            .layout_no_wrap(full.clone(), font.clone(), palette.accent)
+                            .size()
+                            .x;
+                        let label = if full_w <= budget {
+                            full
+                        } else {
+                            let short_w = ui
+                                .painter()
+                                .layout_no_wrap(short.clone(), font.clone(), palette.accent)
+                                .size()
+                                .x;
+                            if short_w <= budget {
+                                short
+                            } else {
+                                // No room at all: the status bar already
+                                // reports the same count and size, so hide
+                                // the chip rather than paint over buttons.
+                                String::new()
+                            }
+                        };
+                        if !label.is_empty() {
+                            ui.add_space(10.0);
+                            ui.label(
+                                egui::RichText::new(label)
+                                    .size(12.0)
+                                    .strong()
+                                    .color(palette.accent),
+                            );
+                        }
                     }
                     // No count label in the no-selection state: the status bar
                     // already reports the item total, and drawing it here
