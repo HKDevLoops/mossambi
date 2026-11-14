@@ -4,6 +4,7 @@
 pub mod action_journal;
 pub mod async_worker;
 pub mod config;
+pub mod conversion_queue;
 pub mod default_explorer;
 pub mod dir_watcher;
 pub mod dnd_backend;
@@ -36,8 +37,11 @@ pub use action_journal::{
     record_copy, record_create_dir, record_move, record_rename, record_tag_set, stage_delete,
     undo_last,
 };
-pub use async_worker::{AsyncWorkerPool, TaskUpdate};
+pub use async_worker::{AsyncWorkerPool, ItemOutcome, TaskUpdate};
 pub use config::{ExplorerStyle, GlassEffect, MossambiConfig, OutputMode, ThemeMode};
+pub use conversion_queue::{
+    ConversionQueue, QueueAction, QueueItem, QueueItemStatus, QueueSummary,
+};
 pub use dir_watcher::DirWatcher;
 pub use donut_config::{DonutAppearance, DonutConfig, DonutProfile, DonutSlicePreset};
 #[cfg(target_os = "windows")]

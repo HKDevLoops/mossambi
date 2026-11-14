@@ -20,6 +20,16 @@ pub enum TaskUpdate {
         id: usize,
         fraction: f32,
         status: String,
+        /// `Some(queue_item_id)` for intra-item progress; `None` for
+        /// batch-level overall progress.
+        item: Option<usize>,
+    },
+    /// Terminal outcome for one item inside a batch task. Deliberately NOT
+    /// treated as terminal by the watchdog (the task itself keeps running).
+    ItemResult {
+        id: usize,
+        item: Option<usize>,
+        outcome: ItemOutcome,
     },
     Completed {
         id: usize,
@@ -29,6 +39,21 @@ pub enum TaskUpdate {
     Failed {
         id: usize,
         error: String,
+    },
+}
+
+/// Terminal outcome of one queue item reported by a batch worker task.
+#[derive(Debug, Clone)]
+pub enum ItemOutcome {
+    Done {
+        outputs: Vec<PathBuf>,
+        message: String,
+    },
+    Failed {
+        error: String,
+    },
+    Cancelled {
+        message: String,
     },
 }
 

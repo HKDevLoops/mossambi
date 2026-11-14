@@ -424,6 +424,7 @@ impl eframe::App for MossambiWidgetApp {
                     log::info!("widget worker finished: {}", message)
                 }
                 TaskUpdate::Failed { error, .. } => log::error!("widget worker failed: {}", error),
+                TaskUpdate::ItemResult { .. } => {}
             }
         }
 

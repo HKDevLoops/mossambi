@@ -577,6 +577,7 @@ impl AppState {
                         id: task_id,
                         fraction: frac,
                         status: format!("Processed {}/{} files", idx + 1, total),
+                        item: None,
                     });
 
                     if let Err(e) = res {
@@ -865,6 +866,7 @@ fn run_app(
                     state.status_message = error;
                     state.status_is_error = true;
                 }
+                TaskUpdate::ItemResult { .. } => {}
             }
         }
 

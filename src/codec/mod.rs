@@ -46,15 +46,166 @@ use anyhow::{bail, Context, Result};
 use calamine::Reader;
 use rayon::prelude::*;
 use std::fs;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::Instant;
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LosslessMode {
     StrictBitExact,         // True 0.00% loss (stream copy, lossless PCM, lossless raster)
     PerceptualHighFidelity, // < 1.00% loss (CRF 16, Opus 192k+, LAME V0)
+}
+
+/// Live encode progress callback: fraction 0.0..=1.0 plus a human status
+/// line. Invoked from the ffmpeg pipe-reader thread.
+pub type ProgressCallback = Box<dyn FnMut(f32, &str) + Send>;
+
+/// Shared progress callback handle used by the worker task and the reader
+/// thread (type alias keeps clippy's type_complexity satisfied).
+type SharedProgress = Arc<Mutex<ProgressCallback>>;
+
+/// Shared handle for one encode: cooperative cancel flag, live progress
+/// callback (invoked from the ffmpeg pipe-reader thread), and the probed
+/// media duration used for determinate progress. Cloneable so the worker
+/// task and the reader thread can each hold a reference.
+#[derive(Clone)]
+pub struct EncodeHandle {
+    pub cancel: Arc<AtomicBool>,
+    pub duration_secs: Option<f64>,
+    progress: SharedProgress,
+}
+
+impl EncodeHandle {
+    pub fn new(
+        cancel: Arc<AtomicBool>,
+        duration_secs: Option<f64>,
+        progress: ProgressCallback,
+    ) -> Self {
+        Self {
+            cancel,
+            duration_secs,
+            progress: Arc::new(Mutex::new(progress)),
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// Reports intra-item progress from any thread. A poisoned lock or lost
+    /// tick is swallowed: progress reporting must never kill the encode.
+    pub fn report(&self, fraction: f32, status: &str) {
+        if let Ok(mut guard) = self.progress.lock() {
+            guard.as_mut()(fraction, status);
+        }
+    }
+}
+
+/// Parses ffmpeg `-progress pipe:1` key=value blocks. Block terminators are
+/// `progress=continue|end`. Note: ffmpeg's `out_time_us` AND `out_time_ms`
+/// are both MICROSECONDS (the `_ms` key is a historical misnomer), so both
+/// divide by 1e6.
+pub struct FfmpegProgressParser {
+    duration_secs: Option<f64>,
+    out_time_us: Option<f64>,
+    speed: Option<f64>,
+}
+
+impl FfmpegProgressParser {
+    pub fn new(duration_secs: Option<f64>) -> Self {
+        Self {
+            duration_secs,
+            out_time_us: None,
+            speed: None,
+        }
+    }
+
+    /// True when a duration was probed (determinate progress mode).
+    pub fn has_duration(&self) -> bool {
+        self.duration_secs.is_some()
+    }
+
+    /// Feeds one progress line; returns `Some((fraction, status_text))` when
+    /// a `progress=` block terminator completes a sample.
+    pub fn feed_line(&mut self, line: &str) -> Option<(f32, String)> {
+        let (key, value) = line.split_once('=')?;
+        let value = value.trim();
+        match key {
+            "out_time_us" => self.out_time_us = value.parse::<f64>().ok(),
+            "out_time_ms" => {
+                if self.out_time_us.is_none() {
+                    self.out_time_us = value.parse::<f64>().ok();
+                }
+            }
+            "speed" => self.speed = parse_ffmpeg_speed(value),
+            "progress" => {
+                let sample = self.build_sample();
+                self.out_time_us = None;
+                self.speed = None;
+                return Some(sample);
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn build_sample(&self) -> (f32, String) {
+        let speed_text = self
+            .speed
+            .map(|s| format!("speed {:.2}x", s))
+            .unwrap_or_else(|| "working".to_string());
+        match (self.duration_secs, self.out_time_us) {
+            (Some(duration), Some(micros)) if duration > 0.0 => {
+                let fraction = ((micros / 1_000_000.0) / duration).clamp(0.0, 1.0) as f32;
+                (
+                    fraction,
+                    format!("{:.0}% | {}", fraction * 100.0, speed_text),
+                )
+            }
+            _ => (0.0, speed_text),
+        }
+    }
+}
+
+/// Parses an ffmpeg `speed` value ("1.5x", "N/A"). Rejects non-finite and
+/// zero speeds so a stalled encode reports indeterminate instead of 0%.
+pub fn parse_ffmpeg_speed(value: &str) -> Option<f64> {
+    value
+        .trim()
+        .trim_end_matches('x')
+        .parse::<f64>()
+        .ok()
+        .filter(|s| s.is_finite() && *s > 0.0)
+}
+
+/// Probes a media file's duration in seconds via ffprobe. Returns None when
+/// ffprobe is unavailable, the file is not media, or the duration is
+/// unreadable - callers fall back to indeterminate progress.
+pub fn probe_media_duration(path: &Path) -> Option<f64> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|d| d.is_finite() && *d > 0.0)
 }
 
 /// Transcode a single input file to target extension with Zero-Loss guarantee.
@@ -63,6 +214,18 @@ pub fn transcode_file(
     target_format: &str,
     mode: LosslessMode,
     custom_dir: Option<&Path>,
+) -> Result<PathBuf> {
+    transcode_file_ctx(input, target_format, mode, custom_dir, None)
+}
+
+/// Same as [`transcode_file`] with an optional encode handle for live
+/// progress reporting and cooperative cancellation (W-7).
+pub fn transcode_file_ctx(
+    input: &Path,
+    target_format: &str,
+    mode: LosslessMode,
+    custom_dir: Option<&Path>,
+    handle: Option<&EncodeHandle>,
 ) -> Result<PathBuf> {
     if !input.exists() {
         bail!("Input path does not exist: {}", input.display());
@@ -145,7 +308,7 @@ pub fn transcode_file(
         target_upper
     );
 
-    let outcome: Result<()> = transcode_single_step(input, &work_path, &target_upper, mode)
+    let outcome: Result<()> = transcode_single_step(input, &work_path, &target_upper, mode, handle)
         .or_else(|direct_err| {
             // If single-step conversion failed, attempt to find a multi-hop route
             if let Some(route) =
@@ -159,7 +322,7 @@ pub fn transcode_file(
                         target_upper,
                         route.display_path()
                     );
-                    return execute_multi_hop_route(input, &work_path, &route, mode);
+                    return execute_multi_hop_route(input, &work_path, &route, mode, handle);
                 }
             }
             Err(direct_err)
@@ -264,6 +427,7 @@ pub fn transcode_single_step(
     output: &Path,
     target_format: &str,
     mode: LosslessMode,
+    handle: Option<&EncodeHandle>,
 ) -> Result<()> {
     let (category, in_ext) = UniversalRegistry::classify_file(input);
     let target_upper = target_format.to_ascii_uppercase();
@@ -307,8 +471,8 @@ pub fn transcode_single_step(
             let arch_type = ArchiveType::from_extension(&target_upper).unwrap_or(ArchiveType::Zip);
             pack_archive(&[input.to_path_buf()], output, arch_type)
         }
-        FileCategory::Audio => convert_audio_zero_loss(input, output, &target_upper, mode),
-        FileCategory::Video => convert_video_zero_loss(input, output, &target_upper, mode),
+        FileCategory::Audio => convert_audio_zero_loss(input, output, &target_upper, mode, handle),
+        FileCategory::Video => convert_video_zero_loss(input, output, &target_upper, mode, handle),
         FileCategory::Subtitle => subtitles::transcode_subtitles(input, output),
         FileCategory::Cad => cad::transcode_cad(input, output),
         FileCategory::Models3D => models_3d::transcode_3d_model(input, output),
@@ -332,6 +496,7 @@ pub fn execute_multi_hop_route(
     output_path: &Path,
     route: &crate::core::route_planner::ConversionRoute,
     mode: LosslessMode,
+    handle: Option<&EncodeHandle>,
 ) -> Result<()> {
     if route.steps.is_empty() {
         bail!("Empty conversion route specified");
@@ -371,7 +536,26 @@ pub fn execute_multi_hop_route(
             step.description
         );
 
-        let step_result = transcode_single_step(&current_input, &step_out, &step.to, mode);
+        // Cooperative cancel between hops (W-7): clean up intermediates and
+        // stop before spending time on the next encode.
+        if let Some(h) = handle {
+            if h.is_cancelled() {
+                for tmp in &intermediate_files {
+                    let _ = fs::remove_file(tmp);
+                }
+                if !is_last {
+                    let _ = fs::remove_file(&step_out);
+                }
+                bail!(
+                    "Conversion cancelled by user before step {} of {}",
+                    i + 1,
+                    total_steps
+                );
+            }
+            h.report(0.0, &format!("step {}/{}: {}", i + 1, total_steps, step.to));
+        }
+
+        let step_result = transcode_single_step(&current_input, &step_out, &step.to, mode, handle);
         if let Err(e) = step_result {
             // Clean up all intermediates immediately on failure
             for tmp in &intermediate_files {
@@ -1021,13 +1205,24 @@ fn ffmpeg_muxer(target: &str) -> Option<&'static str> {
     })
 }
 
-/// Runs ffmpeg with stdin/stdout nulled and stderr PIPED so failures report
-/// the actual ffmpeg diagnosis instead of a bare exit status. Keeps the last
-/// ~2000 characters of stderr and attaches them to the error context.
-fn run_ffmpeg(mut cmd: Command, stage: &str) -> Result<()> {
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+/// Runs ffmpeg with stderr PIPED so failures report the actual ffmpeg
+/// diagnosis instead of a bare exit status. With an `EncodeHandle` (progress
+/// mode), adds the machine progress protocol (`-progress pipe:1 -nostats`),
+/// keeps a dedicated reader thread on every pipe (undrained pipes block the
+/// child), and supports two-tier cancellation: graceful stdin 'q' first,
+/// then a hard kill after the 2s grace window (TerminateProcess is
+/// asynchronous, so exit is confirmed by polling).
+fn run_ffmpeg_ctx(mut cmd: Command, stage: &str, handle: Option<&EncodeHandle>) -> Result<()> {
+    let progress_mode = handle.is_some();
+    if progress_mode {
+        cmd.args(["-progress", "pipe:1", "-nostats"]);
+    }
+    cmd.stderr(Stdio::piped());
+    if progress_mode {
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
+    } else {
+        cmd.stdin(Stdio::null()).stdout(Stdio::null());
+    }
 
     #[cfg(target_os = "windows")]
     {
@@ -1043,21 +1238,124 @@ fn run_ffmpeg(mut cmd: Command, stage: &str) -> Result<()> {
         )
     })?;
 
-    // Drain stderr while ffmpeg runs (it streams progress there), then keep
-    // only the tail — the summary lines right before the error are the useful
-    // part of a multi-megabyte progress log.
-    let mut stderr_tail = String::new();
-    if let Some(mut err_pipe) = child.stderr.take() {
-        let _ = err_pipe.read_to_string(&mut stderr_tail);
+    // stderr tail thread (both modes): keep only the last ~2000 characters -
+    // the summary lines right before the error are the useful part of a
+    // multi-megabyte progress log.
+    let stderr_tail = Arc::new(Mutex::new(String::new()));
+    if let Some(err_pipe) = child.stderr.take() {
+        let tail = Arc::clone(&stderr_tail);
+        thread::spawn(move || {
+            let reader = BufReader::new(err_pipe);
+            for line in reader.lines().map_while(std::result::Result::ok) {
+                let mut buf = match tail.lock() {
+                    Ok(buf) => buf,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                buf.push_str(&line);
+                buf.push('\n');
+                if buf.chars().count() > 2000 {
+                    let cut = buf.chars().count() - 2000;
+                    let start = buf
+                        .char_indices()
+                        .nth(cut)
+                        .map(|(idx, _)| idx)
+                        .unwrap_or(buf.len());
+                    buf.drain(..start);
+                }
+            }
+        });
     }
-    let status = child
-        .wait()
-        .context("Failed to wait for the FFmpeg process to finish")?;
+
+    // stdout progress reader thread (progress mode only): parses key=value
+    // blocks and reports fraction + speed text through the encode handle.
+    if let Some(h) = handle {
+        if let Some(out_pipe) = child.stdout.take() {
+            let cancel = Arc::clone(&h.cancel);
+            let reporter = Arc::clone(&h.progress);
+            let mut parser = FfmpegProgressParser::new(h.duration_secs);
+            thread::spawn(move || {
+                let start = Instant::now();
+                let reader = BufReader::new(out_pipe);
+                for line in reader.lines().map_while(std::result::Result::ok) {
+                    // Keep draining even after cancel so the child's pipes
+                    // never fill and block it mid-shutdown.
+                    if cancel.load(Ordering::Relaxed) {
+                        continue;
+                    }
+                    if let Some((fraction, mut status)) = parser.feed_line(&line) {
+                        if !parser.has_duration() {
+                            status = format!("{} (t+{}s)", status, start.elapsed().as_secs());
+                        }
+                        if let Ok(mut guard) = reporter.lock() {
+                            guard.as_mut()(fraction, &status);
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    // Waiter thread: owns the child + stdin. Two-tier cancel: write 'q'
+    // (graceful), wait a 2s grace window, then kill and poll until exit.
+    let stdin_pipe = child.stdin.take();
+    let cancel_flag = handle.map(|h| Arc::clone(&h.cancel));
+    let waiter = thread::spawn(move || -> Result<ExitStatus> {
+        let grace = Duration::from_secs(2);
+        let poll = Duration::from_millis(100);
+        if let Some(cancel) = cancel_flag {
+            loop {
+                if cancel.load(Ordering::Relaxed) {
+                    if let Some(mut stdin) = stdin_pipe {
+                        let _ = stdin.write_all(b"q");
+                        let _ = stdin.flush();
+                        drop(stdin);
+                    }
+                    let stop_at = Instant::now() + grace;
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(status)) => return Ok(status),
+                            Ok(None) => {
+                                if Instant::now() >= stop_at {
+                                    let _ = child.kill();
+                                }
+                                thread::sleep(poll);
+                            }
+                            Err(e) => return Err(e).context("Failed to poll the FFmpeg process"),
+                        }
+                    }
+                }
+                match child.try_wait() {
+                    Ok(Some(status)) => return Ok(status),
+                    Ok(None) => thread::sleep(poll),
+                    Err(e) => return Err(e).context("Failed to poll the FFmpeg process"),
+                }
+            }
+        }
+        drop(stdin_pipe);
+        child
+            .wait()
+            .context("Failed to wait for the FFmpeg process to finish")
+    });
+
+    let status = match waiter.join() {
+        Ok(result) => result,
+        Err(_) => bail!("FFmpeg watcher thread panicked during {stage}"),
+    }?;
+
+    if let Some(h) = handle {
+        if h.is_cancelled() {
+            bail!("FFmpeg {stage} cancelled by user");
+        }
+    }
 
     if !status.success() {
+        let tail = stderr_tail
+            .lock()
+            .map(|buf| buf.clone())
+            .unwrap_or_else(|p| p.into_inner().clone());
         bail!(
             "FFmpeg {stage} failed ({status}). ffmpeg stderr (tail):\n{}",
-            stderr_tail_of(&stderr_tail, 2000)
+            stderr_tail_of(&tail, 2000)
         );
     }
     Ok(())
@@ -1198,6 +1496,7 @@ fn convert_audio_zero_loss(
     output: &Path,
     target_format: &str,
     _mode: LosslessMode,
+    handle: Option<&EncodeHandle>,
 ) -> Result<()> {
     let in_ext = input
         .extension()
@@ -1271,7 +1570,7 @@ fn convert_audio_zero_loss(
     }
     cmd.arg(output);
 
-    run_ffmpeg(cmd, "audio transcode")?;
+    run_ffmpeg_ctx(cmd, "audio transcode", handle)?;
     Ok(())
 }
 
@@ -1283,6 +1582,7 @@ fn convert_video_zero_loss(
     output: &Path,
     target_format: &str,
     _mode: LosslessMode,
+    handle: Option<&EncodeHandle>,
 ) -> Result<()> {
     let _in_ext = input
         .extension()
@@ -1343,7 +1643,7 @@ fn convert_video_zero_loss(
         }
         cmd.arg(output);
 
-        run_ffmpeg(cmd, "audio extraction")?;
+        run_ffmpeg_ctx(cmd, "audio extraction", handle)?;
         return Ok(());
     }
 
@@ -1369,7 +1669,7 @@ fn convert_video_zero_loss(
         }
         remux_cmd.arg(output);
 
-        match run_ffmpeg(remux_cmd, "stream-copy remux") {
+        match run_ffmpeg_ctx(remux_cmd, "stream-copy remux", handle) {
             Ok(()) if output.exists() => {
                 if fs::metadata(output)
                     .map(|m| m.len() > 1024)
@@ -1387,6 +1687,10 @@ fn convert_video_zero_loss(
                 let _ = fs::remove_file(output);
             }
             Err(remux_err) => {
+                // Respect cancellation: never fall back into a fresh encode.
+                if handle.map(|h| h.is_cancelled()).unwrap_or(false) {
+                    return Err(remux_err);
+                }
                 // Stream copy is impossible for this codec/container pair —
                 // fall back to the full encode pipeline below.
                 log::warn!(
@@ -1503,7 +1807,7 @@ fn convert_video_zero_loss(
     }
     cmd.arg(output);
 
-    run_ffmpeg(cmd, "video conversion")?;
+    run_ffmpeg_ctx(cmd, "video conversion", handle)?;
     Ok(())
 }
 

@@ -2,11 +2,12 @@
 
 use crate::archive::{pack_archive, unpack_archive, ArchiveType};
 use crate::codec::{
-    convert_text_to_pdf_vector, transcode_file, transcode_to_all_formats, LosslessMode,
-    TextPdfSettings,
+    convert_text_to_pdf_vector, probe_media_duration, transcode_file_ctx, transcode_to_all_formats,
+    EncodeHandle, LosslessMode, TextPdfSettings,
 };
+use crate::core::conversion_queue::QueueAction;
 use crate::core::mouse_nav::{MouseNavEvent, MouseNavListener};
-use crate::core::{AsyncWorkerPool, FileCategory, TaskUpdate, UniversalRegistry};
+use crate::core::{AsyncWorkerPool, FileCategory, ItemOutcome, TaskUpdate, UniversalRegistry};
 use crate::exam::{optimize_exam_media, ExamConstraint};
 use crate::gui::macos_theme::*;
 use crate::gui::quick_settings::QuickSettingsState;
@@ -14,8 +15,9 @@ use crate::gui::studio_view::StudioView;
 use crate::gui::tray::{ActivationManager, AppControlEvent};
 use eframe::egui::{self, Vec2, ViewportBuilder, ViewportCommand};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
@@ -46,6 +48,10 @@ pub struct MossambiApp {
     // Pooled background execution: conversions run through the shared
     // watchdog-supervised worker pool instead of ad-hoc thread::spawn.
     pub worker_pool: AsyncWorkerPool,
+
+    // Cancel token for the ACTIVE conversion run (W-7): set by the queue
+    // panel's Cancel button; the encode stops gracefully, then is killed.
+    pub active_cancel: Option<Arc<AtomicBool>>,
 
     // System-wide mouse thumb-button / swipe history navigation (Windows
     // low-level hook; a harmless no-op on other platforms).
@@ -95,6 +101,7 @@ impl Default for MossambiApp {
             result_sender: tx,
 
             worker_pool: AsyncWorkerPool::new(),
+            active_cancel: None,
             mouse_nav: MouseNavListener::new(),
 
             frame_count: 0,
@@ -238,10 +245,10 @@ impl MossambiApp {
         self.start_conversion_batch(files, target_format);
     }
 
-    /// Converts a batch of files through the worker pool, reporting one final
-    /// `ConversionResult` per batch on the result channel. Explicit user
-    /// action - always allowed, even when `background_work` is disabled
-    /// (that knob only gates AUTO-triggered conversions).
+    /// Converts a batch of files through the worker pool with per-item queue
+    /// tracking (W-7). Explicit user action - always allowed, even when
+    /// `background_work` is disabled (that knob only gates AUTO-triggered
+    /// conversions).
     pub fn start_conversion_batch(&mut self, files: Vec<PathBuf>, target: &str) {
         if files.is_empty() {
             self.status_message = "Please drop or select a file first.".to_string();
@@ -260,62 +267,160 @@ impl MossambiApp {
             return;
         }
 
+        let staged: Vec<(usize, PathBuf, String)> = self
+            .studio_view
+            .queue
+            .enqueue_batch(files, target)
+            .into_iter()
+            .map(|(id, path)| (id, path, target.to_string()))
+            .collect();
+        self.status_message = format!("Queued {} file(s) -> {}...", staged.len(), target);
+        log::info!("conversion batch: {} file(s) -> {}", staged.len(), target);
+        self.begin_conversion_run(staged);
+    }
+
+    /// Runs one conversion pass over already-enqueued queue items
+    /// (item_id, source, target) triples. Each item reports its own
+    /// `ItemResult`; batch-level `Progress` drives the overall bar.
+    fn begin_conversion_run(&mut self, run: Vec<(usize, PathBuf, String)>) {
+        if run.is_empty() {
+            return;
+        }
         self.is_converting = true;
-        self.status_message = format!("Converting {} file(s) -> {}...", files.len(), target);
-        log::info!("conversion batch: {} file(s) -> {}", files.len(), target);
+        self.studio_view.batch_progress = Some(0.0);
 
         let sender = self.result_sender.clone();
-        let target_str = target.to_string();
         let settings = self.quick_settings.clone();
 
-        self.worker_pool
-            .spawn_task("StudioConversion", move |cancel, tx, task_id| {
-                let total = files.len();
-                let mut outputs: Vec<PathBuf> = Vec::new();
-                let mut first_error: Option<String> = None;
+        let (_spawned_id, cancel_token) =
+            self.worker_pool
+                .spawn_task("StudioConversion", move |cancel, tx, task_id| {
+                    let run_len = run.len();
+                    let mut done = 0usize;
+                    let mut failed = 0usize;
+                    let mut cancelled = 0usize;
 
-                for (idx, file) in files.iter().enumerate() {
-                    // Cooperative stop between files (the codec engine itself has
-                    // no cancellation hook yet).
-                    if cancel.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    match execute_conversion(file, &target_str, &settings) {
-                        ConversionResult::Success(mut outs) => outputs.append(&mut outs),
-                        ConversionResult::Failure(err) => {
-                            if first_error.is_none() {
-                                first_error = Some(format!("{}: {}", file.display(), err));
-                            }
+                    for (idx, (item_id, file, target_str)) in run.into_iter().enumerate() {
+                        // Cooperative stop between files: remaining items report
+                        // Cancelled so the queue panel reflects reality.
+                        if cancel.load(Ordering::Relaxed) {
+                            let _ = tx.send(TaskUpdate::ItemResult {
+                                id: task_id,
+                                item: Some(item_id),
+                                outcome: ItemOutcome::Cancelled {
+                                    message: "Skipped after cancel request.".to_string(),
+                                },
+                            });
+                            cancelled += 1;
+                            continue;
                         }
-                    }
-                    let _ = tx.send(TaskUpdate::Progress {
-                        id: task_id,
-                        fraction: (idx + 1) as f32 / total.max(1) as f32,
-                        status: format!("Converted {}/{} file(s)", idx + 1, total),
-                    });
-                }
 
-                let result = match first_error {
-                    Some(err) => ConversionResult::Failure(err),
-                    None => ConversionResult::Success(outputs),
-                };
-                match &result {
-                    ConversionResult::Success(outs) => {
-                        let _ = tx.send(TaskUpdate::Completed {
+                        let _ = tx.send(TaskUpdate::Progress {
                             id: task_id,
-                            output: outs.first().cloned(),
-                            message: format!("Converted {} file(s) to {}", outs.len(), target_str),
+                            fraction: idx as f32 / run_len.max(1) as f32,
+                            status: format!("Starting {}", file.display()),
+                            item: Some(item_id),
+                        });
+
+                        // Probe media duration (Audio/Video only) for determinate
+                        // intra-item progress; indeterminate otherwise.
+                        let (category, _) = UniversalRegistry::classify_file(&file);
+                        let duration_secs =
+                            if matches!(category, FileCategory::Audio | FileCategory::Video) {
+                                probe_media_duration(&file)
+                            } else {
+                                None
+                            };
+
+                        let tx_progress = tx.clone();
+                        let item_id_for_cb = item_id;
+                        let handle = EncodeHandle::new(
+                            Arc::clone(&cancel),
+                            duration_secs,
+                            Box::new(move |fraction: f32, status: &str| {
+                                let _ = tx_progress.send(TaskUpdate::Progress {
+                                    id: task_id,
+                                    fraction,
+                                    status: status.to_string(),
+                                    item: Some(item_id_for_cb),
+                                });
+                            }),
+                        );
+
+                        let outcome = match execute_conversion_ctx(
+                            &file,
+                            &target_str,
+                            &settings,
+                            Some(&handle),
+                        ) {
+                            ConversionResult::Success(outputs) => {
+                                done += 1;
+                                ItemOutcome::Done {
+                                    outputs,
+                                    message: "Converted".to_string(),
+                                }
+                            }
+                            ConversionResult::Failure(err) => {
+                                if cancel.load(Ordering::Relaxed) {
+                                    cancelled += 1;
+                                    ItemOutcome::Cancelled {
+                                        message: "Stopped by user.".to_string(),
+                                    }
+                                } else {
+                                    failed += 1;
+                                    ItemOutcome::Failed { error: err }
+                                }
+                            }
+                        };
+
+                        let _ = tx.send(TaskUpdate::ItemResult {
+                            id: task_id,
+                            item: Some(item_id),
+                            outcome,
+                        });
+
+                        let _ = tx.send(TaskUpdate::Progress {
+                            id: task_id,
+                            fraction: (idx + 1) as f32 / run_len.max(1) as f32,
+                            status: format!("Processed {}/{} file(s)", idx + 1, run_len),
+                            item: None,
                         });
                     }
-                    ConversionResult::Failure(err) => {
-                        let _ = tx.send(TaskUpdate::Failed {
-                            id: task_id,
-                            error: err.clone(),
-                        });
-                    }
-                }
-                let _ = sender.send(result);
-            });
+
+                    let summary = format!(
+                        "Batch finished: {} done, {} failed, {} cancelled - details in the queue",
+                        done, failed, cancelled
+                    );
+                    let result = if failed > 0 || cancelled > 0 {
+                        ConversionResult::Failure(summary.clone())
+                    } else {
+                        ConversionResult::Success(Vec::new())
+                    };
+                    let _ = tx.send(TaskUpdate::Completed {
+                        id: task_id,
+                        output: None,
+                        message: summary,
+                    });
+                    let _ = sender.send(result);
+                });
+
+        self.active_cancel = Some(cancel_token);
+    }
+
+    /// Requests graceful cancellation of the active conversion run (W-7):
+    /// signals the cancel token, flips the queue into Stopping, and lets the
+    /// encoder stop on its own before the hard-kill fallback.
+    pub fn cancel_active_batch(&mut self) {
+        if !self.is_converting {
+            return;
+        }
+        if let Some(token) = &self.active_cancel {
+            token.store(true, Ordering::Relaxed);
+        }
+        self.studio_view.queue.request_cancel();
+        self.status_message =
+            "Cancellation requested - waiting for the encoder to stop...".to_string();
+        log::info!("conversion cancel requested");
     }
 
     /// AUTO-triggered conversion hook (reserved for programmatic converters).
@@ -361,6 +466,15 @@ pub fn execute_conversion(
     input: &Path,
     target: &str,
     settings: &QuickSettingsState,
+) -> ConversionResult {
+    execute_conversion_ctx(input, target, settings, None)
+}
+
+pub fn execute_conversion_ctx(
+    input: &Path,
+    target: &str,
+    settings: &QuickSettingsState,
+    handle: Option<&EncodeHandle>,
 ) -> ConversionResult {
     let target_upper = target.to_uppercase();
 
@@ -487,7 +601,7 @@ pub fn execute_conversion(
         LosslessMode::PerceptualHighFidelity
     };
 
-    match transcode_file(input, &target_upper, mode, None) {
+    match transcode_file_ctx(input, &target_upper, mode, None, handle) {
         Ok(out) => ConversionResult::Success(vec![out]),
         Err(e) => ConversionResult::Failure(e.to_string()),
     }
@@ -656,17 +770,56 @@ impl eframe::App for MossambiApp {
         };
         ctx.request_repaint_after(repaint_interval);
 
-        // Drain pooled worker updates (keeps the pool channel bounded and the
-        // log informative; authoritative status comes from the result channel).
+        // Drain pooled worker updates: per-item progress/results feed the
+        // queue reducer on StudioView; batch-level progress feeds the
+        // overall bar. Watchdog failures stall the queue honestly.
         while let Some(update) = self.worker_pool.try_recv() {
             match update {
                 TaskUpdate::Started { name, .. } => log::debug!("worker started: {}", name),
                 TaskUpdate::Progress {
-                    fraction, status, ..
-                } => log::debug!("worker progress {:.0}%: {}", fraction * 100.0, status),
+                    fraction,
+                    status,
+                    item,
+                    ..
+                } => match item {
+                    Some(item_id) => {
+                        self.studio_view
+                            .queue
+                            .on_progress(item_id, fraction, &status);
+                        log::debug!("worker progress {:.0}%: {}", fraction * 100.0, status);
+                    }
+                    None => {
+                        self.studio_view.batch_progress = Some(fraction);
+                        log::debug!("batch progress {:.0}%: {}", fraction * 100.0, status);
+                    }
+                },
+                TaskUpdate::ItemResult { item, outcome, .. } => {
+                    if let Some(item_id) = item {
+                        match outcome {
+                            ItemOutcome::Done { outputs, message } => {
+                                self.studio_view
+                                    .queue
+                                    .on_item_done(item_id, outputs, &message);
+                            }
+                            ItemOutcome::Failed { error } => {
+                                self.studio_view.queue.on_item_failed(item_id, &error);
+                            }
+                            ItemOutcome::Cancelled { message } => {
+                                self.studio_view.queue.on_item_cancelled(item_id);
+                                log::info!("item cancelled: {}", message);
+                            }
+                        }
+                    }
+                }
                 TaskUpdate::Completed { message, .. } => log::info!("worker finished: {}", message),
                 TaskUpdate::Failed { error, .. } => {
-                    log::error!("worker reported failure: {}", error)
+                    // Watchdog stall: per-item outcomes will never arrive.
+                    self.studio_view.queue.on_task_stalled(&error);
+                    self.is_converting = false;
+                    self.active_cancel = None;
+                    self.studio_view.batch_progress = None;
+                    self.status_message = format!("Conversion stalled: {}", error);
+                    log::error!("worker reported failure: {}", error);
                 }
             }
         }
@@ -728,6 +881,8 @@ impl eframe::App for MossambiApp {
         // batch conversions may stack several results between frames)
         while let Ok(res) = self.result_receiver.try_recv() {
             self.is_converting = false;
+            self.active_cancel = None;
+            self.studio_view.batch_progress = None;
             match res {
                 ConversionResult::Success(files) => {
                     self.completion_time = Some(Instant::now());
@@ -735,11 +890,12 @@ impl eframe::App for MossambiApp {
                         self.last_completed_output = Some(first.clone());
                     }
                     self.status_message =
-                        format!("Successfully converted {} file(s)!", files.len());
+                        "Batch finished - details in the conversion queue.".to_string();
                 }
                 ConversionResult::Failure(err) => {
-                    log::error!("Studio conversion failed: {}", err);
-                    self.status_message = format!("Conversion failed: {}", err);
+                    log::error!("Studio conversion finished: {}", err);
+                    self.completion_time = Some(Instant::now());
+                    self.status_message = err;
                 }
             }
         }
@@ -840,6 +996,28 @@ impl eframe::App for MossambiApp {
         }
         if let Some(p) = open_target_folder {
             open_in_file_manager(&p);
+        }
+
+        // 5. Apply deferred conversion-queue actions (W-7)
+        for action in std::mem::take(&mut self.studio_view.queue_actions) {
+            match action {
+                QueueAction::CancelActive => self.cancel_active_batch(),
+                QueueAction::RetryFailed => {
+                    if !self.is_converting {
+                        let retry = self.studio_view.queue.take_failed_for_retry();
+                        if !retry.is_empty() {
+                            log::info!("retrying {} failed item(s)", retry.len());
+                            self.begin_conversion_run(retry);
+                        }
+                    }
+                }
+                QueueAction::ClearFinished => self.studio_view.queue.clear_finished(),
+                QueueAction::Reveal(path) => {
+                    if let Some(parent) = path.parent() {
+                        open_in_file_manager(parent);
+                    }
+                }
+            }
         }
 
         // 6. Persist any explorer preference mutations from this frame

@@ -11,6 +11,7 @@
 //! - Certified Pantone Citrus Palette tokens
 
 use crate::core::config::MossambiConfig;
+use crate::core::conversion_queue::{ConversionQueue, QueueAction, QueueItemStatus};
 use crate::core::icon_packs::IconGlyph;
 use crate::core::{FileCategory, UniversalRegistry};
 use crate::exam::{optimize_exam_media, ExamConstraint};
@@ -120,6 +121,11 @@ pub struct StudioView {
     pub conformer_unit: usize,
     pub conformer_preset_selector: String,
 
+    // Conversion queue (W-7): per-item jobs, deferred actions, overall progress
+    pub queue: ConversionQueue,
+    pub queue_actions: Vec<QueueAction>,
+    pub batch_progress: Option<f32>,
+
     // Once-per-open listings for the sibling-folder context menu
     // (F-2 fix): cleared when a navigation target is applied.
     pub sibling_menu_cache: std::collections::HashMap<PathBuf, Vec<crate::core::FileItem>>,
@@ -145,6 +151,10 @@ impl Default for StudioView {
 
             conformer_unit: 0,
             conformer_preset_selector: "Passport Photo (35x45mm / 300 DPI)".to_string(),
+
+            queue: ConversionQueue::new(),
+            queue_actions: Vec::new(),
+            batch_progress: None,
             sibling_menu_cache: std::collections::HashMap::new(),
         }
     }
@@ -2241,6 +2251,199 @@ impl StudioView {
                     });
                 }
             });
+        }
+
+        // Live conversion queue (W-7): chips, per-item progress, actions.
+        self.render_conversion_queue_panel(ui, palette);
+    }
+
+    /// Conversion queue panel (W-7 Batch A): per-item status chips, live
+    /// progress bars, cancel/retry/clear actions, per-output Reveal buttons,
+    /// and an overall batch bar. Renders nothing when the queue is empty.
+    fn render_conversion_queue_panel(&mut self, ui: &mut Ui, palette: &ThemePalette) {
+        let items = self.queue.items().to_vec();
+        if items.is_empty() {
+            return;
+        }
+        let summary = self.queue.summary();
+
+        ui.add_space(14.0);
+        ui.separator();
+        ui.add_space(8.0);
+
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Conversion Queue")
+                    .size(12.0)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} waiting | {} converting | {} done | {} failed | {} cancelled",
+                    summary.queued,
+                    summary.running,
+                    summary.done,
+                    summary.failed,
+                    summary.cancelled
+                ))
+                .size(11.0)
+                .color(palette.text_secondary),
+            );
+        });
+
+        let mut cancel_clicked = false;
+        let mut retry_clicked = false;
+        let mut clear_clicked = false;
+        ui.horizontal(|ui| {
+            if summary.active() > 0 && ui.small_button("Cancel").clicked() {
+                cancel_clicked = true;
+            }
+            if summary.failed > 0 && ui.small_button("Retry Failed").clicked() {
+                retry_clicked = true;
+            }
+            if summary.done + summary.failed + summary.cancelled > 0
+                && ui.small_button("Clear Finished").clicked()
+            {
+                clear_clicked = true;
+            }
+        });
+
+        if let Some(fraction) = self.batch_progress {
+            ui.add(
+                egui::ProgressBar::new(fraction)
+                    .text(format!("Batch {:.0}%", fraction * 100.0))
+                    .fill(palette.accent),
+            );
+        }
+
+        let mut reveals: Vec<PathBuf> = Vec::new();
+        egui::ScrollArea::vertical()
+            .max_height(280.0)
+            .show(ui, |ui| {
+                for item in &items {
+                    ui.add_space(6.0);
+                    let (chip_label, chip_color) = match item.status {
+                        QueueItemStatus::Queued => ("Waiting", palette.text_muted),
+                        QueueItemStatus::Running => ("Converting", palette.accent),
+                        QueueItemStatus::Stopping => ("Stopping", Color32::from_rgb(210, 153, 34)),
+                        QueueItemStatus::Done => ("Done", Color32::from_rgb(46, 160, 67)),
+                        QueueItemStatus::Failed => ("Failed", Color32::from_rgb(248, 81, 73)),
+                        QueueItemStatus::Cancelled => {
+                            ("Cancelled", Color32::from_rgb(110, 118, 129))
+                        }
+                    };
+                    let fallback_name = item.source.display().to_string();
+                    let file_name = item
+                        .source
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(fallback_name.as_str());
+
+                    ui.horizontal(|ui| {
+                        egui::Frame::none()
+                            .fill(chip_color.gamma_multiply(0.22))
+                            .rounding(Rounding::same(4.0))
+                            .inner_margin(egui::Margin::symmetric(6.0, 2.0))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(chip_label)
+                                        .size(10.0)
+                                        .strong()
+                                        .color(chip_color),
+                                );
+                            });
+                        ui.label(
+                            egui::RichText::new(file_name)
+                                .size(11.0)
+                                .color(palette.text_primary),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("-> {}", item.target))
+                                .size(10.0)
+                                .color(palette.text_secondary),
+                        );
+                    });
+
+                    if let Some(route) = &item.planned_route {
+                        ui.label(
+                            egui::RichText::new(route)
+                                .monospace()
+                                .size(10.0)
+                                .color(palette.text_muted),
+                        );
+                    }
+
+                    if matches!(
+                        item.status,
+                        QueueItemStatus::Running | QueueItemStatus::Stopping
+                    ) {
+                        let mut bar = egui::ProgressBar::new(item.progress)
+                            .fill(chip_color)
+                            .show_percentage();
+                        if item.status == QueueItemStatus::Running {
+                            bar = bar.animate(true);
+                        }
+                        ui.add(bar);
+                    }
+
+                    if !item.status_text.is_empty() {
+                        ui.label(
+                            egui::RichText::new(item.status_text.as_str())
+                                .monospace()
+                                .size(10.0)
+                                .color(palette.text_secondary),
+                        );
+                    }
+
+                    if !item.outputs.is_empty() {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("Output:")
+                                    .size(10.0)
+                                    .color(palette.text_muted),
+                            );
+                            for out in &item.outputs {
+                                let out_name = out
+                                    .file_name()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or("output")
+                                    .to_string();
+                                if ui.small_button(out_name.as_str()).clicked() {
+                                    reveals.push(out.clone());
+                                }
+                            }
+                        });
+                    }
+
+                    if let Some(err) = &item.error_detail {
+                        egui::CollapsingHeader::new(
+                            egui::RichText::new("Details")
+                                .size(10.0)
+                                .color(palette.text_secondary),
+                        )
+                        .id_salt(egui::Id::new(("queue_error", item.id)))
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            ui.monospace(err);
+                        });
+                    }
+
+                    ui.separator();
+                }
+            });
+
+        if cancel_clicked {
+            self.queue_actions.push(QueueAction::CancelActive);
+        }
+        if retry_clicked {
+            self.queue_actions.push(QueueAction::RetryFailed);
+        }
+        if clear_clicked {
+            self.queue_actions.push(QueueAction::ClearFinished);
+        }
+        for out in reveals {
+            self.queue_actions.push(QueueAction::Reveal(out));
         }
     }
 
