@@ -1157,6 +1157,85 @@ impl eframe::App for MossambiApp {
         // (icon pack, zoom level, checkboxes, menu style, animations) into the
         // config - same save pattern as the theme-change handlers above.
         self.sync_explorer_prefs();
+
+        // 7. Edge resizing. The window has no OS title bar or frame (Finder
+        // chrome is drawn by the app), so Windows offers no resize border.
+        // Run last so the resize cursor wins over widgets near the edge.
+        edge_resize(ctx);
+    }
+}
+
+/// Which window edge/corner (if any) a point is on, `margin` px deep.
+/// Corners win over edges and take a larger grab zone, like native windows.
+fn resize_direction_at(
+    rect: egui::Rect,
+    pos: egui::Pos2,
+    margin: f32,
+) -> Option<egui::viewport::ResizeDirection> {
+    use eframe::egui::viewport::ResizeDirection as D;
+    if !rect.expand(1.0).contains(pos) {
+        return None;
+    }
+    let corner = margin * 2.5;
+    let near = |d: f32, m: f32| d <= m;
+    let (dl, dr, dt, db) = (
+        pos.x - rect.left(),
+        rect.right() - pos.x,
+        pos.y - rect.top(),
+        rect.bottom() - pos.y,
+    );
+    let dir = if (near(dl, corner) && near(dt, margin)) || (near(dl, margin) && near(dt, corner)) {
+        D::NorthWest
+    } else if (near(dr, corner) && near(dt, margin)) || (near(dr, margin) && near(dt, corner)) {
+        D::NorthEast
+    } else if (near(dl, corner) && near(db, margin)) || (near(dl, margin) && near(db, corner)) {
+        D::SouthWest
+    } else if (near(dr, corner) && near(db, margin)) || (near(dr, margin) && near(db, corner)) {
+        D::SouthEast
+    } else if near(dl, margin) {
+        D::West
+    } else if near(dr, margin) {
+        D::East
+    } else if near(dt, margin) {
+        D::North
+    } else if near(db, margin) {
+        D::South
+    } else {
+        return None;
+    };
+    Some(dir)
+}
+
+/// Resize cursor + OS-driven drag resize from the borderless window edges.
+fn edge_resize(ctx: &egui::Context) {
+    use eframe::egui::viewport::ResizeDirection as D;
+    let (maximized, fullscreen) = ctx.input(|i| {
+        (
+            i.viewport().maximized.unwrap_or(false),
+            i.viewport().fullscreen.unwrap_or(false),
+        )
+    });
+    if maximized || fullscreen {
+        return;
+    }
+    let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) else {
+        return;
+    };
+    let Some(dir) = resize_direction_at(ctx.screen_rect(), pos, 5.0) else {
+        return;
+    };
+    ctx.set_cursor_icon(match dir {
+        D::North => egui::CursorIcon::ResizeNorth,
+        D::South => egui::CursorIcon::ResizeSouth,
+        D::East => egui::CursorIcon::ResizeEast,
+        D::West => egui::CursorIcon::ResizeWest,
+        D::NorthEast => egui::CursorIcon::ResizeNorthEast,
+        D::NorthWest => egui::CursorIcon::ResizeNorthWest,
+        D::SouthEast => egui::CursorIcon::ResizeSouthEast,
+        D::SouthWest => egui::CursorIcon::ResizeSouthWest,
+    });
+    if ctx.input(|i| i.pointer.primary_pressed()) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir));
     }
 }
 
@@ -1284,4 +1363,38 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
         options,
         Box::new(move |cc| Ok(Box::new(MossambiApp::new_with_path(cc, initial_path)))),
     )
+}
+
+#[cfg(test)]
+mod edge_resize_tests {
+    use super::resize_direction_at;
+    use eframe::egui::viewport::ResizeDirection as D;
+    use eframe::egui::{pos2, Rect};
+
+    #[test]
+    fn edges_and_corners_resolve() {
+        let r = Rect::from_min_max(pos2(0.0, 0.0), pos2(800.0, 600.0));
+        assert_eq!(resize_direction_at(r, pos2(2.0, 300.0), 5.0), Some(D::West));
+        assert_eq!(
+            resize_direction_at(r, pos2(798.0, 300.0), 5.0),
+            Some(D::East)
+        );
+        assert_eq!(
+            resize_direction_at(r, pos2(400.0, 1.0), 5.0),
+            Some(D::North)
+        );
+        assert_eq!(
+            resize_direction_at(r, pos2(400.0, 599.0), 5.0),
+            Some(D::South)
+        );
+        assert_eq!(
+            resize_direction_at(r, pos2(797.0, 590.0), 5.0),
+            Some(D::SouthEast)
+        );
+        assert_eq!(
+            resize_direction_at(r, pos2(3.0, 3.0), 5.0),
+            Some(D::NorthWest)
+        );
+        assert_eq!(resize_direction_at(r, pos2(400.0, 300.0), 5.0), None);
+    }
 }
