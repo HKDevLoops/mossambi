@@ -11,13 +11,13 @@ use crate::core::{AsyncWorkerPool, FileCategory, ItemOutcome, TaskUpdate, Univer
 use crate::exam::{optimize_exam_media_ctx, ExamConstraint};
 use crate::gui::macos_theme::*;
 use crate::gui::quick_settings::QuickSettingsState;
-use crate::gui::studio_view::StudioView;
+use crate::gui::studio_view::{StudioTab, StudioView};
 use crate::gui::tray::{ActivationManager, AppControlEvent};
 use eframe::egui::{self, Vec2, ViewportBuilder, ViewportCommand};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
@@ -249,6 +249,21 @@ impl MossambiApp {
     }
 
     /// Starts a conversion for the currently staged file (explicit user action).
+    /// True when the file name carries a known archive extension (W-7
+    /// Batch C): drives the archive-tab drop zone's pack-or-extract choice.
+    fn looks_like_archive(path: &Path) -> bool {
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_ascii_lowercase(),
+            None => return false,
+        };
+        [
+            ".zip", ".7z", ".tar", ".gz", ".tgz", ".tar.gz", ".bz2", ".tbz2", ".tar.bz2", ".xz",
+            ".txz", ".tar.xz", ".zst", ".tzst", ".tar.zst", ".rar", ".cab", ".iso", ".wim",
+        ]
+        .iter()
+        .any(|ext| name.ends_with(ext))
+    }
+
     /// Delegates to [`start_conversion_batch`] - `studio_view.rs` calls this.
     pub fn start_conversion(&mut self, target_format: &str) {
         let files: Vec<PathBuf> = self.current_file.clone().into_iter().collect();
@@ -284,6 +299,26 @@ impl MossambiApp {
             .into_iter()
             .map(|(id, path)| (id, path, target.to_string()))
             .collect();
+
+        // Plan multi-hop routes once per process (W-7 Batch C): the
+        // standard matrix is large, so it is built lazily into a shared
+        // static and each enqueue stamps its items' planned chips.
+        static ROUTE_PLANNER: OnceLock<crate::core::route_planner::RoutePlanner> = OnceLock::new();
+        let planner = ROUTE_PLANNER
+            .get_or_init(crate::core::route_planner::RoutePlanner::new_with_standard_matrix);
+        for (id, path, tgt) in &staged {
+            let src_ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_uppercase();
+            if let Some(route) = planner.find_route(&src_ext, tgt, 3) {
+                self.studio_view
+                    .queue
+                    .set_planned_route(*id, route.display_path());
+            }
+        }
+
         self.status_message = format!("Queued {} file(s) -> {}...", staged.len(), target);
         log::info!("conversion batch: {} file(s) -> {}", staged.len(), target);
         self.begin_conversion_run(staged);
@@ -993,7 +1028,37 @@ impl eframe::App for MossambiApp {
                 }
 
                 if let Some(path) = cursor_rescue {
-                    self.select_file(path);
+                    self.select_file(path.clone());
+                    // Per-tab drop zones (W-7 Batch C): the tab under the
+                    // drop decides the follow-up action; plain staging
+                    // remains the baseline everywhere else.
+                    match self.studio_view.current_tab {
+                        StudioTab::ArchiveSuite => {
+                            let target = if Self::looks_like_archive(&path) {
+                                "EXTRACT"
+                            } else {
+                                "ZIP"
+                            };
+                            self.start_conversion_batch(vec![path], target);
+                        }
+                        StudioTab::QualityInspector => {
+                            if !self.studio_view.inspection_busy {
+                                self.studio_view.inspection_busy = true;
+                                self.studio_view.inspection_status =
+                                    "Inspecting in background...".to_string();
+                                crate::core::tool_console::inspect_file_async(
+                                    self.studio_view.tool_console.sender(),
+                                    path,
+                                );
+                            }
+                        }
+                        StudioTab::ExamStudio => {
+                            self.studio_view
+                                .queue_actions
+                                .push(QueueAction::RunExam(path));
+                        }
+                        _ => {}
+                    }
                 }
             }
         });

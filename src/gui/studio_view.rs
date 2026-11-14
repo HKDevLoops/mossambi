@@ -193,6 +193,26 @@ impl StudioView {
             .unwrap_or_default()
     }
 
+    /// Per-tab OS drag-hover banner (W-7 Batch C): a slim accent frame
+    /// shown while external files hover the window, mirroring the
+    /// explorer banner. Each studio tab states what a release will do.
+    fn render_tab_drop_banner(ui: &mut Ui, palette: &ThemePalette, message: &str) {
+        let hovered = ui.input(|i| !i.raw.hovered_files.is_empty());
+        if !hovered {
+            return;
+        }
+        ui.add_space(4.0);
+        let drop_frame = egui::Frame::none()
+            .fill(Color32::from_rgba_unmultiplied(120, 190, 32, 50))
+            .stroke(Stroke::new(1.5_f32, palette.accent))
+            .rounding(Rounding::same(8.0))
+            .inner_margin(egui::Margin::symmetric(14.0, 7.0));
+        drop_frame.show(ui, |ui| {
+            ui.label(egui::RichText::new(message).strong().color(palette.accent));
+        });
+        ui.add_space(4.0);
+    }
+
     /// Renders the complete macOS Studio window with sidebar and content area.
     #[allow(clippy::too_many_arguments)]
     pub fn render(
@@ -1716,6 +1736,7 @@ impl StudioView {
         });
 
         ui.add_space(16.0);
+        Self::render_tab_drop_banner(ui, palette, "Release to stage the file for conversion");
 
         if let Some(ref path) = current_file {
             // =========================================================================
@@ -2192,111 +2213,14 @@ impl StudioView {
 
             ui.add_space(8.0);
 
-            let all_samples = [
-                (
-                    "PNG",
-                    FileCategory::Image,
-                    "Portable Network Graphics | Lossless",
-                ),
-                (
-                    "JPG",
-                    FileCategory::Image,
-                    "Joint Photographic Experts Group",
-                ),
-                (
-                    "WEBP",
-                    FileCategory::Image,
-                    "Google Modern Web Image | 80% Reduction",
-                ),
-                (
-                    "AVIF",
-                    FileCategory::Image,
-                    "AV1 Image File Format | Next-Gen",
-                ),
-                (
-                    "HEIC",
-                    FileCategory::Image,
-                    "High Efficiency Image Container | Apple",
-                ),
-                (
-                    "TIFF",
-                    FileCategory::Image,
-                    "Tagged Image File Format | Archival",
-                ),
-                ("BMP", FileCategory::Image, "Windows Bitmap Graphics"),
-                ("SVG", FileCategory::Image, "Scalable Vector Graphics"),
-                (
-                    "PDF",
-                    FileCategory::Document,
-                    "Adobe Portable Document Format | Vector",
-                ),
-                (
-                    "DOCX",
-                    FileCategory::Document,
-                    "Microsoft Word OpenXML Document",
-                ),
-                (
-                    "XLSX",
-                    FileCategory::Document,
-                    "Microsoft Excel Spreadsheet",
-                ),
-                (
-                    "CSV",
-                    FileCategory::Document,
-                    "Comma-Separated Values Table",
-                ),
-                ("TXT", FileCategory::Document, "Plain Text UTF-8"),
-                ("MD", FileCategory::Document, "Markdown Formatted Document"),
-                ("WAV", FileCategory::Audio, "Uncompressed PCM RIFF Wave"),
-                (
-                    "FLAC",
-                    FileCategory::Audio,
-                    "Free Lossless Audio Codec | Bit-Exact",
-                ),
-                (
-                    "MP3",
-                    FileCategory::Audio,
-                    "MPEG-1 Audio Layer III | 320 kbps",
-                ),
-                (
-                    "AAC",
-                    FileCategory::Audio,
-                    "Advanced Audio Coding | High-Fidelity",
-                ),
-                ("OGG", FileCategory::Audio, "Ogg Vorbis Audio Stream"),
-                (
-                    "MP4",
-                    FileCategory::Video,
-                    "MPEG-4 Part 14 Video | Fast Remux",
-                ),
-                ("MKV", FileCategory::Video, "Matroska Multimedia Container"),
-                ("WEBM", FileCategory::Video, "HTML5 Web Video | VP9/AV1"),
-                (
-                    "ZIP",
-                    FileCategory::Archive,
-                    "PKZip Deflate Level 9 | Safe Unpack",
-                ),
-                (
-                    "TAR.GZ",
-                    FileCategory::Archive,
-                    "Unix Tape Archive Gzip Compressed",
-                ),
-                (
-                    "TAR.ZST",
-                    FileCategory::Archive,
-                    "Zstandard Modern Ultra Compression",
-                ),
-            ];
-
-            let query = self.catalogue_search.to_uppercase();
+            // Live catalogue (W-7 Batch C): chips come from the real
+            // 200+ format registry instead of a hardcoded sample list;
+            // the search box drives UniversalRegistry's extension/name/
+            // description filter directly.
+            const MAX_CATALOG_CHIPS: usize = 48;
+            let filtered = UniversalRegistry::search_catalogue(&self.catalogue_search);
             ui.horizontal_wrapped(|ui| {
-                for (fmt, _cat, desc) in all_samples {
-                    if !query.is_empty()
-                        && !fmt.contains(&query)
-                        && !desc.to_uppercase().contains(&query)
-                    {
-                        continue;
-                    }
+                for spec in filtered.iter().take(MAX_CATALOG_CHIPS) {
                     let chip_frame = egui::Frame::none()
                         .fill(palette.card_bg)
                         .stroke(Stroke::new(1.0_f32, palette.border))
@@ -2306,13 +2230,13 @@ impl StudioView {
                     chip_frame.show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new(fmt)
+                                egui::RichText::new(spec.extension)
                                     .size(13.0)
                                     .strong()
                                     .color(palette.text_primary),
                             );
                             ui.label(
-                                egui::RichText::new(desc)
+                                egui::RichText::new(spec.description)
                                     .size(12.0)
                                     .color(palette.text_muted),
                             );
@@ -2320,6 +2244,18 @@ impl StudioView {
                     });
                 }
             });
+
+            if filtered.len() > MAX_CATALOG_CHIPS {
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "+ {} more formats - refine the filter to narrow the catalogue",
+                        filtered.len() - MAX_CATALOG_CHIPS
+                    ))
+                    .size(11.0)
+                    .color(palette.text_muted),
+                );
+            }
         }
 
         // Live conversion queue (W-7): chips, per-item progress, actions.
@@ -2357,6 +2293,7 @@ impl StudioView {
                     summary.cancelled
                 ))
                 .size(11.0)
+                .monospace()
                 .color(palette.text_secondary),
             );
         });
@@ -2538,6 +2475,7 @@ impl StudioView {
                 .color(palette.text_secondary),
         );
         ui.add_space(14.0);
+        Self::render_tab_drop_banner(ui, palette, "Release to queue exam optimization");
 
         // Tuning Envelope Card
         let envelope_frame = egui::Frame::none()
@@ -3017,6 +2955,7 @@ impl StudioView {
             .color(palette.text_secondary),
         );
         ui.add_space(14.0);
+        Self::render_tab_drop_banner(ui, palette, "Release to pack as ZIP or safe-extract");
 
         if let Some(ref path) = current_file {
             ui.label(format!("Target Input: {}", path.display()));
@@ -3036,10 +2975,13 @@ impl StudioView {
                     on_convert_batch(current_file.iter().cloned().collect(), "TAR.GZ".to_string());
                 }
                 if ui
-                    .button(egui::RichText::new("Pack to 7Z").size(13.0))
+                    .button(egui::RichText::new("Pack to TAR.ZST").size(13.0))
                     .clicked()
                 {
-                    on_convert_batch(current_file.iter().cloned().collect(), "7Z".to_string());
+                    on_convert_batch(
+                        current_file.iter().cloned().collect(),
+                        "TAR.ZST".to_string(),
+                    );
                 }
                 if ui
                     .button(
@@ -3303,6 +3245,7 @@ impl StudioView {
                 .color(palette.text_secondary),
         );
         ui.add_space(10.0);
+        Self::render_tab_drop_banner(ui, palette, "Release to inspect file quality and integrity");
 
         // Active File Action Banner
         let card_frame = egui::Frame::none()
