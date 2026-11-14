@@ -1762,3 +1762,30 @@ ggfront id, url(#ggfront) front fill, specular 0.35, bottom catch
 0.14). The proven snapped_icon_quad/icon_texture pipeline is untouched.
 
 MOSSAMBI SETTINGS/CONFIG/LUA WAVE CLOSED (2026-11-13): feat ab8fab2 (feat(gui) settings/config/Lua wave - persistent conversion defaults, rebindable shortcuts, scripts manager + console, mlua engine; 9 files +1215/-395: Cargo.toml, Cargo.lock, src/core/config.rs, src/core/scripting.rs, src/gui/command_palette.rs, src/gui/preferences_view.rs, src/gui/quick_settings.rs, src/gui/studio_app.rs, src/gui/studio_view.rs) + plan 1eec768 (docs(plan) docs/superpowers/plans/2026-11-13-settings-lua-wave.md 104 lines). ALL FIVE GATES GREEN (fmt; clippy --all-targets -D warnings clean; test 73/73 lib + ASCII gate + all integration suites; release 1m 21s with first vendored lua54 C compile; porcelain exactly the 9 expected files). MLUA 0.10.5 API FACTS (lua54 + vendored, 8 crates locked): StdLib::SAFE_ALL does not exist; mlua's safe subset is StdLib::ALL_SAFE but REJECTED for the sandbox because it loads os and io; engine uses the explicit set COROUTINE|TABLE|STRING|UTF8|MATH; HookTriggers::every_nth_instruction (the with_ prefix is gone); Lua::set_hook returns () so no ?; Lua::new_with(StdLib, LuaOptions) unchanged. LUA SANDBOX: 16MB memory cap; instruction hook fires every 100k ops and aborts after 20 fires with RuntimeError "Too many operations"; captured print pushes tab-joined args into the logs buffer; same mossambi primitives as Rhai; sha256_of_path extracted as a shared fn; ScriptLang {Rhai,Lua} with as_str/from_str_opt/label; ScriptCommand {id,title,source ScriptSource::{Disk(PathBuf),Database},body,shortcut,lang}; ScriptConsoleEntry {title,outcome,time}. CONFIG: 10 conv_* persistent conversion defaults (image_quality, image_lossless, image_dpi, audio_bitrate, audio_strict_lossless, video_crf, video_preset, video_hw_accel, archive_compression, exam_mode_enabled); dead local_ai_* keys removed entirely (MossambiConfig has no deny_unknown_fields so old config.json still parses); shortcuts BTreeMap<String,String> ids palette/new_tab/close_tab with DEFAULT_SHORTCUTS Ctrl+P/Ctrl+T/Ctrl+W and MossambiConfig::shortcut_for falling back to defaults. UI: Preferences gains 11th category Scripts (index 9) before About (10); conversion rows dual-write BOTH quick settings and cfg.conv_* per the Finder System-Settings model (quick_settings::from_config seeds session state at startup; popover tweaks stay session-local); Shortcuts page rewritten on REAL data: rebind capture (click Rebind, next key press binds, Esc cancels; studio dispatch suppressed while capturing via prefs_view.capturing_action gate) + gesture card with six real cfg keys (gesture_type ComboBox shake/circle/both, shake_sensitivity_px slider 5..100, gesture_timeout_ms slider 150..1000, deep_drag_detection_only, enable_gesture_wakeup, enable_hotkey_wakeup); all four fake gesture cards and the exclusion_input field DELETED; key_binding_display free fn renders Event::Key as the stored display form. SCRIPTS PAGE render_scripts: manager card (disk scripts read-only with path caption; DB scripts Run/Edit/Delete via state_db delete_command; load_all_user_scripts each frame), editor card (title TextEdit + Rhai/Lua selectable pills + multiline code_editor; New clears; Save gated on non-empty title+body -> state_db::save_command CustomCommandRecord id cmd-{nanos:x} script_lang as_str shortcut None), console card (ScriptConsole mpsc drain cap 50, chrono timestamps, newest-first, OK/FAILED + returned value + error + logs, Clear). PALETTE: PaletteAction::RunUserScript gains lang: ScriptLang; studio handler clones console.sender() and sends (title, outcome) into the console; search_preferences adds 2 static Scripts hits (setting_label is &'static str so dynamic script titles cannot be entries). TESTS: 4 new Lua tests (test_script_lang_roundtrip, test_lua_sandboxed_math_and_print, test_lua_infinite_loop_is_bounded, test_lua_sandbox_denies_unsafe_libs extended to assert io denial alongside os).
+
+## 2026-11-14 - W-7 Batch A: Conversion Queue Core (feat 43edeb5)
+- Plan: docs(plan) 118dee8 (tools/converters redesign wave).
+- Scope: per-item conversion queue with live per-item progress,
+  cooperative two-tier cancel (stdin 'q', 2s grace, hard kill),
+  retry/clear/reveal actions, ffmpeg `-progress pipe:1` parsing, ffprobe
+  duration probing, multi-hop route cancellation, watchdog-stall accounting.
+- Files (9): src/core/conversion_queue.rs (new, 311 lines), src/core/mod.rs,
+  src/core/async_worker.rs, src/codec/mod.rs, src/gui/studio_app.rs,
+  src/gui/studio_view.rs, src/tui/mod.rs, src/widget/widget_app.rs,
+  tests/test_queue.rs (new, 220 lines).
+- Gates: fmt OK; clippy --all-targets -D warnings OK (fixed 7 issues:
+  staged tuple arity E0308, missing id field E0027, id_source->id_salt
+  deprecation, summary move E0382, type annotation E0282, 2x
+  type_complexity via ProgressCallback alias, new_without_default via
+  Default impl); cargo test OK (all suites green incl. new 12-test
+  test_queue); cargo build --release OK (0.64s, exit 0); tree: staged 9
+  expected files only.
+- Notes: ffmpeg out_time_us AND out_time_ms are both microseconds; parser
+  tests placed in tests/test_queue.rs (not test_codec.rs); PROGRESS.md was
+  modified concurrently by the cron session mid-wave and excluded from
+  staging (cron owns it); stray untracked package-lock.json remains
+  excluded per standing decision; egui renamed id_source to id_salt in the
+  vendored version (contradicts older notes); Batch B next (async exam,
+  inspector/bench on plain threads, telemetry cache + real thread count,
+  rfd dialogs on background thread).
+- HEAD after feat: 43edeb5. Ledger hash recorded in Honcho (not here).
