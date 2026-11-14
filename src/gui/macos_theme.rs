@@ -130,7 +130,31 @@ impl ThemeStyle {
         &Self::all()[12..13]
     }
 
+    /// The palette actually shown: the theme's own flavour, or its
+    /// light/dark counterpart when the Appearance setting asks for the other
+    /// one (every theme now exists in both appearances).
     pub fn to_pantone(&self) -> &'static crate::core::pantone::PantoneTheme {
+        let base = self.base_pantone();
+        let idx = crate::core::pantone::THEMES
+            .iter()
+            .position(|t| t.id == base.id)
+            .unwrap_or(0);
+        let alt = &crate::core::pantone::THEMES_ALT[idx];
+        let want_dark = match crate::core::MossambiConfig::load().appearance {
+            crate::core::Appearance::ThemeDefault => base.is_dark,
+            crate::core::Appearance::Light => false,
+            crate::core::Appearance::Dark => true,
+            crate::core::Appearance::System => system_prefers_dark().unwrap_or(base.is_dark),
+        };
+        if want_dark == base.is_dark {
+            base
+        } else {
+            alt
+        }
+    }
+
+    /// The theme's own catalog palette (ignores the Appearance setting).
+    pub fn base_pantone(&self) -> &'static crate::core::pantone::PantoneTheme {
         match self {
             Self::Gruvbox => &crate::core::pantone::THEMES[0],
             Self::TokyoNight => &crate::core::pantone::THEMES[1],
@@ -234,95 +258,10 @@ impl ThemeStyle {
                     }
                 }
             }
-            crate::core::GlassEffect::FrostedGlass => {
-                let effective_op = clamped_opacity.clamp(0.92, 1.00);
-                let _win_a = (effective_op * 252.0) as u8;
-                let side_a = (effective_op * 240.0) as u8;
-                let card_a = (effective_op * 250.0) as u8;
-                let hover_a = (effective_op * 252.0) as u8;
-                let bord_a = (effective_op * 170.0).clamp(60.0, 255.0) as u8;
-
-                ThemePalette {
-                    // Solid, crisp window canvas (Apple HIG: main content canvas never bleeds through)
-                    window_bg: Color32::from_rgb(bg_r, bg_g, bg_b),
-                    sidebar_bg: Color32::from_rgba_premultiplied(
-                        bg_r.saturating_add(6),
-                        bg_g.saturating_add(6),
-                        bg_b.saturating_add(6),
-                        side_a,
-                    ),
-                    card_bg: Color32::from_rgba_premultiplied(surf_r, surf_g, surf_b, card_a),
-                    card_hover: Color32::from_rgba_premultiplied(
-                        surf_r.saturating_add(10),
-                        surf_g.saturating_add(10),
-                        surf_b.saturating_add(10),
-                        hover_a,
-                    ),
-                    border: Color32::from_rgba_premultiplied(bord_r, bord_g, bord_b, bord_a),
-                    specular: if pt.is_dark {
-                        Color32::from_rgba_premultiplied(255, 255, 255, 40)
-                    } else {
-                        Color32::from_rgba_premultiplied(255, 255, 255, 140)
-                    },
-                    divider: Color32::from_rgba_premultiplied(
-                        bord_r,
-                        bord_g,
-                        bord_b,
-                        (bord_a / 2).max(20),
-                    ),
-                    text_primary: Color32::from_rgb(tp_r, tp_g, tp_b),
-                    text_secondary: Color32::from_rgb(ts_r, ts_g, ts_b),
-                    text_muted: Color32::from_rgb(tm_r, tm_g, tm_b),
-                    accent: Color32::from_rgb(acc_r, acc_g, acc_b),
-                    highlight: Color32::from_rgb(hi_r, hi_g, hi_b),
-                    is_translucent: true,
-                    is_dark: pt.is_dark,
-                }
-            }
-            crate::core::GlassEffect::LiquidGlass => {
-                let effective_op = clamped_opacity.clamp(0.90, 1.00);
-                let _win_a = (effective_op * 250.0) as u8;
-                let side_a = (effective_op * 236.0) as u8;
-                let card_a = (effective_op * 248.0) as u8;
-                let hover_a = (effective_op * 250.0) as u8;
-                let bord_a = (effective_op * 190.0).clamp(70.0, 255.0) as u8;
-
-                ThemePalette {
-                    // Solid, crisp window canvas (Apple HIG: main content canvas never bleeds through)
-                    window_bg: Color32::from_rgb(bg_r, bg_g, bg_b),
-                    sidebar_bg: Color32::from_rgba_premultiplied(
-                        bg_r.saturating_add(4),
-                        bg_g.saturating_add(4),
-                        bg_b.saturating_add(4),
-                        side_a,
-                    ),
-                    card_bg: Color32::from_rgba_premultiplied(surf_r, surf_g, surf_b, card_a),
-                    card_hover: Color32::from_rgba_premultiplied(
-                        surf_r.saturating_add(15),
-                        surf_g.saturating_add(15),
-                        surf_b.saturating_add(15),
-                        hover_a,
-                    ),
-                    border: Color32::from_rgba_premultiplied(bord_r, bord_g, bord_b, bord_a),
-                    specular: if pt.is_dark {
-                        Color32::from_rgba_premultiplied(255, 255, 255, 85)
-                    } else {
-                        Color32::from_rgba_premultiplied(255, 255, 255, 190)
-                    },
-                    divider: Color32::from_rgba_premultiplied(
-                        bord_r,
-                        bord_g,
-                        bord_b,
-                        (bord_a / 2).max(25),
-                    ),
-                    text_primary: Color32::from_rgb(tp_r, tp_g, tp_b),
-                    text_secondary: Color32::from_rgb(ts_r, ts_g, ts_b),
-                    text_muted: Color32::from_rgb(tm_r, tm_g, tm_b),
-                    accent: Color32::from_rgb(acc_r, acc_g, acc_b),
-                    highlight: Color32::from_rgb(hi_r, hi_g, hi_b),
-                    is_translucent: true,
-                    is_dark: pt.is_dark,
-                }
+            crate::core::GlassEffect::FrostedGlass | crate::core::GlassEffect::LiquidGlass => {
+                let opaque =
+                    self.colors_with_glass(crate::core::GlassEffect::Opaque, clamped_opacity);
+                glassify(opaque, effect, clamped_opacity)
             }
         }
     }
@@ -615,7 +554,7 @@ pub fn apply_theme_visuals(ctx: &egui::Context, palette: &ThemePalette) {
     // value, so one setting narrows every level including submenus.
     ctx.style_mut(|style| style.spacing.menu_width = 230.0);
 
-    if palette.is_translucent && palette.window_bg.a() == 255 {
+    if palette.is_translucent {
         // Acrylic menu material: menus and popups paint window_fill through
         // Frame::menu / Frame::popup. The main window canvas stays solid
         // while floating menus render translucent acrylic at alpha 232.
@@ -704,4 +643,89 @@ pub fn render_segmented_switch(
             }
         });
     });
+}
+
+/// Turns an opaque palette into a real glass material. The window is
+/// created transparent and DWM blurs what is behind it, so these
+/// alphas reveal blurred desktop content (Frosted) or a clearer, brighter
+/// pane with strong specular rims (Liquid). Before, both "glass" modes were
+/// 92-99% alpha over an opaque window and looked identical to Opaque.
+/// Where the OS cannot blur (old Windows, other OSes), stay opaque:
+/// unblurred transparency reads as dirty see-through.
+fn glassify(mut p: ThemePalette, effect: crate::core::GlassEffect, opacity: f32) -> ThemePalette {
+    if !crate::gui::dwm_helper::backdrop_supported() {
+        return p;
+    }
+    // (window, sidebar, cards, specular) alpha factors.
+    // Light themes need denser glass: a light pane over a dark desktop
+    // otherwise turns muddy (macOS adds a white luminosity layer for this).
+    let (win, side, card, spec): (f32, f32, f32, f32) = match (effect, p.is_dark) {
+        (crate::core::GlassEffect::FrostedGlass, true) => (0.80, 0.62, 0.90, 0.14),
+        (crate::core::GlassEffect::FrostedGlass, false) => (0.92, 0.80, 0.96, 0.14),
+        (crate::core::GlassEffect::LiquidGlass, true) => (0.62, 0.44, 0.74, 0.34),
+        (crate::core::GlassEffect::LiquidGlass, false) => (0.84, 0.68, 0.88, 0.34),
+        (crate::core::GlassEffect::Opaque, _) => return p,
+    };
+    // The opacity slider scales every layer; a floor keeps text legible.
+    let scale = (opacity / 0.88).clamp(0.5, 1.15);
+    let with_a = |c: Color32, f: f32| {
+        let a = (f * scale).clamp(0.32, 1.0);
+        Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (a * 255.0).round() as u8)
+    };
+    p.window_bg = with_a(p.window_bg, win);
+    p.sidebar_bg = with_a(p.sidebar_bg, side);
+    p.card_bg = with_a(p.card_bg, card);
+    p.card_hover = with_a(p.card_hover, (card + 0.08).min(1.0));
+    p.divider = with_a(p.divider, 0.6);
+    let spec_a = if p.is_dark { spec * 0.6 } else { spec * 1.6 };
+    p.specular = Color32::from_rgba_unmultiplied(255, 255, 255, (spec_a.min(1.0) * 255.0) as u8);
+    p.is_translucent = true;
+    p
+}
+
+/// Windows "app mode": `Some(true)` when apps should be dark. Cached for 2 s
+/// so per-frame palette lookups do not hit the registry.
+pub fn system_prefers_dark() -> Option<bool> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::sync::Mutex;
+        use std::time::{Duration, Instant};
+        static CACHE: Mutex<Option<(Instant, Option<bool>)>> = Mutex::new(None);
+        let mut guard = CACHE.lock().ok()?;
+        if let Some((at, v)) = *guard {
+            if at.elapsed() < Duration::from_secs(2) {
+                return v;
+            }
+        }
+        let v = read_apps_use_light_theme().map(|light| !light);
+        *guard = Some((Instant::now(), v));
+        v
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn read_apps_use_light_theme() -> Option<bool> {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let key: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\0"
+        .encode_utf16()
+        .collect();
+    let val: Vec<u16> = "AppsUseLightTheme\0".encode_utf16().collect();
+    let mut data: u32 = 0;
+    let mut size: u32 = 4;
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            val.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            &mut data as *mut u32 as *mut std::ffi::c_void,
+            &mut size,
+        )
+    };
+    (rc == 0).then_some(data != 0)
 }

@@ -39,7 +39,7 @@ pub use action_journal::{
     undo_last,
 };
 pub use async_worker::{AsyncWorkerPool, ItemOutcome, TaskUpdate};
-pub use config::{ExplorerStyle, GlassEffect, MossambiConfig, OutputMode, ThemeMode};
+pub use config::{Appearance, ExplorerStyle, GlassEffect, MossambiConfig, OutputMode, ThemeMode};
 pub use conversion_queue::{
     ConversionQueue, QueueAction, QueueItem, QueueItemStatus, QueueSummary,
 };

@@ -308,6 +308,182 @@ pub static THEMES: [PantoneTheme; 13] = [
     },
 ];
 
+/// Counterpart palettes, index-aligned with `THEMES`: the light variant of
+/// every dark theme (official upstream light flavours where they exist) and
+/// the dark variant of Mossambi Punch, so every theme works in both
+/// appearances.
+pub static THEMES_ALT: [PantoneTheme; 13] = [
+    PantoneTheme {
+        id: "gruvbox_light",
+        name: "Gruvbox Light",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "gruvbox light", "#fbf1c7"),
+        surface: PantoneColor::new("Surface", "gruvbox light", "#ebdbb2"),
+        border: PantoneColor::new("Border", "gruvbox light", "#d5c4a1"),
+        text_primary: PantoneColor::new("Text", "gruvbox light", "#3c3836"),
+        text_secondary: PantoneColor::new("Text Dim", "gruvbox light", "#504945"),
+        text_muted: PantoneColor::new("Muted", "gruvbox light", "#928374"),
+        accent: PantoneColor::new("Accent", "gruvbox light", "#076678"),
+        highlight: PantoneColor::new("Highlight", "gruvbox light", "#b57614"),
+    },
+    PantoneTheme {
+        id: "tokyo_night_day",
+        name: "Tokyo Night Day",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "tokyonight day", "#e1e2e7"),
+        surface: PantoneColor::new("Surface", "tokyonight day", "#d0d5e3"),
+        border: PantoneColor::new("Border", "tokyonight day", "#a8aecb"),
+        text_primary: PantoneColor::new("Text", "tokyonight day", "#3760bf"),
+        text_secondary: PantoneColor::new("Text Dim", "tokyonight day", "#6172b0"),
+        text_muted: PantoneColor::new("Muted", "tokyonight day", "#848cb5"),
+        accent: PantoneColor::new("Accent", "tokyonight day", "#2e7de9"),
+        highlight: PantoneColor::new("Highlight", "tokyonight day", "#8c6c3e"),
+    },
+    PantoneTheme {
+        id: "catppuccin_latte",
+        name: "Catppuccin Latte",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "catppuccin latte", "#eff1f5"),
+        surface: PantoneColor::new("Surface", "catppuccin latte", "#e6e9ef"),
+        border: PantoneColor::new("Border", "catppuccin latte", "#ccd0da"),
+        text_primary: PantoneColor::new("Text", "catppuccin latte", "#4c4f69"),
+        text_secondary: PantoneColor::new("Text Dim", "catppuccin latte", "#6c6f85"),
+        text_muted: PantoneColor::new("Muted", "catppuccin latte", "#9ca0b0"),
+        accent: PantoneColor::new("Accent", "catppuccin latte", "#1e66f5"),
+        highlight: PantoneColor::new("Highlight", "catppuccin latte", "#df8e1d"),
+    },
+    PantoneTheme {
+        id: "modus_operandi",
+        name: "Modus Operandi",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "modus-operandi", "#ffffff"),
+        surface: PantoneColor::new("Surface", "modus-operandi", "#f2f2f2"),
+        border: PantoneColor::new("Border", "modus-operandi", "#c4c4c4"),
+        text_primary: PantoneColor::new("Text", "modus-operandi", "#000000"),
+        text_secondary: PantoneColor::new("Text Dim", "modus-operandi", "#595959"),
+        text_muted: PantoneColor::new("Muted", "modus-operandi", "#7a7a7a"),
+        accent: PantoneColor::new("Accent", "modus-operandi", "#0031a9"),
+        highlight: PantoneColor::new("Highlight", "modus-operandi", "#6f5500"),
+    },
+    PantoneTheme {
+        id: "nord_light",
+        name: "Nord Light",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "nord snow storm", "#eceff4"),
+        surface: PantoneColor::new("Surface", "nord snow storm", "#e5e9f0"),
+        border: PantoneColor::new("Border", "nord snow storm", "#d8dee9"),
+        text_primary: PantoneColor::new("Text", "nord snow storm", "#2e3440"),
+        text_secondary: PantoneColor::new("Text Dim", "nord snow storm", "#3b4252"),
+        text_muted: PantoneColor::new("Muted", "nord snow storm", "#7b88a1"),
+        accent: PantoneColor::new("Accent", "nord snow storm", "#5e81ac"),
+        highlight: PantoneColor::new("Highlight", "nord snow storm", "#d08770"),
+    },
+    PantoneTheme {
+        id: "alucard",
+        name: "Alucard",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "dracula alucard", "#fffbeb"),
+        surface: PantoneColor::new("Surface", "dracula alucard", "#f3eee0"),
+        border: PantoneColor::new("Border", "dracula alucard", "#cfcfde"),
+        text_primary: PantoneColor::new("Text", "dracula alucard", "#1f1f1f"),
+        text_secondary: PantoneColor::new("Text Dim", "dracula alucard", "#4d4a63"),
+        text_muted: PantoneColor::new("Muted", "dracula alucard", "#635d97"),
+        accent: PantoneColor::new("Accent", "dracula alucard", "#644ac9"),
+        highlight: PantoneColor::new("Highlight", "dracula alucard", "#846e15"),
+    },
+    PantoneTheme {
+        id: "kanagawa_lotus",
+        name: "Kanagawa Lotus",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "kanagawa lotus", "#f2ecbc"),
+        surface: PantoneColor::new("Surface", "kanagawa lotus", "#e7dba0"),
+        border: PantoneColor::new("Border", "kanagawa lotus", "#dcd5ac"),
+        text_primary: PantoneColor::new("Text", "kanagawa lotus", "#545464"),
+        text_secondary: PantoneColor::new("Text Dim", "kanagawa lotus", "#43436c"),
+        text_muted: PantoneColor::new("Muted", "kanagawa lotus", "#8a8980"),
+        accent: PantoneColor::new("Accent", "kanagawa lotus", "#4d699b"),
+        highlight: PantoneColor::new("Highlight", "kanagawa lotus", "#de9800"),
+    },
+    PantoneTheme {
+        id: "one_light",
+        name: "One Light",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "one-light syntax", "#fafafa"),
+        surface: PantoneColor::new("Surface", "one-light syntax", "#f0f0f1"),
+        border: PantoneColor::new("Border", "one-light syntax", "#e5e5e6"),
+        text_primary: PantoneColor::new("Text", "one-light syntax", "#383a42"),
+        text_secondary: PantoneColor::new("Text Dim", "one-light syntax", "#696c77"),
+        text_muted: PantoneColor::new("Muted", "one-light syntax", "#a0a1a7"),
+        accent: PantoneColor::new("Accent", "one-light syntax", "#4078f2"),
+        highlight: PantoneColor::new("Highlight", "one-light syntax", "#c18401"),
+    },
+    PantoneTheme {
+        id: "atom_light",
+        name: "Atom Light",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "atom one-light chrome", "#eaeaeb"),
+        surface: PantoneColor::new("Surface", "atom one-light chrome", "#fafafa"),
+        border: PantoneColor::new("Border", "atom one-light chrome", "#dbdbdc"),
+        text_primary: PantoneColor::new("Text", "atom one-light chrome", "#383a42"),
+        text_secondary: PantoneColor::new("Text Dim", "atom one-light chrome", "#696c77"),
+        text_muted: PantoneColor::new("Muted", "atom one-light chrome", "#a0a1a7"),
+        accent: PantoneColor::new("Accent", "atom one-light chrome", "#526fff"),
+        highlight: PantoneColor::new("Highlight", "atom one-light chrome", "#986801"),
+    },
+    PantoneTheme {
+        id: "light_plus",
+        name: "VS Code Light+",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "vscode light+", "#ffffff"),
+        surface: PantoneColor::new("Surface", "vscode light+", "#f3f3f3"),
+        border: PantoneColor::new("Border", "vscode light+", "#e5e5e5"),
+        text_primary: PantoneColor::new("Text", "vscode light+", "#1f1f1f"),
+        text_secondary: PantoneColor::new("Text Dim", "vscode light+", "#616161"),
+        text_muted: PantoneColor::new("Muted", "vscode light+", "#6e7681"),
+        accent: PantoneColor::new("Accent", "vscode light+", "#005fb8"),
+        highlight: PantoneColor::new("Highlight", "vscode light+", "#795e26"),
+    },
+    PantoneTheme {
+        id: "synthwave_day",
+        name: "Synthwave '84 Day",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "mossambi derived synthwave", "#f8f1ff"),
+        surface: PantoneColor::new("Surface", "mossambi derived synthwave", "#ffffff"),
+        border: PantoneColor::new("Border", "mossambi derived synthwave", "#e2d5f0"),
+        text_primary: PantoneColor::new("Text", "mossambi derived synthwave", "#2a2139"),
+        text_secondary: PantoneColor::new("Text Dim", "mossambi derived synthwave", "#5a4d72"),
+        text_muted: PantoneColor::new("Muted", "mossambi derived synthwave", "#8e86a8"),
+        accent: PantoneColor::new("Accent", "mossambi derived synthwave", "#d13fb0"),
+        highlight: PantoneColor::new("Highlight", "mossambi derived synthwave", "#b38600"),
+    },
+    PantoneTheme {
+        id: "rangalipi_day",
+        name: "Rangalipi Day",
+        is_dark: false,
+        bg: PantoneColor::new("Background", "mossambi original alpona", "#fbf4ee"),
+        surface: PantoneColor::new("Surface", "mossambi original alpona", "#ffffff"),
+        border: PantoneColor::new("Border", "mossambi original alpona", "#ead9d6"),
+        text_primary: PantoneColor::new("Text", "mossambi original alpona", "#2b1e33"),
+        text_secondary: PantoneColor::new("Text Dim", "mossambi original alpona", "#6b4f66"),
+        text_muted: PantoneColor::new("Muted", "mossambi original alpona", "#9a8496"),
+        accent: PantoneColor::new("Accent", "mossambi original alpona", "#c8423a"),
+        highlight: PantoneColor::new("Highlight", "mossambi original alpona", "#c07a10"),
+    },
+    PantoneTheme {
+        id: "mossambi_punch_night",
+        name: "Mossambi Punch Night",
+        is_dark: true,
+        bg: PantoneColor::new("Background", "mossambi original fruit", "#1b2116"),
+        surface: PantoneColor::new("Surface", "mossambi original fruit", "#242c1d"),
+        border: PantoneColor::new("Border", "mossambi original fruit", "#354029"),
+        text_primary: PantoneColor::new("Text", "mossambi original fruit", "#eef2dc"),
+        text_secondary: PantoneColor::new("Text Dim", "mossambi original fruit", "#c3cc9e"),
+        text_muted: PantoneColor::new("Muted", "mossambi original fruit", "#85906a"),
+        accent: PantoneColor::new("Accent", "mossambi original fruit", "#8fc24f"),
+        highlight: PantoneColor::new("Highlight", "mossambi original fruit", "#e5b92c"),
+    },
+];
+
 /// Returns all 13 named themes (11 Dark, 1 Light) in catalog order
 pub fn all_pantone_themes() -> &'static [PantoneTheme] {
     &THEMES
@@ -328,5 +504,26 @@ pub fn get_pantone_theme(id_or_name: &str) -> &'static PantoneTheme {
         &THEMES[12] // Mossambi Punch - the one light theme
     } else {
         &THEMES[11] // Rangalipi - the default dark theme
+    }
+}
+
+#[cfg(test)]
+mod alt_theme_tests {
+    use super::*;
+
+    #[test]
+    fn every_theme_has_an_opposite_appearance_counterpart() {
+        for (base, alt) in THEMES.iter().zip(THEMES_ALT.iter()) {
+            assert_ne!(base.is_dark, alt.is_dark, "{} / {}", base.name, alt.name);
+            for c in [
+                alt.bg,
+                alt.surface,
+                alt.border,
+                alt.text_primary,
+                alt.accent,
+            ] {
+                assert_eq!(c.hex.len(), 7, "{}", alt.name);
+            }
+        }
     }
 }

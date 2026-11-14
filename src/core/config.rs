@@ -228,6 +228,39 @@ impl ThemeMode {
     }
 }
 
+/// Light/dark appearance applied on top of the chosen theme family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Appearance {
+    /// Use the theme's own flavour (Gruvbox dark, Mossambi Punch light...).
+    #[default]
+    ThemeDefault,
+    Light,
+    Dark,
+    /// Follow the Windows "app mode" setting.
+    System,
+}
+
+impl Appearance {
+    pub fn all() -> [Appearance; 4] {
+        [
+            Appearance::ThemeDefault,
+            Appearance::Light,
+            Appearance::Dark,
+            Appearance::System,
+        ]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Appearance::ThemeDefault => "Theme default",
+            Appearance::Light => "Light",
+            Appearance::Dark => "Dark",
+            Appearance::System => "Match Windows",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum GlassEffect {
@@ -604,6 +637,8 @@ pub struct MossambiConfig {
     pub theme_mode: ThemeMode,
     #[serde(default)]
     pub glass_effect: GlassEffect,
+    #[serde(default)]
+    pub appearance: Appearance,
     #[serde(default = "default_window_opacity")]
     pub window_opacity: f32, // 0.20 to 1.00 (translucency)
     pub citrus_shade: String, // "rawpeel", "sweetzest", "ripepulp", "citrusgold", "deepforest", "tangerine"
@@ -878,6 +913,7 @@ impl Default for MossambiConfig {
         Self {
             theme_mode: ThemeMode::Rangalipi,
             glass_effect: GlassEffect::FrostedGlass,
+            appearance: Appearance::default(),
             window_opacity: 0.92,
             citrus_shade: "classicblue".to_string(),
             output_mode: OutputMode::Sibling,

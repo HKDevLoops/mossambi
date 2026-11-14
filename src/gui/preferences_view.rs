@@ -1789,10 +1789,22 @@ impl PreferencesView {
     ) {
         section(ui, palette, "Theme");
         ui.label(
-            egui::RichText::new("Pick a theme.")
+            egui::RichText::new("Pick a theme. Every theme has a light and a dark version.")
                 .size(design::type_scale::BODY_SM)
                 .color(palette.text_secondary),
         );
+        ui.add_space(design::space::SM);
+        card(ui, palette, |ui| {
+            let ap_mut = &mut self.cfg.appearance;
+            setting_row(ui, palette, "Appearance", "", dirty, |ui, dirty| {
+                for v in crate::core::Appearance::all().into_iter().rev() {
+                    if ui.selectable_label(*ap_mut == v, v.label()).clicked() {
+                        *ap_mut = v;
+                        *dirty = true;
+                    }
+                }
+            });
+        });
         ui.add_space(design::space::SM);
         // Compact swatch grid (2 responsive columns fitting cleanly in bounded card).
         let themes = ThemeStyle::all();
@@ -1806,13 +1818,16 @@ impl PreferencesView {
                     let (acc_r, acc_g, acc_b) = pt.accent.to_rgb();
                     let bg_col = Color32::from_rgb(bg_r, bg_g, bg_b);
                     let acc_col = Color32::from_rgb(acc_r, acc_g, acc_b);
+                    let (tx_r, tx_g, tx_b) = pt.text_primary.to_rgb();
+                    // Label in the swatch's own text colour: the app's
+                    // secondary text was unreadable on light swatches.
                     let btn = egui::Button::new(
-                        egui::RichText::new(t.name())
+                        egui::RichText::new(pt.name)
                             .size(design::type_scale::MICRO)
                             .color(if is_active {
-                                palette.accent
+                                palette.text_primary
                             } else {
-                                palette.text_secondary
+                                Color32::from_rgb(tx_r, tx_g, tx_b)
                             }),
                     )
                     .fill(if is_active {

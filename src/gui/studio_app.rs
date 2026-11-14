@@ -78,6 +78,9 @@ pub struct MossambiApp {
     // when the Preferences knob actually changes (does not fight the
     // toolbar/status-bar sliders, which write explorer_view.icon_size).
     pub last_grid_icon_size: u32,
+    /// Last explorer-pref values both sides agreed on; tells which side
+    /// (Preferences/config or the explorer UI) changed since.
+    pub explorer_pref_mirror: Option<ExplorerPrefMirror>,
 }
 
 impl Default for MossambiApp {
@@ -120,6 +123,7 @@ impl Default for MossambiApp {
             config: cfg,
             ui_zoom: 1.0,
             last_grid_icon_size: 0,
+            explorer_pref_mirror: None,
         }
     }
 }
@@ -660,6 +664,11 @@ pub fn execute_conversion_ctx(
 impl eframe::App for MossambiApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         let pal = self.theme.colors();
+        if pal.is_translucent {
+            // Panels carry the glass alpha; clearing to transparent lets
+            // the OS backdrop show where they are see-through.
+            return [0.0, 0.0, 0.0, 0.0];
+        }
         [
             pal.window_bg.r() as f32 / 255.0,
             pal.window_bg.g() as f32 / 255.0,
@@ -776,13 +785,35 @@ impl eframe::App for MossambiApp {
                 }
             }
         }
-        if self.frame_count % 120 == 0 {
+        // Pick up config edits made outside this window (other windows,
+        // hand edits) about once a second. A frame count is not a clock:
+        // at the 5 Hz idle rate "every 120 frames" meant ~24 s.
+        let reload_id = egui::Id::new("mossambi_config_reload_at");
+        let now_t = ctx.input(|i| i.time);
+        let last_t = ctx
+            .data(|d| d.get_temp::<f64>(reload_id))
+            .unwrap_or(f64::MIN);
+        if now_t - last_t >= 1.0 {
+            ctx.data_mut(|d| d.insert_temp(reload_id, now_t));
             self.config = crate::core::MossambiConfig::load();
         }
+        // Config -> explorer for the prefs both sides can change. Before,
+        // only the reverse direction existed and ran every frame, so the
+        // explorer's defaults overwrote whatever Preferences saved (icon
+        // pack, zoom, checkbox mode, menu style, all animation settings).
+        self.pull_explorer_prefs();
+        // Always-on-top was only honoured by the CLI.
+        let aot_id = egui::Id::new("mossambi_applied_always_on_top");
+        let aot = self.config.always_on_top;
+        if ctx.data(|d| d.get_temp::<bool>(aot_id)) != Some(aot) {
+            ctx.data_mut(|d| d.insert_temp(aot_id, aot));
+            ctx.send_viewport_cmd(ViewportCommand::WindowLevel(if aot {
+                egui::WindowLevel::AlwaysOnTop
+            } else {
+                egui::WindowLevel::Normal
+            }));
+        }
         let cfg = &self.config;
-        // Sync icon pack from config (live)
-        self.studio_view.explorer_view.icon_pack =
-            crate::core::icon_packs::IconPack::from_config_id(&cfg.icon_pack);
         // Sync grid icon size from config (Preferences -> live view).
         // The mirror prevents this from fighting the toolbar/status-bar
         // sliders, which write explorer_view.icon_size directly.
@@ -791,13 +822,25 @@ impl eframe::App for MossambiApp {
             self.studio_view.explorer_view.icon_size = cfg.grid_icon_size as f32;
         }
         let current_glass = cfg.glass_effect;
+        // Appearance (light/dark/system) and opacity change the palette
+        // without changing the theme id, so compare the resolved palette too.
+        let sig_id = egui::Id::new("mossambi_applied_palette_sig");
+        let pal_now = self.theme.colors();
+        let sig = (
+            pal_now.window_bg.to_array(),
+            pal_now.sidebar_bg.to_array(),
+            pal_now.is_dark,
+        );
+        let sig_changed = ctx.data(|d| d.get_temp::<([u8; 4], [u8; 4], bool)>(sig_id)) != Some(sig);
         if self.frame_count == 1
+            || sig_changed
             || self.last_applied_theme != Some(self.theme)
             || self.last_applied_glass != Some(current_glass)
         {
+            ctx.data_mut(|d| d.insert_temp(sig_id, sig));
             let palette = self.theme.colors();
             crate::gui::macos_theme::apply_theme_visuals(ctx, &palette);
-            crate::gui::dwm_helper::apply_system_backdrop(self.theme.is_dark(), current_glass);
+            crate::gui::dwm_helper::apply_system_backdrop(pal_now.is_dark, current_glass);
             self.last_applied_theme = Some(self.theme);
             self.last_applied_glass = Some(current_glass);
         }
@@ -1242,32 +1285,59 @@ fn edge_resize(ctx: &egui::Context) {
 impl MossambiApp {
     /// Dirty-checks the live [`StudioView`]'s explorer preference fields
     /// against the persisted config and saves only when something changed.
+    /// Pushes config values that changed (Preferences, a hand-edited
+    /// config file, first frame) into the explorer view.
+    fn pull_explorer_prefs(&mut self) {
+        let from_cfg = ExplorerPrefMirror::from_config(&self.config);
+        if self.explorer_pref_mirror.as_ref() == Some(&from_cfg) {
+            return;
+        }
+        let ev = &mut self.studio_view.explorer_view;
+        ev.icon_pack = crate::core::icon_packs::IconPack::from_config_id(&from_cfg.icon_pack);
+        ev.explorer_zoom = from_cfg.explorer_zoom;
+        ev.checkbox_mode = from_cfg.checkbox_mode;
+        ev.menu_style = from_cfg.menu_style;
+        ev.animations = from_cfg.animations;
+        ev.show_hidden_files = from_cfg.show_hidden_files;
+        self.explorer_pref_mirror = Some(from_cfg);
+    }
+
+    /// Explorer -> config: only for prefs the explorer UI itself changed
+    /// this frame (zoom ladder, toolbar toggles). Comparing against the
+    /// mirror instead of the config is what keeps a Preferences edit made
+    /// in the same frame from being overwritten.
     fn sync_explorer_prefs(&mut self) {
-        let explorer = &self.studio_view.explorer_view;
+        let now = ExplorerPrefMirror::from_explorer(&self.studio_view.explorer_view);
+        let Some(prev) = self.explorer_pref_mirror.clone() else {
+            self.explorer_pref_mirror = Some(now);
+            return;
+        };
         let mut dirty = false;
-
-        let pack_id = explorer.icon_pack.id().to_string();
-        if self.config.icon_pack != pack_id {
-            self.config.icon_pack = pack_id;
+        if now.icon_pack != prev.icon_pack {
+            self.config.icon_pack = now.icon_pack.clone();
             dirty = true;
         }
-        if self.config.explorer_zoom != explorer.explorer_zoom {
-            self.config.explorer_zoom = explorer.explorer_zoom;
+        if now.explorer_zoom != prev.explorer_zoom {
+            self.config.explorer_zoom = now.explorer_zoom;
             dirty = true;
         }
-        if self.config.checkbox_mode != explorer.checkbox_mode {
-            self.config.checkbox_mode = explorer.checkbox_mode;
+        if now.checkbox_mode != prev.checkbox_mode {
+            self.config.checkbox_mode = now.checkbox_mode;
             dirty = true;
         }
-        if self.config.menu_style != explorer.menu_style {
-            self.config.menu_style = explorer.menu_style;
+        if now.menu_style != prev.menu_style {
+            self.config.menu_style = now.menu_style;
             dirty = true;
         }
-        if self.config.animations != explorer.animations {
-            self.config.animations = explorer.animations;
+        if now.animations != prev.animations {
+            self.config.animations = now.animations;
             dirty = true;
         }
-
+        if now.show_hidden_files != prev.show_hidden_files {
+            self.config.show_hidden_files = now.show_hidden_files;
+            dirty = true;
+        }
+        self.explorer_pref_mirror = Some(now);
         if dirty {
             log::debug!(
                 "explorer prefs changed - saving config (zoom={}, pack={})",
@@ -1277,6 +1347,42 @@ impl MossambiApp {
             if let Err(e) = self.config.save() {
                 log::warn!("Could not persist explorer prefs: {e}");
             }
+        }
+    }
+}
+
+/// Snapshot of the explorer prefs that live in both the config and the
+/// explorer view.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplorerPrefMirror {
+    icon_pack: String,
+    explorer_zoom: u8,
+    checkbox_mode: crate::core::config::CheckboxMode,
+    menu_style: crate::core::config::MenuStyle,
+    animations: crate::core::config::AnimationSettings,
+    show_hidden_files: bool,
+}
+
+impl ExplorerPrefMirror {
+    fn from_explorer(e: &crate::gui::explorer_view::ExplorerView) -> Self {
+        Self {
+            icon_pack: e.icon_pack.id().to_string(),
+            explorer_zoom: e.explorer_zoom,
+            checkbox_mode: e.checkbox_mode,
+            menu_style: e.menu_style,
+            animations: e.animations,
+            show_hidden_files: e.show_hidden_files,
+        }
+    }
+
+    fn from_config(c: &crate::core::MossambiConfig) -> Self {
+        Self {
+            icon_pack: c.icon_pack.clone(),
+            explorer_zoom: c.explorer_zoom,
+            checkbox_mode: c.checkbox_mode,
+            menu_style: c.menu_style,
+            animations: c.animations,
+            show_hidden_files: c.show_hidden_files,
         }
     }
 }
@@ -1325,7 +1431,9 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
         .with_inner_size([1120.0, 720.0])
         .with_min_inner_size([920.0, 580.0])
         .with_decorations(false)
-        .with_transparent(false)
+        // Transparent so the DWM Acrylic backdrop can show through in the
+        // Frosted / Liquid glass modes (Opaque paints a solid canvas).
+        .with_transparent(true)
         .with_resizable(true)
         .with_visible(true)
         .with_active(true);
