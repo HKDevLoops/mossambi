@@ -721,7 +721,16 @@ fn convert_image_zero_loss(
                     }
                 }
             }
-            rgb_canvas.save_with_format(output, image::ImageFormat::Jpeg)?;
+            // Quality from Preferences (it used to be ignored).
+            {
+                let q = crate::core::MossambiConfig::load()
+                    .conv_image_quality
+                    .clamp(10, 100);
+                let mut w = std::io::BufWriter::new(fs::File::create(output)?);
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut w, q)
+                    .encode_image(&rgb_canvas)?;
+                std::io::Write::flush(&mut w)?;
+            }
             // Inject Photoshop-standard 300 DPI JFIF APP0 header
             if let Ok(raw) = fs::read(output) {
                 let enriched = inject_jfif_dpi(&raw, 300);
@@ -1531,11 +1540,12 @@ fn convert_audio_zero_loss(
         }
         "MP3" => {
             // LAME 320 kbps High-Fidelity CBR Studio Master with ID3v2.4
+            let br = audio_bitrate("320k");
             cmd.args([
                 "-c:a",
                 "libmp3lame",
                 "-b:a",
-                "320k",
+                br.as_str(),
                 "-ar",
                 "44100",
                 "-id3v2_version",
@@ -1543,13 +1553,22 @@ fn convert_audio_zero_loss(
             ]);
         }
         "M4A" | "AAC" => {
-            // Fraunhofer / CoreAudio style 320 kbps high-definition AAC-LC
-            cmd.args(["-c:a", "aac", "-b:a", "320k", "-ar", "48000"]);
+            // Fraunhofer / CoreAudio style AAC-LC (bitrate from Preferences)
+            let br = audio_bitrate("320k");
+            cmd.args(["-c:a", "aac", "-b:a", br.as_str(), "-ar", "48000"]);
         }
         "OPUS" => {
-            // Broadcast Fullband (20 Hz - 20 kHz) 256 kbps
+            // Broadcast Fullband (20 Hz - 20 kHz), bitrate from Preferences
+            let br = audio_bitrate("256k");
             cmd.args([
-                "-c:a", "libopus", "-b:a", "256k", "-vbr", "on", "-ar", "48000",
+                "-c:a",
+                "libopus",
+                "-b:a",
+                br.as_str(),
+                "-vbr",
+                "on",
+                "-ar",
+                "48000",
             ]);
         }
         "OGG" => {
@@ -1740,17 +1759,21 @@ fn convert_video_zero_loss(
             ]);
         }
         "MP4" | "MOV" | "MKV" | "M4V" => {
-            if hw.supports_h264_hw {
+            // Quality, preset and hardware use come from Preferences.
+            let vcfg = crate::core::MossambiConfig::load();
+            let crf = vcfg.conv_video_crf.min(51).to_string();
+            let crf = crf.as_str();
+            if hw.supports_h264_hw && vcfg.conv_video_hw_accel {
                 // Hardware Accelerated Cinema Encode (NVENC, AMF, QSV, VideoToolbox)
                 cmd.args(["-c:v", hw.h264_encoder]);
                 if hw.h264_encoder.contains("nvenc") {
-                    cmd.args(["-preset", "p4", "-cq", "16", "-bufsize", "64M"]);
+                    cmd.args(["-preset", "p4", "-cq", crf, "-bufsize", "64M"]);
                 } else if hw.h264_encoder.contains("qsv") {
-                    cmd.args(["-global_quality", "16", "-bufsize", "64M"]);
+                    cmd.args(["-global_quality", crf, "-bufsize", "64M"]);
                 } else if hw.h264_encoder.contains("amf") {
                     cmd.args([
-                        "-quality", "speed", "-rc", "cqp", "-qp_i", "16", "-qp_p", "16",
-                        "-bufsize", "64M",
+                        "-quality", "speed", "-rc", "cqp", "-qp_i", crf, "-qp_p", crf, "-bufsize",
+                        "64M",
                     ]);
                 } else {
                     cmd.args(["-b:v", "10M", "-bufsize", "64M"]);
@@ -1760,10 +1783,10 @@ fn convert_video_zero_loss(
                 ]);
             } else {
                 // CPU x264 Broadcast Quality with multi-threading
+                let preset = x264_preset(&vcfg.conv_video_preset);
                 cmd.args([
-                    "-c:v", "libx264", "-crf", "16", "-preset", "veryfast", "-threads", "0",
-                    "-bufsize", "64M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "320k", "-ar",
-                    "48000",
+                    "-c:v", "libx264", "-crf", crf, "-preset", preset, "-threads", "0", "-bufsize",
+                    "64M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
                 ]);
             }
             if matches!(target_format, "MP4" | "MOV" | "M4V") {
@@ -1819,4 +1842,43 @@ fn is_text_file(path: &Path) -> bool {
         }
     }
     false
+}
+
+/// FFmpeg `-b:a` value from Preferences ("256k"), or `default` when the
+/// setting is blank or not of the form `<digits>k`.
+fn audio_bitrate(default: &str) -> String {
+    let v = crate::core::MossambiConfig::load()
+        .conv_audio_bitrate
+        .trim()
+        .to_ascii_lowercase();
+    let ok =
+        v.len() > 1 && v.ends_with('k') && v[..v.len() - 1].chars().all(|c| c.is_ascii_digit());
+    if ok {
+        v
+    } else {
+        default.to_string()
+    }
+}
+
+/// x264 preset for the Preferences "Video preset" choice.
+fn x264_preset(label: &str) -> &'static str {
+    match label.trim().to_ascii_lowercase().as_str() {
+        "fast" => "veryfast",
+        "balanced" => "medium",
+        "high quality" | "quality" => "slow",
+        _ => "veryfast",
+    }
+}
+
+#[cfg(test)]
+mod conv_setting_tests {
+    use super::x264_preset;
+
+    #[test]
+    fn preset_labels_map_to_x264() {
+        assert_eq!(x264_preset("Fast"), "veryfast");
+        assert_eq!(x264_preset("Balanced"), "medium");
+        assert_eq!(x264_preset("High Quality"), "slow");
+        assert_eq!(x264_preset("???"), "veryfast");
+    }
 }

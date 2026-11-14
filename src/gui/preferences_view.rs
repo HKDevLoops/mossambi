@@ -3111,12 +3111,12 @@ impl PreferencesView {
             let ab_mut = &mut settings.audio_bitrate;
             let ab_conv = &mut self.cfg.conv_audio_bitrate;
             setting_row(ui, palette, "Audio bitrate", &ab_lbl, dirty, |ui, dirty| {
-                if ui
-                    .add(TextEdit::singleline(ab_mut).desired_width(120.0))
-                    .changed()
-                {
-                    *ab_conv = ab_mut.clone();
-                    *dirty = true;
+                for v in ["320k", "256k", "192k", "128k"] {
+                    if ui.selectable_label(ab_mut.as_str() == v, v).clicked() {
+                        *ab_mut = v.to_string();
+                        *ab_conv = v.to_string();
+                        *dirty = true;
+                    }
                 }
             });
 
@@ -3161,12 +3161,12 @@ impl PreferencesView {
             let vp_mut = &mut settings.video_preset;
             let vp_conv = &mut self.cfg.conv_video_preset;
             setting_row(ui, palette, "Video preset", &vp_lbl, dirty, |ui, dirty| {
-                if ui
-                    .add(TextEdit::singleline(vp_mut).desired_width(120.0))
-                    .changed()
-                {
-                    *vp_conv = vp_mut.clone();
-                    *dirty = true;
+                for v in ["High Quality", "Balanced", "Fast"] {
+                    if ui.selectable_label(vp_mut.as_str() == v, v).clicked() {
+                        *vp_mut = v.to_string();
+                        *vp_conv = v.to_string();
+                        *dirty = true;
+                    }
                 }
             });
 
@@ -3203,12 +3203,12 @@ impl PreferencesView {
                 &ac_lbl,
                 dirty,
                 |ui, dirty| {
-                    if ui
-                        .add(TextEdit::singleline(ac_mut).desired_width(120.0))
-                        .changed()
-                    {
-                        *ac_conv = ac_mut.clone();
-                        *dirty = true;
+                    for v in ["Ultra", "Normal", "Fast"] {
+                        if ui.selectable_label(ac_mut.as_str() == v, v).clicked() {
+                            *ac_mut = v.to_string();
+                            *ac_conv = v.to_string();
+                            *dirty = true;
+                        }
                     }
                 },
             );

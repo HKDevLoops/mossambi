@@ -275,6 +275,19 @@ fn extract_single_file_safe<R: Read>(mut reader: R, out_file: &Path) -> Result<(
     Ok(())
 }
 
+/// Codec level 1-9 for the Preferences "Archive compression" choice
+/// (Fast / Normal / Ultra); `max` is used for Ultra and unknown labels.
+fn compression_level(max: u32) -> u32 {
+    let label = crate::core::MossambiConfig::load()
+        .conv_archive_compression
+        .to_ascii_lowercase();
+    match label.as_str() {
+        "fast" => 1,
+        "normal" | "balanced" => 6,
+        _ => max,
+    }
+}
+
 fn pack_zip(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let file = File::create(output)?;
     let buf = BufWriter::with_capacity(512 * 1024, file);
@@ -282,7 +295,7 @@ fn pack_zip(inputs: &[PathBuf], output: &Path) -> Result<()> {
     // Level 9: Maximum Deflate (7-Zip Ultra / WinRAR Best equivalent)
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
-        .compression_level(Some(9))
+        .compression_level(Some(compression_level(9) as i64))
         .unix_permissions(0o755);
 
     for input in inputs {
@@ -330,7 +343,7 @@ fn pack_tar_gz(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let file = File::create(output)?;
     let buf = BufWriter::with_capacity(512 * 1024, file);
     // Maximum Gzip compression level 9
-    let enc = flate2::write::GzEncoder::new(buf, flate2::Compression::best());
+    let enc = flate2::write::GzEncoder::new(buf, flate2::Compression::new(compression_level(9)));
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
     let enc = builder.into_inner()?;
@@ -343,7 +356,8 @@ fn pack_tar_bz2(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let file = File::create(output)?;
     let buf = BufWriter::with_capacity(512 * 1024, file);
     // Maximum Bzip2 compression level 9
-    let enc = bzip2::write::BzEncoder::new(buf, bzip2::Compression::best());
+    let enc =
+        bzip2::write::BzEncoder::new(buf, bzip2::Compression::new(compression_level(9).max(1)));
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
     let enc = builder.into_inner()?;
@@ -356,7 +370,7 @@ fn pack_tar_xz(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let file = File::create(output)?;
     let buf = BufWriter::with_capacity(512 * 1024, file);
     // Maximum LZMA2 Level 9 Ultra (7-Zip Ultra standard)
-    let enc = xz2::write::XzEncoder::new(buf, 9);
+    let enc = xz2::write::XzEncoder::new(buf, compression_level(9));
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
     let enc = builder.into_inner()?;
@@ -369,7 +383,8 @@ fn pack_tar_zst(inputs: &[PathBuf], output: &Path) -> Result<()> {
     let file = File::create(output)?;
     let buf = BufWriter::with_capacity(512 * 1024, file);
     // High-performance Zstandard Level 19 (Ultra ratio & ultra-fast decompression)
-    let enc = zstd::stream::write::Encoder::new(buf, 19)?;
+    let enc =
+        zstd::stream::write::Encoder::new(buf, (compression_level(9) as i32 * 2 + 1).min(19))?;
     let mut builder = tar::Builder::new(enc);
     add_inputs_to_tar(&mut builder, inputs)?;
     let enc = builder.into_inner()?;

@@ -526,6 +526,14 @@ pub fn execute_conversion_ctx(
     handle: Option<&EncodeHandle>,
 ) -> ConversionResult {
     let target_upper = target.to_uppercase();
+    // Preferences "Output": Custom sends results to the chosen folder
+    // (it used to be ignored; everything went next to the source).
+    let out_cfg = crate::core::MossambiConfig::load();
+    let out_dir: Option<PathBuf> = match out_cfg.output_mode {
+        crate::core::OutputMode::Custom => out_cfg.custom_output_dir.clone().filter(|d| d.is_dir()),
+        crate::core::OutputMode::Sibling => None,
+    };
+    let out_dir = out_dir.as_deref();
 
     // 1. Indian Exam Form Mode
     if settings.exam_mode_enabled || target_upper.contains("EXAM") {
@@ -542,7 +550,7 @@ pub fn execute_conversion_ctx(
             background_color: [255, 255, 255],
         };
 
-        let parent = input.parent().unwrap_or_else(|| Path::new("."));
+        let parent = out_dir.unwrap_or_else(|| input.parent().unwrap_or_else(|| Path::new(".")));
         let stem = input
             .file_stem()
             .and_then(|s| s.to_str())
@@ -563,7 +571,7 @@ pub fn execute_conversion_ctx(
             LosslessMode::PerceptualHighFidelity
         };
 
-        match transcode_to_all_formats(input, mode, None) {
+        match transcode_to_all_formats(input, mode, out_dir) {
             Ok(outputs) => return ConversionResult::Success(outputs),
             Err(e) => {
                 return ConversionResult::Failure(format!("Batch ALL transcode failed: {}", e))
@@ -597,7 +605,7 @@ pub fn execute_conversion_ctx(
     );
 
     if target_upper == "PDF" && (cat == FileCategory::Document || is_text) {
-        let out_path = crate::core::resolve_clean_sibling_output_path(input, "pdf", None);
+        let out_path = crate::core::resolve_clean_sibling_output_path(input, "pdf", out_dir);
         let pdf_cfg = TextPdfSettings {
             page_size: settings.pdf_page_size.clone(),
             font_family: settings.pdf_font_family.clone(),
@@ -640,7 +648,7 @@ pub fn execute_conversion_ctx(
 
     if ["ZIP", "7Z", "TAR", "TAR.GZ", "TAR.XZ", "TAR.ZST"].contains(&target_upper.as_str()) {
         let out_archive =
-            crate::core::resolve_clean_sibling_output_path(input, &target_upper, None);
+            crate::core::resolve_clean_sibling_output_path(input, &target_upper, out_dir);
         let arch_type = ArchiveType::from_extension(&target_upper).unwrap_or(ArchiveType::Zip);
         match pack_archive(&[input.to_path_buf()], &out_archive, arch_type) {
             Ok(()) => return ConversionResult::Success(vec![out_archive]),
@@ -655,7 +663,7 @@ pub fn execute_conversion_ctx(
         LosslessMode::PerceptualHighFidelity
     };
 
-    match transcode_file_ctx(input, &target_upper, mode, None, handle) {
+    match transcode_file_ctx(input, &target_upper, mode, out_dir, handle) {
         Ok(out) => ConversionResult::Success(vec![out]),
         Err(e) => ConversionResult::Failure(e.to_string()),
     }
