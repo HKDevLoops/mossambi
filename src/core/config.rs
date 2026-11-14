@@ -269,6 +269,10 @@ pub enum GlassEffect {
     FrostedGlass,
     #[serde(alias = "liquid")]
     LiquidGlass,
+    #[serde(alias = "acrylic")]
+    Acrylic,
+    #[serde(alias = "mica")]
+    Mica,
     Opaque,
 }
 
@@ -277,6 +281,8 @@ impl GlassEffect {
         &[
             GlassEffect::FrostedGlass,
             GlassEffect::LiquidGlass,
+            GlassEffect::Acrylic,
+            GlassEffect::Mica,
             GlassEffect::Opaque,
         ]
     }
@@ -285,6 +291,8 @@ impl GlassEffect {
         match self {
             Self::FrostedGlass => "Frosted Glass (Sonoma Blur)",
             Self::LiquidGlass => "Liquid Glass (Sequoia / VisionOS)",
+            Self::Acrylic => "Acrylic (Windows Blur)",
+            Self::Mica => "Mica (Windows Alt)",
             Self::Opaque => "Opaque (Solid Container)",
         }
     }

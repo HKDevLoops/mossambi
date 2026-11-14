@@ -258,7 +258,10 @@ impl ThemeStyle {
                     }
                 }
             }
-            crate::core::GlassEffect::FrostedGlass | crate::core::GlassEffect::LiquidGlass => {
+            crate::core::GlassEffect::FrostedGlass
+            | crate::core::GlassEffect::LiquidGlass
+            | crate::core::GlassEffect::Acrylic
+            | crate::core::GlassEffect::Mica => {
                 let opaque =
                     self.colors_with_glass(crate::core::GlassEffect::Opaque, clamped_opacity);
                 glassify(opaque, effect, clamped_opacity)
@@ -557,13 +560,15 @@ pub fn apply_theme_visuals(ctx: &egui::Context, palette: &ThemePalette) {
     if palette.is_translucent {
         // Acrylic menu material: menus and popups paint window_fill through
         // Frame::menu / Frame::popup. The main window canvas stays solid
-        // while floating menus render translucent acrylic at alpha 232.
-        visuals.window_fill = Color32::from_rgba_unmultiplied(
-            palette.window_bg.r(),
-            palette.window_bg.g(),
-            palette.window_bg.b(),
-            232,
+        // while floating menus render translucent acrylic with alpha >= 0.88 floor.
+        let cfg = crate::core::MossambiConfig::load();
+        let menu_fill = crate::core::glass_fill(
+            palette.window_bg,
+            cfg.glass_effect,
+            crate::core::Surface::Menu,
+            palette.is_dark,
         );
+        visuals.window_fill = menu_fill;
         visuals.menu_rounding = Rounding::same(10.0);
     } else {
         visuals.window_fill = palette.window_bg;
@@ -588,11 +593,22 @@ pub fn apply_theme_visuals(ctx: &egui::Context, palette: &ThemePalette) {
     visuals.widgets.active.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
     visuals.widgets.active.rounding = Rounding::same(6.0);
 
+    let sel_alpha = if palette.is_translucent {
+        if palette.is_dark {
+            110
+        } else {
+            90
+        }
+    } else if palette.is_dark {
+        45
+    } else {
+        26
+    };
     visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(
         palette.accent.r(),
         palette.accent.g(),
         palette.accent.b(),
-        if palette.is_dark { 45 } else { 26 },
+        sel_alpha,
     );
     visuals.selection.stroke = Stroke::new(1.0_f32, palette.accent);
 
@@ -645,14 +661,48 @@ pub fn render_segmented_switch(
     });
 }
 
-/// Glass modes. The GPU surface (OpenGL via glow) is composited opaque by
-/// Windows, so per-pixel alpha in the palette only darkened the panels
-/// against black, and an OS blur behind it never showed. What works is
-/// whole-window translucency (layered window alpha, see dwm_helper), so the
-/// palette stays solid and readable here; the glass look comes from that
-/// window alpha. Liquid additionally gets bright refracted rims on every
-/// card, field and popup edge.
-fn glassify(mut p: ThemePalette, effect: crate::core::GlassEffect, _opacity: f32) -> ThemePalette {
+/// Glass modes: computes panel fills respecting surface readability floors
+/// (Content/Menu/Card >= 0.88, Sidebar >= 0.72, Chrome >= 0.60) and ensures
+/// WCAG contrast >= 4.5:1 for primary text against window_bg over light and dark backdrops.
+fn glassify(mut p: ThemePalette, effect: crate::core::GlassEffect, opacity: f32) -> ThemePalette {
+    use crate::core::{choose_readable_text_color, glass_fill, Surface};
+
+    let intensity_byte = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+
+    let chrome_base = Color32::from_rgba_unmultiplied(
+        p.window_bg.r(),
+        p.window_bg.g(),
+        p.window_bg.b(),
+        intensity_byte,
+    );
+    let sidebar_base = Color32::from_rgba_unmultiplied(
+        p.sidebar_bg.r(),
+        p.sidebar_bg.g(),
+        p.sidebar_bg.b(),
+        intensity_byte,
+    );
+    let card_base = Color32::from_rgba_unmultiplied(
+        p.card_bg.r(),
+        p.card_bg.g(),
+        p.card_bg.b(),
+        intensity_byte,
+    );
+    let hover_base = Color32::from_rgba_unmultiplied(
+        p.card_hover.r(),
+        p.card_hover.g(),
+        p.card_hover.b(),
+        intensity_byte,
+    );
+
+    p.window_bg = glass_fill(chrome_base, effect, Surface::Chrome, p.is_dark);
+    p.sidebar_bg = glass_fill(sidebar_base, effect, Surface::Sidebar, p.is_dark);
+    p.card_bg = glass_fill(card_base, effect, Surface::Card, p.is_dark);
+    p.card_hover = glass_fill(hover_base, effect, Surface::Card, p.is_dark);
+    p.is_translucent = true;
+
+    // Guarantee WCAG contrast >= 4.5:1 for primary text against window_bg
+    p.text_primary = choose_readable_text_color(p.window_bg, p.is_dark);
+
     if effect == crate::core::GlassEffect::LiquidGlass {
         let rim = if p.is_dark { 0.30 } else { 0.85 };
         p.border = Color32::from_rgba_unmultiplied(255, 255, 255, (rim * 255.0) as u8);

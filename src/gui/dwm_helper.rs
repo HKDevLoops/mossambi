@@ -3,27 +3,7 @@
 //! Provides hardware-accelerated Windows Desktop Window Manager (DWM) Acrylic and Mica blur,
 //! immersive dark mode synchronization, and frame margin extension for transparent windows.
 
-use crate::core::GlassEffect;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BackdropKind {
-    None = 1,
-    Mica = 2,       // DWMSBT_MAINWINDOW (Windows 11)
-    Acrylic = 3,    // DWMSBT_TRANSIENTWINDOW (Acrylic blur behind)
-    TabbedMica = 4, // DWMSBT_TABBEDWINDOW (Mica Alt)
-}
-
-impl From<GlassEffect> for BackdropKind {
-    fn from(effect: GlassEffect) -> Self {
-        match effect {
-            // Both glass modes need a real blur of what is behind the
-            // window; Mica only tints with the wallpaper colour.
-            GlassEffect::FrostedGlass => BackdropKind::Acrylic,
-            GlassEffect::LiquidGlass => BackdropKind::Acrylic,
-            GlassEffect::Opaque => BackdropKind::None,
-        }
-    }
-}
+use crate::core::{choose_backdrop, Backdrop, GlassEffect};
 
 /// True when the OS can blur behind the window (Windows 10 1809+).
 pub fn backdrop_supported() -> bool {
@@ -38,25 +18,18 @@ pub fn backdrop_supported() -> bool {
     }
 }
 
-/// Applies native DWM system backdrop (Acrylic / Mica) and extends frame into client area
+/// Applies native DWM system backdrop (Acrylic / Mica) and extends frame into client area.
 #[allow(unused_variables)]
 pub fn apply_system_backdrop(dark_mode: bool, effect: GlassEffect, opacity: f32) {
     #[cfg(target_os = "windows")]
     {
-        // Whole-window alpha for the glass modes (the only translucency the
-        // OpenGL surface supports); Opaque is fully solid.
-        let alpha = match effect {
-            GlassEffect::Opaque => 255u8,
-            GlassEffect::FrostedGlass => (opacity.clamp(0.30, 1.0).max(0.80) * 255.0) as u8,
-            GlassEffect::LiquidGlass => (opacity.clamp(0.30, 1.0) * 255.0) as u8,
-        };
-        win32_dwm::apply_dwm_attributes(dark_mode, BackdropKind::from(effect), alpha);
+        win32_dwm::apply_dwm_attributes(dark_mode, effect);
     }
 }
 
 #[cfg(target_os = "windows")]
 mod win32_dwm {
-    use super::BackdropKind;
+    use super::{choose_backdrop, Backdrop, GlassEffect};
     use std::ffi::c_void;
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
     use windows_sys::Win32::Graphics::Dwm::{
@@ -64,6 +37,10 @@ mod win32_dwm {
         DWMWA_USE_IMMERSIVE_DARK_MODE,
     };
     use windows_sys::Win32::UI::Controls::MARGINS;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetClassNameW, GetWindowLongPtrW, GetWindowThreadProcessId, SetWindowLongPtrW,
+        GWL_EXSTYLE, WS_EX_LAYERED,
+    };
 
     #[repr(C)]
     struct AccentPolicy {
@@ -80,8 +57,7 @@ mod win32_dwm {
         cb_data: usize,
     }
 
-    // Undocumented but long-stable user32 export (Windows 10 1803+); not in
-    // the SDK import library, hence raw-dylib.
+    // Undocumented but stable user32 export for Windows 10 acrylic/blur behind
     #[link(name = "user32", kind = "raw-dylib")]
     extern "system" {
         fn SetWindowCompositionAttribute(
@@ -90,41 +66,12 @@ mod win32_dwm {
         ) -> BOOL;
     }
 
-    /// Layered-window alpha: 255 removes WS_EX_LAYERED (fully solid).
-    fn set_window_alpha(hwnd: HWND, alpha: u8) {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW, GWL_EXSTYLE,
-            LWA_ALPHA, WS_EX_LAYERED,
-        };
-        unsafe {
-            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            if alpha == 255 {
-                if ex & WS_EX_LAYERED as isize != 0 {
-                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & !(WS_EX_LAYERED as isize));
-                }
-            } else {
-                if ex & WS_EX_LAYERED as isize == 0 {
-                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED as isize);
-                }
-                SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
-            }
-        }
-    }
-
-    /// Gaussian blur of whatever is behind the window, under the app's own
-    /// translucent fills (ACCENT_ENABLE_BLURBEHIND), or off.
-    fn set_blur_behind(hwnd: HWND, on: bool) {
+    fn set_accent_policy(hwnd: HWND, state: u32, gradient_color: u32) {
         const WCA_ACCENT_POLICY: u32 = 19;
-        const ACCENT_DISABLED: u32 = 0;
-        const ACCENT_ENABLE_BLURBEHIND: u32 = 3;
         let mut policy = AccentPolicy {
-            accent_state: if on {
-                ACCENT_ENABLE_BLURBEHIND
-            } else {
-                ACCENT_DISABLED
-            },
-            accent_flags: 0,
-            gradient_color: 0,
+            accent_state: state,
+            accent_flags: if state == 4 { 2 } else { 0 },
+            gradient_color,
             animation_id: 0,
         };
         let mut data = WindowCompositionAttribData {
@@ -168,13 +115,20 @@ mod win32_dwm {
             .parse()
             .unwrap_or(0)
     }
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetClassNameW, GetWindowThreadProcessId,
-    };
 
-    pub fn apply_dwm_attributes(dark_mode: bool, backdrop: BackdropKind, alpha: u8) {
-        let param =
-            (backdrop as usize) | if dark_mode { 0x100 } else { 0 } | ((alpha as usize) << 16);
+    pub fn apply_dwm_attributes(dark_mode: bool, effect: GlassEffect) {
+        let build = os_build();
+        let backdrop = choose_backdrop(effect, build);
+
+        // Pack backdrop and dark mode into LPARAM:
+        // Tag: 0 = None, 1 = DwmSystem, 2 = Win10Accent
+        let (tag, val) = match backdrop {
+            Backdrop::None => (0u32, 0u32),
+            Backdrop::DwmSystem(k) => (1u32, k),
+            Backdrop::Win10Accent(s) => (2u32, s),
+        };
+        let param = (tag << 8) | (val & 0xFF) | if dark_mode { 0x10000 } else { 0 };
+
         unsafe {
             EnumWindows(Some(enum_proc), param as LPARAM);
         }
@@ -190,11 +144,22 @@ mod win32_dwm {
             let len = GetClassNameW(hwnd, class_name.as_mut_ptr(), 256);
             let class_str = String::from_utf16_lossy(&class_name[..len as usize]);
 
-            // Matches eframe / winit primary window class (skip internal event targets)
+            // Matches eframe / winit primary window class
             if class_str == "Window Class" {
-                let dark_mode = (lparam & 0x100) != 0;
+                let dark_mode = (lparam & 0x10000) != 0;
+                let tag = ((lparam >> 8) & 0xFF) as u32;
+                let val = (lparam & 0xFF) as u32;
 
-                // 1. Synchronize Immersive Dark Mode with active theme
+                // 1. Extend frame into client area (-1 margins = whole client area)
+                let margins = MARGINS {
+                    cxLeftWidth: -1,
+                    cxRightWidth: -1,
+                    cyTopHeight: -1,
+                    cyBottomHeight: -1,
+                };
+                let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+
+                // 2. Synchronize Immersive Dark Mode with active theme
                 let dark_val: i32 = if dark_mode { 1 } else { 0 };
                 let _ = DwmSetWindowAttribute(
                     hwnd,
@@ -203,32 +168,51 @@ mod win32_dwm {
                     4,
                 );
 
-                // 3. Blur behind the client area. DWMWA_SYSTEMBACKDROP_TYPE
-                // only shows through when the frame is extended into the
-                // client area, and an extended frame makes DWM paint the
-                // native caption buttons over the app's own title bar. The
-                // accent-policy blur works on the client area directly, so
-                // keep the system backdrop off and the frame unextended.
-                let none = super::BackdropKind::None as i32;
-                let _ = DwmSetWindowAttribute(
-                    hwnd,
-                    DWMWA_SYSTEMBACKDROP_TYPE as u32,
-                    &none as *const i32 as *const c_void,
-                    4,
-                );
-                let margins = MARGINS {
-                    cxLeftWidth: 0,
-                    cxRightWidth: 0,
-                    cyTopHeight: 0,
-                    cyBottomHeight: 0,
-                };
-                let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
-                // The accent blur stays off: it needs per-pixel alpha, which
-                // the GL surface does not provide (verified: no effect).
-                set_blur_behind(hwnd, false);
-                set_window_alpha(hwnd, ((lparam >> 16) & 0xFF) as u8);
+                // 3. Remove WS_EX_LAYERED whole-window alpha path entirely
+                let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                if ex & (WS_EX_LAYERED as isize) != 0 {
+                    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & !(WS_EX_LAYERED as isize));
+                }
 
-                // 4. Windows 11 Rounded Corners (DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2)
+                // 4. Apply system backdrop
+                match tag {
+                    1 => {
+                        // Win11 DWMWA_SYSTEMBACKDROP_TYPE
+                        let sys_val = val as i32;
+                        let _ = DwmSetWindowAttribute(
+                            hwnd,
+                            DWMWA_SYSTEMBACKDROP_TYPE as u32,
+                            &sys_val as *const i32 as *const c_void,
+                            4,
+                        );
+                        set_accent_policy(hwnd, 0, 0);
+                    }
+                    2 => {
+                        // Win10 SetWindowCompositionAttribute accent policy
+                        let none = 1i32; // DWMSBT_NONE
+                        let _ = DwmSetWindowAttribute(
+                            hwnd,
+                            DWMWA_SYSTEMBACKDROP_TYPE as u32,
+                            &none as *const i32 as *const c_void,
+                            4,
+                        );
+                        let tint_abgr = if dark_mode { 0x011E1E1E } else { 0x01FFFFFF };
+                        set_accent_policy(hwnd, val, tint_abgr);
+                    }
+                    _ => {
+                        // Off / Solid container
+                        let none = 1i32;
+                        let _ = DwmSetWindowAttribute(
+                            hwnd,
+                            DWMWA_SYSTEMBACKDROP_TYPE as u32,
+                            &none as *const i32 as *const c_void,
+                            4,
+                        );
+                        set_accent_policy(hwnd, 0, 0);
+                    }
+                }
+
+                // 5. Windows 11 Rounded Corners (DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2)
                 const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
                 let corner_pref: i32 = 2; // DWMWCP_ROUND
                 let _ = DwmSetWindowAttribute(

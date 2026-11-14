@@ -2054,6 +2054,8 @@ impl PreferencesView {
                 for (v, lab) in [
                     (GlassEffect::FrostedGlass, "Frosted"),
                     (GlassEffect::LiquidGlass, "Liquid"),
+                    (GlassEffect::Acrylic, "Acrylic"),
+                    (GlassEffect::Mica, "Mica"),
                     (GlassEffect::Opaque, "Opaque"),
                 ] {
                     let active = *glass_mut == v;
@@ -3848,6 +3850,8 @@ fn glass_label(g: GlassEffect) -> &'static str {
     match g {
         GlassEffect::FrostedGlass => "Frosted Glass",
         GlassEffect::LiquidGlass => "Liquid Glass",
+        GlassEffect::Acrylic => "Acrylic",
+        GlassEffect::Mica => "Mica",
         GlassEffect::Opaque => "Opaque",
     }
 }

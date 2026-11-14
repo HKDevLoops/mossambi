@@ -280,7 +280,7 @@ fn enforce_borderless_win32() {
                     | WS_CLIPCHILDREN;
 
                 let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-                let target_ex = (ex_style & !0x00020301) | WS_EX_LAYERED | WS_EX_TOPMOST;
+                let target_ex = (ex_style & !0x00020301 & !WS_EX_LAYERED) | WS_EX_TOPMOST;
 
                 let mut changed = false;
                 if style != target_style {
@@ -305,12 +305,6 @@ fn enforce_borderless_win32() {
 
                 let color_none: u32 = 0xFFFFFFFE; // DWMWA_COLOR_NONE
                 let _ = DwmSetWindowAttribute(hwnd, 34, &color_none as *const _ as *const _, 4);
-
-                use windows_sys::Win32::Graphics::Gdi::{CreateEllipticRgn, SetWindowRgn};
-                let rgn = CreateEllipticRgn(6, 6, 394, 394);
-                if !rgn.is_null() {
-                    let _ = SetWindowRgn(hwnd, rgn, 1);
-                }
 
                 if changed {
                     SetWindowPos(
@@ -370,6 +364,11 @@ impl eframe::App for MossambiWidgetApp {
         if self.frame_count == 1 {
             let cfg = crate::core::MossambiConfig::load();
             let is_dark = cfg.theme_mode.is_dark();
+            crate::gui::dwm_helper::apply_system_backdrop(
+                is_dark,
+                crate::core::GlassEffect::Acrylic,
+                1.0,
+            );
             self.geometry.theme = if is_dark {
                 WidgetTheme::Dark
             } else {

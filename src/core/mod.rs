@@ -18,6 +18,7 @@ pub mod file_icons;
 pub mod fs_utils;
 pub mod fuzzy;
 pub mod gesture;
+pub mod glass;
 pub mod icon_packs;
 pub mod linux_clipboard_files;
 pub mod linux_dna;
@@ -72,6 +73,10 @@ pub use fs_utils::{
 };
 pub use fuzzy::{fuzzy_match, sort_by_fuzzy_match};
 pub use gesture::{GestureKind, GesturePoint, KinematicGestureTracker};
+pub use glass::{
+    check_wcag_contrast, choose_backdrop, choose_readable_text_color, glass_fill, is_wcag_readable,
+    Backdrop, Surface,
+};
 pub use linux_dna::{
     discover_linux_mounts, install_linux_desktop_integration, send_linux_notification,
 };

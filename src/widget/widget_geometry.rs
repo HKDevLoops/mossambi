@@ -289,13 +289,23 @@ impl RadialWidgetGeometry {
             let (fill, stroke, text_col) = if is_dark {
                 if is_sub_hovered {
                     (
-                        Color32::from_rgb(38, 98, 40),
+                        crate::core::glass_fill(
+                            Color32::from_rgb(38, 98, 40),
+                            crate::core::GlassEffect::Acrylic,
+                            crate::core::Surface::Donut,
+                            true,
+                        ),
                         Stroke::new(1.8_f32, Color32::from_rgb(95, 215, 80)),
                         Color32::WHITE,
                     )
                 } else {
                     (
-                        Color32::from_rgba_premultiplied(28, 33, 44, (230.0 * expansion) as u8),
+                        crate::core::glass_fill(
+                            Color32::from_rgb(28, 33, 44),
+                            crate::core::GlassEffect::Acrylic,
+                            crate::core::Surface::Donut,
+                            true,
+                        ),
                         Stroke::new(
                             1.0_f32,
                             Color32::from_rgba_premultiplied(
@@ -310,13 +320,23 @@ impl RadialWidgetGeometry {
                 }
             } else if is_sub_hovered {
                 (
-                    Color32::from_rgb(226, 247, 214),
+                    crate::core::glass_fill(
+                        Color32::from_rgb(226, 247, 214),
+                        crate::core::GlassEffect::Acrylic,
+                        crate::core::Surface::Donut,
+                        false,
+                    ),
                     Stroke::new(1.6_f32, Color32::from_rgb(120, 190, 32)),
                     Color32::from_rgb(32, 44, 26),
                 )
             } else {
                 (
-                    Color32::from_rgba_premultiplied(245, 247, 250, (245.0 * expansion) as u8),
+                    crate::core::glass_fill(
+                        Color32::from_rgb(245, 247, 250),
+                        crate::core::GlassEffect::Acrylic,
+                        crate::core::Surface::Donut,
+                        false,
+                    ),
                     Stroke::new(
                         1.0_f32,
                         Color32::from_rgba_premultiplied(215, 220, 230, (200.0 * expansion) as u8),
@@ -381,16 +401,28 @@ impl RadialWidgetGeometry {
         let (fill_color, border_stroke, text_color, icon_color) = if is_dark {
             if is_hovered {
                 // State 6 active petal: vibrant emerald green (#266228) with #52B846 border
-                (
+                let fill = crate::core::glass_fill(
                     Color32::from_rgb(38, 98, 40),
+                    crate::core::GlassEffect::Acrylic,
+                    crate::core::Surface::Donut,
+                    true,
+                );
+                (
+                    fill,
                     Stroke::new(1.8_f32, Color32::from_rgb(95, 215, 80)),
                     Color32::WHITE,
                     Color32::from_rgb(115, 235, 95),
                 )
             } else {
                 // State 6 idle petal: deep charcoal/slate matte (#222733)
+                let fill = crate::core::glass_fill(
+                    Color32::from_rgb(34, 39, 51),
+                    crate::core::GlassEffect::Acrylic,
+                    crate::core::Surface::Donut,
+                    true,
+                );
                 (
-                    Color32::from_rgba_premultiplied(34, 39, 51, 250),
+                    fill,
                     Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(62, 70, 88, 180)),
                     Color32::from_rgb(240, 242, 248),
                     Color32::from_rgb(190, 198, 212),
@@ -398,16 +430,28 @@ impl RadialWidgetGeometry {
             }
         } else if is_hovered {
             // State 2 & 4 hovered petal: soft illuminated lime-green (#E2F7D6)
-            (
+            let fill = crate::core::glass_fill(
                 Color32::from_rgb(226, 247, 214),
+                crate::core::GlassEffect::Acrylic,
+                crate::core::Surface::Donut,
+                false,
+            );
+            (
+                fill,
                 Stroke::new(1.6_f32, Color32::from_rgb(120, 190, 32)), // Pantone 376 C
                 Color32::from_rgb(32, 44, 26),
                 Color32::from_rgb(45, 105, 30),
             )
         } else {
             // State 1 idle petal: clean off-white / pearl frosted (#F8F9FA)
+            let fill = crate::core::glass_fill(
+                Color32::from_rgb(248, 249, 250),
+                crate::core::GlassEffect::Acrylic,
+                crate::core::Surface::Donut,
+                false,
+            );
             (
-                Color32::from_rgba_premultiplied(248, 249, 250, 255),
+                fill,
                 Stroke::new(
                     1.0_f32,
                     Color32::from_rgba_premultiplied(222, 226, 234, 220),

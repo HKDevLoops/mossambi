@@ -651,18 +651,9 @@ pub fn execute_conversion_ctx(
 
 impl eframe::App for MossambiApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        let pal = self.theme.colors();
-        if pal.is_translucent {
-            // Panels carry the glass alpha; clearing to transparent lets
-            // the OS backdrop show where they are see-through.
-            return [0.0, 0.0, 0.0, 0.0];
-        }
-        [
-            pal.window_bg.r() as f32 / 255.0,
-            pal.window_bg.g() as f32 / 255.0,
-            pal.window_bg.b() as f32 / 255.0,
-            1.0,
-        ]
+        // Transparent clear color lets the DWM backdrop blur show through
+        // wherever panels have translucent glass fill.
+        [0.0, 0.0, 0.0, 0.0]
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -1627,9 +1618,9 @@ pub fn run_studio_with_path(initial_path: Option<PathBuf>) -> Result<(), eframe:
         .with_inner_size([1120.0, 720.0])
         .with_min_inner_size([920.0, 580.0])
         .with_decorations(false)
-        // Glass translucency is whole-window layered alpha (dwm_helper);
-        // the GL surface itself is composited opaque on Windows.
-        .with_transparent(false)
+        // Enable transparency so the DWM system backdrop blur shows through
+        // the client area.
+        .with_transparent(true)
         .with_resizable(true)
         .with_visible(true)
         .with_active(true);
