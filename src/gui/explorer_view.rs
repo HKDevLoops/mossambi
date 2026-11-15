@@ -31,12 +31,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewMode {
-    Details,
-    Grid,
-    Columns,
-}
+pub use crate::core::ViewMode;
 
 /// ASCII funnel glyph for the compact filter popover button.
 const FILTER_FUNNEL_GLYPH: &str = "|v";
@@ -774,6 +769,7 @@ pub struct ExplorerView {
 
     // Finder-style long-hover preview (files & folders)
     hover_preview: Option<HoverPreviewState>,
+    pub sidebar_hover_active: bool,
 
     // Drop action menu (Windows/Finder style drag-and-drop popup)
     pub drop_menu: Option<DropMenuState>,
@@ -798,9 +794,18 @@ pub struct ExplorerView {
     /// the Details view via `zoom_ladder_step`; the auto-switched view mode
     /// itself stays session-only per the confirmed design.
     pub explorer_zoom: u8,
-    /// Time of the last Grid<->Details zoom-ladder crossing, used to
-    /// debounce touchpad wiggle at the boundary (`zoom_ladder_step`).
-    zoom_cross_gate: Option<Instant>,
+    /// Independent zoom level for List (Details) view: 0..=4.
+    pub list_zoom: u8,
+    /// Independent zoom level for Grid (Icons) view: 0..=4.
+    pub grid_zoom: u8,
+    /// Independent zoom level for Miller Columns view: 0..=4.
+    pub miller_zoom: u8,
+    /// Smooth spring transition for List row height.
+    pub list_zoom_spring: crate::gui::anim::Spring,
+    /// Smooth spring transition for Grid icon size.
+    pub grid_zoom_spring: crate::gui::anim::Spring,
+    /// Smooth spring transition for Miller column width.
+    pub miller_zoom_spring: crate::gui::anim::Spring,
     /// Rubber-band marquee: drag origin + the selection snapshot it modifies.
     /// `Some` while a canvas rubber-band drag is in flight.
     marquee: Option<(Pos2, HashSet<PathBuf>)>,
@@ -1106,6 +1111,7 @@ impl Default for ExplorerView {
                 _ => ViewMode::Details,
             },
             hover_preview: None,
+            sidebar_hover_active: false,
             thumb_cache: std::collections::HashMap::new(),
             thumb_decode_budget: (0, Instant::now()),
             selection_anchor: None,
@@ -1114,8 +1120,20 @@ impl Default for ExplorerView {
             menu_style: crate::core::config::MenuStyle::default(),
             animations: crate::core::config::AnimationSettings::default(),
             hover_anims: crate::gui::anim::AnimRegistry::new(),
-            explorer_zoom: 2,
-            zoom_cross_gate: None,
+            explorer_zoom: cfg.grid_zoom.min(4),
+            list_zoom: cfg.list_zoom.min(4),
+            grid_zoom: cfg.grid_zoom.min(4),
+            miller_zoom: cfg.miller_zoom.min(4),
+            list_zoom_spring: crate::gui::anim::Spring::new(
+                crate::gui::view_zoom::ListZoomMetrics::for_step(cfg.list_zoom.min(4)).row_height,
+            ),
+            grid_zoom_spring: crate::gui::anim::Spring::new(
+                crate::gui::view_zoom::GridZoomMetrics::for_step(cfg.grid_zoom.min(4)).icon_size,
+            ),
+            miller_zoom_spring: crate::gui::anim::Spring::new(
+                crate::gui::view_zoom::MillerZoomMetrics::for_step(cfg.miller_zoom.min(4))
+                    .column_width,
+            ),
             marquee: None,
             drag_out_in_flight: false,
             custom_icon_input: String::new(),
@@ -1182,45 +1200,131 @@ impl ExplorerView {
         }
     }
 
-    /// One Ctrl+Scroll notch on the zoom ladder (Windows Explorer parity,
-    /// user-confirmed design): five Grid icon-size levels 0..=4; one notch
-    /// below the smallest grid size crosses into the Details view and one
-    /// notch up from Details returns to the smallest grid size. Columns is
-    /// excluded from the ladder entirely, and mode crossings are debounced
-    /// so touchpad wiggle at the boundary cannot flicker between modes.
-    pub fn zoom_ladder_step(&mut self, step: i32) {
-        if step == 0 || self.view_mode == ViewMode::Columns {
-            return; // no-op notch, and Columns stays outside the ladder
-        }
-        if self.view_mode == ViewMode::Details {
-            if step > 0 && self.zoom_cross_open() {
-                self.view_mode = ViewMode::Grid;
-                self.explorer_zoom = 0; // re-enter at the smallest grid size
-                self.zoom_cross_gate = Some(Instant::now());
-                log::debug!("zoom ladder: Details -> Grid (extra small)");
-            }
-            return; // Details is the bottom of the ladder
-        }
-        if step < 0 && self.explorer_zoom == 0 {
-            if self.zoom_cross_open() {
-                self.view_mode = ViewMode::Details;
-                self.zoom_cross_gate = Some(Instant::now());
-                log::debug!("zoom ladder: Grid (extra small) -> Details");
-            }
-            return;
-        }
-        let next = (self.explorer_zoom as i32 + step).clamp(0, 4) as u8;
-        if next != self.explorer_zoom {
-            log::debug!("explorer zoom level: {} -> {}", self.explorer_zoom, next);
-            self.explorer_zoom = next;
+    /// Returns the zoom level (0..=4) for the active view mode.
+    pub fn active_mode_zoom(&self) -> u8 {
+        match self.view_mode {
+            ViewMode::Details => self.list_zoom.min(4),
+            ViewMode::Grid => self.grid_zoom.min(4),
+            ViewMode::Columns => self.miller_zoom.min(4),
         }
     }
 
-    /// True when a Grid<->Details crossing may fire: no crossing yet, or the
-    /// previous crossing is older than the wiggle debounce window.
-    fn zoom_cross_open(&self) -> bool {
-        self.zoom_cross_gate
-            .is_none_or(|t| Instant::now().duration_since(t) >= Self::ZOOM_CROSS_DEBOUNCE)
+    /// Sets the zoom level for the active view mode, updating springs and bounds.
+    pub fn set_active_mode_zoom(&mut self, zoom: u8) {
+        let clamped = zoom.min(4);
+        match self.view_mode {
+            ViewMode::Details => {
+                self.list_zoom = clamped;
+                let target = crate::gui::view_zoom::ListZoomMetrics::for_step(clamped).row_height;
+                if self.animations.reduced_motion {
+                    self.list_zoom_spring.value = target;
+                    self.list_zoom_spring.target = target;
+                    self.list_zoom_spring.velocity = 0.0;
+                } else {
+                    self.list_zoom_spring.set(target);
+                }
+            }
+            ViewMode::Grid => {
+                self.grid_zoom = clamped;
+                self.explorer_zoom = clamped;
+                let target = crate::gui::view_zoom::GridZoomMetrics::for_step(clamped).icon_size;
+                if self.animations.reduced_motion {
+                    self.grid_zoom_spring.value = target;
+                    self.grid_zoom_spring.target = target;
+                    self.grid_zoom_spring.velocity = 0.0;
+                } else {
+                    self.grid_zoom_spring.set(target);
+                }
+            }
+            ViewMode::Columns => {
+                self.miller_zoom = clamped;
+                let target =
+                    crate::gui::view_zoom::MillerZoomMetrics::for_step(clamped).column_width;
+                if self.animations.reduced_motion {
+                    self.miller_zoom_spring.value = target;
+                    self.miller_zoom_spring.target = target;
+                    self.miller_zoom_spring.velocity = 0.0;
+                } else {
+                    self.miller_zoom_spring.set(target);
+                }
+            }
+        }
+    }
+
+    /// Steps the active view mode's zoom level by `step` (+1 or -1) within [0, 4].
+    pub fn zoom_step_active_mode(&mut self, step: i32) {
+        if step == 0 {
+            return;
+        }
+        let current = self.active_mode_zoom();
+        let next = crate::gui::view_zoom::step_zoom(current, step);
+        if next != current {
+            log::debug!(
+                "Active mode {:?} zoom level: {} -> {}",
+                self.view_mode,
+                current,
+                next
+            );
+            self.set_active_mode_zoom(next);
+        }
+    }
+
+    /// Resets the active view mode's zoom level to default (step 2).
+    pub fn reset_active_mode_zoom(&mut self) {
+        self.set_active_mode_zoom(crate::gui::view_zoom::DEFAULT_ZOOM_STEP);
+    }
+
+    /// One Ctrl+Scroll notch or shortcut step on the active view mode's zoom ladder.
+    pub fn zoom_ladder_step(&mut self, step: i32) {
+        self.zoom_step_active_mode(step);
+    }
+
+    /// Advances spring animations for per-mode zoom transitions.
+    pub fn advance_zoom_springs(&mut self, ctx: &egui::Context, dt: f32) {
+        if self.animations.reduced_motion {
+            let list_t =
+                crate::gui::view_zoom::ListZoomMetrics::for_step(self.list_zoom).row_height;
+            let grid_t = crate::gui::view_zoom::GridZoomMetrics::for_step(self.grid_zoom).icon_size;
+            let miller_t =
+                crate::gui::view_zoom::MillerZoomMetrics::for_step(self.miller_zoom).column_width;
+            self.list_zoom_spring.value = list_t;
+            self.list_zoom_spring.target = list_t;
+            self.list_zoom_spring.velocity = 0.0;
+            self.grid_zoom_spring.value = grid_t;
+            self.grid_zoom_spring.target = grid_t;
+            self.grid_zoom_spring.velocity = 0.0;
+            self.miller_zoom_spring.value = miller_t;
+            self.miller_zoom_spring.target = miller_t;
+            self.miller_zoom_spring.velocity = 0.0;
+            return;
+        }
+
+        let mut needs_repaint = false;
+        if !self.list_zoom_spring.at_rest() {
+            let target =
+                crate::gui::view_zoom::ListZoomMetrics::for_step(self.list_zoom).row_height;
+            crate::gui::anim::advance(&mut self.list_zoom_spring, target, self.animations.open, dt);
+            needs_repaint = true;
+        }
+        if !self.grid_zoom_spring.at_rest() {
+            let target = crate::gui::view_zoom::GridZoomMetrics::for_step(self.grid_zoom).icon_size;
+            crate::gui::anim::advance(&mut self.grid_zoom_spring, target, self.animations.open, dt);
+            needs_repaint = true;
+        }
+        if !self.miller_zoom_spring.at_rest() {
+            let target =
+                crate::gui::view_zoom::MillerZoomMetrics::for_step(self.miller_zoom).column_width;
+            crate::gui::anim::advance(
+                &mut self.miller_zoom_spring,
+                target,
+                self.animations.open,
+                dt,
+            );
+            needs_repaint = true;
+        }
+        if needs_repaint {
+            ctx.request_repaint();
+        }
     }
 
     /// Toggle Dual-Pane Split View
@@ -1438,6 +1542,39 @@ impl ExplorerView {
             self.search_query = tab.search_query.clone();
             self.navigate_to(target);
         }
+    }
+
+    pub fn trigger_hover_preview(&mut self, item: FileItem, anchor: Pos2) {
+        self.sidebar_hover_active = true;
+        let is_same = self
+            .hover_preview
+            .as_ref()
+            .map(|h| h.item.path == item.path)
+            .unwrap_or(false);
+        if !is_same {
+            self.hover_preview = Some(HoverPreviewState {
+                item,
+                anchor,
+                started_at: Instant::now(),
+                content: HoverContent::Meta,
+            });
+        }
+    }
+
+    pub fn clear_sidebar_hover_preview(&mut self) {
+        if self.sidebar_hover_active {
+            self.sidebar_hover_active = false;
+            self.hover_preview = None;
+        }
+    }
+
+    pub fn render_floating_preview(&mut self, ui: &Ui, palette: &ThemePalette) {
+        if let Some(ref h) = self.hover_preview {
+            if h.started_at.elapsed() > std::time::Duration::from_millis(350) {
+                self.ensure_hover_content(ui.ctx());
+            }
+        }
+        self.render_hover_preview(ui, palette);
     }
 
     pub fn can_go_back(&self) -> bool {
@@ -3816,9 +3953,10 @@ impl ExplorerView {
             // Right Pinned Container: macOS 3-Segmented Switcher (Icons / List / Columns) & Icon Size
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let mut switch_mode = self.view_mode;
-                crate::gui::finder_chrome::render_segmented_view_switcher(
+                crate::gui::finder_chrome::render_styled_segmented_view_switcher(
                     ui,
                     palette,
+                    &self.design_tokens,
                     self.icon_pack,
                     self.view_mode,
                     |new_m| switch_mode = new_m,
@@ -4204,6 +4342,8 @@ impl ExplorerView {
                     ui.ctx().request_repaint();
                 }
             }
+
+            self.advance_zoom_springs(ui.ctx(), dt);
 
             // Newly created item entrance animation (scale + fade in)
             if let Some((_, ref mut spring)) = self.new_item_entrance {
@@ -4943,8 +5083,13 @@ impl ExplorerView {
 
             let is_sel = self.selected_paths.contains(&item.path);
             if is_sel {
-                ui.painter().rect_filled(row_rect, Rounding::same(6.0), palette.selection);
-                ui.painter().rect_stroke(row_rect, Rounding::same(6.0), Stroke::new(1.0_f32, palette.accent));
+                ui.painter()
+                    .rect_filled(row_rect, Rounding::same(6.0), palette.selection);
+                ui.painter().rect_stroke(
+                    row_rect,
+                    Rounding::same(6.0),
+                    Stroke::new(1.0_f32, palette.accent),
+                );
             }
 
             if row_resp.double_clicked() {
@@ -5645,7 +5790,7 @@ impl ExplorerView {
         let keep_existing = matches!(
             (&self.hover_preview, &new_dash_hover),
             (Some(active), Some((item, _))) if active.item.path == item.path
-        );
+        ) || (self.sidebar_hover_active && self.hover_preview.is_some());
         if keep_existing {
             let due = self
                 .hover_preview
@@ -5656,13 +5801,14 @@ impl ExplorerView {
                 self.ensure_hover_content(ui.ctx());
             }
         } else if let Some((item, anchor)) = new_dash_hover {
+            self.sidebar_hover_active = false;
             self.hover_preview = Some(HoverPreviewState {
                 item,
                 anchor,
                 started_at: Instant::now(),
                 content: HoverContent::Meta,
             });
-        } else {
+        } else if !self.sidebar_hover_active {
             self.hover_preview = None;
         }
         self.render_hover_preview(ui, palette);
@@ -5723,6 +5869,12 @@ impl ExplorerView {
             .map(|c| self.column_layout.width(*c))
             .collect();
         let n_cols = visible.len();
+        let tier = crate::gui::dashboard_layout::tier_for_width(content_width);
+        let bounded = crate::gui::view_zoom::compute_bounded_list_columns(
+            content_width,
+            tier,
+            self.design_tokens.style,
+        );
         let flex_idx = visible
             .iter()
             .position(|c| *c == DetailColumn::Name)
@@ -5735,7 +5887,8 @@ impl ExplorerView {
                 .map(|(_, w)| *w)
                 .sum();
             let min_flex = visible[flex_idx].min_w().max(widths[flex_idx]);
-            widths[flex_idx] = (available_for_cols - fixed).max(min_flex);
+            let target_flex = (available_for_cols - fixed).max(min_flex);
+            widths[flex_idx] = target_flex.min(bounded.name_max_width.max(min_flex));
         }
 
         // Column header: flat interactive labels, no button boxes, hairline underneath
@@ -5958,11 +6111,20 @@ impl ExplorerView {
                 }
                 canvas_dragging = canvas_resp.dragged();
 
+                let zoom_metrics = crate::gui::view_zoom::ListZoomMetrics::for_step(self.list_zoom);
+                let row_height =
+                    if (self.list_zoom_spring.value - zoom_metrics.row_height).abs() > 0.05 {
+                        self.list_zoom_spring.value
+                    } else {
+                        zoom_metrics.row_height
+                    };
+                let font_sz = zoom_metrics.font_size;
+                let icon_sz = zoom_metrics.icon_size;
+
                 ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
 
                 for (idx, item) in entries.iter().enumerate() {
                     let is_selected = self.selected_paths.contains(&item.path);
-                    let row_height = self.row_density.details_row_height();
 
                     let (row_rect, row_resp) = ui.allocate_exact_size(
                         Vec2::new(content_width, row_height),
@@ -6051,7 +6213,7 @@ impl ExplorerView {
                         );
                         if *col == DetailColumn::Name {
                             let name_x = cell_rect.left() + col_pad;
-                            let icon_side = 22.0;
+                            let icon_side = icon_sz;
                             let icon_rect = Rect::from_center_size(
                                 Pos2::new(name_x + 2.0 + icon_side * 0.5, row_rect.center().y),
                                 Vec2::splat(icon_side),
@@ -6078,7 +6240,7 @@ impl ExplorerView {
                                     130,
                                 );
                             }
-                            let name_font = egui::FontId::proportional(13.5);
+                            let name_font = egui::FontId::proportional(font_sz + 0.5);
                             // The name text starts after the icon + tag dots.
                             let name_pos_x = name_x + 28.0 + dots_w;
                             let name_avail = w - 32.0 - col_pad - dots_w;
@@ -6102,19 +6264,27 @@ impl ExplorerView {
                             let (text, font, color, align) = match col {
                                 DetailColumn::Name => (
                                     String::new(),
-                                    egui::FontId::proportional(12.0),
+                                    egui::FontId::proportional(font_sz - 1.0),
                                     palette.text_secondary,
                                     egui::Align2::LEFT_CENTER,
                                 ),
                                 DetailColumn::DateModified => (
                                     item.formatted_date(),
-                                    egui::FontId::proportional(12.0),
+                                    if bounded.tabular_figures {
+                                        egui::FontId::monospace(font_sz - 1.5)
+                                    } else {
+                                        egui::FontId::proportional(font_sz - 1.0)
+                                    },
                                     palette.text_secondary,
                                     egui::Align2::LEFT_CENTER,
                                 ),
                                 DetailColumn::DateCreated => (
                                     item.formatted_created(),
-                                    egui::FontId::proportional(12.0),
+                                    if bounded.tabular_figures {
+                                        egui::FontId::monospace(font_sz - 1.5)
+                                    } else {
+                                        egui::FontId::proportional(font_sz - 1.0)
+                                    },
                                     palette.text_secondary,
                                     egui::Align2::LEFT_CENTER,
                                 ),
@@ -6122,20 +6292,20 @@ impl ExplorerView {
                                     let size_text = self.dir_size_text(item);
                                     (
                                         size_text,
-                                        egui::FontId::monospace(11.5),
+                                        egui::FontId::monospace(font_sz - 1.5),
                                         palette.text_secondary,
                                         egui::Align2::RIGHT_CENTER,
                                     )
                                 }
                                 DetailColumn::Kind => (
                                     icon_spec.category.to_string(),
-                                    egui::FontId::proportional(12.0),
+                                    egui::FontId::proportional(font_sz - 1.0),
                                     palette.text_muted,
                                     egui::Align2::LEFT_CENTER,
                                 ),
                                 DetailColumn::Permissions => (
                                     item.formatted_permissions(),
-                                    egui::FontId::monospace(11.5),
+                                    egui::FontId::monospace(font_sz - 1.5),
                                     palette.text_secondary,
                                     egui::Align2::LEFT_CENTER,
                                 ),
@@ -6145,7 +6315,7 @@ impl ExplorerView {
                                     } else {
                                         String::new()
                                     },
-                                    egui::FontId::proportional(12.0),
+                                    egui::FontId::proportional(font_sz - 1.0),
                                     palette.text_secondary,
                                     egui::Align2::LEFT_CENTER,
                                 ),
@@ -6406,7 +6576,8 @@ impl ExplorerView {
                     Rounding::same(2.0),
                     Stroke::new(1.0_f32, palette.accent),
                 );
-                let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
+                let additive =
+                    ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
                 let hits: Vec<PathBuf> = marquee_rects
                     .iter()
                     .enumerate()
@@ -6514,7 +6685,7 @@ impl ExplorerView {
         let keep_existing = matches!(
             (&self.hover_preview, &new_hover),
             (Some(active), Some((item, _))) if active.item.path == item.path
-        );
+        ) || (self.sidebar_hover_active && self.hover_preview.is_some());
         if keep_existing {
             let due = self
                 .hover_preview
@@ -6525,13 +6696,14 @@ impl ExplorerView {
                 self.ensure_hover_content(ui.ctx());
             }
         } else if let Some((item, anchor)) = new_hover {
+            self.sidebar_hover_active = false;
             self.hover_preview = Some(HoverPreviewState {
                 item,
                 anchor,
                 started_at: Instant::now(),
                 content: HoverContent::Meta,
             });
-        } else {
+        } else if !self.sidebar_hover_active {
             self.hover_preview = None;
         }
         self.render_hover_preview(ui, palette);
@@ -7223,19 +7395,24 @@ impl ExplorerView {
             }
         }
 
-        // Icon size scaled by the zoom level (Small -> Medium -> Large -> Extra large)
-        let grid_zoom_scale = Self::EXPLORER_ZOOM_LEVELS[(self.explorer_zoom as usize).min(4)];
+        // Grid zoom & column reflow
+        let zoom_metrics = crate::gui::view_zoom::GridZoomMetrics::for_step(self.grid_zoom);
         let grid_checkboxes = self.checkbox_mode;
-        let icon_sz = (self.icon_size * grid_zoom_scale).clamp(64.0, 300.0);
-        // Proportional tile chrome: label and padding scale with the
-        // icon so the name never crowds the glyph at small sizes and
-        // the icon always paints at the requested size.
-        let label_font = (icon_sz * 0.15).clamp(12.0, 22.0);
-        let size_font = (label_font - 2.0).clamp(9.5, 12.0);
+        let icon_sz = if (self.grid_zoom_spring.value - zoom_metrics.icon_size).abs() > 0.05 {
+            self.grid_zoom_spring.value
+        } else {
+            zoom_metrics.icon_size
+        };
+        let gap = 14.0_f32;
+        let avail_w = (ui.available_width() - 16.0).max(zoom_metrics.min_tile_width);
+        let reflow =
+            crate::gui::view_zoom::compute_grid_reflow(avail_w, zoom_metrics.min_tile_width, gap);
+        let tile_w = reflow.tile_width;
+        let label_font = zoom_metrics.font_size;
+        let size_font = (label_font - 1.5).max(9.5);
         let label_zone_h = label_font * 2.6;
         let bottom_chrome = label_zone_h + size_font + 10.0;
         let top_pad = (icon_sz * 0.10).clamp(8.0, 26.0);
-        let tile_w = (icon_sz + 32.0).max(96.0);
         let tile_h = top_pad + icon_sz + bottom_chrome;
         let tile_size = Vec2::new(tile_w, tile_h);
 
@@ -7274,7 +7451,7 @@ impl ExplorerView {
                 canvas_dragging = canvas_resp.dragged();
 
                 ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(14.0, 14.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(reflow.gap, reflow.gap);
 
                     for (idx, item) in entries.iter().enumerate() {
                         let is_checked = self.selected_paths.contains(&item.path);
@@ -7719,7 +7896,8 @@ impl ExplorerView {
                     Rounding::same(2.0),
                     Stroke::new(1.0_f32, palette.accent),
                 );
-                let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
+                let additive =
+                    ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
                 let hits: Vec<PathBuf> = marquee_rects
                     .iter()
                     .enumerate()
@@ -7826,7 +8004,7 @@ impl ExplorerView {
         let keep_existing = matches!(
             (&self.hover_preview, &new_hover),
             (Some(active), Some((item, _))) if active.item.path == item.path
-        );
+        ) || (self.sidebar_hover_active && self.hover_preview.is_some());
         if keep_existing {
             let due = self
                 .hover_preview
@@ -7837,13 +8015,14 @@ impl ExplorerView {
                 self.ensure_hover_content(ui.ctx());
             }
         } else if let Some((item, anchor)) = new_hover {
+            self.sidebar_hover_active = false;
             self.hover_preview = Some(HoverPreviewState {
                 item,
                 anchor,
                 started_at: Instant::now(),
                 content: HoverContent::Meta,
             });
-        } else {
+        } else if !self.sidebar_hover_active {
             self.hover_preview = None;
         }
         self.render_hover_preview(ui, palette);
@@ -7884,6 +8063,7 @@ impl ExplorerView {
         preview_to_set: &mut Option<FileItem>,
         column_drop: &mut Option<DropOp>,
         item_intents: &mut Vec<ItemMenuIntents>,
+        new_hover: &mut Option<(FileItem, Pos2)>,
     ) {
         ui.allocate_ui_with_layout(
             Vec2::new(col_w, full_h),
@@ -8053,6 +8233,11 @@ impl ExplorerView {
                                                 Rounding::same(6.0),
                                                 palette.hover,
                                             );
+                                        }
+
+                                        if resp.hovered() {
+                                            *new_hover = Some((item.clone(), row_rect.right_top() + Vec2::new(10.0, 0.0)));
+                                            resp.clone().on_hover_text(format!("{} ({})", item.name, if item.is_dir { "Folder" } else { &item.extension }));
                                         }
                                         // Pack vector icon on left
                                         let (icon_glyph, accent_rgb) =
@@ -8278,6 +8463,7 @@ impl ExplorerView {
         }
 
         let full_h = ui.available_height().max(320.0);
+        let mut new_hover: Option<(FileItem, Pos2)> = None;
         egui::ScrollArea::horizontal()
             .id_salt("miller_outer_hscroll")
             .auto_shrink([false, false])
@@ -8327,11 +8513,20 @@ impl ExplorerView {
                     // Miller lineage: the navigated directory is the primary first column (Column 0).
                     // Subfolders opened by click form the descendant stack (Columns 1..N).
                     // Double-clicking a folder makes that folder become the first column.
+                    let zoom_metrics =
+                        crate::gui::view_zoom::MillerZoomMetrics::for_step(self.miller_zoom);
+                    let base_col_w =
+                        if (self.miller_zoom_spring.value - zoom_metrics.column_width).abs() > 0.05
+                        {
+                            self.miller_zoom_spring.value
+                        } else {
+                            zoom_metrics.column_width
+                        };
                     let cur_dir = self.current_dir.clone();
                     let num_cols = (1 + self.column_stack.len()) as f32;
-                    let cols_avail_w = (avail_w - inspector_w - (num_cols * 2.0)).max(220.0);
+                    let cols_avail_w = (avail_w - inspector_w - (num_cols * 2.0)).max(180.0);
                     let natural_col_w = cols_avail_w / num_cols;
-                    let col_w = natural_col_w.max(260.0);
+                    let col_w = natural_col_w.max(base_col_w);
 
                     // ==========================================
                     // PRIMARY COLUMN (Column 0): Current Directory
@@ -8355,6 +8550,7 @@ impl ExplorerView {
                             &mut preview_to_set,
                             &mut column_drop,
                             &mut item_intents,
+                            &mut new_hover,
                         );
                     }
 
@@ -8382,6 +8578,7 @@ impl ExplorerView {
                             &mut preview_to_set,
                             &mut column_drop,
                             &mut item_intents,
+                            &mut new_hover,
                         );
                     }
 
@@ -8438,6 +8635,32 @@ impl ExplorerView {
         if let Some(new_dir) = nav_into_dir {
             self.navigate_to(new_dir);
         }
+
+        let keep_existing = matches!(
+            (&self.hover_preview, &new_hover),
+            (Some(active), Some((item, _))) if active.item.path == item.path
+        ) || (self.sidebar_hover_active && self.hover_preview.is_some());
+        if keep_existing {
+            let due = self
+                .hover_preview
+                .as_ref()
+                .map(|h| h.started_at.elapsed() > std::time::Duration::from_millis(350))
+                .unwrap_or(false);
+            if due {
+                self.ensure_hover_content(ui.ctx());
+            }
+        } else if let Some((item, anchor)) = new_hover {
+            self.sidebar_hover_active = false;
+            self.hover_preview = Some(HoverPreviewState {
+                item,
+                anchor,
+                started_at: Instant::now(),
+                content: HoverContent::Meta,
+            });
+        } else if !self.sidebar_hover_active {
+            self.hover_preview = None;
+        }
+        self.render_hover_preview(ui, palette);
 
         // Context-menu intents (mirrors the list view consumption).
         if canvas_intents.new_folder {

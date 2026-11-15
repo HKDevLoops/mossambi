@@ -676,11 +676,28 @@ impl eframe::App for MossambiApp {
         // pointer wheel and digit keys; zoom must not mutate the
         // view underneath the backdrop.
         let palette_open = self.studio_view.command_palette.is_open;
-        let (ui_zoom_scroll, ui_zoom_reset, explorer_scroll, explorer_reset) = ctx.input(|i| {
+        let is_typing = ctx.wants_keyboard_input();
+        let (
+            ui_zoom_scroll,
+            ui_zoom_reset,
+            explorer_scroll,
+            explorer_reset,
+            explorer_zoom_in,
+            explorer_zoom_out,
+            switch_to_grid,
+            switch_to_details,
+            switch_to_columns,
+        ) = ctx.input(|i| {
             let ctrl = i.modifiers.ctrl || i.modifiers.command;
             let shift = i.modifiers.shift;
             let scroll = if ctrl { i.raw_scroll_delta.y } else { 0.0 };
             let num0 = i.key_pressed(egui::Key::Num0);
+            let zoom_in_key = i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals);
+            let zoom_out_key = i.key_pressed(egui::Key::Minus);
+            let num1 = i.key_pressed(egui::Key::Num1);
+            let num2 = i.key_pressed(egui::Key::Num2);
+            let num3 = i.key_pressed(egui::Key::Num3);
+
             (
                 if ctrl && shift && !palette_open {
                     scroll
@@ -693,15 +710,39 @@ impl eframe::App for MossambiApp {
                 } else {
                     0.0
                 },
-                ctrl && !shift && num0 && !palette_open,
+                ctrl && !shift && num0 && !palette_open && !is_typing,
+                ctrl && !shift && zoom_in_key && !palette_open && !is_typing,
+                ctrl && !shift && zoom_out_key && !palette_open && !is_typing,
+                ctrl && !shift && num1 && !palette_open && !is_typing,
+                ctrl && !shift && num2 && !palette_open && !is_typing,
+                ctrl && !shift && num3 && !palette_open && !is_typing,
             )
         });
+
+        if switch_to_grid {
+            self.studio_view.explorer_view.view_mode = crate::core::ViewMode::Grid;
+        } else if switch_to_details {
+            self.studio_view.explorer_view.view_mode = crate::core::ViewMode::Details;
+        } else if switch_to_columns {
+            self.studio_view.explorer_view.view_mode = crate::core::ViewMode::Columns;
+        }
+
         if explorer_reset {
-            self.studio_view.explorer_view.explorer_zoom = 2;
-            log::debug!("explorer zoom reset to level 2 (Ctrl+0)");
-        } else if explorer_scroll != 0.0 {
-            let step = if explorer_scroll > 0.0 { 1 } else { -1 };
-            self.studio_view.explorer_view.zoom_ladder_step(step);
+            self.studio_view.explorer_view.reset_active_mode_zoom();
+            let mode = self.studio_view.explorer_view.view_mode;
+            let level = self.studio_view.explorer_view.active_mode_zoom();
+            self.config.set_zoom_for_mode(mode, level);
+            log::debug!("explorer zoom reset to default level 2 for {:?}", mode);
+        } else if explorer_zoom_in || explorer_scroll > 0.0 {
+            self.studio_view.explorer_view.zoom_step_active_mode(1);
+            let mode = self.studio_view.explorer_view.view_mode;
+            let level = self.studio_view.explorer_view.active_mode_zoom();
+            self.config.set_zoom_for_mode(mode, level);
+        } else if explorer_zoom_out || explorer_scroll < 0.0 {
+            self.studio_view.explorer_view.zoom_step_active_mode(-1);
+            let mode = self.studio_view.explorer_view.view_mode;
+            let level = self.studio_view.explorer_view.active_mode_zoom();
+            self.config.set_zoom_for_mode(mode, level);
         } else if ui_zoom_reset {
             self.ui_zoom = 1.0;
             self.last_applied_theme = None;
@@ -1676,8 +1717,14 @@ fn render_window_animation_overlay(
 
             // Draw smooth funnel outer perimeter stroke
             for i in 0..slices {
-                painter.line_segment([left_edge[i], left_edge[i + 1]], egui::Stroke::new(1.5_f32, stroke_color));
-                painter.line_segment([right_edge[i], right_edge[i + 1]], egui::Stroke::new(1.5_f32, stroke_color));
+                painter.line_segment(
+                    [left_edge[i], left_edge[i + 1]],
+                    egui::Stroke::new(1.5_f32, stroke_color),
+                );
+                painter.line_segment(
+                    [right_edge[i], right_edge[i + 1]],
+                    egui::Stroke::new(1.5_f32, stroke_color),
+                );
             }
             if let (Some(tl), Some(tr)) = (left_edge.first(), right_edge.first()) {
                 painter.line_segment([*tl, *tr], egui::Stroke::new(1.5_f32, stroke_color));
@@ -1709,7 +1756,11 @@ fn render_window_animation_overlay(
             );
 
             painter.rect_filled(rect, egui::Rounding::same(12.0 * scale), bg_color);
-            painter.rect_stroke(rect, egui::Rounding::same(12.0 * scale), egui::Stroke::new(1.5_f32, stroke_color));
+            painter.rect_stroke(
+                rect,
+                egui::Rounding::same(12.0 * scale),
+                egui::Stroke::new(1.5_f32, stroke_color),
+            );
         }
     }
 }
@@ -1727,6 +1778,9 @@ impl MossambiApp {
         let ev = &mut self.studio_view.explorer_view;
         ev.icon_pack = crate::core::icon_packs::IconPack::from_config_id(&from_cfg.icon_pack);
         ev.explorer_zoom = from_cfg.explorer_zoom;
+        ev.list_zoom = from_cfg.list_zoom;
+        ev.grid_zoom = from_cfg.grid_zoom;
+        ev.miller_zoom = from_cfg.miller_zoom;
         ev.checkbox_mode = from_cfg.checkbox_mode;
         ev.menu_style = from_cfg.menu_style;
         ev.animations = from_cfg.animations;
@@ -1753,6 +1807,20 @@ impl MossambiApp {
         }
         if now.explorer_zoom != prev.explorer_zoom {
             self.config.explorer_zoom = now.explorer_zoom;
+            self.config.grid_zoom = now.explorer_zoom;
+            dirty = true;
+        }
+        if now.list_zoom != prev.list_zoom {
+            self.config.list_zoom = now.list_zoom;
+            dirty = true;
+        }
+        if now.grid_zoom != prev.grid_zoom {
+            self.config.grid_zoom = now.grid_zoom;
+            self.config.explorer_zoom = now.grid_zoom;
+            dirty = true;
+        }
+        if now.miller_zoom != prev.miller_zoom {
+            self.config.miller_zoom = now.miller_zoom;
             dirty = true;
         }
         if now.checkbox_mode != prev.checkbox_mode {
@@ -1791,6 +1859,9 @@ impl MossambiApp {
 pub struct ExplorerPrefMirror {
     icon_pack: String,
     explorer_zoom: u8,
+    list_zoom: u8,
+    grid_zoom: u8,
+    miller_zoom: u8,
     checkbox_mode: crate::core::config::CheckboxMode,
     menu_style: crate::core::config::MenuStyle,
     animations: crate::core::config::AnimationSettings,
@@ -1804,6 +1875,9 @@ impl ExplorerPrefMirror {
         Self {
             icon_pack: e.icon_pack.id().to_string(),
             explorer_zoom: e.explorer_zoom,
+            list_zoom: e.list_zoom,
+            grid_zoom: e.grid_zoom,
+            miller_zoom: e.miller_zoom,
             checkbox_mode: e.checkbox_mode,
             menu_style: e.menu_style,
             animations: e.animations,
@@ -1817,6 +1891,9 @@ impl ExplorerPrefMirror {
         Self {
             icon_pack: c.icon_pack.clone(),
             explorer_zoom: c.explorer_zoom,
+            list_zoom: c.list_zoom,
+            grid_zoom: c.grid_zoom,
+            miller_zoom: c.miller_zoom,
             checkbox_mode: c.checkbox_mode,
             menu_style: c.menu_style,
             animations: c.animations,

@@ -19,31 +19,98 @@ pub enum ThreadQoS {
     Default,
 }
 
-/// Discovered CPU core topology.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Discovered CPU core topology and system architecture.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CpuTopology {
     /// Total logical processing units available.
     pub total_logical_cores: usize,
-    /// Number of identified or estimated Performance cores.
+    /// Number of physical cores detected.
+    pub physical_cores: usize,
+    /// Number of Performance cores (or P-core allocation).
     pub p_cores: usize,
-    /// Number of identified or estimated Efficiency cores.
+    /// Number of Efficiency cores (or E-core allocation).
     pub e_cores: usize,
-    /// True when heterogeneous core classes are detected.
+    /// Number of Super / Prime cores (or super allocation).
+    pub super_cores: usize,
+    /// True when heterogeneous hardware core classes are detected.
     pub is_hybrid: bool,
+    /// CPU Brand/Model name.
+    pub cpu_name: String,
 }
 
 impl CpuTopology {
     /// Formats a descriptive label for UI settings.
     pub fn description(&self) -> String {
         if self.is_hybrid {
+            if self.super_cores > 0 {
+                format!(
+                    "Hybrid ({}T: {} P + {} E + {} Super)",
+                    self.total_logical_cores, self.p_cores, self.e_cores, self.super_cores
+                )
+            } else {
+                format!(
+                    "Hybrid ({}T: {} P-cores + {} E-cores)",
+                    self.total_logical_cores, self.p_cores, self.e_cores
+                )
+            }
+        } else if self.super_cores > 0 {
             format!(
-                "Hybrid ({} cores: {} P-cores + {} E-cores)",
-                self.total_logical_cores, self.p_cores, self.e_cores
+                "Classical ({}T: {} P + {} E-EcoQoS + {} Super UI)",
+                self.total_logical_cores, self.p_cores, self.e_cores, self.super_cores
             )
         } else {
-            format!("{} cores", self.total_logical_cores)
+            format!(
+                "Classical ({}T: {} Performance + {} EcoQoS)",
+                self.total_logical_cores, self.p_cores, self.e_cores
+            )
         }
     }
+
+    /// Detailed description of architecture for About / Diagnostics.
+    pub fn detailed_summary(&self) -> String {
+        if self.is_hybrid {
+            format!(
+                "{} - Heterogeneous Hybrid Architecture: {} logical processors ({} P-cores, {} E-cores, {} Super-cores)",
+                self.cpu_name, self.total_logical_cores, self.p_cores, self.e_cores, self.super_cores
+            )
+        } else {
+            format!(
+                "{} - Classical Architecture ({} cores / {} threads): Partitioned as {} Performance workers (50%), {} Background EcoQoS workers, and {} Super-core UI worker",
+                self.cpu_name, self.physical_cores, self.total_logical_cores, self.p_cores, self.e_cores, self.super_cores
+            )
+        }
+    }
+}
+
+/// Queries CPU brand string via x86 CPUID or generic fallback.
+pub fn query_cpu_brand_string() -> String {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        #[cfg(target_arch = "x86")]
+        use std::arch::x86::__cpuid;
+        #[cfg(target_arch = "x86_64")]
+        use std::arch::x86_64::__cpuid;
+
+        #[allow(unused_unsafe)]
+        {
+            let max_ext = unsafe { __cpuid(0x80000000) }.eax;
+            if max_ext >= 0x80000004 {
+                let mut bytes = Vec::with_capacity(48);
+                for func in 0x80000002..=0x80000004 {
+                    let res = unsafe { __cpuid(func) };
+                    for reg in [res.eax, res.ebx, res.ecx, res.edx] {
+                        bytes.extend_from_slice(&reg.to_le_bytes());
+                    }
+                }
+                let s = String::from_utf8_lossy(&bytes);
+                let trimmed = s.trim_matches('\0').trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+            }
+        }
+    }
+    "Multi-Core Processor".to_string()
 }
 
 /// Detects CPU topology and core distribution using system APIs.
@@ -51,20 +118,44 @@ pub fn detect_cpu_topology() -> CpuTopology {
     let total = std::thread::available_parallelism()
         .map(|p| p.get())
         .unwrap_or(4);
+    let cpu_name = query_cpu_brand_string();
 
     #[cfg(target_os = "windows")]
     {
-        win32_topology::detect_windows_topology(total)
+        win32_topology::detect_windows_topology(total, cpu_name)
     }
 
     #[cfg(not(target_os = "windows"))]
     {
+        let (p_cores, e_cores, super_cores) = partition_classical_cores(total);
         CpuTopology {
             total_logical_cores: total,
-            p_cores: total,
-            e_cores: 0,
+            physical_cores: (total / 2).max(1),
+            p_cores,
+            e_cores,
+            super_cores,
             is_hybrid: false,
+            cpu_name,
         }
+    }
+}
+
+/// Classical homogeneous CPU core partitioner (e.g. AMD Ryzen 4800H 8C/16T):
+/// - ~50% allocated to Performance tasks (transcoding, heavy indexing, hashing)
+/// - ~40-50% allocated to Efficiency background tasks (EcoQoS file watching, cache)
+/// - ~10% (1 core) allocated to latency-critical Super-core UI responsiveness
+pub fn partition_classical_cores(total: usize) -> (usize, usize, usize) {
+    if total >= 8 {
+        let super_cores = (total * 10 / 100).clamp(1, 2);
+        let p_cores = (total * 50 / 100).max(1);
+        let e_cores = total.saturating_sub(p_cores + super_cores).max(1);
+        (p_cores, e_cores, super_cores)
+    } else if total >= 4 {
+        let p_cores = total / 2;
+        let e_cores = total.saturating_sub(p_cores);
+        (p_cores, e_cores, 0)
+    } else {
+        (total.max(1), 0, 0)
     }
 }
 
@@ -116,6 +207,7 @@ mod win32_qos {
     }
 
     pub fn apply_windows_thread_qos(qos: ThreadQoS) {
+        #[allow(unused_unsafe)]
         unsafe {
             let t = GetCurrentThread();
             match qos {
@@ -187,8 +279,9 @@ mod win32_topology {
         ) -> i32;
     }
 
-    pub fn detect_windows_topology(total: usize) -> CpuTopology {
+    pub fn detect_windows_topology(total: usize, cpu_name: String) -> CpuTopology {
         let mut len: u32 = 0;
+        #[allow(unused_unsafe)]
         unsafe {
             let _ = GetLogicalProcessorInformationEx(
                 RELATION_PROCESSOR_CORE,
@@ -197,33 +290,39 @@ mod win32_topology {
             );
         }
         if len == 0 {
+            let (p_cores, e_cores, super_cores) = super::partition_classical_cores(total);
             return CpuTopology {
                 total_logical_cores: total,
-                p_cores: total,
-                e_cores: 0,
+                physical_cores: (total / 2).max(1),
+                p_cores,
+                e_cores,
+                super_cores,
                 is_hybrid: false,
+                cpu_name,
             };
         }
 
         let mut buf = vec![0u8; len as usize];
         let ok = unsafe {
-            GetLogicalProcessorInformationEx(
-                RELATION_PROCESSOR_CORE,
-                buf.as_mut_ptr(),
-                &mut len,
-            )
+            GetLogicalProcessorInformationEx(RELATION_PROCESSOR_CORE, buf.as_mut_ptr(), &mut len)
         };
         if ok == 0 {
+            let (p_cores, e_cores, super_cores) = super::partition_classical_cores(total);
             return CpuTopology {
                 total_logical_cores: total,
-                p_cores: total,
-                e_cores: 0,
+                physical_cores: (total / 2).max(1),
+                p_cores,
+                e_cores,
+                super_cores,
                 is_hybrid: false,
+                cpu_name,
             };
         }
 
         let mut p_count = 0usize;
         let mut e_count = 0usize;
+        let mut super_count = 0usize;
+        let mut physical_cores = 0usize;
         let mut offset = 0usize;
         while offset + std::mem::size_of::<SystemLogicalProcessorInformationEx>() <= buf.len() {
             let info = unsafe {
@@ -233,28 +332,37 @@ mod win32_topology {
                 break;
             }
             if info.relationship == RELATION_PROCESSOR_CORE {
-                if info.processor_core.efficiency_class == 0 {
-                    e_count += 1;
-                } else {
-                    p_count += 1;
+                physical_cores += 1;
+                match info.processor_core.efficiency_class {
+                    0 => e_count += 1,
+                    1 => p_count += 1,
+                    _ => super_count += 1,
                 }
             }
             offset += info.size as usize;
         }
 
-        if p_count > 0 && e_count > 0 {
+        if (p_count > 0 && e_count > 0) || (super_count > 0 && (p_count > 0 || e_count > 0)) {
             CpuTopology {
                 total_logical_cores: total,
-                p_cores: p_count,
+                physical_cores: physical_cores.max(1),
+                p_cores: p_count.max(1),
                 e_cores: e_count,
+                super_cores: super_count,
                 is_hybrid: true,
+                cpu_name,
             }
         } else {
+            // Classical homogeneous processor (e.g. AMD Ryzen 4800H 8C/16T, Intel 10th Gen)
+            let (p_cores, e_cores, super_cores) = super::partition_classical_cores(total);
             CpuTopology {
                 total_logical_cores: total,
-                p_cores: total,
-                e_cores: 0,
+                physical_cores: physical_cores.max((total / 2).max(1)),
+                p_cores,
+                e_cores,
+                super_cores,
                 is_hybrid: false,
+                cpu_name,
             }
         }
     }
@@ -278,6 +386,7 @@ mod darwin_qos {
             ThreadQoS::Efficiency => QOS_CLASS_BACKGROUND,
             ThreadQoS::Default => QOS_CLASS_DEFAULT,
         };
+        #[allow(unused_unsafe)]
         unsafe {
             let _ = pthread_set_qos_class_self_np(code, 0);
         }

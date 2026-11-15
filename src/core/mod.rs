@@ -54,7 +54,7 @@ pub use async_worker::{AsyncWorkerPool, ItemOutcome, TaskUpdate};
 pub use config::{
     default_dashboard_slots, Appearance, CornerStyle, DashboardWidgetSlot, DesignStyle,
     DesignTokens, DropActionPreference, ExplorerStyle, GlassEffect, LookPreset, MossambiConfig,
-    OutputMode, RowDensity, SidebarStyle, ThemeMode,
+    OutputMode, RowDensity, SidebarStyle, ThemeMode, ViewMode,
 };
 pub use conversion_queue::{
     ConversionQueue, QueueAction, QueueItem, QueueItemStatus, QueueSummary,

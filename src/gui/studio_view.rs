@@ -188,6 +188,13 @@ pub struct StudioView {
 
     /// Smooth animated sidebar width spring for collapse/expand (Ctrl+B).
     pub sidebar_width_spring: crate::gui::anim::Spring,
+
+    // Navigation button micro-animation click timestamps
+    pub nav_anim_back: Option<std::time::Instant>,
+    pub nav_anim_fwd: Option<std::time::Instant>,
+    pub nav_anim_up: Option<std::time::Instant>,
+    pub nav_anim_refresh: Option<std::time::Instant>,
+    pub nav_anim_newfolder: Option<std::time::Instant>,
 }
 
 impl Default for StudioView {
@@ -206,6 +213,11 @@ impl Default for StudioView {
             catalogue_category: None,
 
             sidebar_width_spring: crate::gui::anim::Spring::new(240.0),
+            nav_anim_back: None,
+            nav_anim_fwd: None,
+            nav_anim_up: None,
+            nav_anim_refresh: None,
+            nav_anim_newfolder: None,
 
             prefs_view: crate::gui::preferences_view::PreferencesView::default(),
             command_palette: CommandPalette::default(),
@@ -941,7 +953,7 @@ impl StudioView {
                         }
 
                         let can_back = self.explorer_view.can_go_back();
-                        if crate::gui::finder_chrome::toolbar_icon_button(
+                        if crate::gui::finder_chrome::toolbar_animated_icon_button(
                             ui,
                             &palette,
                             pack,
@@ -949,6 +961,8 @@ impl StudioView {
                             if can_back { text_rgb } else { muted_rgb },
                             "Back (Alt+Left)",
                             false,
+                            crate::gui::finder_chrome::ToolbarButtonAnim::SlideLeft,
+                            &mut self.nav_anim_back,
                         ) && can_back
                         {
                             self.current_tab = StudioTab::FileExplorer;
@@ -956,7 +970,7 @@ impl StudioView {
                         }
 
                         let can_fwd = self.explorer_view.can_go_forward();
-                        if crate::gui::finder_chrome::toolbar_icon_button(
+                        if crate::gui::finder_chrome::toolbar_animated_icon_button(
                             ui,
                             &palette,
                             pack,
@@ -964,13 +978,15 @@ impl StudioView {
                             if can_fwd { text_rgb } else { muted_rgb },
                             "Forward (Alt+Right)",
                             false,
+                            crate::gui::finder_chrome::ToolbarButtonAnim::SlideRight,
+                            &mut self.nav_anim_fwd,
                         ) && can_fwd
                         {
                             self.current_tab = StudioTab::FileExplorer;
                             self.explorer_view.go_forward();
                         }
 
-                        if crate::gui::finder_chrome::toolbar_icon_button(
+                        if crate::gui::finder_chrome::toolbar_animated_icon_button(
                             ui,
                             &palette,
                             pack,
@@ -978,6 +994,8 @@ impl StudioView {
                             text_rgb,
                             "Up to parent folder (Alt+Up / Backspace)",
                             false,
+                            crate::gui::finder_chrome::ToolbarButtonAnim::BounceUp,
+                            &mut self.nav_anim_up,
                         ) {
                             self.current_tab = StudioTab::FileExplorer;
                             if let Some(parent) = self.explorer_view.current_dir.parent() {
@@ -988,20 +1006,22 @@ impl StudioView {
                             }
                         }
 
-                        if crate::gui::finder_chrome::toolbar_icon_button(
+                        if crate::gui::finder_chrome::toolbar_animated_icon_button(
                             ui,
                             &palette,
                             pack,
                             IconGlyph::ActionRefresh,
                             text_rgb,
-                            "Refresh directory (F5)",
+                            "Refresh directory (F5 / Ctrl+R)",
                             false,
+                            crate::gui::finder_chrome::ToolbarButtonAnim::SpinRotate,
+                            &mut self.nav_anim_refresh,
                         ) {
                             self.explorer_view
                                 .navigate_to(self.explorer_view.current_dir.clone());
                         }
 
-                        if crate::gui::finder_chrome::toolbar_icon_button(
+                        if crate::gui::finder_chrome::toolbar_animated_icon_button(
                             ui,
                             &palette,
                             pack,
@@ -1009,6 +1029,8 @@ impl StudioView {
                             text_rgb,
                             "New Folder (Ctrl+Shift+N)",
                             false,
+                            crate::gui::finder_chrome::ToolbarButtonAnim::PulsePop,
+                            &mut self.nav_anim_newfolder,
                         ) {
                             self.explorer_view.show_new_folder_dialog = true;
                         }
@@ -1471,9 +1493,10 @@ impl StudioView {
                             if chrome_spec.toolbar.contains(&ToolbarItem::ViewSwitcher)
                                 && chrome_spec.title_bar != TitleBarStyle::Separate
                             {
-                                crate::gui::finder_chrome::render_segmented_view_switcher(
+                                crate::gui::finder_chrome::render_styled_segmented_view_switcher(
                                     ui,
                                     &palette,
+                                    &self.explorer_view.design_tokens,
                                     pack,
                                     self.explorer_view.view_mode,
                                     |mode| {
@@ -1605,9 +1628,10 @@ impl StudioView {
                                         }
                                     }
                                     ToolbarItem::ViewSwitcher => {
-                                        crate::gui::finder_chrome::render_segmented_view_switcher(
+                                        crate::gui::finder_chrome::render_styled_segmented_view_switcher(
                                             ui,
                                             &palette,
+                                            &self.explorer_view.design_tokens,
                                             pack,
                                             self.explorer_view.view_mode,
                                             |mode| {
@@ -1645,7 +1669,7 @@ impl StudioView {
             });
 
         // 2. Left Sidebar Panel (Pinned, Drives, Cloud, Network, Tags, Tools)
-        let target_sidebar_w = if config.sidebar_collapsed {
+        let target_sidebar_w = if config.sidebar_collapsed || self.current_tab == StudioTab::Preferences {
             0.0_f32
         } else {
             chrome_spec.sidebar.width
@@ -1723,6 +1747,8 @@ impl StudioView {
                         let is_sidebar_active =
                             |p: &PathBuf| active_sidebar_path.as_ref() == Some(p);
 
+                        let mut sidebar_hover: Option<(crate::core::FileItem, Pos2)> = None;
+
                         if chrome_spec.sidebar.show_favorites {
                             // 1. Home Item (Apple HIG Home Blue)
                             let is_home_active = self.current_tab == StudioTab::FileExplorer
@@ -1735,6 +1761,7 @@ impl StudioView {
                                 selected: is_home_active,
                                 show_pin: false,
                                 dimmed: false,
+                                tooltip: Some("Home - Dashboard & Quick Access".to_string()),
                             };
                             let home_click = render_sidebar_row(ui, &palette, &home_spec);
                             if home_click.row {
@@ -1818,8 +1845,15 @@ impl StudioView {
                                     selected: is_active,
                                     show_pin: false,
                                     dimmed: false,
+                                    tooltip: Some(format!("{name} ({})", path.display())),
                                 };
                                 let row_click = render_sidebar_row(ui, &palette, &spec);
+                                if row_click.hovered && path.exists() {
+                                    sidebar_hover = Some((
+                                        crate::core::FileItem::from_path(path.clone()),
+                                        row_click.rect.right_top() + Vec2::new(12.0, 0.0),
+                                    ));
+                                }
                                 if let Some(payload) = row_click.dropped {
                                     dispatch_sidebar_drop(
                                         &mut self.explorer_view,
@@ -1928,6 +1962,18 @@ impl StudioView {
                                     let row_resp =
                                         ui.interact(row_hit_rect, row_id, Sense::click_and_drag());
                                     let is_hovered = hover_resp.hovered() || row_resp.hovered();
+                                    row_resp.clone().on_hover_ui(|ui| {
+                                        crate::gui::finder_chrome::show_tooltip(
+                                            ui,
+                                            format!("{name} ({})", path.display()),
+                                        )
+                                    });
+                                    if is_hovered && path.exists() {
+                                        sidebar_hover = Some((
+                                            crate::core::FileItem::from_path(path.clone()),
+                                            rect.right_top() + Vec2::new(12.0, 0.0),
+                                        ));
+                                    }
                                     let painter = ui.painter_at(rect);
 
                                     // Drag to reorder
@@ -2282,8 +2328,15 @@ impl StudioView {
                                         selected: is_active,
                                         show_pin: false,
                                         dimmed: false,
+                                        tooltip: Some(format!("{} ({})", drive.display_name, drive.path.display())),
                                     };
                                     let drive_click = render_sidebar_row(ui, &palette, &spec);
+                                    if drive_click.hovered && drive.path.exists() {
+                                        sidebar_hover = Some((
+                                            crate::core::FileItem::from_path(drive.path.clone()),
+                                            drive_click.rect.right_top() + Vec2::new(12.0, 0.0),
+                                        ));
+                                    }
                                     if let Some(payload) = drive_click.dropped {
                                         dispatch_sidebar_drop(
                                             &mut self.explorer_view,
@@ -2312,8 +2365,15 @@ impl StudioView {
                                             selected: is_active,
                                             show_pin: false,
                                             dimmed: false,
+                                            tooltip: Some(format!("OneDrive ({})", od.display())),
                                         };
                                         let cloud_click = render_sidebar_row(ui, &palette, &spec);
+                                        if cloud_click.hovered && od.exists() {
+                                            sidebar_hover = Some((
+                                                crate::core::FileItem::from_path(od.clone()),
+                                                cloud_click.rect.right_top() + Vec2::new(12.0, 0.0),
+                                            ));
+                                        }
                                         if let Some(payload) = cloud_click.dropped {
                                             dispatch_sidebar_drop(
                                                 &mut self.explorer_view,
@@ -2479,6 +2539,7 @@ impl StudioView {
                                         selected: is_active,
                                         show_pin: false,
                                         dimmed: false,
+                                        tooltip: Some(format!("Open {label}")),
                                     };
                                     let tool_click = render_sidebar_row(ui, &palette, &spec);
                                     if tool_click.row {
@@ -2490,6 +2551,12 @@ impl StudioView {
                                     ui.add_space(1.0);
                                 }
                             }
+                        }
+
+                        if let Some((item, anchor)) = sidebar_hover {
+                            self.explorer_view.trigger_hover_preview(item, anchor);
+                        } else {
+                            self.explorer_view.clear_sidebar_hover_preview();
                         }
 
                         ui.add_space(12.0);
@@ -2510,7 +2577,8 @@ impl StudioView {
 
         egui::CentralPanel::default()
             .frame(central_frame)
-            .show(ctx, |ui| match self.current_tab {
+            .show(ctx, |ui| {
+                match self.current_tab {
                 StudioTab::FileExplorer => {
                     let mut staged: Option<PathBuf> = None;
                     let mut transcode_reqs: Vec<(PathBuf, String)> = Vec::new();
@@ -2648,7 +2716,12 @@ impl StudioView {
                             });
                         });
                 }
-            });
+            }
+
+            if self.current_tab != StudioTab::FileExplorer {
+                self.explorer_view.render_floating_preview(ui, &palette);
+            }
+        });
 
         // Finder-style Command Palette Modal (Ctrl+P / Cmd+K)
         let palette_action = self.command_palette.render(
@@ -2782,11 +2855,14 @@ impl StudioView {
                 self.explorer_view.show_new_folder_dialog = true;
             }
             PaletteAction::NewWindow => {
-                crate::gui::explorer_view::spawn_new_explorer_window(Some(&self.explorer_view.current_dir));
+                crate::gui::explorer_view::spawn_new_explorer_window(Some(
+                    &self.explorer_view.current_dir,
+                ));
             }
             PaletteAction::NewTab => {
                 self.current_tab = StudioTab::FileExplorer;
-                self.explorer_view.add_tab(self.explorer_view.current_dir.clone());
+                self.explorer_view
+                    .add_tab(self.explorer_view.current_dir.clone());
             }
             PaletteAction::CloseTab => {
                 let idx = self.explorer_view.active_tab_index;
@@ -2801,7 +2877,13 @@ impl StudioView {
             }
             PaletteAction::ShowProperties => {
                 if let Some(first_path) = self.explorer_view.selected_paths().first() {
-                    if let Some(item) = self.explorer_view.entries.iter().find(|e| &e.path == first_path).cloned() {
+                    if let Some(item) = self
+                        .explorer_view
+                        .entries
+                        .iter()
+                        .find(|e| &e.path == first_path)
+                        .cloned()
+                    {
                         self.explorer_view.properties_item = Some(item);
                     }
                 }

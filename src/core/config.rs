@@ -690,6 +690,30 @@ pub fn default_dashboard_slots() -> Vec<DashboardWidgetSlot> {
     DashboardWidgetSlot::default_slots()
 }
 
+/// View presentation mode in the file explorer (List/Details, Icons/Grid, Columns/Miller).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewMode {
+    #[default]
+    Details,
+    Grid,
+    Columns,
+}
+
+impl ViewMode {
+    pub fn all() -> [ViewMode; 3] {
+        [Self::Details, Self::Grid, Self::Columns]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Details => "Details / List",
+            Self::Grid => "Icons / Grid",
+            Self::Columns => "Miller Columns",
+        }
+    }
+}
+
 /// Explorer chrome style: macOS Finder vs Windows Explorer vs Linux desktop layouts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -1111,18 +1135,29 @@ pub struct MossambiConfig {
     #[serde(default)]
     pub animations: AnimationSettings,
     #[serde(default = "default_explorer_zoom")]
-    pub explorer_zoom: u8, // 0 = smallest, 4 = largest
+    pub explorer_zoom: u8, // 0 = smallest, 4 = largest (Grid zoom alias)
+    /// Independent zoom level for List (Details) view: 0..=4.
+    #[serde(default = "default_explorer_zoom")]
+    pub list_zoom: u8,
+    /// Independent zoom level for Grid (Icons) view: 0..=4.
+    #[serde(default = "default_explorer_zoom")]
+    pub grid_zoom: u8,
+    /// Independent zoom level for Miller Columns view: 0..=4.
+    #[serde(default = "default_explorer_zoom")]
+    pub miller_zoom: u8,
     #[serde(default = "default_background_work")]
     pub background_work: bool,
     #[serde(default = "default_worker_threads")]
     pub worker_threads: u8,
+    #[serde(default)]
+    pub directml_enabled: bool,
     /// Uncapped frame rate: disables vsync and drives continuous repaints
     /// for the highest possible responsiveness ("Max FPS" in Performance).
     #[serde(default = "default_max_fps")]
     pub max_fps: bool,
     /// Conversion target used when files are dropped on the global Drop
     /// Overlay from other apps. "AUTO" picks per file category
-    /// (image→PNG, video→MP4, audio→FLAC, doc→PDF, …); any other value is
+    /// (image -> PNG, video -> MP4, audio -> FLAC, doc -> PDF, ...); any other value is
     /// treated as a literal target format (e.g. "PDF").
     #[serde(default = "default_drop_target")]
     pub drop_target_default: String,
@@ -1415,8 +1450,12 @@ impl Default for MossambiConfig {
             explorer_column_widths: std::collections::BTreeMap::new(),
             animations: AnimationSettings::default(),
             explorer_zoom: default_explorer_zoom(),
+            list_zoom: default_explorer_zoom(),
+            grid_zoom: default_explorer_zoom(),
+            miller_zoom: default_explorer_zoom(),
             background_work: default_background_work(),
             worker_threads: default_worker_threads(),
+            directml_enabled: true,
             max_fps: default_max_fps(),
             drop_target_default: default_drop_target(),
             sidebar_collapsed: false,
@@ -1476,6 +1515,28 @@ impl MossambiConfig {
     /// Returns the active design tokens derived from the configured DesignStyle.
     pub fn tokens(&self) -> DesignTokens {
         self.design_style.tokens()
+    }
+
+    /// Returns the zoom level (0..=4) for the specified view mode.
+    pub fn zoom_for_mode(&self, mode: ViewMode) -> u8 {
+        match mode {
+            ViewMode::Details => self.list_zoom.min(4),
+            ViewMode::Grid => self.grid_zoom.min(4),
+            ViewMode::Columns => self.miller_zoom.min(4),
+        }
+    }
+
+    /// Sets the zoom level (0..=4) for the specified view mode, keeping explorer_zoom in sync.
+    pub fn set_zoom_for_mode(&mut self, mode: ViewMode, zoom: u8) {
+        let clamped = zoom.min(4);
+        match mode {
+            ViewMode::Details => self.list_zoom = clamped,
+            ViewMode::Grid => {
+                self.grid_zoom = clamped;
+                self.explorer_zoom = clamped;
+            }
+            ViewMode::Columns => self.miller_zoom = clamped,
+        }
     }
 
     /// Applies an operating-system look preset while keeping individual settings overridable.
@@ -1599,7 +1660,7 @@ impl MossambiConfig {
                         parsed.worker_threads = raw_threads.min(64);
                         if parsed.worker_threads != raw_threads {
                             log::warn!(
-                                "config.worker_threads = {} exceeds the 64-thread ceiling — clamped to {}",
+                                "config.worker_threads = {} exceeds the 64-thread ceiling -- clamped to {}",
                                 raw_threads,
                                 parsed.worker_threads
                             );

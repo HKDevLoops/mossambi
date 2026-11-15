@@ -579,7 +579,11 @@ impl CommandPalette {
                                         let subtitle = if item.is_dir {
                                             "Folder".to_string()
                                         } else {
-                                            format!("{} - {}", item.extension, item.formatted_size())
+                                            format!(
+                                                "{} - {}",
+                                                item.extension,
+                                                item.formatted_size()
+                                            )
                                         };
                                         let action = if item.is_dir {
                                             PaletteAction::NavigateTo(item.path.clone())

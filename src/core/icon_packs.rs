@@ -18,7 +18,7 @@
 //!   done once per size with full antialiasing and LINEAR filtering.
 
 use crate::core::SpecialFolder;
-use eframe::egui::{Color32, ColorImage, Rect, TextureHandle, TextureOptions, Ui};
+use eframe::egui::{Color32, ColorImage, Pos2, Rect, TextureHandle, TextureOptions, Ui, Vec2};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -332,7 +332,9 @@ impl IconGlyph {
             if let Some(p) = path {
                 if let Some(custom) = crate::core::folder_icons::get_custom_folder_icon(p) {
                     match custom {
-                        crate::core::folder_icons::FolderIconCustomization::Professional(ref id)
+                        crate::core::folder_icons::FolderIconCustomization::Professional(
+                            ref id,
+                        )
                         | crate::core::folder_icons::FolderIconCustomization::Meme(ref id) => {
                             if let Some(def) = crate::core::folder_icons::find_preset(id) {
                                 return (IconGlyph::Folder, def.accent_rgb);
@@ -1772,6 +1774,69 @@ fn rasterize(
 /// Paints a glyph inside `rect` (square centering) at the pack's language.
 pub fn paint_icon(ui: &Ui, pack: IconPack, glyph: IconGlyph, rect: Rect, accent_rgb: [u8; 3]) {
     paint_icon_with(ui.painter(), ui.ctx(), pack, glyph, rect, accent_rgb);
+}
+
+/// Paints a glyph with transformed geometry: optional rotation, scale, and offset translation.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_icon_transformed(
+    painter: &eframe::egui::Painter,
+    ctx: &eframe::egui::Context,
+    pack: IconPack,
+    glyph: IconGlyph,
+    rect: Rect,
+    accent_rgb: [u8; 3],
+    angle_rad: f32,
+    scale: f32,
+    offset: Vec2,
+) {
+    let base_size = rect.width().min(rect.height()) * scale;
+    if base_size < 4.0 {
+        return;
+    }
+    let Some(tex) = icon_texture(ctx, pack, glyph, base_size, accent_rgb) else {
+        return;
+    };
+    let center = rect.center() + offset;
+    let target_rect = Rect::from_center_size(center, Vec2::splat(base_size));
+    let sq = snapped_icon_quad(ctx, target_rect, base_size);
+
+    if angle_rad.abs() > 0.001 {
+        let (sin_a, cos_a) = angle_rad.sin_cos();
+        let rotate_point = |p: Pos2| -> Pos2 {
+            let d = p - center;
+            let rx = d.x * cos_a - d.y * sin_a;
+            let ry = d.x * sin_a + d.y * cos_a;
+            center + Vec2::new(rx, ry)
+        };
+        let mut mesh = eframe::egui::Mesh::with_texture(tex.id());
+        let idx = mesh.vertices.len() as u32;
+        mesh.vertices.push(eframe::egui::epaint::Vertex {
+            pos: rotate_point(sq.left_top()),
+            uv: eframe::egui::pos2(0.0, 0.0),
+            color: Color32::WHITE,
+        });
+        mesh.vertices.push(eframe::egui::epaint::Vertex {
+            pos: rotate_point(sq.right_top()),
+            uv: eframe::egui::pos2(1.0, 0.0),
+            color: Color32::WHITE,
+        });
+        mesh.vertices.push(eframe::egui::epaint::Vertex {
+            pos: rotate_point(sq.right_bottom()),
+            uv: eframe::egui::pos2(1.0, 1.0),
+            color: Color32::WHITE,
+        });
+        mesh.vertices.push(eframe::egui::epaint::Vertex {
+            pos: rotate_point(sq.left_bottom()),
+            uv: eframe::egui::pos2(0.0, 1.0),
+            color: Color32::WHITE,
+        });
+        mesh.add_triangle(idx, idx + 1, idx + 2);
+        mesh.add_triangle(idx, idx + 2, idx + 3);
+        painter.add(eframe::egui::Shape::Mesh(mesh));
+    } else {
+        let uv = Rect::from_min_max(eframe::egui::pos2(0.0, 0.0), eframe::egui::pos2(1.0, 1.0));
+        painter.image(tex.id(), sq, uv, Color32::WHITE);
+    }
 }
 
 /// Paints a glyph with an explicit painter — used by widget surfaces that draw

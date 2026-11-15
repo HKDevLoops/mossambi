@@ -232,10 +232,11 @@ pub fn init_multi_threading(threads: Option<usize>) -> usize {
         Some(0) | None => None,
         Some(n) => Some(n),
     };
+    let topo = crate::core::qos::detect_cpu_topology();
     let thread_count = requested.unwrap_or_else(|| {
-        std::thread::available_parallelism()
-            .map(|p| p.get())
-            .unwrap_or(4)
+        // Auto-sizing: Allocate to Performance cores (either hardware P-cores or classical 50% partition)
+        // Leaving remaining threads free for background EcoQoS and UI frame-rate fluid interaction.
+        topo.p_cores.max(1)
     });
 
     let _ = rayon::ThreadPoolBuilder::new()

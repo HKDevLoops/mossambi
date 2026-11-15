@@ -227,6 +227,112 @@ pub fn paint_path_chevron(ui: &mut Ui, color: Color32) {
 
 /// A square, icon-only toolbar button in Finder style.
 ///
+/// Micro-animation style for toolbar navigation buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolbarButtonAnim {
+    None,
+    SlideLeft,
+    SlideRight,
+    BounceUp,
+    SpinRotate,
+    PulsePop,
+}
+
+/// Renders a toolbar icon button with micro-animations (press depth, slide, bounce, spin, pulse).
+#[allow(clippy::too_many_arguments)]
+pub fn toolbar_animated_icon_button(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    pack: IconPack,
+    glyph: IconGlyph,
+    accent_rgb: [u8; 3],
+    tooltip: &str,
+    active: bool,
+    anim: ToolbarButtonAnim,
+    click_time: &mut Option<std::time::Instant>,
+) -> bool {
+    let side = 29.0;
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(side), Sense::click());
+    let painter = ui.painter_at(rect);
+
+    let is_pressed = resp.is_pointer_button_down_on();
+
+    if active {
+        painter.rect_filled(rect, Rounding::same(radius::MD), palette.card_hover);
+    } else if resp.hovered() {
+        painter.rect_filled(
+            rect,
+            Rounding::same(radius::MD),
+            Color32::from_rgba_unmultiplied(
+                palette.text_primary.r(),
+                palette.text_primary.g(),
+                palette.text_primary.b(),
+                28,
+            ),
+        );
+        painter.rect_stroke(
+            rect,
+            Rounding::same(radius::MD),
+            Stroke::new(1.0_f32, palette.border),
+        );
+    }
+
+    let mut angle_rad = 0.0_f32;
+    let mut scale = if is_pressed { 0.90_f32 } else { 1.0_f32 };
+    let mut offset = Vec2::ZERO;
+
+    if let Some(t0) = *click_time {
+        let elapsed = t0.elapsed().as_secs_f32();
+        if elapsed < 0.40 {
+            ui.ctx().request_repaint();
+            let progress = (elapsed / 0.40).clamp(0.0, 1.0);
+            let sin_p = (progress * std::f32::consts::PI).sin();
+            match anim {
+                ToolbarButtonAnim::None => {}
+                ToolbarButtonAnim::SlideLeft => {
+                    offset.x = -4.5 * sin_p;
+                }
+                ToolbarButtonAnim::SlideRight => {
+                    offset.x = 4.5 * sin_p;
+                }
+                ToolbarButtonAnim::BounceUp => {
+                    offset.y = -4.5 * sin_p;
+                }
+                ToolbarButtonAnim::SpinRotate => {
+                    let ease = 1.0 - (1.0 - progress).powi(3);
+                    angle_rad = 2.0 * std::f32::consts::PI * ease;
+                }
+                ToolbarButtonAnim::PulsePop => {
+                    scale *= 1.0 + 0.22 * sin_p;
+                }
+            }
+        } else {
+            *click_time = None;
+        }
+    }
+
+    let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(22.0));
+    crate::core::icon_packs::paint_icon_transformed(
+        &painter,
+        ui.ctx(),
+        pack,
+        glyph,
+        icon_rect,
+        accent_rgb,
+        angle_rad,
+        scale,
+        offset,
+    );
+
+    let clicked = resp.clicked();
+    if clicked {
+        *click_time = Some(std::time::Instant::now());
+        ui.ctx().request_repaint();
+    }
+    resp.on_hover_ui(|ui| show_tooltip(ui, tooltip.to_owned()));
+    clicked
+}
+
 /// Returns true when clicked. The button carries no text, so it can never
 /// collide with a neighbouring label.
 pub fn toolbar_icon_button(
@@ -238,37 +344,22 @@ pub fn toolbar_icon_button(
     tooltip: &str,
     active: bool,
 ) -> bool {
-    let side = 29.0;
-    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(side), Sense::click());
-    let painter = ui.painter_at(rect);
-
-    if active {
-        painter.rect_filled(rect, Rounding::same(radius::MD), palette.card_hover);
-    } else if resp.hovered() {
-        painter.rect_filled(
-            rect,
-            Rounding::same(radius::MD),
-            // Straight-alpha hover tint: premultiplied with raw rgb renders
-            // near-opaque and drowns the glyph (premul-vs-unmul semantics).
-            Color32::from_rgba_unmultiplied(
-                palette.text_primary.r(),
-                palette.text_primary.g(),
-                palette.text_primary.b(),
-                22,
-            ),
-        );
-    }
-
-    let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(22.0));
-    crate::core::icon_packs::paint_icon(ui, pack, glyph, icon_rect, accent_rgb);
-
-    let clicked = resp.clicked();
-    resp.on_hover_ui(|ui| show_tooltip(ui, tooltip.to_owned()));
-    clicked
+    let mut dummy_time = None;
+    toolbar_animated_icon_button(
+        ui,
+        palette,
+        pack,
+        glyph,
+        accent_rgb,
+        tooltip,
+        active,
+        ToolbarButtonAnim::None,
+        &mut dummy_time,
+    )
 }
 
 /// Renders the tooltip body.
-fn show_tooltip(ui: &mut Ui, text: String) {
+pub fn show_tooltip(ui: &mut Ui, text: String) {
     egui::Frame::popup(ui.style())
         .fill(Color32::from_rgb(38, 38, 42))
         .stroke(Stroke::new(1.0_f32, Color32::from_black_alpha(90)))
@@ -328,11 +419,12 @@ pub fn toolbar_row(ui: &mut Ui, build: impl FnOnce(&mut Ui)) {
     });
 }
 
-/// Renders an authentic macOS Finder connected segmented view switcher control:
-/// [ Icons | List | Columns ] in a unified pill container with active highlight.
-pub fn render_segmented_view_switcher(
+/// Renders an authentic segmented view switcher control styled with D1 tokens for each DesignStyle preset:
+/// [ Icons | List | Columns ] in a unified container with active highlight.
+pub fn render_styled_segmented_view_switcher(
     ui: &mut Ui,
     palette: &ThemePalette,
+    tokens: &crate::core::config::DesignTokens,
     pack: IconPack,
     current_mode: ViewMode,
     mut on_select: impl FnMut(ViewMode),
@@ -343,35 +435,46 @@ pub fn render_segmented_view_switcher(
     let (container_rect, _) = ui.allocate_exact_size(Vec2::new(total_w, height), Sense::hover());
     let painter = ui.painter_at(container_rect);
 
+    let container_radius = match tokens.style {
+        crate::core::config::DesignStyle::ArcaneFluid => tokens.radius_pill.min(height * 0.5),
+        crate::core::config::DesignStyle::ZenithPro => tokens.radius_card.min(4.0),
+        crate::core::config::DesignStyle::HyperionSlate => tokens.radius_card.min(8.0),
+    };
+    let active_radius = match tokens.style {
+        crate::core::config::DesignStyle::ArcaneFluid => (container_radius - 2.0).max(2.0),
+        crate::core::config::DesignStyle::ZenithPro => 2.0,
+        crate::core::config::DesignStyle::HyperionSlate => 4.0,
+    };
+
     // Subtle background pill & border (straight alpha: premul with raw
     // rgb renders near-opaque and would glare in dark themes)
     let bg_col = if palette.is_dark {
-        Color32::from_rgba_unmultiplied(255, 255, 255, 14)
+        Color32::from_rgba_unmultiplied(255, 255, 255, tokens.border_subtle_alpha / 2)
     } else {
         Color32::from_rgba_unmultiplied(0, 0, 0, 10)
     };
-    painter.rect_filled(container_rect, Rounding::same(radius::MD), bg_col);
+    painter.rect_filled(container_rect, Rounding::same(container_radius), bg_col);
     painter.rect_stroke(
         container_rect,
-        Rounding::same(radius::MD),
-        Stroke::new(1.0_f32, palette.border),
+        Rounding::same(container_radius),
+        Stroke::new(tokens.border_width, palette.border),
     );
 
     let modes = [
         (
             ViewMode::Grid,
             IconGlyph::ActionView,
-            "Icon Grid View (Cmd+1)",
+            "Icon Grid View (Ctrl+1 / Cmd+1)",
         ),
         (
             ViewMode::Details,
             IconGlyph::ActionList,
-            "Details List View (Cmd+2)",
+            "Details List View (Ctrl+2 / Cmd+2)",
         ),
         (
             ViewMode::Columns,
             IconGlyph::ActionColumns,
-            "Miller Columns View (Cmd+3)",
+            "Miller Columns View (Ctrl+3 / Cmd+3)",
         ),
     ];
 
@@ -392,12 +495,12 @@ pub fn render_segmented_view_switcher(
 
         if is_active {
             let active_rect = seg_rect.shrink2(Vec2::new(2.0, 2.0));
-            painter.rect_filled(active_rect, Rounding::same(radius::SM), palette.accent);
+            painter.rect_filled(active_rect, Rounding::same(active_radius), palette.accent);
         } else if resp.hovered() {
             let hover_rect = seg_rect.shrink2(Vec2::new(2.0, 2.0));
             painter.rect_filled(
                 hover_rect,
-                Rounding::same(radius::SM),
+                Rounding::same(active_radius),
                 Color32::from_rgba_unmultiplied(
                     palette.text_primary.r(),
                     palette.text_primary.g(),
@@ -414,7 +517,7 @@ pub fn render_segmented_view_switcher(
         design::paint_pill_ring(
             ui.painter(),
             seg_rect.shrink2(Vec2::new(2.0, 2.0)),
-            Rounding::same(radius::SM),
+            Rounding::same(active_radius),
             ring_state,
             palette.accent,
         );
@@ -427,7 +530,7 @@ pub fn render_segmented_view_switcher(
                     Pos2::new(div_x, container_rect.min.y + 6.0),
                     Pos2::new(div_x, container_rect.max.y - 6.0),
                 ],
-                Stroke::new(1.0_f32, palette.border),
+                Stroke::new(tokens.border_width, palette.border),
             );
         }
 
@@ -449,6 +552,19 @@ pub fn render_segmented_view_switcher(
             on_select(mode);
         }
     }
+}
+
+/// Renders an authentic macOS Finder connected segmented view switcher control:
+/// [ Icons | List | Columns ] in a unified pill container with active highlight.
+pub fn render_segmented_view_switcher(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    pack: IconPack,
+    current_mode: ViewMode,
+    on_select: impl FnMut(ViewMode),
+) {
+    let tokens = crate::core::config::DesignTokens::default();
+    render_styled_segmented_view_switcher(ui, palette, &tokens, pack, current_mode, on_select);
 }
 
 // ---------------------------------------------------------------------------
@@ -808,13 +924,15 @@ pub struct SidebarRowSpec<'a> {
     pub show_pin: bool,
     /// Whether the row is dimmed (e.g. missing folder).
     pub dimmed: bool,
+    /// Optional tooltip text shown on row hover.
+    pub tooltip: Option<String>,
 }
 
 /// What the user clicked on a sidebar row.
 ///
 /// The pin strip is its own hit region, so a row action and a pin toggle
 /// can never fire from the same click.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SidebarRowClick {
     /// The row body was clicked (navigate/activate).
     pub row: bool,
@@ -824,6 +942,23 @@ pub struct SidebarRowClick {
     pub dropped: Option<crate::gui::explorer_view::FileDragPayload>,
     /// Secondary (right) click on the row body.
     pub secondary_clicked: bool,
+    /// Whether the row body is currently hovered.
+    pub hovered: bool,
+    /// Allocation rectangle of the row.
+    pub rect: Rect,
+}
+
+impl Default for SidebarRowClick {
+    fn default() -> Self {
+        Self {
+            row: false,
+            pin: false,
+            dropped: None,
+            secondary_clicked: false,
+            hovered: false,
+            rect: Rect::NOTHING,
+        }
+    }
 }
 
 /// A standard sidebar row with a real vector icon, a label, and an
@@ -981,11 +1116,17 @@ pub fn render_sidebar_row(
         pin_clicked = pin_resp.clicked();
     }
 
+    if let Some(ref tip) = spec.tooltip {
+        row_resp.clone().on_hover_ui(|ui| show_tooltip(ui, tip.clone()));
+    }
+
     SidebarRowClick {
         row: row_resp.clicked(),
         pin: pin_clicked,
         dropped,
         secondary_clicked: row_resp.secondary_clicked(),
+        hovered: is_hovered,
+        rect,
     }
 }
 
