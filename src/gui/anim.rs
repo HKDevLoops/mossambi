@@ -9,7 +9,8 @@
 //! The integrator is a semi-implicit Euler step with sub-stepping so that a
 //! dropped frame (long delta) cannot make the spring explode.
 
-use crate::core::config::{AnimStyle, AnimationSettings};
+pub use crate::core::config::AnimStyle;
+use crate::core::config::AnimationSettings;
 use eframe::egui;
 
 /// A single damped-spring value.

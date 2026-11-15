@@ -140,7 +140,7 @@ impl ToolbarItem {
             Self::Share => IconGlyph::ActionShortcut,
             Self::Delete => IconGlyph::ActionDelete,
             Self::Sort => IconGlyph::ActionSort,
-            Self::Hamburger => IconGlyph::ActionMore,
+            Self::Hamburger => IconGlyph::ActionHamburger,
             Self::Group => IconGlyph::ActionFilter,
             Self::Tags => IconGlyph::ActionPin,
         }

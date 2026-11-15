@@ -935,6 +935,9 @@ pub struct MossambiConfig {
     /// treated as a literal target format (e.g. "PDF").
     #[serde(default = "default_drop_target")]
     pub drop_target_default: String,
+    /// Whether the left sidebar is completely collapsed (toggled via Ctrl+B or Hamburger).
+    #[serde(default)]
+    pub sidebar_collapsed: bool,
     /// Show the Tags smart-list section in the sidebar (optional Finder-like
     /// tags feature). Off by default per user preference.
     #[serde(default)]
@@ -1219,6 +1222,7 @@ impl Default for MossambiConfig {
             worker_threads: default_worker_threads(),
             max_fps: default_max_fps(),
             drop_target_default: default_drop_target(),
+            sidebar_collapsed: false,
             show_tags_section: false,
             show_custom_pinned: false,
             pinned_custom: Vec::new(),

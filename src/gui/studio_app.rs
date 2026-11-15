@@ -715,6 +715,16 @@ impl eframe::App for MossambiApp {
             ctx.set_zoom_factor(zoom);
         }
 
+        // Global Ctrl+B / Cmd+B to toggle collapsible sidebar
+        let toggle_sidebar = ctx.input(|i| {
+            let ctrl = i.modifiers.ctrl || i.modifiers.command;
+            ctrl && !i.modifiers.shift && !i.modifiers.alt && i.key_pressed(egui::Key::B)
+        });
+        if toggle_sidebar {
+            self.config.sidebar_collapsed = !self.config.sidebar_collapsed;
+            let _ = self.config.save();
+        }
+
         // -- Mouse history navigation (thumb buttons / middle-drag swipe) ---
         while let Some(evt) = self.mouse_nav.try_recv() {
             let explorer = &mut self.studio_view.explorer_view;

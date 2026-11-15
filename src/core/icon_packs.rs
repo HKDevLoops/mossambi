@@ -220,6 +220,7 @@ pub enum IconGlyph {
     ActionSun,
     ActionMoon,
     ActionPlay,
+    ActionHamburger,
 }
 
 impl IconGlyph {
@@ -1521,6 +1522,13 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
         ),
         IconGlyph::ActionMore => format!(
             "{head}<circle cx='28' cy='50' r='7' fill='{a}'/><circle cx='50' cy='50' r='7' fill='{a}'/><circle cx='72' cy='50' r='7' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionHamburger => format!(
+            "{head}<line x1='20' y1='30' x2='80' y2='30' stroke='{a}' stroke-width='7' stroke-linecap='round'/>\
+             <line x1='20' y1='50' x2='80' y2='50' stroke='{a}' stroke-width='7' stroke-linecap='round'/>\
+             <line x1='20' y1='70' x2='80' y2='70' stroke='{a}' stroke-width='7' stroke-linecap='round'/></svg>",
             head = head,
             a = accent
         ),

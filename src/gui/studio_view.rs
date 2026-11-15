@@ -182,6 +182,9 @@ pub struct StudioView {
     // Once-per-open listings for the sibling-folder context menu
     // (F-2 fix): cleared when a navigation target is applied.
     pub sibling_menu_cache: std::collections::HashMap<PathBuf, Vec<crate::core::FileItem>>,
+
+    /// Smooth animated sidebar width spring for collapse/expand (Ctrl+B).
+    pub sidebar_width_spring: crate::gui::anim::Spring,
 }
 
 impl Default for StudioView {
@@ -198,6 +201,8 @@ impl Default for StudioView {
             inspected_file_path: None,
             catalogue_search: String::new(),
             catalogue_category: None,
+
+            sidebar_width_spring: crate::gui::anim::Spring::new(240.0),
 
             prefs_view: crate::gui::preferences_view::PreferencesView::default(),
             command_palette: CommandPalette::default(),
@@ -824,6 +829,18 @@ impl StudioView {
                                 }
                             });
                             ui.menu_button("Go", |ui| {
+                                let toggle_label = if config.sidebar_collapsed {
+                                    "Show Sidebar (Ctrl+B)"
+                                } else {
+                                    "Hide Sidebar (Ctrl+B)"
+                                };
+                                if ui.button(toggle_label).clicked() {
+                                    let mut cfg = crate::core::MossambiConfig::load();
+                                    cfg.sidebar_collapsed = !cfg.sidebar_collapsed;
+                                    let _ = cfg.save();
+                                    ui.close_menu();
+                                }
+
                                 let can_back = self.explorer_view.can_go_back();
                                 if ui
                                     .add_enabled(can_back, egui::Button::new("Back (Alt+Left)"))
@@ -884,6 +901,22 @@ impl StudioView {
                             palette.text_muted.g(),
                             palette.text_muted.b(),
                         ];
+
+                        // Sidebar collapse/expand toggle button (Ctrl+B)
+                        let is_collapsed = config.sidebar_collapsed;
+                        if crate::gui::finder_chrome::toolbar_icon_button(
+                            ui,
+                            &palette,
+                            pack,
+                            IconGlyph::ActionHamburger,
+                            if is_collapsed { muted_rgb } else { text_rgb },
+                            "Toggle Sidebar (Ctrl+B)",
+                            !is_collapsed,
+                        ) {
+                            let mut cfg = crate::core::MossambiConfig::load();
+                            cfg.sidebar_collapsed = !cfg.sidebar_collapsed;
+                            let _ = cfg.save();
+                        }
 
                         let can_back = self.explorer_view.can_go_back();
                         if crate::gui::finder_chrome::toolbar_icon_button(
@@ -1590,20 +1623,44 @@ impl StudioView {
             });
 
         // 2. Left Sidebar Panel (Pinned, Drives, Cloud, Network, Tags, Tools)
-        let sidebar_frame = egui::Frame::none()
-            .fill(palette.sidebar_bg)
-            .inner_margin(egui::Margin::symmetric(8.0, 8.0));
+        let target_sidebar_w = if config.sidebar_collapsed {
+            0.0_f32
+        } else {
+            chrome_spec.sidebar.width
+        };
+        let dt = crate::gui::anim::frame_dt(ctx);
+        let current_sidebar_w = crate::gui::anim::advance(
+            &mut self.sidebar_width_spring,
+            target_sidebar_w,
+            config.animations.toolbar,
+            dt,
+        );
+        if !self.sidebar_width_spring.at_rest() {
+            ctx.request_repaint();
+        }
 
-        egui::SidePanel::left("studio_sidebar")
-            .resizable(false)
-            .exact_width(chrome_spec.sidebar.width)
-            .frame(sidebar_frame)
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let pack = self.explorer_view.icon_pack;
-                        let mut cfg = crate::core::MossambiConfig::load();
+        if current_sidebar_w > 1.5_f32 {
+            let sidebar_frame = egui::Frame::none()
+                .fill(palette.sidebar_bg)
+                .inner_margin(egui::Margin::symmetric(8.0, 8.0));
+
+            egui::SidePanel::left("studio_sidebar")
+                .resizable(false)
+                .exact_width(current_sidebar_w)
+                .frame(sidebar_frame)
+                .show(ctx, |ui| {
+                    ui.set_clip_rect(ui.max_rect());
+                    let label_fade = ((current_sidebar_w - 60.0)
+                        / (chrome_spec.sidebar.width - 60.0).max(1.0))
+                    .clamp(0.0, 1.0);
+                    if label_fade < 0.99 {
+                        ui.set_opacity(label_fade);
+                    }
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let pack = self.explorer_view.icon_pack;
+                            let mut cfg = crate::core::MossambiConfig::load();
 
                         // Exactly ONE sidebar row is active: the deepest sidebar
                         // location that contains the current folder.
@@ -2411,6 +2468,7 @@ impl StudioView {
                         ui.add_space(12.0);
                     });
             });
+        }
 
         // 2. Central Content Panel with smooth vertical ScrollArea.
         // The explorer tab renders flush to the window edges (Finder
