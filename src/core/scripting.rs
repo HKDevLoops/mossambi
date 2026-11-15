@@ -271,6 +271,40 @@ fn build_engine(logs: Arc<Mutex<Vec<String>>>) -> Engine {
         },
     );
 
+    // mossambi_anim_set_window_effect(effect) -> bool
+    engine.register_fn("mossambi_anim_set_window_effect", |effect: &str| -> bool {
+        let anim = match effect.to_ascii_lowercase().as_str() {
+            "genie" => crate::core::window_anim::WindowAnimType::Genie,
+            "scale" => crate::core::window_anim::WindowAnimType::Scale,
+            "slide" => crate::core::window_anim::WindowAnimType::Slide,
+            "morph" => crate::core::window_anim::WindowAnimType::Morph,
+            "fade" => crate::core::window_anim::WindowAnimType::Fade,
+            _ => return false,
+        };
+        let mut cfg = crate::core::MossambiConfig::load();
+        cfg.animations.window_anim = anim;
+        cfg.save().is_ok()
+    });
+
+    // mossambi_anim_tune_spring(target, stiffness, damping, mass) -> bool
+    engine.register_fn(
+        "mossambi_anim_tune_spring",
+        |_target: &str, stiffness: f64, damping: f64, mass: f64| -> bool {
+            let mut cfg = crate::core::MossambiConfig::load();
+            cfg.animations.spring_stiffness = stiffness as f32;
+            cfg.animations.spring_damping = damping as f32;
+            cfg.animations.spring_mass = mass as f32;
+            cfg.save().is_ok()
+        },
+    );
+
+    // mossambi_sidebar_toggle() -> bool
+    engine.register_fn("mossambi_sidebar_toggle", || -> bool {
+        let mut cfg = crate::core::MossambiConfig::load();
+        cfg.sidebar_collapsed = !cfg.sidebar_collapsed;
+        cfg.save().is_ok()
+    });
+
     engine
 }
 
@@ -385,6 +419,53 @@ fn build_lua_engine(logs: Arc<Mutex<Vec<String>>>) -> Result<mlua::Lua, mlua::Er
         .is_ok())
     })?;
     globals.set("mossambi_transcode", transcode_fn)?;
+
+    let anim_set_fn = lua.create_function(|_, effect: String| {
+        let anim = match effect.to_ascii_lowercase().as_str() {
+            "genie" => crate::core::window_anim::WindowAnimType::Genie,
+            "scale" => crate::core::window_anim::WindowAnimType::Scale,
+            "slide" => crate::core::window_anim::WindowAnimType::Slide,
+            "morph" => crate::core::window_anim::WindowAnimType::Morph,
+            "fade" => crate::core::window_anim::WindowAnimType::Fade,
+            _ => return Ok(false),
+        };
+        let mut cfg = crate::core::MossambiConfig::load();
+        cfg.animations.window_anim = anim;
+        Ok(cfg.save().is_ok())
+    })?;
+
+    let spring_tune_fn = lua.create_function(
+        |_, (_target, stiffness, damping, mass): (String, f64, f64, f64)| {
+            let mut cfg = crate::core::MossambiConfig::load();
+            cfg.animations.spring_stiffness = stiffness as f32;
+            cfg.animations.spring_damping = damping as f32;
+            cfg.animations.spring_mass = mass as f32;
+            Ok(cfg.save().is_ok())
+        },
+    )?;
+
+    let sidebar_toggle_fn = lua.create_function(|_, ()| {
+        let mut cfg = crate::core::MossambiConfig::load();
+        cfg.sidebar_collapsed = !cfg.sidebar_collapsed;
+        Ok(cfg.save().is_ok())
+    })?;
+
+    globals.set("mossambi_anim_set_window_effect", anim_set_fn.clone())?;
+    globals.set("mossambi_anim_tune_spring", spring_tune_fn.clone())?;
+    globals.set("mossambi_sidebar_toggle", sidebar_toggle_fn.clone())?;
+
+    // Create table mossambi = { anim = { ... }, sidebar = { ... } }
+    let mossambi_table = lua.create_table()?;
+    let anim_table = lua.create_table()?;
+    anim_table.set("set_window_effect", anim_set_fn)?;
+    anim_table.set("tune_spring", spring_tune_fn)?;
+    mossambi_table.set("anim", anim_table)?;
+
+    let sidebar_table = lua.create_table()?;
+    sidebar_table.set("toggle", sidebar_toggle_fn)?;
+    mossambi_table.set("sidebar", sidebar_table)?;
+
+    globals.set("mossambi", mossambi_table)?;
 
     Ok(lua)
 }
