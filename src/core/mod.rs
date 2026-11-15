@@ -41,6 +41,7 @@ pub mod tabs;
 pub mod tags;
 pub mod tool_console;
 pub mod web_drop;
+pub mod window_anim;
 pub mod window_level;
 
 pub use action_journal::{

@@ -81,6 +81,11 @@ pub struct MossambiApp {
     /// Last explorer-pref values both sides agreed on; tells which side
     /// (Preferences/config or the explorer UI) changed since.
     pub explorer_pref_mirror: Option<ExplorerPrefMirror>,
+
+    /// In-app Alt+Tab quick switcher HUD state machine.
+    pub alt_tab: crate::core::window_anim::AltTabState,
+    /// Active window-level minimize animation progress: `(style, t)`.
+    pub window_anim_progress: Option<(crate::core::window_anim::WindowAnimType, f32)>,
 }
 
 impl Default for MossambiApp {
@@ -124,6 +129,8 @@ impl Default for MossambiApp {
             ui_zoom: 1.0,
             last_grid_icon_size: 0,
             explorer_pref_mirror: None,
+            alt_tab: crate::core::window_anim::AltTabState::default(),
+            window_anim_progress: None,
         }
     }
 }
@@ -725,6 +732,50 @@ impl eframe::App for MossambiApp {
             let _ = self.config.save();
         }
 
+        // In-App Alt+Tab Quick Switcher HUD
+        let alt_down = ctx.input(|i| i.modifiers.alt);
+        let tab_pressed = ctx.input(|i| i.key_pressed(egui::Key::Tab));
+        let shift_down = ctx.input(|i| i.modifiers.shift);
+        let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+
+        if alt_down && tab_pressed {
+            if !self.alt_tab.is_open {
+                let tabs = vec![
+                    "Files".to_string(),
+                    "Transcoder".to_string(),
+                    "Exam Studio".to_string(),
+                    "Quality Inspector".to_string(),
+                    "Archive Suite".to_string(),
+                    "Hardware Telemetry".to_string(),
+                    "Preferences".to_string(),
+                ];
+                self.alt_tab = crate::core::window_anim::AltTabState::new(tabs);
+            }
+            if shift_down {
+                self.alt_tab.cycle_prev();
+            } else {
+                self.alt_tab.cycle_next();
+            }
+        }
+
+        if self.alt_tab.is_open {
+            if esc_pressed {
+                self.alt_tab.close();
+            } else if !alt_down {
+                match self.alt_tab.active_index() {
+                    0 => self.studio_view.switch_to_tab(StudioTab::FileExplorer),
+                    1 => self.studio_view.switch_to_tab(StudioTab::Transcoder),
+                    2 => self.studio_view.switch_to_tab(StudioTab::ExamStudio),
+                    3 => self.studio_view.switch_to_tab(StudioTab::QualityInspector),
+                    4 => self.studio_view.switch_to_tab(StudioTab::ArchiveSuite),
+                    5 => self.studio_view.switch_to_tab(StudioTab::HardwareTelemetry),
+                    6 => self.studio_view.switch_to_tab(StudioTab::Preferences),
+                    _ => {}
+                }
+                self.alt_tab.close();
+            }
+        }
+
         // -- Mouse history navigation (thumb buttons / middle-drag swipe) ---
         while let Some(evt) = self.mouse_nav.try_recv() {
             let explorer = &mut self.studio_view.explorer_view;
@@ -1240,6 +1291,61 @@ impl eframe::App for MossambiApp {
         // (icon pack, zoom level, checkboxes, menu style, animations) into the
         // config - same save pattern as the theme-change handlers above.
         self.sync_explorer_prefs();
+
+        // Render In-App Alt+Tab Quick Switcher HUD Overlay
+        if self.alt_tab.is_open {
+            let palette = self.theme.colors();
+            let active_idx = self.alt_tab.active_index();
+            egui::Area::new(egui::Id::new("mossambi_alt_tab_hud"))
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    let frame = egui::Frame::none()
+                        .fill(palette.card_bg)
+                        .stroke(egui::Stroke::new(1.5_f32, palette.accent))
+                        .rounding(egui::Rounding::same(12.0))
+                        .inner_margin(egui::Margin::symmetric(20.0, 16.0));
+                    frame.show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = egui::Vec2::new(12.0, 0.0);
+                            for (idx, item) in self.alt_tab.items.iter().enumerate() {
+                                let is_active = idx == active_idx;
+                                let (rect, _) = ui.allocate_exact_size(
+                                    egui::Vec2::new(100.0, 64.0),
+                                    egui::Sense::hover(),
+                                );
+                                let bg = if is_active {
+                                    palette.accent.gamma_multiply(0.20)
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                };
+                                let stroke = if is_active {
+                                    egui::Stroke::new(1.5_f32, palette.accent)
+                                } else {
+                                    egui::Stroke::new(1.0_f32, palette.border)
+                                };
+                                ui.painter()
+                                    .rect_filled(rect, egui::Rounding::same(8.0), bg);
+                                ui.painter()
+                                    .rect_stroke(rect, egui::Rounding::same(8.0), stroke);
+
+                                let label_color = if is_active {
+                                    palette.accent
+                                } else {
+                                    palette.text_primary
+                                };
+                                ui.painter().text(
+                                    rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    item,
+                                    egui::FontId::proportional(13.0),
+                                    label_color,
+                                );
+                            }
+                        });
+                    });
+                });
+        }
 
         // 7. Edge resizing. The window has no OS title bar or frame (Finder
         // chrome is drawn by the app), so Windows offers no resize border.

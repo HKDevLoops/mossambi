@@ -795,6 +795,14 @@ pub struct AnimationSettings {
     pub folder_nav_motion: bool,
     #[serde(default = "default_true")]
     pub click_feedback: bool,
+    #[serde(default)]
+    pub window_anim: crate::core::window_anim::WindowAnimType,
+    #[serde(default = "default_window_anim_duration")]
+    pub window_anim_duration: f32,
+}
+
+fn default_window_anim_duration() -> f32 {
+    0.28
 }
 
 fn default_spring_stiffness() -> f32 {
@@ -831,6 +839,8 @@ impl Default for AnimationSettings {
             widget_elastic_hover: true,
             folder_nav_motion: true,
             click_feedback: true,
+            window_anim: crate::core::window_anim::WindowAnimType::Genie,
+            window_anim_duration: 0.28,
         }
     }
 }
