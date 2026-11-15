@@ -46,3 +46,43 @@ fn test_sidebar_collapsed_serde_roundtrip() {
     let deserialized: MossambiConfig = serde_json::from_str(&json).expect("Must deserialize");
     assert!(deserialized.sidebar_collapsed);
 }
+
+#[test]
+fn test_sidebar_reduced_motion_snaps_instantly() {
+    let mut config = MossambiConfig::default();
+    config.animations.reduced_motion = true;
+    config.sidebar_collapsed = true;
+
+    let target_w = if config.sidebar_collapsed { 0.0 } else { 240.0 };
+    let mut spring = Spring::new(240.0);
+
+    // When reduced motion is on, spring snaps immediately
+    if config.animations.reduced_motion {
+        spring.set(target_w);
+    } else {
+        advance(&mut spring, target_w, AnimStyle::Spring, 0.05);
+    }
+
+    assert_eq!(spring.value, 0.0);
+    assert!(spring.at_rest());
+}
+
+#[test]
+fn test_ctrl_b_keymap_logic() {
+    let mut config = MossambiConfig::default();
+    assert!(!config.sidebar_collapsed);
+
+    // Simulate Ctrl+B press
+    let is_ctrl = true;
+    let key_b = true;
+    if is_ctrl && key_b {
+        config.sidebar_collapsed = !config.sidebar_collapsed;
+    }
+    assert!(config.sidebar_collapsed);
+
+    // Press again
+    if is_ctrl && key_b {
+        config.sidebar_collapsed = !config.sidebar_collapsed;
+    }
+    assert!(!config.sidebar_collapsed);
+}

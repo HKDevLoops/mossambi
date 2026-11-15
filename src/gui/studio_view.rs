@@ -835,9 +835,8 @@ impl StudioView {
                                     "Hide Sidebar (Ctrl+B)"
                                 };
                                 if ui.button(toggle_label).clicked() {
-                                    let mut cfg = crate::core::MossambiConfig::load();
-                                    cfg.sidebar_collapsed = !cfg.sidebar_collapsed;
-                                    let _ = cfg.save();
+                                    config.sidebar_collapsed = !config.sidebar_collapsed;
+                                    let _ = config.save();
                                     ui.close_menu();
                                 }
 
@@ -913,9 +912,8 @@ impl StudioView {
                             "Toggle Sidebar (Ctrl+B)",
                             !is_collapsed,
                         ) {
-                            let mut cfg = crate::core::MossambiConfig::load();
-                            cfg.sidebar_collapsed = !cfg.sidebar_collapsed;
-                            let _ = cfg.save();
+                            config.sidebar_collapsed = !config.sidebar_collapsed;
+                            let _ = config.save();
                         }
 
                         let can_back = self.explorer_view.can_go_back();
@@ -1629,13 +1627,18 @@ impl StudioView {
             chrome_spec.sidebar.width
         };
         let dt = crate::gui::anim::frame_dt(ctx);
-        let current_sidebar_w = crate::gui::anim::advance(
-            &mut self.sidebar_width_spring,
-            target_sidebar_w,
-            config.animations.toolbar,
-            dt,
-        );
-        if !self.sidebar_width_spring.at_rest() {
+        let current_sidebar_w = if config.animations.reduced_motion {
+            self.sidebar_width_spring.set(target_sidebar_w);
+            target_sidebar_w
+        } else {
+            crate::gui::anim::advance(
+                &mut self.sidebar_width_spring,
+                target_sidebar_w,
+                config.animations.toolbar,
+                dt,
+            )
+        };
+        if !self.sidebar_width_spring.at_rest() && !config.animations.reduced_motion {
             ctx.request_repaint();
         }
 
@@ -1660,7 +1663,7 @@ impl StudioView {
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             let pack = self.explorer_view.icon_pack;
-                            let mut cfg = crate::core::MossambiConfig::load();
+                            let cfg = &mut *config;
 
                         // Exactly ONE sidebar row is active: the deepest sidebar
                         // location that contains the current folder.

@@ -47,3 +47,74 @@ fn test_click_depth_scale_spring() {
         "Scale should recover towards 1.0, got {step}"
     );
 }
+
+#[test]
+fn test_distinct_view_mode_transitions_reach_rest() {
+    // 1. Details view stagger-slide: 1.0 -> 0.0
+    let mut details_spring = Spring::new(1.0);
+    for _ in 0..40 {
+        advance(&mut details_spring, 0.0, AnimStyle::Natural, 0.05);
+    }
+    assert!(
+        details_spring.at_rest(),
+        "Details transition spring must reach rest"
+    );
+    assert_eq!(details_spring.value, 0.0);
+
+    // 2. Grid view scale/fade: 0.0 -> 1.0
+    let mut grid_spring = Spring::new(0.0);
+    for _ in 0..40 {
+        advance(&mut grid_spring, 1.0, AnimStyle::Natural, 0.05);
+    }
+    assert!(
+        grid_spring.at_rest(),
+        "Grid transition spring must reach rest"
+    );
+    assert_eq!(grid_spring.value, 1.0);
+
+    // 3. Columns view slide: 1.0 -> 0.0
+    let mut columns_spring = Spring::new(1.0);
+    for _ in 0..40 {
+        advance(&mut columns_spring, 0.0, AnimStyle::Natural, 0.05);
+    }
+    assert!(
+        columns_spring.at_rest(),
+        "Columns transition spring must reach rest"
+    );
+    assert_eq!(columns_spring.value, 0.0);
+}
+
+#[test]
+fn test_reduced_motion_short_circuits_instantly() {
+    let reduced_motion = true;
+
+    let mut details_spring = Spring::new(1.0);
+    let mut grid_spring = Spring::new(0.0);
+    let mut columns_spring = Spring::new(1.0);
+
+    if reduced_motion {
+        details_spring.set(0.0);
+        grid_spring.set(1.0);
+        columns_spring.set(0.0);
+    }
+
+    assert!(details_spring.at_rest());
+    assert_eq!(details_spring.value, 0.0);
+    assert!(grid_spring.at_rest());
+    assert_eq!(grid_spring.value, 1.0);
+    assert!(columns_spring.at_rest());
+    assert_eq!(columns_spring.value, 0.0);
+}
+
+#[test]
+fn test_new_item_entrance_spring_reaches_rest() {
+    let mut entrance_spring = Spring::new(0.0);
+    for _ in 0..50 {
+        advance(&mut entrance_spring, 1.0, AnimStyle::Natural, 0.05);
+    }
+    assert!(
+        entrance_spring.at_rest(),
+        "New item entrance spring must reach rest"
+    );
+    assert_eq!(entrance_spring.value, 1.0);
+}

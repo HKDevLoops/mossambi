@@ -753,6 +753,10 @@ pub struct ExplorerView {
     pub nav_alpha_spring: crate::gui::anim::Spring,
     pub click_depth_spring: crate::gui::anim::Spring,
     pub view_mode_crossfade_spring: crate::gui::anim::Spring,
+    pub details_transition_spring: crate::gui::anim::Spring,
+    pub grid_transition_spring: crate::gui::anim::Spring,
+    pub columns_transition_spring: crate::gui::anim::Spring,
+    pub new_item_entrance: Option<(PathBuf, crate::gui::anim::Spring)>,
     pub last_view_mode: ViewMode,
 
     // Windows 11 & macOS Home Dashboard View
@@ -1086,6 +1090,10 @@ impl Default for ExplorerView {
             nav_alpha_spring: crate::gui::anim::Spring::new(1.0),
             click_depth_spring: crate::gui::anim::Spring::new(1.0),
             view_mode_crossfade_spring: crate::gui::anim::Spring::new(1.0),
+            details_transition_spring: crate::gui::anim::Spring::new(0.0),
+            grid_transition_spring: crate::gui::anim::Spring::new(1.0),
+            columns_transition_spring: crate::gui::anim::Spring::new(0.0),
+            new_item_entrance: None,
             last_view_mode: match cfg.default_explorer_layout {
                 2 => ViewMode::Grid,
                 3 => ViewMode::Columns,
@@ -1141,9 +1149,15 @@ impl ExplorerView {
 
     /// Trigger subtle tactile click depression feedback (scale 0.985 -> 1.0).
     pub fn trigger_click_feedback(&mut self) {
-        let cfg = crate::core::MossambiConfig::load();
-        if cfg.animations.click_feedback && !cfg.animations.reduced_motion {
+        if self.animations.click_feedback && !self.animations.reduced_motion {
             self.click_depth_spring.set(0.985);
+        }
+    }
+
+    /// Register a newly created folder or file to play its scale+fade entrance animation.
+    pub fn register_created_item(&mut self, path: PathBuf) {
+        if !self.animations.reduced_motion {
+            self.new_item_entrance = Some((path, crate::gui::anim::Spring::new(0.0)));
         }
     }
 
@@ -1274,8 +1288,8 @@ impl ExplorerView {
         // and keeps deeper columns; unrelated navigation closes the
         // stack.
         let old_dir = std::mem::replace(&mut self.current_dir, dir.clone());
-        let cfg = crate::core::MossambiConfig::load();
-        if cfg.animations.folder_nav_motion && !cfg.animations.reduced_motion && dir != old_dir {
+        self.trigger_click_feedback();
+        if self.animations.folder_nav_motion && !self.animations.reduced_motion && dir != old_dir {
             if dir.starts_with(&old_dir) {
                 self.nav_offset_spring.set(16.0);
                 self.nav_alpha_spring.set(0.4);
@@ -2491,6 +2505,7 @@ impl ExplorerView {
                     let target_dir = self.current_dir.join(clean_name);
                     let _ = std::fs::create_dir_all(&target_dir);
                     crate::core::action_journal::record_create_dir(target_dir.clone());
+                    self.register_created_item(target_dir.clone());
                     self.navigate_to(self.current_dir.clone());
                 }
                 self.show_new_folder_dialog = false;
@@ -4030,9 +4045,8 @@ impl ExplorerView {
             return;
         }
 
-        let cfg = crate::core::MossambiConfig::load();
         let dt = crate::gui::anim::frame_dt(ui.ctx());
-        if cfg.animations.folder_nav_motion && !cfg.animations.reduced_motion {
+        if self.animations.folder_nav_motion && !self.animations.reduced_motion {
             let _ = crate::gui::anim::advance(
                 &mut self.nav_offset_spring,
                 0.0,
@@ -4053,32 +4067,80 @@ impl ExplorerView {
             }
         }
 
+        // Distinct View-Mode Transitions
         if self.last_view_mode != self.view_mode {
             self.last_view_mode = self.view_mode;
-            if !cfg.animations.reduced_motion {
-                self.view_mode_crossfade_spring.set(0.4);
+            if !self.animations.reduced_motion {
+                match self.view_mode {
+                    ViewMode::Details => self.details_transition_spring.set(1.0),
+                    ViewMode::Grid => self.grid_transition_spring.set(0.0),
+                    ViewMode::Columns => self.columns_transition_spring.set(1.0),
+                }
             }
         }
-        let view_alpha = crate::gui::anim::advance(
-            &mut self.view_mode_crossfade_spring,
-            1.0,
-            crate::core::config::AnimStyle::Natural,
-            dt,
-        );
-        if view_alpha < 0.99 {
-            ui.set_opacity(view_alpha);
-            ui.ctx().request_repaint();
-        }
 
-        if cfg.animations.click_feedback && !cfg.animations.reduced_motion {
-            let _ = crate::gui::anim::advance(
-                &mut self.click_depth_spring,
-                1.0,
-                crate::core::config::AnimStyle::Snappy,
-                dt,
-            );
-            if !self.click_depth_spring.at_rest() {
-                ui.ctx().request_repaint();
+        if self.animations.reduced_motion {
+            self.details_transition_spring.set(0.0);
+            self.grid_transition_spring.set(1.0);
+            self.columns_transition_spring.set(0.0);
+            self.click_depth_spring.set(1.0);
+        } else {
+            match self.view_mode {
+                ViewMode::Details => {
+                    if !self.details_transition_spring.at_rest() {
+                        crate::gui::anim::advance(
+                            &mut self.details_transition_spring,
+                            0.0,
+                            self.animations.open,
+                            dt,
+                        );
+                        ui.ctx().request_repaint();
+                    }
+                }
+                ViewMode::Grid => {
+                    if !self.grid_transition_spring.at_rest() {
+                        crate::gui::anim::advance(
+                            &mut self.grid_transition_spring,
+                            1.0,
+                            self.animations.open,
+                            dt,
+                        );
+                        ui.ctx().request_repaint();
+                    }
+                }
+                ViewMode::Columns => {
+                    if !self.columns_transition_spring.at_rest() {
+                        crate::gui::anim::advance(
+                            &mut self.columns_transition_spring,
+                            0.0,
+                            self.animations.open,
+                            dt,
+                        );
+                        ui.ctx().request_repaint();
+                    }
+                }
+            }
+
+            if self.animations.click_feedback {
+                let _ = crate::gui::anim::advance(
+                    &mut self.click_depth_spring,
+                    1.0,
+                    crate::core::config::AnimStyle::Snappy,
+                    dt,
+                );
+                if !self.click_depth_spring.at_rest() {
+                    ui.ctx().request_repaint();
+                }
+            }
+
+            // Newly created item entrance animation (scale + fade in)
+            if let Some((_, ref mut spring)) = self.new_item_entrance {
+                crate::gui::anim::advance(spring, 1.0, crate::core::config::AnimStyle::Natural, dt);
+                if !spring.at_rest() {
+                    ui.ctx().request_repaint();
+                } else if spring.value >= 0.99 {
+                    self.new_item_entrance = None;
+                }
             }
         }
 
@@ -4561,6 +4623,11 @@ impl ExplorerView {
             .into_iter()
             .cloned()
             .collect();
+
+        let slide_p = self.details_transition_spring.value;
+        if slide_p > 0.001 {
+            ui.set_opacity((1.0 - slide_p * 0.5).clamp(0.0, 1.0));
+        }
 
         // -- Tools & Converters toolbar (sits directly above the parameter row) --
         self.render_action_toolbar(
@@ -5069,6 +5136,7 @@ impl ExplorerView {
 
                     // -- Interaction: Finder semantics --
                     if row_resp.double_clicked() {
+                        self.trigger_click_feedback();
                         self.selection_anchor = Some(idx);
                         if item.is_dir {
                             nav_into_dir = Some(item.path.clone());
@@ -5076,6 +5144,7 @@ impl ExplorerView {
                             open_in_default_app(&item.path);
                         }
                     } else if row_resp.clicked() {
+                        self.trigger_click_feedback();
                         self.focused_row = idx;
                         let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                         let shift = ui.input(|i| i.modifiers.shift);
@@ -6068,6 +6137,11 @@ impl ExplorerView {
             .into_iter()
             .cloned()
             .collect();
+        let grid_p = self.grid_transition_spring.value;
+        if grid_p < 0.999 {
+            ui.set_opacity((0.35 + 0.65 * grid_p).clamp(0.0, 1.0));
+        }
+
         let mut nav_into_dir: Option<PathBuf> = None;
         let peek_to_open: Option<FileItem> = None;
         let mut item_intents: Vec<ItemMenuIntents> = Vec::new();
@@ -6480,12 +6554,14 @@ impl ExplorerView {
                         );
 
                         if resp.double_clicked() {
+                            self.trigger_click_feedback();
                             if item.is_dir {
                                 nav_into_dir = Some(item.path.clone());
                             } else {
                                 open_in_default_app(&item.path);
                             }
                         } else if resp.clicked() {
+                            self.trigger_click_feedback();
                             if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
                                 if is_checked {
                                     self.selected_paths.remove(&item.path);
@@ -6983,6 +7059,7 @@ impl ExplorerView {
                                         }
                                         // Role-specific click dispatch
                                         if resp.clicked() {
+                                            self.trigger_click_feedback();
                                             match role {
                                                 ColumnRole::Ancestor => {
                                                     if !chain_sel {
@@ -7028,6 +7105,7 @@ impl ExplorerView {
                                             }
                                         }
                                         if resp.double_clicked() {
+                                            self.trigger_click_feedback();
                                             if item.is_dir {
                                                 *nav_into_dir = Some(item.path.clone());
                                             } else {
@@ -7078,6 +7156,11 @@ impl ExplorerView {
             .into_iter()
             .cloned()
             .collect();
+        let col_p = self.columns_transition_spring.value;
+        if col_p > 0.001 {
+            ui.set_opacity((1.0 - col_p * 0.5).clamp(0.0, 1.0));
+        }
+
         let mut nav_into_dir: Option<PathBuf> = None;
         let mut subfolder_to_load: Option<(usize, PathBuf)> = None;
         let mut preview_to_set: Option<FileItem> = None;
