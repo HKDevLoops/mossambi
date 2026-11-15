@@ -13,9 +13,13 @@
 use crate::core::config::MossambiConfig;
 use crate::core::conversion_queue::{ConversionQueue, QueueAction, QueueItemStatus};
 use crate::core::icon_packs::IconGlyph;
+use crate::core::look_spec::{
+    AddressBarStyle, SearchPosition, SidebarHeaderStyle, TabPosition, TitleBarStyle, ToolbarItem,
+    WindowControlsPosition,
+};
 use crate::core::{FileCategory, UniversalRegistry};
 use crate::gui::command_palette::{CommandPalette, PaletteAction};
-use crate::gui::design::{self, layout, radius, type_scale};
+use crate::gui::design::{self, radius, type_scale};
 use crate::gui::explorer_view::ExplorerView;
 use crate::gui::finder_chrome::{
     render_sidebar_row, render_sidebar_zone_header, render_sidebar_zone_header_with_drop,
@@ -265,6 +269,32 @@ impl StudioView {
         ui.add_space(4.0);
     }
 
+    fn render_zone_header(
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        title: &str,
+        expanded: bool,
+        style: SidebarHeaderStyle,
+    ) -> bool {
+        match style {
+            SidebarHeaderStyle::SectionTitle => {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(title.to_uppercase())
+                        .size(11.0)
+                        .color(palette.text_muted)
+                        .strong(),
+                );
+                ui.add_space(4.0);
+                false
+            }
+            SidebarHeaderStyle::CollapsibleZone => {
+                render_sidebar_zone_header(ui, palette, title, expanded)
+            }
+            SidebarHeaderStyle::None => false,
+        }
+    }
+
     /// Renders the complete macOS Studio window with sidebar and content area.
     #[allow(clippy::too_many_arguments)]
     pub fn render(
@@ -398,6 +428,7 @@ impl StudioView {
             .inner_margin(egui::Margin::symmetric(10.0, 4.0));
 
         let is_max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+        let chrome_spec = config.chrome_spec();
 
         egui::TopBottomPanel::top("studio_unified_header")
             .frame(top_frame)
@@ -406,20 +437,20 @@ impl StudioView {
                 // ROW 1: Tabs + Drag Window Area + Window Controls
                 // ==============================================================
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                    ui.spacing_mut().item_spacing =
+                        Vec2::new(chrome_spec.spacing.toolbar_item_spacing, 0.0);
 
-                    // Finder traffic lights on the LEFT of the tab strip.
-                    // The Windows-style Fluent dots (plus a stray maximize
-                    // glyph) were replaced: macOS puts the controls first.
-                    crate::gui::finder_chrome::render_traffic_lights(
-                        ui,
-                        &palette,
-                        || ctx.send_viewport_cmd(ViewportCommand::Close),
-                        || ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
-                        || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
-                    );
-
-                    ui.add_space(6.0);
+                    // Left traffic lights (Finder style)
+                    if chrome_spec.window_controls == WindowControlsPosition::LeftTraffic {
+                        crate::gui::finder_chrome::render_traffic_lights(
+                            ui,
+                            &palette,
+                            || ctx.send_viewport_cmd(ViewportCommand::Close),
+                            || ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
+                            || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
+                        );
+                        ui.add_space(6.0);
+                    }
 
                     // Brand Icon (enlarged Finder proportions)
                     let (b_rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
@@ -431,107 +462,189 @@ impl StudioView {
                         [palette.accent.r(), palette.accent.g(), palette.accent.b()],
                     );
 
-                    // Tabs
-                    let mut tab_to_select: Option<usize> = None;
-                    let mut tab_to_close: Option<usize> = None;
-                    let tabs_count = self.explorer_view.tabs.len();
-                    let pack = self.explorer_view.icon_pack;
+                    if chrome_spec.tab_position != TabPosition::None {
+                        // Tabs
+                        let mut tab_to_select: Option<usize> = None;
+                        let mut tab_to_close: Option<usize> = None;
+                        let tabs_count = self.explorer_view.tabs.len();
+                        let pack = self.explorer_view.icon_pack;
 
-                    for (idx, tab) in self.explorer_view.tabs.iter().enumerate() {
-                        let is_active = self.current_tab == StudioTab::FileExplorer
-                            && idx == self.explorer_view.active_tab_index;
-                        let tab_bg = if is_active {
-                            palette.card_bg
-                        } else {
-                            Color32::TRANSPARENT
-                        };
-                        let tab_stroke = if is_active {
-                            Stroke::new(1.0_f32, palette.border)
-                        } else {
-                            Stroke::NONE
-                        };
+                        for (idx, tab) in self.explorer_view.tabs.iter().enumerate() {
+                            let is_active = self.current_tab == StudioTab::FileExplorer
+                                && idx == self.explorer_view.active_tab_index;
+                            let tab_bg = if is_active {
+                                palette.card_bg
+                            } else {
+                                Color32::TRANSPARENT
+                            };
+                            let tab_stroke = if is_active {
+                                Stroke::new(1.0_f32, palette.border)
+                            } else {
+                                Stroke::NONE
+                            };
 
-                        let (rect, resp) =
-                            ui.allocate_exact_size(Vec2::new(130.0, 26.0), Sense::click());
-                        let is_hovered = resp.hovered();
+                            let (rect, resp) =
+                                ui.allocate_exact_size(Vec2::new(130.0, 26.0), Sense::click());
+                            let is_hovered = resp.hovered();
 
-                        let bg = if is_active {
-                            tab_bg
-                        } else if is_hovered {
-                            palette.card_hover
-                        } else {
-                            tab_bg
-                        };
+                            let bg = if is_active {
+                                tab_bg
+                            } else if is_hovered {
+                                palette.card_hover
+                            } else {
+                                tab_bg
+                            };
 
-                        ui.painter().rect_filled(rect, Rounding::same(6.0), bg);
-                        if is_active {
-                            ui.painter()
-                                .rect_stroke(rect, Rounding::same(6.0), tab_stroke);
+                            ui.painter().rect_filled(rect, Rounding::same(6.0), bg);
+                            if is_active {
+                                ui.painter()
+                                    .rect_stroke(rect, Rounding::same(6.0), tab_stroke);
+                            }
+
+                            // Real vector tab icon
+                            let tab_glyph = if tab.is_home {
+                                IconGlyph::Home
+                            } else if let Some(sf) =
+                                crate::core::special_folders::lookup_path(&tab.path)
+                            {
+                                IconGlyph::FolderSpecial(sf)
+                            } else {
+                                IconGlyph::Folder
+                            };
+                            let tab_icon_rect = Rect::from_center_size(
+                                rect.left_center() + Vec2::new(14.0, 0.0),
+                                Vec2::splat(16.0),
+                            );
+                            let tab_icon_rgb = if is_active {
+                                [79, 168, 255]
+                            } else {
+                                [
+                                    palette.text_secondary.r(),
+                                    palette.text_secondary.g(),
+                                    palette.text_secondary.b(),
+                                ]
+                            };
+                            crate::core::icon_packs::paint_icon(
+                                ui,
+                                pack,
+                                tab_glyph,
+                                tab_icon_rect,
+                                tab_icon_rgb,
+                            );
+
+                            // Tab title (truncated)
+                            let max_title_chars = 10;
+                            let title_display = if tab.title.chars().count() > max_title_chars {
+                                format!(
+                                    "{}...",
+                                    tab.title.chars().take(max_title_chars).collect::<String>()
+                                )
+                            } else {
+                                tab.title.clone()
+                            };
+
+                            ui.painter().text(
+                                rect.left_center() + Vec2::new(30.0, 0.0),
+                                egui::Align2::LEFT_CENTER,
+                                title_display,
+                                egui::FontId::proportional(13.5),
+                                if is_active {
+                                    palette.text_primary
+                                } else {
+                                    palette.text_secondary
+                                },
+                            );
+
+                            // Close button on tab
+                            if tabs_count > 1 {
+                                let close_rect = Rect::from_center_size(
+                                    rect.right_center() + Vec2::new(-12.0, 0.0),
+                                    Vec2::splat(14.0),
+                                );
+                                let close_resp = ui.interact(
+                                    close_rect,
+                                    ui.make_persistent_id(("tab_close", tab.id)),
+                                    Sense::click(),
+                                );
+                                if close_resp.hovered() {
+                                    ui.painter().circle_filled(
+                                        close_rect.center(),
+                                        7.0,
+                                        palette.card_hover,
+                                    );
+                                }
+                                ui.painter().text(
+                                    close_rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    "x",
+                                    egui::FontId::proportional(11.0),
+                                    if close_resp.hovered() {
+                                        palette.text_primary
+                                    } else {
+                                        palette.text_muted
+                                    },
+                                );
+                                if close_resp.clicked() {
+                                    tab_to_close = Some(idx);
+                                }
+                            }
+
+                            if resp.clicked() {
+                                tab_to_select = Some(idx);
+                            }
                         }
 
-                        // Real vector tab icon
-                        let tab_glyph = if tab.is_home {
-                            IconGlyph::Home
-                        } else if let Some(sf) =
-                            crate::core::special_folders::lookup_path(&tab.path)
-                        {
-                            IconGlyph::FolderSpecial(sf)
-                        } else {
-                            IconGlyph::Folder
-                        };
-                        let tab_icon_rect = Rect::from_center_size(
-                            rect.left_center() + Vec2::new(14.0, 0.0),
-                            Vec2::splat(16.0),
-                        );
-                        let tab_icon_rgb = if is_active {
-                            [79, 168, 255]
-                        } else {
-                            [
-                                palette.text_secondary.r(),
-                                palette.text_secondary.g(),
-                                palette.text_secondary.b(),
-                            ]
-                        };
-                        crate::core::icon_packs::paint_icon(
-                            ui,
-                            pack,
-                            tab_glyph,
-                            tab_icon_rect,
-                            tab_icon_rgb,
-                        );
-
-                        // Tab title (truncated)
-                        let max_title_chars = 10;
-                        let title_display = if tab.title.chars().count() > max_title_chars {
-                            format!(
-                                "{}...",
-                                tab.title.chars().take(max_title_chars).collect::<String>()
-                            )
-                        } else {
-                            tab.title.clone()
-                        };
-
-                        ui.painter().text(
-                            rect.left_center() + Vec2::new(30.0, 0.0),
-                            egui::Align2::LEFT_CENTER,
-                            title_display,
-                            egui::FontId::proportional(13.5),
-                            if is_active {
-                                palette.text_primary
+                        // B-3: when a non-explorer view is on screen the
+                        // strip must show what is actually displayed
+                        // instead of only stale explorer pills.
+                        let mut close_tool_tab = false;
+                        if self.current_tab != StudioTab::FileExplorer {
+                            let (label, glyph) = studio_tab_label(self.current_tab);
+                            let (p_rect, _) =
+                                ui.allocate_exact_size(Vec2::new(130.0, 26.0), Sense::hover());
+                            ui.painter()
+                                .rect_filled(p_rect, Rounding::same(6.0), palette.card_bg);
+                            ui.painter().rect_stroke(
+                                p_rect,
+                                Rounding::same(6.0),
+                                Stroke::new(1.0_f32, palette.border),
+                            );
+                            let pill_icon_rect = Rect::from_center_size(
+                                p_rect.left_center() + Vec2::new(14.0, 0.0),
+                                Vec2::splat(16.0),
+                            );
+                            crate::core::icon_packs::paint_icon(
+                                ui,
+                                pack,
+                                glyph,
+                                pill_icon_rect,
+                                [79, 168, 255],
+                            );
+                            let max_title_chars = 10;
+                            let title_display = if label.chars().count() > max_title_chars {
+                                format!(
+                                    "{}...",
+                                    label.chars().take(max_title_chars).collect::<String>()
+                                )
                             } else {
-                                palette.text_secondary
-                            },
-                        );
+                                label.to_string()
+                            };
+                            ui.painter().text(
+                                p_rect.left_center() + Vec2::new(30.0, 0.0),
+                                egui::Align2::LEFT_CENTER,
+                                title_display,
+                                egui::FontId::proportional(13.5),
+                                palette.text_primary,
+                            );
 
-                        // Close button on tab
-                        if tabs_count > 1 {
+                            // Close button "x" on tool/preferences pill
                             let close_rect = Rect::from_center_size(
-                                rect.right_center() + Vec2::new(-12.0, 0.0),
+                                p_rect.right_center() + Vec2::new(-12.0, 0.0),
                                 Vec2::splat(14.0),
                             );
                             let close_resp = ui.interact(
                                 close_rect,
-                                ui.make_persistent_id(("tab_close", tab.id)),
+                                ui.make_persistent_id("tool_tab_close_btn"),
                                 Sense::click(),
                             );
                             if close_resp.hovered() {
@@ -553,127 +666,77 @@ impl StudioView {
                                 },
                             );
                             if close_resp.clicked() {
-                                tab_to_close = Some(idx);
+                                close_tool_tab = true;
                             }
                         }
 
-                        if resp.clicked() {
-                            tab_to_select = Some(idx);
-                        }
-                    }
-
-                    // B-3: when a non-explorer view is on screen the
-                    // strip must show what is actually displayed
-                    // instead of only stale explorer pills.
-                    let mut close_tool_tab = false;
-                    if self.current_tab != StudioTab::FileExplorer {
-                        let (label, glyph) = studio_tab_label(self.current_tab);
-                        let (p_rect, _) =
-                            ui.allocate_exact_size(Vec2::new(130.0, 26.0), Sense::hover());
-                        ui.painter()
-                            .rect_filled(p_rect, Rounding::same(6.0), palette.card_bg);
-                        ui.painter().rect_stroke(
-                            p_rect,
-                            Rounding::same(6.0),
-                            Stroke::new(1.0_f32, palette.border),
-                        );
-                        let pill_icon_rect = Rect::from_center_size(
-                            p_rect.left_center() + Vec2::new(14.0, 0.0),
-                            Vec2::splat(16.0),
-                        );
-                        crate::core::icon_packs::paint_icon(
-                            ui,
-                            pack,
-                            glyph,
-                            pill_icon_rect,
-                            [79, 168, 255],
-                        );
-                        let max_title_chars = 10;
-                        let title_display = if label.chars().count() > max_title_chars {
-                            format!(
-                                "{}...",
-                                label.chars().take(max_title_chars).collect::<String>()
-                            )
-                        } else {
-                            label.to_string()
-                        };
-                        ui.painter().text(
-                            p_rect.left_center() + Vec2::new(30.0, 0.0),
-                            egui::Align2::LEFT_CENTER,
-                            title_display,
-                            egui::FontId::proportional(13.5),
-                            palette.text_primary,
-                        );
-
-                        // Close button "x" on tool/preferences pill
-                        let close_rect = Rect::from_center_size(
-                            p_rect.right_center() + Vec2::new(-12.0, 0.0),
-                            Vec2::splat(14.0),
-                        );
-                        let close_resp = ui.interact(
-                            close_rect,
-                            ui.make_persistent_id("tool_tab_close_btn"),
-                            Sense::click(),
-                        );
-                        if close_resp.hovered() {
-                            ui.painter().circle_filled(
-                                close_rect.center(),
-                                7.0,
-                                palette.card_hover,
-                            );
-                        }
-                        ui.painter().text(
-                            close_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "x",
-                            egui::FontId::proportional(11.0),
-                            if close_resp.hovered() {
-                                palette.text_primary
+                        if close_tool_tab {
+                            self.current_tab = if self.previous_tab != self.current_tab
+                                && self.previous_tab != StudioTab::Preferences
+                            {
+                                self.previous_tab
                             } else {
-                                palette.text_muted
-                            },
-                        );
-                        if close_resp.clicked() {
-                            close_tool_tab = true;
+                                StudioTab::FileExplorer
+                            };
+                        } else if let Some(idx) = tab_to_close {
+                            self.explorer_view.close_tab(idx);
+                        } else if let Some(idx) = tab_to_select {
+                            self.current_tab = StudioTab::FileExplorer;
+                            self.explorer_view.switch_to_tab(idx);
                         }
-                    }
 
-                    if close_tool_tab {
-                        self.current_tab = if self.previous_tab != self.current_tab
-                            && self.previous_tab != StudioTab::Preferences
+                        // Plus button for new tab
+                        let new_tab_btn = egui::Button::new(
+                            egui::RichText::new("+")
+                                .size(13.0)
+                                .color(palette.text_secondary),
+                        )
+                        .min_size(Vec2::splat(24.0))
+                        .fill(Color32::TRANSPARENT)
+                        .rounding(Rounding::same(4.0));
+                        if ui
+                            .add(new_tab_btn)
+                            .on_hover_text("New tab (Ctrl+T)")
+                            .clicked()
                         {
-                            self.previous_tab
+                            let target = self.explorer_view.current_dir.clone();
+                            self.explorer_view.add_tab(target);
+                            self.current_tab = StudioTab::FileExplorer;
+                        }
+                    } else {
+                        // Title label when tabs are disabled (Thunar / Nautilus)
+                        let title = if self.current_tab == StudioTab::FileExplorer {
+                            if self.explorer_view.is_home_view {
+                                "Home".to_string()
+                            } else {
+                                self.explorer_view
+                                    .current_dir
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| {
+                                        self.explorer_view.current_dir.to_string_lossy().to_string()
+                                    })
+                            }
                         } else {
-                            StudioTab::FileExplorer
+                            studio_tab_label(self.current_tab).0.to_string()
                         };
-                    } else if let Some(idx) = tab_to_close {
-                        self.explorer_view.close_tab(idx);
-                    } else if let Some(idx) = tab_to_select {
-                        self.current_tab = StudioTab::FileExplorer;
-                        self.explorer_view.switch_to_tab(idx);
-                    }
-
-                    // Plus button for new tab
-                    let new_tab_btn = egui::Button::new(
-                        egui::RichText::new("+")
-                            .size(13.0)
-                            .color(palette.text_secondary),
-                    )
-                    .min_size(Vec2::splat(24.0))
-                    .fill(Color32::TRANSPARENT)
-                    .rounding(Rounding::same(4.0));
-                    if ui
-                        .add(new_tab_btn)
-                        .on_hover_text("New tab (Ctrl+T)")
-                        .clicked()
-                    {
-                        let target = self.explorer_view.current_dir.clone();
-                        self.explorer_view.add_tab(target);
-                        self.current_tab = StudioTab::FileExplorer;
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new(title)
+                                .size(13.5)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
                     }
 
                     // Draggable Window Title Region
-                    let drag_w = (ui.available_width() - 130.0).max(20.0);
+                    let right_reserve =
+                        if chrome_spec.window_controls == WindowControlsPosition::RightCaption {
+                            110.0_f32
+                        } else {
+                            20.0_f32
+                        };
+                    let drag_w = (ui.available_width() - right_reserve).max(20.0);
                     let (_drag_rect, drag_resp) =
                         ui.allocate_exact_size(Vec2::new(drag_w, 26.0), Sense::click_and_drag());
                     if drag_resp.drag_started() {
@@ -682,7 +745,124 @@ impl StudioView {
                     if drag_resp.double_clicked() {
                         ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max));
                     }
+
+                    // Right caption buttons (Windows / GNOME style)
+                    if chrome_spec.window_controls == WindowControlsPosition::RightCaption {
+                        crate::gui::finder_chrome::render_caption_buttons(
+                            ui,
+                            &palette,
+                            || ctx.send_viewport_cmd(ViewportCommand::Close),
+                            || ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
+                            || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
+                        );
+                    }
                 });
+
+                // Menubar (Thunar style)
+                if chrome_spec.menubar {
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+                        egui::menu::bar(ui, |ui| {
+                            ui.menu_button("File", |ui| {
+                                if ui.button("New Window (Ctrl+N)").clicked() {
+                                    crate::gui::explorer_view::spawn_new_explorer_window(Some(
+                                        &self.explorer_view.current_dir,
+                                    ));
+                                    ui.close_menu();
+                                }
+                                if ui.button("New Folder (Ctrl+Shift+N)").clicked() {
+                                    self.explorer_view.show_new_folder_dialog = true;
+                                    ui.close_menu();
+                                }
+                                ui.separator();
+                                if ui.button("Close Window (Alt+F4)").clicked() {
+                                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                                    ui.close_menu();
+                                }
+                            });
+                            ui.menu_button("Edit", |ui| {
+                                if ui.button("Cut (Ctrl+X)").clicked() {
+                                    self.explorer_view.cut_selected_to_clipboard();
+                                    ui.close_menu();
+                                }
+                                if ui.button("Copy (Ctrl+C)").clicked() {
+                                    self.explorer_view.copy_selected_to_clipboard();
+                                    ui.close_menu();
+                                }
+                                if ui.button("Paste (Ctrl+V)").clicked() {
+                                    self.explorer_view.paste_from_clipboard();
+                                    ui.close_menu();
+                                }
+                                ui.separator();
+                                if ui.button("Select All (Ctrl+A)").clicked() {
+                                    self.explorer_view.select_all();
+                                    ui.close_menu();
+                                }
+                            });
+                            ui.menu_button("View", |ui| {
+                                if ui.button("Icons View (Ctrl+1)").clicked() {
+                                    self.explorer_view.view_mode =
+                                        crate::gui::explorer_view::ViewMode::Grid;
+                                    ui.close_menu();
+                                }
+                                if ui.button("Details View (Ctrl+2)").clicked() {
+                                    self.explorer_view.view_mode =
+                                        crate::gui::explorer_view::ViewMode::Details;
+                                    ui.close_menu();
+                                }
+                                if ui.button("Columns View (Ctrl+3)").clicked() {
+                                    self.explorer_view.view_mode =
+                                        crate::gui::explorer_view::ViewMode::Columns;
+                                    ui.close_menu();
+                                }
+                                ui.separator();
+                                if ui.button("Refresh (F5)").clicked() {
+                                    self.explorer_view
+                                        .navigate_to(self.explorer_view.current_dir.clone());
+                                    ui.close_menu();
+                                }
+                            });
+                            ui.menu_button("Go", |ui| {
+                                let can_back = self.explorer_view.can_go_back();
+                                if ui
+                                    .add_enabled(can_back, egui::Button::new("Back (Alt+Left)"))
+                                    .clicked()
+                                {
+                                    self.explorer_view.go_back();
+                                    ui.close_menu();
+                                }
+                                let can_fwd = self.explorer_view.can_go_forward();
+                                if ui
+                                    .add_enabled(can_fwd, egui::Button::new("Forward (Alt+Right)"))
+                                    .clicked()
+                                {
+                                    self.explorer_view.go_forward();
+                                    ui.close_menu();
+                                }
+                                if ui.button("Parent Folder (Alt+Up)").clicked() {
+                                    if let Some(p) = self.explorer_view.current_dir.parent() {
+                                        self.explorer_view.navigate_to(p.to_path_buf());
+                                    }
+                                    ui.close_menu();
+                                }
+                                if ui.button("Home").clicked() {
+                                    if let Some(h) = crate::core::platform_paths::home_dir_opt() {
+                                        self.explorer_view.navigate_to(h);
+                                        self.explorer_view.is_home_view = true;
+                                    }
+                                    ui.close_menu();
+                                }
+                            });
+                            ui.menu_button("Help", |ui| {
+                                if ui.button("Preferences (Cmd+,)").clicked() {
+                                    self.switch_to_tab(StudioTab::Preferences);
+                                    ui.close_menu();
+                                }
+                            });
+                        });
+                    });
+                }
 
                 // ROW 2 (Navigation Buttons + Breadcrumbs + Search + Utilities)
                 // is ONLY shown when the user is in the File Explorer tab (macOS Finder parity).
@@ -780,283 +960,350 @@ impl StudioView {
 
                         ui.add_space(4.0);
 
-                        let cfg = crate::core::MossambiConfig::load();
-                        let is_macos_style =
-                            cfg.explorer_style == crate::core::ExplorerStyle::MacOS;
-
                         let mut nav_target: Option<PathBuf> = None;
                         let mut toggle_edit = false;
 
-                        if is_macos_style {
-                            // Authentic macOS Finder Header: Folder Icon + Title
-                            let is_home = self.explorer_view.is_home_view;
-                            let title_str = if is_home {
-                                "Home".to_string()
-                            } else {
-                                self.explorer_view
-                                    .current_dir
-                                    .file_name()
-                                    .map(|n| n.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| {
-                                        self.explorer_view.current_dir.to_string_lossy().to_string()
-                                    })
-                            };
-                            let glyph = if is_home {
-                                IconGlyph::Home
-                            } else if let Some(sf) =
-                                crate::core::special_folders::lookup_path(&self.explorer_view.current_dir)
-                            {
-                                IconGlyph::FolderSpecial(sf)
-                            } else if self.explorer_view.current_dir.parent().is_none() {
-                                IconGlyph::Drive
-                            } else {
-                                IconGlyph::Folder
-                            };
+                        match chrome_spec.address {
+                            AddressBarStyle::PillPathBar => {
+                                // Authentic macOS Finder Header: Folder Icon + Title
+                                let is_home = self.explorer_view.is_home_view;
+                                let title_str = if is_home {
+                                    "Home".to_string()
+                                } else {
+                                    self.explorer_view
+                                        .current_dir
+                                        .file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| {
+                                            self.explorer_view
+                                                .current_dir
+                                                .to_string_lossy()
+                                                .to_string()
+                                        })
+                                };
+                                let glyph = if is_home {
+                                    IconGlyph::Home
+                                } else if let Some(sf) = crate::core::special_folders::lookup_path(
+                                    &self.explorer_view.current_dir,
+                                ) {
+                                    IconGlyph::FolderSpecial(sf)
+                                } else if self.explorer_view.current_dir.parent().is_none() {
+                                    IconGlyph::Drive
+                                } else {
+                                    IconGlyph::Folder
+                                };
 
-                            ui.add_space(6.0);
-                            let (h_rect, _) =
-                                ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                            crate::core::icon_packs::paint_icon(
-                                ui,
-                                pack,
-                                glyph,
-                                h_rect,
-                                [palette.accent.r(), palette.accent.g(), palette.accent.b()],
-                            );
-                            ui.add_space(4.0);
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new(&title_str)
-                                            .size(15.0)
-                                            .strong()
-                                            .color(palette.text_primary),
-                                    )
-                                    .fill(Color32::TRANSPARENT)
-                                    .stroke(Stroke::NONE),
-                                )
-                                .on_hover_text("Click to edit folder path (Ctrl+L)")
-                                .clicked()
-                            {
-                                toggle_edit = true;
-                            }
-                        } else {
-                            // Windows Explorer Path Ribbon
-                            let search_area_w = 320.0_f32;
-                            let ribbon_w = (ui.available_width() - search_area_w - 8.0).max(180.0);
-
-                            let (bc_rect, _) =
-                                ui.allocate_exact_size(Vec2::new(ribbon_w, 28.0), Sense::hover());
-                            ui.painter()
-                                .rect_filled(bc_rect, Rounding::same(6.0), palette.card_bg);
-                            ui.painter().rect_stroke(
-                                bc_rect,
-                                Rounding::same(6.0),
-                                Stroke::new(1.0_f32, palette.border),
-                            );
-
-                            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bc_rect), |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
-                                    ui.add_space(4.0);
-
-                                    if self.explorer_view.is_home_view {
-                                        let (h_rect, _) = ui
-                                            .allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                                        crate::core::icon_packs::paint_icon(
-                                            ui,
-                                            pack,
-                                            IconGlyph::Home,
-                                            h_rect,
-                                            [
-                                                palette.accent.r(),
-                                                palette.accent.g(),
-                                                palette.accent.b(),
-                                            ],
-                                        );
-                                        ui.label(
-                                            egui::RichText::new("Home")
-                                                .size(13.0)
+                                ui.add_space(6.0);
+                                let (h_rect, _) =
+                                    ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+                                crate::core::icon_packs::paint_icon(
+                                    ui,
+                                    pack,
+                                    glyph,
+                                    h_rect,
+                                    [palette.accent.r(), palette.accent.g(), palette.accent.b()],
+                                );
+                                ui.add_space(4.0);
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new(&title_str)
+                                                .size(15.0)
                                                 .strong()
                                                 .color(palette.text_primary),
-                                        );
-                                    } else if self.explorer_view.is_editing_path {
-                                        let edit_box_w = (ribbon_w - 74.0).max(100.0);
-                                        let text_resp = ui.add(
-                                            egui::TextEdit::singleline(
-                                                &mut self.explorer_view.path_edit_buffer,
-                                            )
-                                            .desired_width(edit_box_w)
-                                            .font(egui::TextStyle::Monospace),
-                                        );
-                                        if text_resp.lost_focus()
-                                            && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                        {
-                                            let new_p =
-                                                PathBuf::from(&self.explorer_view.path_edit_buffer);
-                                            if new_p.exists() {
-                                                nav_target = Some(new_p);
-                                            }
-                                            self.explorer_view.is_editing_path = false;
+                                        )
+                                        .fill(Color32::TRANSPARENT)
+                                        .stroke(Stroke::NONE),
+                                    )
+                                    .on_hover_text("Click to edit folder path (Ctrl+L)")
+                                    .clicked()
+                                {
+                                    toggle_edit = true;
+                                }
+                            }
+                            AddressBarStyle::PathButtons => {
+                                // Thunar path buttons
+                                let segments = crate::core::parse_breadcrumbs(
+                                    &self.explorer_view.current_dir,
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+                                    for (idx, seg) in segments.iter().enumerate() {
+                                        if idx > 0 {
+                                            ui.label(
+                                                egui::RichText::new("/")
+                                                    .size(12.0)
+                                                    .color(palette.text_muted),
+                                            );
                                         }
-                                        if ui.small_button("Go").clicked() {
-                                            let new_p =
-                                                PathBuf::from(&self.explorer_view.path_edit_buffer);
-                                            if new_p.exists() {
-                                                nav_target = Some(new_p);
-                                            }
-                                            self.explorer_view.is_editing_path = false;
-                                        }
-                                        if ui.small_button("x").on_hover_text("Cancel").clicked() {
-                                            self.explorer_view.is_editing_path = false;
-                                        }
-                                    } else {
-                                        let segments = crate::core::parse_breadcrumbs(
-                                            &self.explorer_view.current_dir,
-                                        );
-                                        let num_segs = segments.len();
-
-                                        // Finder parity: a deep trail scrolls
-                                        // horizontally instead of clipping; the
-                                        // Edit button stays pinned right.
-                                        let edit_reserve = 52.0_f32;
-                                        let trail_w = (ribbon_w - 8.0 - edit_reserve).max(120.0);
-                                        ui.allocate_ui_with_layout(
-                                            Vec2::new(trail_w, 28.0),
-                                            egui::Layout::left_to_right(egui::Align::Center),
-                                            |ui| {
-                                                egui::ScrollArea::horizontal()
-                                                    .id_salt("studio_breadcrumb_hscroll")
-                                                    .auto_shrink([false, true])
-                                                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-                                                    .show(ui, |ui| {
-                                        for (idx, seg) in segments.iter().enumerate() {
-                                            if idx > 0 {
-                                                crate::gui::finder_chrome::paint_path_chevron(
-                                                    ui,
-                                                    palette.text_muted,
-                                                );
-                                            }
-                                            let is_current = idx + 1 == num_segs;
-                                            let is_root = idx == 0
-                                                && (seg.target_path.parent().is_none()
-                                                    || seg.label.contains(':'));
-                                            let glyph = if is_root {
-                                                IconGlyph::Drive
-                                            } else if let Some(sf) =
-                                                crate::core::special_folders::lookup(
-                                                    &seg.label,
-                                                    Some(&seg.target_path),
-                                                )
-                                            {
-                                                IconGlyph::FolderSpecial(sf)
-                                            } else if seg.label.eq_ignore_ascii_case("home")
-                                                || seg.label.eq_ignore_ascii_case("users")
-                                            {
-                                                IconGlyph::Home
-                                            } else {
-                                                IconGlyph::Folder
-                                            };
-
-                                            let seg_resp = ui.horizontal(|ui| {
-                                                let (s_icon_rect, _) = ui.allocate_exact_size(
-                                                    Vec2::splat(16.0),
-                                                    Sense::hover(),
-                                                );
-                                                crate::core::icon_packs::paint_icon(
-                                                    ui,
-                                                    pack,
-                                                    glyph,
-                                                    s_icon_rect,
+                                        let is_current = idx + 1 == segments.len();
+                                        let btn = ui.add(
+                                            egui::Button::new(
+                                                egui::RichText::new(&seg.label).size(12.5).color(
                                                     if is_current {
-                                                        [
-                                                            palette.accent.r(),
-                                                            palette.accent.g(),
-                                                            palette.accent.b(),
-                                                        ]
+                                                        palette.accent
                                                     } else {
-                                                        muted_rgb
-                                                    },
-                                                );
-                                                let text = egui::RichText::new(&seg.label)
-                                                    .size(12.5)
-                                                    .color(if is_current {
                                                         palette.text_primary
-                                                    } else {
-                                                        palette.text_secondary
-                                                    });
-                                                ui.add(
-                                                    egui::Button::new(text)
-                                                        .fill(Color32::TRANSPARENT)
-                                                        .stroke(Stroke::NONE)
-                                                        .rounding(Rounding::same(4.0)),
-                                                )
-                                            });
-
-                                            if seg_resp.inner.clicked() {
-                                                nav_target = Some(seg.target_path.clone());
-                                            }
-
-                                            seg_resp.inner.context_menu(|menu_ui| {
-                                                menu_ui.set_max_width(220.0);
-                                                let parent_dir = seg
-                                                    .target_path
-                                                    .parent()
-                                                    .unwrap_or(&seg.target_path);
-                                                // Once-per-open cache (F-2 fix): this
-                                                // closure re-runs every frame while
-                                                // the menu is open.
-                                                let dirs = self.sibling_dirs(parent_dir);
-                                                if dirs.is_empty() {
-                                                    menu_ui.label(
-                                                        egui::RichText::new("No sibling folders")
-                                                            .size(12.0)
-                                                            .color(palette.text_muted),
-                                                    );
-                                                } else {
-                                                    for d in dirs {
-                                                        let is_this = d.path == seg.target_path;
-                                                        let item_text = egui::RichText::new(
-                                                            format!("> {}", d.name),
-                                                        )
-                                                        .size(12.5)
-                                                        .color(if is_this {
-                                                            palette.accent
-                                                        } else {
-                                                            palette.text_primary
-                                                        });
-                                                        if menu_ui.button(item_text).clicked() {
-                                                            nav_target = Some(d.path);
-                                                            menu_ui.close_menu();
-                                                        }
-                                                    }
-                                                }
-                                            });
+                                                    },
+                                                ),
+                                            )
+                                            .fill(if is_current {
+                                                palette.card_bg
+                                            } else {
+                                                Color32::TRANSPARENT
+                                            })
+                                            .rounding(Rounding::same(4.0)),
+                                        );
+                                        if btn.clicked() {
+                                            nav_target = Some(seg.target_path.clone());
                                         }
-                                                });
-                                            },
-                                        );
-
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                if ui
-                                                    .small_button("Edit")
-                                                    .on_hover_text("Edit path (Ctrl+L / Alt+D)")
-                                                    .clicked()
-                                                {
-                                                    toggle_edit = true;
-                                                }
-                                            },
-                                        );
                                     }
                                 });
-                            });
+                            }
+                            AddressBarStyle::Breadcrumb | AddressBarStyle::TextEntry => {
+                                // Windows Explorer Path Ribbon
+                                let search_area_w = 320.0_f32;
+                                let ribbon_w =
+                                    (ui.available_width() - search_area_w - 8.0).max(180.0);
+
+                                let (bc_rect, _) = ui.allocate_exact_size(
+                                    Vec2::new(ribbon_w, 28.0),
+                                    Sense::hover(),
+                                );
+                                ui.painter()
+                                    .rect_filled(bc_rect, Rounding::same(6.0), palette.card_bg);
+                                ui.painter().rect_stroke(
+                                    bc_rect,
+                                    Rounding::same(6.0),
+                                    Stroke::new(1.0_f32, palette.border),
+                                );
+
+                                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bc_rect), |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
+                                        ui.add_space(4.0);
+
+                                        if self.explorer_view.is_home_view {
+                                            let (h_rect, _) = ui.allocate_exact_size(
+                                                Vec2::splat(18.0),
+                                                Sense::hover(),
+                                            );
+                                            crate::core::icon_packs::paint_icon(
+                                                ui,
+                                                pack,
+                                                IconGlyph::Home,
+                                                h_rect,
+                                                [
+                                                    palette.accent.r(),
+                                                    palette.accent.g(),
+                                                    palette.accent.b(),
+                                                ],
+                                            );
+                                            ui.label(
+                                                egui::RichText::new("Home")
+                                                    .size(13.0)
+                                                    .strong()
+                                                    .color(palette.text_primary),
+                                            );
+                                        } else if self.explorer_view.is_editing_path {
+                                            let edit_box_w = (ribbon_w - 74.0).max(100.0);
+                                            let text_resp = ui.add(
+                                                egui::TextEdit::singleline(
+                                                    &mut self.explorer_view.path_edit_buffer,
+                                                )
+                                                .desired_width(edit_box_w)
+                                                .font(egui::TextStyle::Monospace),
+                                            );
+                                            if text_resp.lost_focus()
+                                                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                            {
+                                                let new_p = PathBuf::from(
+                                                    &self.explorer_view.path_edit_buffer,
+                                                );
+                                                if new_p.exists() {
+                                                    nav_target = Some(new_p);
+                                                }
+                                                self.explorer_view.is_editing_path = false;
+                                            }
+                                            if ui.small_button("Go").clicked() {
+                                                let new_p = PathBuf::from(
+                                                    &self.explorer_view.path_edit_buffer,
+                                                );
+                                                if new_p.exists() {
+                                                    nav_target = Some(new_p);
+                                                }
+                                                self.explorer_view.is_editing_path = false;
+                                            }
+                                            if ui
+                                                .small_button("x")
+                                                .on_hover_text("Cancel")
+                                                .clicked()
+                                            {
+                                                self.explorer_view.is_editing_path = false;
+                                            }
+                                        } else {
+                                            let segments = crate::core::parse_breadcrumbs(
+                                                &self.explorer_view.current_dir,
+                                            );
+                                            let num_segs = segments.len();
+
+                                            // Deep trail horizontal scroll
+                                            let edit_reserve = 52.0_f32;
+                                            let trail_w =
+                                                (ribbon_w - 8.0 - edit_reserve).max(120.0);
+                                            ui.allocate_ui_with_layout(
+                                                Vec2::new(trail_w, 28.0),
+                                                egui::Layout::left_to_right(egui::Align::Center),
+                                                |ui| {
+                                                    egui::ScrollArea::horizontal()
+                                                        .id_salt("studio_breadcrumb_hscroll")
+                                                        .auto_shrink([false, true])
+                                                        .scroll_bar_visibility(
+                                                            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
+                                                        )
+                                                        .show(ui, |ui| {
+                                                            for (idx, seg) in
+                                                                segments.iter().enumerate()
+                                                            {
+                                                                if idx > 0 {
+                                                                    crate::gui::finder_chrome::paint_path_chevron(
+                                                                        ui,
+                                                                        palette.text_muted,
+                                                                    );
+                                                                }
+                                                                let is_current =
+                                                                    idx + 1 == num_segs;
+                                                                let is_root = idx == 0
+                                                                    && (seg.target_path.parent().is_none()
+                                                                        || seg.label.contains(':'));
+                                                                let glyph = if is_root {
+                                                                    IconGlyph::Drive
+                                                                } else if let Some(sf) =
+                                                                    crate::core::special_folders::lookup(
+                                                                        &seg.label,
+                                                                        Some(&seg.target_path),
+                                                                    )
+                                                                {
+                                                                    IconGlyph::FolderSpecial(sf)
+                                                                } else if seg.label.eq_ignore_ascii_case("home")
+                                                                    || seg.label.eq_ignore_ascii_case("users")
+                                                                {
+                                                                    IconGlyph::Home
+                                                                } else {
+                                                                    IconGlyph::Folder
+                                                                };
+
+                                                                let seg_resp = ui.horizontal(|ui| {
+                                                                    let (s_icon_rect, _) = ui
+                                                                        .allocate_exact_size(
+                                                                            Vec2::splat(16.0),
+                                                                            Sense::hover(),
+                                                                        );
+                                                                    crate::core::icon_packs::paint_icon(
+                                                                        ui,
+                                                                        pack,
+                                                                        glyph,
+                                                                        s_icon_rect,
+                                                                        if is_current {
+                                                                            [
+                                                                                palette.accent.r(),
+                                                                                palette.accent.g(),
+                                                                                palette.accent.b(),
+                                                                            ]
+                                                                        } else {
+                                                                            muted_rgb
+                                                                        },
+                                                                    );
+                                                                    let text = egui::RichText::new(
+                                                                        &seg.label,
+                                                                    )
+                                                                    .size(12.5)
+                                                                    .color(
+                                                                        if is_current {
+                                                                            palette.text_primary
+                                                                        } else {
+                                                                            palette.text_secondary
+                                                                        },
+                                                                    );
+                                                                    ui.add(
+                                                                        egui::Button::new(text)
+                                                                            .fill(
+                                                                                Color32::TRANSPARENT,
+                                                                            )
+                                                                            .stroke(Stroke::NONE)
+                                                                            .rounding(
+                                                                                Rounding::same(4.0),
+                                                                            ),
+                                                                    )
+                                                                });
+
+                                                                if seg_resp.inner.clicked() {
+                                                                    nav_target =
+                                                                        Some(seg.target_path.clone());
+                                                                }
+
+                                                                seg_resp.inner.context_menu(
+                                                                    |menu_ui| {
+                                                                        menu_ui.set_max_width(220.0);
+                                                                        let parent_dir = seg
+                                                                            .target_path
+                                                                            .parent()
+                                                                            .unwrap_or(
+                                                                                &seg.target_path,
+                                                                            );
+                                                                        let dirs = self
+                                                                            .sibling_dirs(parent_dir);
+                                                                        if dirs.is_empty() {
+                                                                            menu_ui.label(
+                                                                                egui::RichText::new("No sibling folders")
+                                                                                    .size(12.0)
+                                                                                    .color(palette.text_muted),
+                                                                            );
+                                                                        } else {
+                                                                            for d in dirs {
+                                                                                let is_this = d.path
+                                                                                    == seg.target_path;
+                                                                                let item_text = egui::RichText::new(
+                                                                                    format!("> {}", d.name),
+                                                                                )
+                                                                                .size(12.5)
+                                                                                .color(if is_this {
+                                                                                    palette.accent
+                                                                                } else {
+                                                                                    palette.text_primary
+                                                                                });
+                                                                                if menu_ui.button(item_text).clicked() {
+                                                                                    nav_target = Some(d.path);
+                                                                                    menu_ui.close_menu();
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    },
+                                                                );
+                                                            }
+                                                        });
+                                                },
+                                            );
+
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    if ui
+                                                        .small_button("Edit")
+                                                        .on_hover_text("Edit path (Ctrl+L / Alt+D)")
+                                                        .clicked()
+                                                    {
+                                                        toggle_edit = true;
+                                                    }
+                                                },
+                                            );
+                                        }
+                                    });
+                                });
+                            }
                         }
 
                         if let Some(target) = nav_target {
-                            // Invalidate the sibling-menu cache (F-2 fix)
-                            // so listings never go stale after navigation.
                             self.sibling_menu_cache.clear();
                             self.explorer_view.navigate_to(target);
                         }
@@ -1066,64 +1313,98 @@ impl StudioView {
                             self.explorer_view.is_editing_path = true;
                         }
 
-                        // Search Box & Action Icons on Right (Finder vector chrome)
+                        // Search Box & Action Icons on Right
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            // 1. Search box on FAR RIGHT (macOS Finder standard)
-                            let search_w = 170.0_f32;
-                            let search_resp = ui.add(
-                                egui::TextEdit::singleline(&mut self.explorer_view.search_query)
-                                    .id(egui::Id::new("mossambi_global_search_input"))
-                                    .hint_text("Search (/)")
-                                    .desired_width(search_w),
-                            );
-                            if self.explorer_view.focus_search_requested {
-                                search_resp.request_focus();
-                                self.explorer_view.focus_search_requested = false;
-                            }
+                            // Search Box / Toggle
+                            match chrome_spec.search {
+                                SearchPosition::Right | SearchPosition::InAddressRow => {
+                                    let search_w = 170.0_f32;
+                                    let search_resp = ui.add(
+                                        egui::TextEdit::singleline(
+                                            &mut self.explorer_view.search_query,
+                                        )
+                                        .id(egui::Id::new("mossambi_global_search_input"))
+                                        .hint_text("Search (/)")
+                                        .desired_width(search_w),
+                                    );
+                                    if self.explorer_view.focus_search_requested {
+                                        search_resp.request_focus();
+                                        self.explorer_view.focus_search_requested = false;
+                                    }
 
-                            // 2. Clear search button (when active)
-                            if !self.explorer_view.search_query.is_empty()
-                                && crate::gui::finder_chrome::toolbar_icon_button(
-                                    ui,
-                                    &palette,
-                                    pack,
-                                    IconGlyph::ActionClose,
-                                    text_rgb,
-                                    "Clear search (Esc)",
-                                    false,
-                                )
-                            {
-                                self.explorer_view.search_query.clear();
-                                ui.memory_mut(|m| {
-                                    m.surrender_focus(egui::Id::new("mossambi_global_search_input"))
-                                });
+                                    if !self.explorer_view.search_query.is_empty()
+                                        && crate::gui::finder_chrome::toolbar_icon_button(
+                                            ui,
+                                            &palette,
+                                            pack,
+                                            IconGlyph::ActionClose,
+                                            text_rgb,
+                                            "Clear search (Esc)",
+                                            false,
+                                        )
+                                    {
+                                        self.explorer_view.search_query.clear();
+                                        ui.memory_mut(|m| {
+                                            m.surrender_focus(egui::Id::new(
+                                                "mossambi_global_search_input",
+                                            ))
+                                        });
+                                    }
+                                }
+                                SearchPosition::Toggle => {
+                                    if crate::gui::finder_chrome::toolbar_icon_button(
+                                        ui,
+                                        &palette,
+                                        pack,
+                                        IconGlyph::Search,
+                                        text_rgb,
+                                        "Toggle search",
+                                        !self.explorer_view.search_query.is_empty(),
+                                    ) {
+                                        self.explorer_view.focus_search_requested = true;
+                                    }
+                                    if !self.explorer_view.search_query.is_empty() {
+                                        let search_w = 120.0_f32;
+                                        ui.add(
+                                            egui::TextEdit::singleline(
+                                                &mut self.explorer_view.search_query,
+                                            )
+                                            .id(egui::Id::new("mossambi_global_search_input"))
+                                            .desired_width(search_w),
+                                        );
+                                    }
+                                }
                             }
 
                             ui.add_space(4.0);
 
-                            // 3. Settings Gear
-                            if crate::gui::finder_chrome::toolbar_icon_button(
-                                ui,
-                                &palette,
-                                pack,
-                                IconGlyph::Gear,
-                                text_rgb,
-                                "Preferences & Settings (Cmd+,)",
-                                false,
-                            ) {
+                            // Settings Gear
+                            if chrome_spec.toolbar.contains(&ToolbarItem::Settings)
+                                && crate::gui::finder_chrome::toolbar_icon_button(
+                                    ui,
+                                    &palette,
+                                    pack,
+                                    IconGlyph::Gear,
+                                    text_rgb,
+                                    "Preferences & Settings (Cmd+,)",
+                                    false,
+                                )
+                            {
                                 self.switch_to_tab(StudioTab::Preferences);
                             }
 
-                            // 4. New Window Button (Ctrl+N)
-                            if crate::gui::finder_chrome::toolbar_icon_button(
-                                ui,
-                                &palette,
-                                pack,
-                                IconGlyph::ActionNewFolder,
-                                text_rgb,
-                                "Open New Concurrent Explorer Window (Ctrl+N)",
-                                false,
-                            ) {
+                            // New Window Button (Ctrl+N)
+                            if chrome_spec.toolbar.contains(&ToolbarItem::NewWindow)
+                                && crate::gui::finder_chrome::toolbar_icon_button(
+                                    ui,
+                                    &palette,
+                                    pack,
+                                    IconGlyph::ActionNewFolder,
+                                    text_rgb,
+                                    "Open New Concurrent Explorer Window (Ctrl+N)",
+                                    false,
+                                )
+                            {
                                 crate::gui::explorer_view::spawn_new_explorer_window(Some(
                                     &self.explorer_view.current_dir,
                                 ));
@@ -1131,20 +1412,159 @@ impl StudioView {
 
                             ui.add_space(6.0);
 
-                            // 5. Authentic macOS Connected Segmented View Switcher: [ Icons | List | Columns ]
-                            crate::gui::finder_chrome::render_segmented_view_switcher(
-                                ui,
-                                &palette,
-                                pack,
-                                self.explorer_view.view_mode,
-                                |mode| {
-                                    self.explorer_view.view_mode = mode;
-                                },
-                            );
+                            // Connected Segmented View Switcher: [ Icons | List | Columns ]
+                            if chrome_spec.toolbar.contains(&ToolbarItem::ViewSwitcher)
+                                && chrome_spec.title_bar != TitleBarStyle::Separate
+                            {
+                                crate::gui::finder_chrome::render_segmented_view_switcher(
+                                    ui,
+                                    &palette,
+                                    pack,
+                                    self.explorer_view.view_mode,
+                                    |mode| {
+                                        self.explorer_view.view_mode = mode;
+                                    },
+                                );
+                            }
                         });
                     });
                     let row2_h = row2.response.rect.height();
                     ui.data_mut(|d| d.insert_temp(egui::Id::new("mossambi_toolbar_row2_h"), row2_h));
+
+                    // Command Bar for Windows 11 Explorer preset (Separate title bar style)
+                    if chrome_spec.title_bar == TitleBarStyle::Separate {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+                            let pack = self.explorer_view.icon_pack;
+                            let text_rgb = [
+                                palette.text_primary.r(),
+                                palette.text_primary.g(),
+                                palette.text_primary.b(),
+                            ];
+                            for item in &chrome_spec.toolbar {
+                                match item {
+                                    ToolbarItem::NewFolder => {
+                                        if ui
+                                            .button(
+                                                egui::RichText::new("+ New")
+                                                    .size(12.5)
+                                                    .color(palette.text_primary),
+                                            )
+                                            .on_hover_text("New Folder (Ctrl+Shift+N)")
+                                            .clicked()
+                                        {
+                                            self.explorer_view.show_new_folder_dialog = true;
+                                        }
+                                    }
+                                    ToolbarItem::Cut => {
+                                        if crate::gui::finder_chrome::toolbar_icon_button(
+                                            ui,
+                                            &palette,
+                                            pack,
+                                            IconGlyph::ActionCut,
+                                            text_rgb,
+                                            "Cut (Ctrl+X)",
+                                            false,
+                                        ) {
+                                            self.explorer_view.cut_selected_to_clipboard();
+                                        }
+                                    }
+                                    ToolbarItem::Copy => {
+                                        if crate::gui::finder_chrome::toolbar_icon_button(
+                                            ui,
+                                            &palette,
+                                            pack,
+                                            IconGlyph::ActionCopy,
+                                            text_rgb,
+                                            "Copy (Ctrl+C)",
+                                            false,
+                                        ) {
+                                            self.explorer_view.copy_selected_to_clipboard();
+                                        }
+                                    }
+                                    ToolbarItem::Paste => {
+                                        if crate::gui::finder_chrome::toolbar_icon_button(
+                                            ui,
+                                            &palette,
+                                            pack,
+                                            IconGlyph::ActionPaste,
+                                            text_rgb,
+                                            "Paste (Ctrl+V)",
+                                            false,
+                                        ) {
+                                            self.explorer_view.paste_from_clipboard();
+                                        }
+                                    }
+                                    ToolbarItem::Rename => {
+                                        if crate::gui::finder_chrome::toolbar_icon_button(
+                                            ui,
+                                            &palette,
+                                            pack,
+                                            IconGlyph::ActionRename,
+                                            text_rgb,
+                                            "Rename (F2)",
+                                            false,
+                                        ) {
+                                            self.explorer_view.rename_selected();
+                                        }
+                                    }
+                                    ToolbarItem::Share => {
+                                        if crate::gui::finder_chrome::toolbar_icon_button(
+                                            ui,
+                                            &palette,
+                                            pack,
+                                            IconGlyph::ActionShortcut,
+                                            text_rgb,
+                                            "Share / Copy Path",
+                                            false,
+                                        ) {
+                                            self.explorer_view.copy_current_path_to_clipboard();
+                                        }
+                                    }
+                                    ToolbarItem::Delete => {
+                                        if crate::gui::finder_chrome::toolbar_icon_button(
+                                            ui,
+                                            &palette,
+                                            pack,
+                                            IconGlyph::ActionDelete,
+                                            text_rgb,
+                                            "Delete (Delete)",
+                                            false,
+                                        ) {
+                                            self.explorer_view.delete_selected();
+                                        }
+                                    }
+                                    ToolbarItem::Sort => {
+                                        if crate::gui::finder_chrome::toolbar_icon_button(
+                                            ui,
+                                            &palette,
+                                            pack,
+                                            IconGlyph::ActionSort,
+                                            text_rgb,
+                                            "Sort items",
+                                            false,
+                                        ) {
+                                            self.explorer_view.sort_direction =
+                                                self.explorer_view.sort_direction.toggle();
+                                        }
+                                    }
+                                    ToolbarItem::ViewSwitcher => {
+                                        crate::gui::finder_chrome::render_segmented_view_switcher(
+                                            ui,
+                                            &palette,
+                                            pack,
+                                            self.explorer_view.view_mode,
+                                            |mode| {
+                                                self.explorer_view.view_mode = mode;
+                                            },
+                                        );
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        });
+                    }
                 } else {
                     // Tool pages keep a toolbar row of the SAME height carrying
                     // the page title, so the sidebar and content never jump
@@ -1176,54 +1596,17 @@ impl StudioView {
 
         egui::SidePanel::left("studio_sidebar")
             .resizable(false)
-            .exact_width(layout::SIDEBAR_W)
+            .exact_width(chrome_spec.sidebar.width)
             .frame(sidebar_frame)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let pack = self.explorer_view.icon_pack;
-
-                        // 1. Home Item (Apple HIG Home Blue)
-                        let is_home_active = self.current_tab == StudioTab::FileExplorer
-                            && self.explorer_view.is_home_view;
-                        let home_spec = SidebarRowSpec {
-                            pack,
-                            glyph: IconGlyph::Home,
-                            accent_rgb: [79, 168, 255],
-                            label: "Home",
-                            selected: is_home_active,
-                            show_pin: false,
-                            dimmed: false,
-                        };
-                        let home_click = render_sidebar_row(ui, &palette, &home_spec);
-                        if home_click.row {
-                            self.current_tab = StudioTab::FileExplorer;
-                            let home_opt = crate::core::platform_paths::home_dir_opt();
-                            let target = home_opt.unwrap_or_else(|| PathBuf::from("."));
-                            self.explorer_view.navigate_to(target);
-                            self.explorer_view.is_home_view = true;
-                        }
-
-                        // 2. FAVORITES Zone (static favorites + user pins,
-                        // Finder semantics: pinned folders live inline)
                         let mut cfg = crate::core::MossambiConfig::load();
-                        if render_sidebar_zone_header(
-                            ui,
-                            &palette,
-                            "Favorites",
-                            cfg.sidebar_favorites_expanded,
-                        ) {
-                            cfg.sidebar_favorites_expanded = !cfg.sidebar_favorites_expanded;
-                            if let Err(e) = cfg.save() {
-                                log::warn!("Could not persist sidebar state: {e}");
-                            }
-                        }
 
                         // Exactly ONE sidebar row is active: the deepest sidebar
-                        // location that contains the current folder. Before,
-                        // a favorite AND its drive lit up together (and the
-                        // drive also lit up on the Home dashboard).
+                        // location that contains the current folder.
                         let active_sidebar_path: Option<PathBuf> = if self.current_tab
                             == StudioTab::FileExplorer
                             && !self.explorer_view.is_home_view
@@ -1256,7 +1639,44 @@ impl StudioView {
                         let is_sidebar_active =
                             |p: &PathBuf| active_sidebar_path.as_ref() == Some(p);
 
-                        let home_opt = crate::core::platform_paths::home_dir_opt();
+                        if chrome_spec.sidebar.show_favorites {
+                            // 1. Home Item (Apple HIG Home Blue)
+                            let is_home_active = self.current_tab == StudioTab::FileExplorer
+                                && self.explorer_view.is_home_view;
+                            let home_spec = SidebarRowSpec {
+                                pack,
+                                glyph: IconGlyph::Home,
+                                accent_rgb: [79, 168, 255],
+                                label: "Home",
+                                selected: is_home_active,
+                                show_pin: false,
+                                dimmed: false,
+                            };
+                            let home_click = render_sidebar_row(ui, &palette, &home_spec);
+                            if home_click.row {
+                                self.current_tab = StudioTab::FileExplorer;
+                                let home_opt = crate::core::platform_paths::home_dir_opt();
+                                let target = home_opt.unwrap_or_else(|| PathBuf::from("."));
+                                self.explorer_view.navigate_to(target);
+                                self.explorer_view.is_home_view = true;
+                            }
+
+                            // 2. FAVORITES Zone (static favorites + user pins,
+                            // Finder semantics: pinned folders live inline)
+                            if Self::render_zone_header(
+                                ui,
+                                &palette,
+                                "Favorites",
+                                cfg.sidebar_favorites_expanded,
+                                chrome_spec.sidebar.header_style,
+                            ) {
+                                cfg.sidebar_favorites_expanded = !cfg.sidebar_favorites_expanded;
+                                if let Err(e) = cfg.save() {
+                                    log::warn!("Could not persist sidebar state: {e}");
+                                }
+                            }
+
+                            let home_opt = crate::core::platform_paths::home_dir_opt();
                         if cfg.sidebar_favorites_expanded && home_opt.is_some() {
                             let recycle_target = crate::core::resolve_recycle_bin_target();
                             let pinned: [(&str, IconGlyph, [u8; 3], PathBuf); 7] = [
@@ -1739,99 +2159,103 @@ impl StudioView {
                                 }
                             }
                         }
-
-                        // 3. LOCATIONS Zone (drives + cloud; the empty
-                        // Network section is removed)
-                        if render_sidebar_zone_header(
-                            ui,
-                            &palette,
-                            "Locations",
-                            cfg.sidebar_locations_expanded,
-                        ) {
-                            cfg.sidebar_locations_expanded = !cfg.sidebar_locations_expanded;
-                            if let Err(e) = cfg.save() {
-                                log::warn!("Could not persist sidebar state: {e}");
-                            }
                         }
 
-                        if cfg.sidebar_locations_expanded {
-                            let drives = self.explorer_view.drives.clone();
-                            for drive in &drives {
-                                let is_active = is_sidebar_active(&drive.path);
-                                let glyph = if drive.is_system {
-                                    IconGlyph::DriveSystem
-                                } else {
-                                    IconGlyph::Drive
-                                };
-                                let drive_rgb: [u8; 3] = if drive.is_system {
-                                    [79, 168, 255]
-                                } else {
-                                    [140, 145, 155]
-                                };
-                                let spec = SidebarRowSpec {
-                                    pack,
-                                    glyph,
-                                    accent_rgb: drive_rgb,
-                                    label: &drive.display_name,
-                                    selected: is_active,
-                                    show_pin: false,
-                                    dimmed: false,
-                                };
-                                let drive_click = render_sidebar_row(ui, &palette, &spec);
-                                if let Some(payload) = drive_click.dropped {
-                                    dispatch_sidebar_drop(
-                                        &mut self.explorer_view,
-                                        ui,
-                                        &drive.path,
-                                        payload,
-                                    );
+                        // 3. LOCATIONS Zone (drives + cloud)
+                        if chrome_spec.sidebar.show_locations {
+                            if Self::render_zone_header(
+                                ui,
+                                &palette,
+                                "Locations",
+                                cfg.sidebar_locations_expanded,
+                                chrome_spec.sidebar.header_style,
+                            ) {
+                                cfg.sidebar_locations_expanded = !cfg.sidebar_locations_expanded;
+                                if let Err(e) = cfg.save() {
+                                    log::warn!("Could not persist sidebar state: {e}");
                                 }
-                                if drive_click.row {
-                                    self.current_tab = StudioTab::FileExplorer;
-                                    self.explorer_view.navigate_to(drive.path.clone());
-                                    self.explorer_view.is_home_view = false;
-                                }
-                                ui.add_space(1.0);
                             }
 
-                            if let Ok(userprofile) = std::env::var("USERPROFILE") {
-                                let od = PathBuf::from(&userprofile).join("OneDrive");
-                                if od.exists() {
-                                    let is_active = is_sidebar_active(&od);
+                            if cfg.sidebar_locations_expanded {
+                                let drives = self.explorer_view.drives.clone();
+                                for drive in &drives {
+                                    let is_active = is_sidebar_active(&drive.path);
+                                    let glyph = if drive.is_system {
+                                        IconGlyph::DriveSystem
+                                    } else {
+                                        IconGlyph::Drive
+                                    };
+                                    let drive_rgb: [u8; 3] = if drive.is_system {
+                                        [79, 168, 255]
+                                    } else {
+                                        [140, 145, 155]
+                                    };
                                     let spec = SidebarRowSpec {
                                         pack,
-                                        glyph: IconGlyph::Cloud,
-                                        accent_rgb: [70, 130, 240],
-                                        label: "OneDrive",
+                                        glyph,
+                                        accent_rgb: drive_rgb,
+                                        label: &drive.display_name,
                                         selected: is_active,
                                         show_pin: false,
                                         dimmed: false,
                                     };
-                                    let cloud_click = render_sidebar_row(ui, &palette, &spec);
-                                    if let Some(payload) = cloud_click.dropped {
+                                    let drive_click = render_sidebar_row(ui, &palette, &spec);
+                                    if let Some(payload) = drive_click.dropped {
                                         dispatch_sidebar_drop(
                                             &mut self.explorer_view,
                                             ui,
-                                            &od,
+                                            &drive.path,
                                             payload,
                                         );
                                     }
-                                    if cloud_click.row {
+                                    if drive_click.row {
                                         self.current_tab = StudioTab::FileExplorer;
-                                        self.explorer_view.navigate_to(od);
+                                        self.explorer_view.navigate_to(drive.path.clone());
                                         self.explorer_view.is_home_view = false;
+                                    }
+                                    ui.add_space(1.0);
+                                }
+
+                                if let Ok(userprofile) = std::env::var("USERPROFILE") {
+                                    let od = PathBuf::from(&userprofile).join("OneDrive");
+                                    if od.exists() {
+                                        let is_active = is_sidebar_active(&od);
+                                        let spec = SidebarRowSpec {
+                                            pack,
+                                            glyph: IconGlyph::Cloud,
+                                            accent_rgb: [70, 130, 240],
+                                            label: "OneDrive",
+                                            selected: is_active,
+                                            show_pin: false,
+                                            dimmed: false,
+                                        };
+                                        let cloud_click = render_sidebar_row(ui, &palette, &spec);
+                                        if let Some(payload) = cloud_click.dropped {
+                                            dispatch_sidebar_drop(
+                                                &mut self.explorer_view,
+                                                ui,
+                                                &od,
+                                                payload,
+                                            );
+                                        }
+                                        if cloud_click.row {
+                                            self.current_tab = StudioTab::FileExplorer;
+                                            self.explorer_view.navigate_to(od);
+                                            self.explorer_view.is_home_view = false;
+                                        }
                                     }
                                 }
                             }
                         }
 
                         // 4. TAGS Zone (optional Finder-like tags)
-                        if cfg.show_tags_section {
-                            if render_sidebar_zone_header(
+                        if chrome_spec.sidebar.show_tags && cfg.show_tags_section {
+                            if Self::render_zone_header(
                                 ui,
                                 &palette,
                                 "Tags",
                                 cfg.sidebar_tags_expanded,
+                                chrome_spec.sidebar.header_style,
                             ) {
                                 cfg.sidebar_tags_expanded = !cfg.sidebar_tags_expanded;
                                 if let Err(e) = cfg.save() {
@@ -1905,75 +2329,82 @@ impl StudioView {
                         }
 
                         // 5. TOOLS & CONVERTERS Zone
-                        if render_sidebar_zone_header(
-                            ui,
-                            &palette,
-                            "Tools & Converters",
-                            cfg.sidebar_tools_expanded,
-                        ) {
-                            cfg.sidebar_tools_expanded = !cfg.sidebar_tools_expanded;
-                            if let Err(e) = cfg.save() {
-                                log::warn!("Could not persist sidebar state: {e}");
-                            }
-                        }
-                        if cfg.sidebar_tools_expanded {
-                            let tools = [
-                                (
-                                    "Transcoder",
-                                    IconGlyph::ActionRefresh,
-                                    StudioTab::Transcoder,
-                                ),
-                                (
-                                    "Custom Conformer",
-                                    IconGlyph::ActionEdit,
-                                    StudioTab::ExamStudio,
-                                ),
-                                (
-                                    "Quality Inspector",
-                                    IconGlyph::Search,
-                                    StudioTab::QualityInspector,
-                                ),
-                                (
-                                    "Archive Suite",
-                                    IconGlyph::PageArchive,
-                                    StudioTab::ArchiveSuite,
-                                ),
-                                (
-                                    "Hardware & AI",
-                                    IconGlyph::ActionShield,
-                                    StudioTab::HardwareTelemetry,
-                                ),
-                                ("Preferences", IconGlyph::Gear, StudioTab::Preferences),
-                            ];
-
-                            let sec_rgb = [
-                                palette.text_secondary.r(),
-                                palette.text_secondary.g(),
-                                palette.text_secondary.b(),
-                            ];
-                            for (label, glyph, tab) in tools {
-                                let is_active = self.current_tab == tab;
-                                let spec = SidebarRowSpec {
-                                    pack,
-                                    glyph,
-                                    accent_rgb: if is_active {
-                                        [palette.accent.r(), palette.accent.g(), palette.accent.b()]
-                                    } else {
-                                        sec_rgb
-                                    },
-                                    label,
-                                    selected: is_active,
-                                    show_pin: false,
-                                    dimmed: false,
-                                };
-                                let tool_click = render_sidebar_row(ui, &palette, &spec);
-                                if tool_click.row {
-                                    self.switch_to_tab(tab);
-                                    if tab == StudioTab::ExamStudio {
-                                        quick_settings.exam_mode_enabled = true;
-                                    }
+                        if chrome_spec.sidebar.show_tools {
+                            if Self::render_zone_header(
+                                ui,
+                                &palette,
+                                "Tools & Converters",
+                                cfg.sidebar_tools_expanded,
+                                chrome_spec.sidebar.header_style,
+                            ) {
+                                cfg.sidebar_tools_expanded = !cfg.sidebar_tools_expanded;
+                                if let Err(e) = cfg.save() {
+                                    log::warn!("Could not persist sidebar state: {e}");
                                 }
-                                ui.add_space(1.0);
+                            }
+                            if cfg.sidebar_tools_expanded {
+                                let tools = [
+                                    (
+                                        "Transcoder",
+                                        IconGlyph::ActionRefresh,
+                                        StudioTab::Transcoder,
+                                    ),
+                                    (
+                                        "Custom Conformer",
+                                        IconGlyph::ActionEdit,
+                                        StudioTab::ExamStudio,
+                                    ),
+                                    (
+                                        "Quality Inspector",
+                                        IconGlyph::Search,
+                                        StudioTab::QualityInspector,
+                                    ),
+                                    (
+                                        "Archive Suite",
+                                        IconGlyph::PageArchive,
+                                        StudioTab::ArchiveSuite,
+                                    ),
+                                    (
+                                        "Hardware & AI",
+                                        IconGlyph::ActionShield,
+                                        StudioTab::HardwareTelemetry,
+                                    ),
+                                    ("Preferences", IconGlyph::Gear, StudioTab::Preferences),
+                                ];
+
+                                let sec_rgb = [
+                                    palette.text_secondary.r(),
+                                    palette.text_secondary.g(),
+                                    palette.text_secondary.b(),
+                                ];
+                                for (label, glyph, tab) in tools {
+                                    let is_active = self.current_tab == tab;
+                                    let spec = SidebarRowSpec {
+                                        pack,
+                                        glyph,
+                                        accent_rgb: if is_active {
+                                            [
+                                                palette.accent.r(),
+                                                palette.accent.g(),
+                                                palette.accent.b(),
+                                            ]
+                                        } else {
+                                            sec_rgb
+                                        },
+                                        label,
+                                        selected: is_active,
+                                        show_pin: false,
+                                        dimmed: false,
+                                    };
+                                    let tool_click = render_sidebar_row(ui, &palette, &spec);
+                                    if tool_click.row {
+                                        self.switch_to_tab(tab);
+                                        if tab == StudioTab::ExamStudio {
+                                            quick_settings.exam_mode_enabled = true;
+                                        }
+                                    }
+                                    ui.add_space(1.0);
+                                }
                             }
                         }
 

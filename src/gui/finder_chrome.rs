@@ -117,6 +117,80 @@ pub fn render_traffic_lights(
     });
 }
 
+/// Renders standard Windows / GNOME caption buttons (Minimize, Maximize/Restore, Close).
+pub fn render_caption_buttons(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    on_close: impl FnOnce(),
+    on_min: impl FnOnce(),
+    on_zoom: impl FnOnce(),
+) {
+    let btn_w = 28.0;
+    let btn_h = 24.0;
+    let size = Vec2::new(btn_w, btn_h);
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(0.0, 0.0);
+
+        // Minimize
+        let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+        if resp.hovered() {
+            ui.painter()
+                .rect_filled(rect, Rounding::ZERO, palette.card_hover);
+        }
+        let painter = ui.painter_at(rect);
+        let stroke = Stroke::new(1.1_f32, palette.text_primary);
+        painter.line_segment(
+            [
+                rect.center() - Vec2::new(5.0, 0.0),
+                rect.center() + Vec2::new(5.0, 0.0),
+            ],
+            stroke,
+        );
+        if resp.clicked() {
+            on_min();
+        }
+
+        // Maximize / Restore
+        let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+        if resp.hovered() {
+            ui.painter()
+                .rect_filled(rect, Rounding::ZERO, palette.card_hover);
+        }
+        let painter = ui.painter_at(rect);
+        let box_r = Rect::from_center_size(rect.center(), Vec2::splat(10.0));
+        painter.rect_stroke(box_r, Rounding::ZERO, stroke);
+        if resp.clicked() {
+            on_zoom();
+        }
+
+        // Close (red on hover)
+        let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+        if resp.hovered() {
+            ui.painter()
+                .rect_filled(rect, Rounding::ZERO, Color32::from_rgb(232, 17, 35));
+        }
+        let painter = ui.painter_at(rect);
+        let close_stroke = Stroke::new(
+            1.1_f32,
+            if resp.hovered() {
+                Color32::WHITE
+            } else {
+                palette.text_primary
+            },
+        );
+        let c = rect.center();
+        painter.line_segment([c - Vec2::splat(4.5), c + Vec2::splat(4.5)], close_stroke);
+        painter.line_segment(
+            [c + Vec2::new(-4.5, 4.5), c + Vec2::new(4.5, -4.5)],
+            close_stroke,
+        );
+        if resp.clicked() {
+            on_close();
+        }
+    });
+}
+
 /// Draws a small vector "x" centered at `center`.
 fn draw_x_glyph(painter: &egui::Painter, center: egui::Pos2, size: f32) {
     let stroke = Stroke::new(1.1_f32, Color32::from_black_alpha(170));

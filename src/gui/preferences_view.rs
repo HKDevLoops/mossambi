@@ -23,8 +23,8 @@ use crate::gui::macos_theme::ThemePalette;
 use crate::gui::macos_theme::ThemeStyle;
 use crate::gui::quick_settings::QuickSettingsState;
 use eframe::egui::{
-    self, Align, Align2, Color32, Frame, Layout, Margin, Pos2, Rounding, ScrollArea, Sense, Stroke,
-    TextEdit, Ui, Vec2,
+    self, Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, Rect, Rounding, ScrollArea,
+    Sense, Stroke, TextEdit, Ui, Vec2,
 };
 use std::path::PathBuf;
 
@@ -1901,6 +1901,181 @@ impl PreferencesView {
         );
     }
 
+    fn render_look_preset_card(
+        ui: &mut egui::Ui,
+        palette: &ThemePalette,
+        preset: LookPreset,
+        is_active: bool,
+    ) -> bool {
+        let card_size = Vec2::new(140.0, 105.0);
+        let (rect, resp) = ui.allocate_exact_size(card_size, Sense::click());
+        let is_hovered = resp.hovered();
+        let painter = ui.painter_at(rect);
+
+        let bg = if is_active {
+            Color32::from_rgba_unmultiplied(
+                palette.accent.r(),
+                palette.accent.g(),
+                palette.accent.b(),
+                if palette.is_dark { 35 } else { 20 },
+            )
+        } else if is_hovered {
+            palette.card_hover
+        } else {
+            palette.card_bg
+        };
+
+        let stroke = if is_active {
+            Stroke::new(2.0_f32, palette.accent)
+        } else if is_hovered {
+            Stroke::new(1.0_f32, palette.text_secondary)
+        } else {
+            Stroke::new(1.0_f32, palette.border)
+        };
+
+        painter.rect(rect, Rounding::same(design::radius::MD), bg, stroke);
+
+        // Miniature wireframe preview (top 56px of card)
+        let preview_rect =
+            Rect::from_min_size(rect.min + Vec2::new(8.0, 8.0), Vec2::new(124.0, 52.0));
+        painter.rect(
+            preview_rect,
+            Rounding::same(4.0),
+            palette.window_bg,
+            Stroke::new(1.0_f32, palette.border),
+        );
+
+        // Mini header bar
+        let header_h = 12.0;
+        let header_rect =
+            Rect::from_min_size(preview_rect.min, Vec2::new(preview_rect.width(), header_h));
+        painter.rect_filled(header_rect, Rounding::same(3.0), palette.sidebar_bg);
+
+        match preset {
+            LookPreset::Finder => {
+                // Traffic lights on left
+                painter.circle_filled(
+                    header_rect.min + Vec2::new(6.0, 6.0),
+                    2.0,
+                    Color32::from_rgb(255, 95, 86),
+                );
+                painter.circle_filled(
+                    header_rect.min + Vec2::new(12.0, 6.0),
+                    2.0,
+                    Color32::from_rgb(255, 189, 46),
+                );
+                painter.circle_filled(
+                    header_rect.min + Vec2::new(18.0, 6.0),
+                    2.0,
+                    Color32::from_rgb(39, 201, 63),
+                );
+            }
+            LookPreset::WindowsExplorer => {
+                // Mini tabs on top left
+                painter.rect_filled(
+                    Rect::from_min_size(
+                        header_rect.min + Vec2::new(4.0, 2.0),
+                        Vec2::new(28.0, 8.0),
+                    ),
+                    Rounding::same(2.0),
+                    palette.card_bg,
+                );
+                // Caption buttons on right
+                painter.rect_filled(
+                    Rect::from_min_size(
+                        header_rect.max - Vec2::new(14.0, 8.0),
+                        Vec2::new(6.0, 4.0),
+                    ),
+                    Rounding::ZERO,
+                    palette.text_muted,
+                );
+            }
+            LookPreset::Nautilus => {
+                // Centered pill
+                painter.rect_filled(
+                    Rect::from_center_size(header_rect.center(), Vec2::new(32.0, 7.0)),
+                    Rounding::same(3.0),
+                    palette.card_bg,
+                );
+                // Caption buttons right
+                painter.circle_filled(
+                    header_rect.right_center() - Vec2::new(8.0, 0.0),
+                    2.0,
+                    palette.text_muted,
+                );
+            }
+            LookPreset::Thunar => {
+                // Menu bar dashes
+                painter.line_segment(
+                    [
+                        header_rect.min + Vec2::new(4.0, 6.0),
+                        header_rect.min + Vec2::new(34.0, 6.0),
+                    ],
+                    Stroke::new(1.5_f32, palette.text_muted),
+                );
+                // Caption button right
+                painter.circle_filled(
+                    header_rect.right_center() - Vec2::new(8.0, 0.0),
+                    2.0,
+                    palette.text_muted,
+                );
+            }
+        }
+
+        // Mini sidebar on left
+        let mini_sidebar_w = 26.0;
+        let mini_sidebar_rect = Rect::from_min_size(
+            preview_rect.min + Vec2::new(0.0, header_h),
+            Vec2::new(mini_sidebar_w, preview_rect.height() - header_h),
+        );
+        painter.rect_filled(mini_sidebar_rect, Rounding::ZERO, palette.sidebar_bg);
+
+        // Mini content lines
+        let line_x = preview_rect.min.x + mini_sidebar_w + 6.0;
+        let line_w = preview_rect.max.x - line_x - 6.0;
+        for i in 0..3 {
+            let line_y = preview_rect.min.y + header_h + 8.0 + (i as f32 * 8.0);
+            painter.line_segment(
+                [
+                    Pos2::new(line_x, line_y),
+                    Pos2::new(line_x + line_w, line_y),
+                ],
+                Stroke::new(1.5_f32, palette.border),
+            );
+        }
+
+        // Preset Label
+        let label_y = rect.min.y + 68.0;
+        painter.text(
+            Pos2::new(rect.center().x, label_y),
+            Align2::CENTER_TOP,
+            preset.label(),
+            FontId::proportional(design::type_scale::BODY_SM),
+            if is_active {
+                palette.accent
+            } else {
+                palette.text_primary
+            },
+        );
+
+        // Preset Subtitle
+        let sub_y = rect.min.y + 86.0;
+        painter.text(
+            Pos2::new(rect.center().x, sub_y),
+            Align2::CENTER_TOP,
+            match preset {
+                LookPreset::Finder => "macOS Finder",
+                LookPreset::WindowsExplorer => "Windows 11",
+                LookPreset::Nautilus => "GNOME Nautilus",
+                LookPreset::Thunar => "XFCE Thunar",
+            },
+            FontId::proportional(design::type_scale::SMALL),
+            palette.text_muted,
+        );
+
+        resp.clicked()
+    }
+
     fn render_appearance(
         &mut self,
         ui: &mut Ui,
@@ -1917,10 +2092,11 @@ impl PreferencesView {
         ui.add_space(design::space::SM);
         card(ui, palette, |ui| {
             let active_preset = self.cfg.look_preset;
-            setting_row(ui, palette, "Look preset", "", dirty, |ui, dirty| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(design::space::SM, design::space::SM);
                 for preset in LookPreset::all() {
                     let is_active = active_preset == Some(preset);
-                    if ui.selectable_label(is_active, preset.label()).clicked() {
+                    if Self::render_look_preset_card(ui, palette, preset, is_active) {
                         self.cfg.apply_look_preset(preset);
                         *current_theme = ThemeStyle::from(self.cfg.theme_mode);
                         *dirty = true;
@@ -1928,7 +2104,7 @@ impl PreferencesView {
                 }
             });
             if let Some(p) = self.cfg.look_preset {
-                ui.add_space(design::space::XS);
+                ui.add_space(design::space::SM);
                 ui.label(
                     egui::RichText::new(p.description())
                         .size(design::type_scale::SMALL)

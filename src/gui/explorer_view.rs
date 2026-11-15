@@ -2975,36 +2975,36 @@ impl ExplorerView {
                     }
                 });
 
-            // Docked bottom chrome (Finder): the status bar docks at the
-            // very bottom edge; the path bar docks above it. Panels take
-            // exactly their content height, so early returns can never
-            // leave reservation gaps behind.
-            let status_resp = egui::TopBottomPanel::bottom("explorer_status_bar")
-                .frame(
-                    egui::Frame::none()
-                        .fill(palette.window_bg)
-                        .inner_margin(egui::Margin {
-                            left: 10.0,
-                            right: 10.0,
-                            top: 0.0,
-                            bottom: 2.0,
-                        }),
-                )
-                .show_separator_line(false)
-                .show_inside(ui, |ui| {
-                    self.render_status_bar(ui, palette);
-                });
-            let status_rect = status_resp.response.rect;
-            ui.painter().line_segment(
-                [
-                    Pos2::new(status_rect.left(), status_rect.top() + 0.5),
-                    Pos2::new(status_rect.right(), status_rect.top() + 0.5),
-                ],
-                Stroke::new(1.0_f32, palette.border),
-            );
+            // Docked bottom chrome: honor ChromeSpec status_bar and path_bar_bottom
+            let chrome_spec = crate::core::MossambiConfig::load().chrome_spec();
+            if chrome_spec.status_bar {
+                let status_resp =
+                    egui::TopBottomPanel::bottom("explorer_status_bar")
+                        .frame(egui::Frame::none().fill(palette.window_bg).inner_margin(
+                            egui::Margin {
+                                left: 10.0,
+                                right: 10.0,
+                                top: 0.0,
+                                bottom: 2.0,
+                            },
+                        ))
+                        .show_separator_line(false)
+                        .show_inside(ui, |ui| {
+                            self.render_status_bar(ui, palette);
+                        });
+                let status_rect = status_resp.response.rect;
+                ui.painter().line_segment(
+                    [
+                        Pos2::new(status_rect.left(), status_rect.top() + 0.5),
+                        Pos2::new(status_rect.right(), status_rect.top() + 0.5),
+                    ],
+                    Stroke::new(1.0_f32, palette.border),
+                );
+            }
 
-            let path_bar_visible =
-                !self.is_home_view && !parse_breadcrumbs(&self.current_dir).is_empty();
+            let path_bar_visible = chrome_spec.path_bar_bottom
+                && !self.is_home_view
+                && !parse_breadcrumbs(&self.current_dir).is_empty();
             if path_bar_visible {
                 let path_resp =
                     egui::TopBottomPanel::bottom("explorer_path_bar")
@@ -9946,6 +9946,46 @@ impl ExplorerView {
                 .fs_worker_tx
                 .send(FsOperation::Copy { sources, dest_dir });
         }
+    }
+
+    pub fn copy_selected_to_clipboard(&mut self) {
+        if !self.selected_paths.is_empty() {
+            self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+            self.clipboard_is_cut = false;
+        }
+    }
+
+    pub fn cut_selected_to_clipboard(&mut self) {
+        if !self.selected_paths.is_empty() {
+            self.clipboard_paths = self.selected_paths.iter().cloned().collect();
+            self.clipboard_is_cut = true;
+        }
+    }
+
+    pub fn delete_selected(&mut self) {
+        let paths: Vec<PathBuf> = self
+            .selected_paths
+            .iter()
+            .filter(|&p| !crate::core::is_protected_os_file(p))
+            .cloned()
+            .collect();
+        if !paths.is_empty() {
+            let _ = crate::core::action_journal::stage_delete(&paths);
+            self.selected_paths.clear();
+            self.navigate_to(self.current_dir.clone());
+        }
+    }
+
+    pub fn rename_selected(&mut self) {
+        if let Some(path) = self.selected_paths.iter().next().cloned() {
+            if let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) {
+                self.renaming_path = Some((path, name));
+            }
+        }
+    }
+
+    pub fn copy_current_path_to_clipboard(&mut self) {
+        crate::gui::context_menu::set_clipboard_files(std::slice::from_ref(&self.current_dir));
     }
 
     /// Shared empty-canvas context menu for the Details and Grid canvases.

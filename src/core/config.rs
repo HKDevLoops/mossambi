@@ -1317,6 +1317,16 @@ impl MossambiConfig {
         }
     }
 
+    /// Returns the active `ChromeSpec` for this configuration.
+    pub fn chrome_spec(&self) -> crate::core::ChromeSpec {
+        let preset = self.look_preset.unwrap_or(LookPreset::Finder);
+        let mut spec = crate::core::ChromeSpec::for_preset(preset);
+        if !self.show_tags_section {
+            spec.sidebar.show_tags = false;
+        }
+        spec
+    }
+
     /// Returns the display binding for a rebindable shortcut action id,
     /// falling back to DEFAULT_SHORTCUTS when unset or blank.
     pub fn shortcut_for(&self, id: &str) -> String {

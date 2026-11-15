@@ -22,6 +22,7 @@ pub mod glass;
 pub mod icon_packs;
 pub mod linux_clipboard_files;
 pub mod linux_dna;
+pub mod look_spec;
 pub mod mouse_nav;
 #[cfg(target_os = "windows")]
 pub mod ole_drag_out;
@@ -80,6 +81,10 @@ pub use glass::{
 };
 pub use linux_dna::{
     discover_linux_mounts, install_linux_desktop_integration, send_linux_notification,
+};
+pub use look_spec::{
+    AddressBarStyle, ChromeSpec, DetailsPanePosition, SearchPosition, SidebarHeaderStyle,
+    SidebarSpec, SpacingTokens, TabPosition, TitleBarStyle, ToolbarItem, WindowControlsPosition,
 };
 pub use mouse_nav::MouseNavListener;
 pub use pantone::{
