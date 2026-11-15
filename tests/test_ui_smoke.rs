@@ -149,3 +149,33 @@ fn test_explorer_view_all_modes_render_headless() {
     });
     assert!(explorer.is_home_view);
 }
+
+#[test]
+fn test_preferences_window_and_explorer_motion_render_headless() {
+    let ctx = Context::default();
+    let mut prefs = PreferencesView::default();
+    let mut current_theme = ThemeStyle::default();
+    let mut quick_settings = QuickSettingsState::default();
+    let mut console = ScriptConsole::default();
+
+    prefs.selected = 4; // Appearance & Themes
+
+    for anim in mossambi::core::window_anim::WindowAnimType::ALL {
+        prefs.cfg.animations.window_anim = anim;
+        prefs.cfg.sidebar_collapsed = true;
+
+        let _output = ctx.run(RawInput::default(), |ctx| {
+            eframe::egui::CentralPanel::default().show(ctx, |ui| {
+                let palette = current_theme.colors();
+                prefs.render(
+                    ui,
+                    &palette,
+                    &mut current_theme,
+                    &mut quick_settings,
+                    &mut console,
+                    (None, Vec::new()),
+                );
+            });
+        });
+    }
+}

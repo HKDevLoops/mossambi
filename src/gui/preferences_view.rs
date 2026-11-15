@@ -2752,6 +2752,100 @@ impl PreferencesView {
             &mut self.cfg.animations.widget_elastic_hover,
             dirty,
         );
+
+        section(ui, palette, "Window & Explorer Motion");
+        ui.label(
+            egui::RichText::new(
+                "Authentic OS-level window minimize transitions and fluid spatial explorer navigation.",
+            )
+            .size(design::type_scale::BODY_SM)
+            .color(palette.text_secondary),
+        );
+        ui.add_space(design::space::SM);
+
+        let cur_win_anim = self.cfg.animations.window_anim;
+        let win_anim_lbl = cur_win_anim.label().to_string();
+        setting_row(
+            ui,
+            palette,
+            "Window minimize effect",
+            &win_anim_lbl,
+            dirty,
+            |ui, dirty| {
+                egui::ComboBox::from_id_salt("prefs_window_anim_effect_combo")
+                    .selected_text(cur_win_anim.label())
+                    .width(180.0)
+                    .show_ui(ui, |ui| {
+                        for anim in crate::core::window_anim::WindowAnimType::ALL {
+                            let is_active = self.cfg.animations.window_anim == anim;
+                            if ui.selectable_label(is_active, anim.label()).clicked() {
+                                self.cfg.animations.window_anim = anim;
+                                *dirty = true;
+                            }
+                        }
+                    });
+            },
+        );
+
+        let dur_lbl = format!("{:.2} s", self.cfg.animations.window_anim_duration);
+        setting_row(
+            ui,
+            palette,
+            "Animation duration",
+            &dur_lbl,
+            dirty,
+            |ui, dirty| {
+                if ui
+                    .add(
+                        egui::Slider::new(
+                            &mut self.cfg.animations.window_anim_duration,
+                            0.15..=0.60,
+                        )
+                        .show_value(false),
+                    )
+                    .changed()
+                {
+                    *dirty = true;
+                }
+            },
+        );
+
+        toggle_row(
+            ui,
+            palette,
+            "Folder navigation drift",
+            "Subtle 14px directional drift when entering or backing out of directories",
+            &mut self.cfg.animations.folder_nav_motion,
+            dirty,
+        );
+
+        toggle_row(
+            ui,
+            palette,
+            "Tactile click feedback",
+            "Subtle 0.985 scale depression on file, folder, and button clicks",
+            &mut self.cfg.animations.click_feedback,
+            dirty,
+        );
+
+        card(ui, palette, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Collapsible Sidebar:")
+                        .size(design::type_scale::BODY_SM)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.label(
+                    egui::RichText::new(
+                        "Toggle with Ctrl+B (Cmd+B) or the top toolbar Hamburger button.",
+                    )
+                    .size(design::type_scale::BODY_SM)
+                    .color(palette.text_secondary),
+                );
+            });
+        });
+        ui.add_space(design::space::SM);
     }
 
     fn render_explorer(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
