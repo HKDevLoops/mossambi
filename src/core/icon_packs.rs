@@ -329,6 +329,22 @@ impl IconGlyph {
         color_rgb: [u8; 3],
     ) -> (IconGlyph, [u8; 3]) {
         if is_dir {
+            if let Some(p) = path {
+                if let Some(custom) = crate::core::folder_icons::get_custom_folder_icon(p) {
+                    match custom {
+                        crate::core::folder_icons::FolderIconCustomization::Professional(ref id)
+                        | crate::core::folder_icons::FolderIconCustomization::Meme(ref id) => {
+                            if let Some(def) = crate::core::folder_icons::find_preset(id) {
+                                return (IconGlyph::Folder, def.accent_rgb);
+                            }
+                        }
+                        crate::core::folder_icons::FolderIconCustomization::LocalPath(_)
+                        | crate::core::folder_icons::FolderIconCustomization::CdnUrl(_) => {
+                            return (IconGlyph::Folder, [59, 130, 246]);
+                        }
+                    }
+                }
+            }
             if let Some(sf) = crate::core::special_folders::lookup(name, path) {
                 return (IconGlyph::FolderSpecial(sf), sf.default_color());
             }
@@ -433,9 +449,9 @@ impl IconPack {
                 line: "#7D8AA5",
             },
             Self::Windows11 => PackStyle {
-                back: "#DBA222",
-                front: "#FFC844",
-                tab: "#B57F0F",
+                back: "#FFA726",
+                front: "#FFD54F",
+                tab: "#FB8C00",
                 outline: None,
                 radius: 8.0,
                 tab_style: TabStyle::Tab,
@@ -446,22 +462,22 @@ impl IconPack {
                 line: "#9AA0A6",
             },
             Self::Windows10 => PackStyle {
-                back: "#E4A918",
-                front: "#FDCD58",
-                tab: "#C28C0B",
+                back: "#FFB300",
+                front: "#FFE082",
+                tab: "#FFA000",
                 outline: None,
                 radius: 3.0,
                 tab_style: TabStyle::Tab,
-                gloss: false,
+                gloss: true,
                 page: "#FFFFFF",
                 page_edge: "#DCD5C6",
                 fold: "#EFE6D2",
                 line: "#8B97A8",
             },
             Self::Windows8 => PackStyle {
-                back: "#EDB500",
-                front: "#FFCB29",
-                tab: "#D19E00",
+                back: "#FFC107",
+                front: "#FFE082",
+                tab: "#FFB300",
                 outline: None,
                 radius: 0.5,
                 tab_style: TabStyle::Tab,
@@ -472,10 +488,10 @@ impl IconPack {
                 line: "#767676",
             },
             Self::Windows7 => PackStyle {
-                back: "#E7BE33",
-                front: "#FEDB63",
-                tab: "#C99F22",
-                outline: Some("#A47A1B"),
+                back: "#FFB300",
+                front: "#FFE082",
+                tab: "#FFA000",
+                outline: Some("#FF8F00"),
                 radius: 6.0,
                 tab_style: TabStyle::Tab,
                 gloss: true,
@@ -485,10 +501,10 @@ impl IconPack {
                 line: "#95805A",
             },
             Self::WindowsXp => PackStyle {
-                back: "#DFA92A",
-                front: "#F9D65C",
-                tab: "#B8860B",
-                outline: Some("#7A5A14"),
+                back: "#FFB300",
+                front: "#FFE082",
+                tab: "#FFA000",
+                outline: Some("#FF8F00"),
                 radius: 2.0,
                 tab_style: TabStyle::Tab,
                 gloss: true,
@@ -498,9 +514,9 @@ impl IconPack {
                 line: "#6E6A4F",
             },
             Self::Fluent => PackStyle {
-                back: "#F4A93C",
-                front: "#FFC340",
-                tab: "#DE8F1E",
+                back: "#FFA000",
+                front: "#FFD54F",
+                tab: "#FF8F00",
                 outline: None,
                 radius: 9.0,
                 tab_style: TabStyle::Flush,
@@ -995,8 +1011,8 @@ fn folder_shapes(st: &PackStyle) -> String {
         ),
         None => String::new(),
     };
-    let ggtop = mix_hex(st.front, "#FFFFFF", 0.38);
-    let ggbot = shade_hex(st.front, 0.86);
+    let ggtop = mix_hex(st.front, "#FFFFFF", 0.45);
+    let ggbot = shade_hex(st.front, 0.94);
     let defs = format!(
         "<defs><linearGradient id='ggfront' x1='0' y1='0' x2='0' y2='1'> \
          <stop offset='0' stop-color='{top}'/> \

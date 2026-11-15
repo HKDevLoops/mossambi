@@ -598,11 +598,17 @@ impl PreferencesView {
             value_label: on_off(self.cfg.enable_hotkey_wakeup).to_string(),
         });
         // Performance
+        let topo = crate::core::qos::detect_cpu_topology();
+        let wt_val = if self.cfg.worker_threads == 0 {
+            format!("Auto ({})", topo.description())
+        } else {
+            format!("{} threads", self.cfg.worker_threads)
+        };
         out.push(PreferenceHit {
             category_id: "performance",
             category_title: "Performance",
             setting_label: "Worker threads",
-            value_label: format!("{}", self.cfg.worker_threads),
+            value_label: wt_val,
         });
         // Conversion
         out.push(PreferenceHit {
@@ -3105,7 +3111,12 @@ impl PreferencesView {
             );
 
             let wt = self.cfg.worker_threads;
-            let wt_lbl = format!("{}", wt);
+            let topo = crate::core::qos::detect_cpu_topology();
+            let wt_lbl = if wt == 0 {
+                format!("Auto ({})", topo.description())
+            } else {
+                format!("{} threads", wt)
+            };
             let wt_mut = &mut self.cfg.worker_threads;
             setting_row(
                 ui,
@@ -3115,7 +3126,7 @@ impl PreferencesView {
                 dirty,
                 |ui, dirty| {
                     if ui
-                        .add(egui::Slider::new(wt_mut, 1..=16).show_value(false))
+                        .add(egui::Slider::new(wt_mut, 0..=32).show_value(false))
                         .changed()
                     {
                         *dirty = true;
@@ -3177,7 +3188,12 @@ impl PreferencesView {
 
     fn render_performance(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
         let wt = self.cfg.worker_threads;
-        let wt_lbl = format!("{}", wt);
+        let topo = crate::core::qos::detect_cpu_topology();
+        let wt_lbl = if wt == 0 {
+            format!("Auto ({})", topo.description())
+        } else {
+            format!("{} threads", wt)
+        };
         let wt_mut = &mut self.cfg.worker_threads;
         setting_row(
             ui,
@@ -3187,7 +3203,7 @@ impl PreferencesView {
             dirty,
             |ui, dirty| {
                 if ui
-                    .add(egui::Slider::new(wt_mut, 1..=16).show_value(false))
+                    .add(egui::Slider::new(wt_mut, 0..=32).show_value(false))
                     .changed()
                 {
                     *dirty = true;
@@ -4050,7 +4066,14 @@ pub fn setting_value_label(key: &str, cfg: &MossambiConfig) -> Option<String> {
         "deep_drag_detection_only" => Some(on_off(cfg.deep_drag_detection_only).to_string()),
         "glass_effect" => Some(glass_label(cfg.glass_effect).to_string()),
         "output_mode" => Some(output_mode_label(cfg.output_mode).to_string()),
-        "worker_threads" => Some(format!("{}", cfg.worker_threads)),
+        "worker_threads" => {
+            let topo = crate::core::qos::detect_cpu_topology();
+            Some(if cfg.worker_threads == 0 {
+                format!("Auto ({})", topo.description())
+            } else {
+                format!("{} threads", cfg.worker_threads)
+            })
+        }
         "icon_pack" => Some(IconPack::from_config_id(&cfg.icon_pack).label().to_string()),
         "drop_action_pref" => Some(cfg.drop_action_pref.label().to_string()),
         _ => None,

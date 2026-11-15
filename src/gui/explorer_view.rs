@@ -768,6 +768,10 @@ pub struct ExplorerView {
     /// into the view underneath.
     pub palette_open: bool,
 
+    // Custom folder icon properties modal state
+    pub custom_icon_input: String,
+    pub custom_icon_tab: usize,
+
     // Finder-style long-hover preview (files & folders)
     hover_preview: Option<HoverPreviewState>,
 
@@ -1114,6 +1118,8 @@ impl Default for ExplorerView {
             zoom_cross_gate: None,
             marquee: None,
             drag_out_in_flight: false,
+            custom_icon_input: String::new(),
+            custom_icon_tab: 0,
             status_note: None,
             split_view_enabled: false,
             active_pane: 0,
@@ -4658,12 +4664,12 @@ impl ExplorerView {
     }
 
     fn render_recent_files_view(
-        &self,
+        &mut self,
         ui: &mut Ui,
         palette: &ThemePalette,
         tier: crate::gui::dashboard_layout::DashboardTier,
         available_w: f32,
-        recent_files: &[&FileItem],
+        recent_files: &[FileItem],
     ) {
         if recent_files.is_empty() {
             ui.label(
@@ -4873,8 +4879,43 @@ impl ExplorerView {
                 palette.text_muted,
             );
 
+            let is_sel = self.selected_paths.contains(&item.path);
+            if is_sel {
+                ui.painter().rect_filled(row_rect, Rounding::same(6.0), palette.selection);
+                ui.painter().rect_stroke(row_rect, Rounding::same(6.0), Stroke::new(1.0_f32, palette.accent));
+            }
+
             if row_resp.double_clicked() {
+                self.trigger_click_feedback();
                 open_in_default_app(&item.path);
+            } else if row_resp.clicked() {
+                self.trigger_click_feedback();
+                let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                let shift = ui.input(|i| i.modifiers.shift);
+                if ctrl {
+                    if is_sel {
+                        self.selected_paths.remove(&item.path);
+                    } else {
+                        self.selected_paths.insert(item.path.clone());
+                    }
+                    self.selection_anchor = Some(idx);
+                } else if shift {
+                    if let Some(anchor) = self.selection_anchor {
+                        self.selected_paths.clear();
+                        let (lo, hi) = (anchor.min(idx), anchor.max(idx));
+                        for e in recent_files.iter().take(hi + 1).skip(lo) {
+                            self.selected_paths.insert(e.path.clone());
+                        }
+                    } else {
+                        self.selected_paths.clear();
+                        self.selected_paths.insert(item.path.clone());
+                        self.selection_anchor = Some(idx);
+                    }
+                } else {
+                    self.selected_paths.clear();
+                    self.selected_paths.insert(item.path.clone());
+                    self.selection_anchor = Some(idx);
+                }
             }
         }
     }
@@ -4970,10 +5011,11 @@ impl ExplorerView {
             recycle_target,
         ));
 
-        let mut recent_files: Vec<&FileItem> = self
+        let mut recent_files: Vec<FileItem> = self
             .entries
             .iter()
             .filter(|e| !e.is_dir && !e.is_hidden)
+            .cloned()
             .collect();
         recent_files.sort_by_key(|e| std::cmp::Reverse(e.modified));
         recent_files.truncate(15);
@@ -4984,39 +5026,62 @@ impl ExplorerView {
                 ui.add_space(8.0);
 
                 ui.horizontal(|ui| {
-                    if container.margin_x > 0.0 {
-                        ui.add_space(container.margin_x);
-                    }
+                    ui.add_space(container.margin_x);
 
                     ui.vertical(|ui| {
+                        ui.set_width(container.content_width);
                         ui.set_max_width(container.content_width);
                         let content_w = container.content_width;
                         let tier = container.tier;
 
+                        let bento_frame = egui::Frame::none()
+                            .fill(palette.surface_2)
+                            .stroke(Stroke::new(self.design_tokens.border_width, palette.border))
+                            .rounding(Rounding::same(self.design_tokens.radius_card))
+                            .inner_margin(egui::Margin::symmetric(18.0, 16.0));
+
                         match self.design_tokens.style {
                             crate::core::DesignStyle::ArcaneFluid => {
-                                // 1. Quick Access
-                                ui.label(
-                                    egui::RichText::new("Quick Access")
-                                        .size(15.0)
-                                        .strong()
-                                        .color(palette.text_primary),
-                                );
-                                ui.add_space(8.0);
-                                self.render_quick_access_cards(
-                                    ui,
-                                    palette,
-                                    &pinned_folders,
-                                    content_w,
-                                    &mut nav_to,
-                                    &mut new_dash_hover,
-                                );
-                                ui.add_space(20.0);
+                                // 1. Quick Access Bento Tile
+                                bento_frame.show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        let (ir, _) = ui.allocate_exact_size(
+                                            Vec2::splat(16.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        crate::core::icon_packs::paint_icon(
+                                            ui,
+                                            self.icon_pack,
+                                            crate::core::icon_packs::IconGlyph::FolderFavorites,
+                                            ir,
+                                            [palette.accent.r(), palette.accent.g(), palette.accent.b()],
+                                        );
+                                        ui.add_space(4.0);
+                                        ui.label(
+                                            egui::RichText::new("Quick Access")
+                                                .size(15.0)
+                                                .strong()
+                                                .color(palette.text_primary),
+                                        );
+                                    });
+                                    ui.add_space(10.0);
+                                    self.render_quick_access_cards(
+                                        ui,
+                                        palette,
+                                        &pinned_folders,
+                                        content_w - 36.0,
+                                        &mut nav_to,
+                                        &mut new_dash_hover,
+                                    );
+                                });
+
+                                ui.add_space(16.0);
 
                                 // 2. Bento Grid Section (Drives + Quick Actions / Activity)
                                 if matches!(
                                     tier,
-                                    crate::gui::dashboard_layout::DashboardTier::Wide
+                                    crate::gui::dashboard_layout::DashboardTier::Medium
+                                        | crate::gui::dashboard_layout::DashboardTier::Wide
                                         | crate::gui::dashboard_layout::DashboardTier::Ultrawide
                                 ) {
                                     let gap = 16.0;
@@ -5024,122 +5089,208 @@ impl ExplorerView {
                                     let right_w = content_w - gap - left_w;
 
                                     ui.horizontal(|ui| {
+                                        // Left Bento Tile: Drives & Storage
                                         ui.vertical(|ui| {
+                                            ui.set_width(left_w);
                                             ui.set_max_width(left_w);
-                                            ui.label(
-                                                egui::RichText::new("Drives & Storage")
-                                                    .size(15.0)
-                                                    .strong()
-                                                    .color(palette.text_primary),
-                                            );
-                                            ui.add_space(8.0);
-                                            self.render_drives_cards(
-                                                ui,
-                                                palette,
-                                                tier,
-                                                left_w,
-                                                &mut nav_to,
-                                            );
+                                            bento_frame.show(ui, |ui| {
+                                                ui.horizontal(|ui| {
+                                                    let (ir, _) = ui.allocate_exact_size(
+                                                        Vec2::splat(16.0),
+                                                        egui::Sense::hover(),
+                                                    );
+                                                    crate::core::icon_packs::paint_icon(
+                                                        ui,
+                                                        self.icon_pack,
+                                                        crate::core::icon_packs::IconGlyph::Drive,
+                                                        ir,
+                                                        [palette.accent.r(), palette.accent.g(), palette.accent.b()],
+                                                    );
+                                                    ui.add_space(4.0);
+                                                    ui.label(
+                                                        egui::RichText::new("Drives & Storage")
+                                                            .size(15.0)
+                                                            .strong()
+                                                            .color(palette.text_primary),
+                                                    );
+                                                });
+                                                ui.add_space(10.0);
+                                                self.render_drives_cards(
+                                                    ui,
+                                                    palette,
+                                                    tier,
+                                                    left_w - 36.0,
+                                                    &mut nav_to,
+                                                );
+                                            });
                                         });
 
                                         ui.add_space(gap);
 
+                                        // Right Bento Tiles: Quick Actions + Storage Activity
                                         ui.vertical(|ui| {
+                                            ui.set_width(right_w);
                                             ui.set_max_width(right_w);
-                                            ui.label(
-                                                egui::RichText::new("Quick Actions")
-                                                    .size(15.0)
-                                                    .strong()
-                                                    .color(palette.text_primary),
-                                            );
-                                            ui.add_space(8.0);
-                                            self.render_quick_actions_bar(
-                                                ui,
-                                                palette,
-                                                right_w,
-                                                &mut action_out,
-                                            );
-                                            ui.add_space(14.0);
 
-                                            ui.label(
-                                                egui::RichText::new("Storage Activity")
-                                                    .size(15.0)
-                                                    .strong()
-                                                    .color(palette.text_primary),
-                                            );
-                                            ui.add_space(8.0);
-                                            self.render_activity_summary(
-                                                ui,
-                                                palette,
-                                                right_w,
-                                                pinned_folders.len(),
-                                            );
+                                            bento_frame.show(ui, |ui| {
+                                                ui.horizontal(|ui| {
+                                                    let (ir, _) = ui.allocate_exact_size(
+                                                        Vec2::splat(16.0),
+                                                        egui::Sense::hover(),
+                                                    );
+                                                    crate::core::icon_packs::paint_icon(
+                                                        ui,
+                                                        self.icon_pack,
+                                                        crate::core::icon_packs::IconGlyph::ActionMore,
+                                                        ir,
+                                                        [palette.accent.r(), palette.accent.g(), palette.accent.b()],
+                                                    );
+                                                    ui.add_space(4.0);
+                                                    ui.label(
+                                                        egui::RichText::new("Quick Actions")
+                                                            .size(15.0)
+                                                            .strong()
+                                                            .color(palette.text_primary),
+                                                    );
+                                                });
+                                                ui.add_space(8.0);
+                                                self.render_quick_actions_bar(
+                                                    ui,
+                                                    palette,
+                                                    right_w - 36.0,
+                                                    &mut action_out,
+                                                );
+                                            });
+
+                                            ui.add_space(12.0);
+
+                                            bento_frame.show(ui, |ui| {
+                                                ui.horizontal(|ui| {
+                                                    let (ir, _) = ui.allocate_exact_size(
+                                                        Vec2::splat(16.0),
+                                                        egui::Sense::hover(),
+                                                    );
+                                                    crate::core::icon_packs::paint_icon(
+                                                        ui,
+                                                        self.icon_pack,
+                                                        crate::core::icon_packs::IconGlyph::ActionShield,
+                                                        ir,
+                                                        [palette.accent.r(), palette.accent.g(), palette.accent.b()],
+                                                    );
+                                                    ui.add_space(4.0);
+                                                    ui.label(
+                                                        egui::RichText::new("Storage Activity")
+                                                            .size(15.0)
+                                                            .strong()
+                                                            .color(palette.text_primary),
+                                                    );
+                                                });
+                                                ui.add_space(8.0);
+                                                self.render_activity_summary(
+                                                    ui,
+                                                    palette,
+                                                    right_w - 36.0,
+                                                    pinned_folders.len(),
+                                                );
+                                            });
                                         });
                                     });
                                 } else {
-                                    ui.label(
-                                        egui::RichText::new("Drives & Storage")
-                                            .size(15.0)
-                                            .strong()
-                                            .color(palette.text_primary),
-                                    );
+                                    // Compact: single column stack with bento containment
+                                    bento_frame.show(ui, |ui| {
+                                        ui.label(
+                                            egui::RichText::new("Drives & Storage")
+                                                .size(15.0)
+                                                .strong()
+                                                .color(palette.text_primary),
+                                        );
+                                        ui.add_space(8.0);
+                                        self.render_drives_cards(
+                                            ui,
+                                            palette,
+                                            tier,
+                                            content_w - 36.0,
+                                            &mut nav_to,
+                                        );
+                                    });
+
+                                    ui.add_space(14.0);
+
+                                    bento_frame.show(ui, |ui| {
+                                        ui.label(
+                                            egui::RichText::new("Quick Actions")
+                                                .size(15.0)
+                                                .strong()
+                                                .color(palette.text_primary),
+                                        );
+                                        ui.add_space(8.0);
+                                        self.render_quick_actions_bar(
+                                            ui,
+                                            palette,
+                                            content_w - 36.0,
+                                            &mut action_out,
+                                        );
+                                    });
+
+                                    ui.add_space(14.0);
+
+                                    bento_frame.show(ui, |ui| {
+                                        ui.label(
+                                            egui::RichText::new("Storage Activity")
+                                                .size(15.0)
+                                                .strong()
+                                                .color(palette.text_primary),
+                                        );
+                                        ui.add_space(8.0);
+                                        self.render_activity_summary(
+                                            ui,
+                                            palette,
+                                            content_w - 36.0,
+                                            pinned_folders.len(),
+                                        );
+                                    });
+                                }
+
+                                ui.add_space(16.0);
+
+                                // 3. Recent Files Bento Tile
+                                bento_frame.show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        let (ir, _) = ui.allocate_exact_size(
+                                            Vec2::splat(16.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        crate::core::icon_packs::paint_icon(
+                                            ui,
+                                            self.icon_pack,
+                                            crate::core::icon_packs::IconGlyph::ActionList,
+                                            ir,
+                                            [palette.accent.r(), palette.accent.g(), palette.accent.b()],
+                                        );
+                                        ui.add_space(4.0);
+                                        ui.label(
+                                            egui::RichText::new("Recent Files")
+                                                .size(15.0)
+                                                .strong()
+                                                .color(palette.text_primary),
+                                        );
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            ui.label(
+                                                egui::RichText::new(format!("{} items", recent_files.len()))
+                                                    .size(11.5)
+                                                    .color(palette.text_muted),
+                                            );
+                                        });
+                                    });
                                     ui.add_space(8.0);
-                                    self.render_drives_cards(
+                                    self.render_recent_files_view(
                                         ui,
                                         palette,
                                         tier,
-                                        content_w,
-                                        &mut nav_to,
+                                        content_w - 36.0,
+                                        &recent_files,
                                     );
-                                    ui.add_space(16.0);
-
-                                    ui.label(
-                                        egui::RichText::new("Quick Actions")
-                                            .size(15.0)
-                                            .strong()
-                                            .color(palette.text_primary),
-                                    );
-                                    ui.add_space(8.0);
-                                    self.render_quick_actions_bar(
-                                        ui,
-                                        palette,
-                                        content_w,
-                                        &mut action_out,
-                                    );
-                                    ui.add_space(16.0);
-
-                                    ui.label(
-                                        egui::RichText::new("Storage Activity")
-                                            .size(15.0)
-                                            .strong()
-                                            .color(palette.text_primary),
-                                    );
-                                    ui.add_space(8.0);
-                                    self.render_activity_summary(
-                                        ui,
-                                        palette,
-                                        content_w,
-                                        pinned_folders.len(),
-                                    );
-                                }
-
-                                ui.add_space(20.0);
-
-                                // 3. Recent Files Table
-                                ui.label(
-                                    egui::RichText::new("Recent Files")
-                                        .size(15.0)
-                                        .strong()
-                                        .color(palette.text_primary),
-                                );
-                                ui.add_space(8.0);
-                                self.render_recent_files_view(
-                                    ui,
-                                    palette,
-                                    tier,
-                                    content_w,
-                                    &recent_files,
-                                );
+                                });
                             }
 
                             crate::core::DesignStyle::ZenithPro => {
@@ -5396,6 +5547,10 @@ impl ExplorerView {
                             }
                         }
                     });
+
+                    if container.margin_x > 0.0 {
+                        ui.add_space(container.margin_x);
+                    }
                 });
             });
 
@@ -7087,7 +7242,7 @@ impl ExplorerView {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(14.0, 14.0);
 
-                    for item in &entries {
+                    for (idx, item) in entries.iter().enumerate() {
                         let is_checked = self.selected_paths.contains(&item.path);
                         let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
 
@@ -7170,10 +7325,24 @@ impl ExplorerView {
                             );
                         }
                         if cb_resp.clicked() {
-                            if is_checked {
-                                self.selected_paths.remove(&item.path);
+                            let shift = ui.input(|i| i.modifiers.shift);
+                            if shift {
+                                if let Some(anchor) = self.selection_anchor {
+                                    let (lo, hi) = (anchor.min(idx), anchor.max(idx));
+                                    for e in entries.iter().take(hi + 1).skip(lo) {
+                                        self.selected_paths.insert(e.path.clone());
+                                    }
+                                } else {
+                                    self.selected_paths.insert(item.path.clone());
+                                    self.selection_anchor = Some(idx);
+                                }
                             } else {
-                                self.selected_paths.insert(item.path.clone());
+                                if is_checked {
+                                    self.selected_paths.remove(&item.path);
+                                } else {
+                                    self.selected_paths.insert(item.path.clone());
+                                }
+                                self.selection_anchor = Some(idx);
                             }
                         }
 
@@ -7422,15 +7591,32 @@ impl ExplorerView {
                             }
                         } else if resp.clicked() {
                             self.trigger_click_feedback();
-                            if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                            self.focused_row = idx;
+                            let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                            let shift = ui.input(|i| i.modifiers.shift);
+                            if ctrl {
                                 if is_checked {
                                     self.selected_paths.remove(&item.path);
                                 } else {
                                     self.selected_paths.insert(item.path.clone());
                                 }
+                                self.selection_anchor = Some(idx);
+                            } else if shift {
+                                if let Some(anchor) = self.selection_anchor {
+                                    self.selected_paths.clear();
+                                    let (lo, hi) = (anchor.min(idx), anchor.max(idx));
+                                    for e in entries.iter().take(hi + 1).skip(lo) {
+                                        self.selected_paths.insert(e.path.clone());
+                                    }
+                                } else {
+                                    self.selected_paths.clear();
+                                    self.selected_paths.insert(item.path.clone());
+                                    self.selection_anchor = Some(idx);
+                                }
                             } else {
                                 self.selected_paths.clear();
                                 self.selected_paths.insert(item.path.clone());
+                                self.selection_anchor = Some(idx);
                             }
                         }
 
@@ -7708,12 +7894,25 @@ impl ExplorerView {
                             .show(ui, |ui| {
                                 ui.vertical(|ui| {
                                     for (idx, item) in entries.iter().enumerate() {
-                                        let chain_sel = role == ColumnRole::Ancestor
-                                            && chain_highlight == Some(item.path.as_path());
+                                        let is_open_in_next = match role {
+                                            ColumnRole::Current => self
+                                                .column_stack
+                                                .first()
+                                                .map(|(p, _)| p == &item.path)
+                                                .unwrap_or(false),
+                                            ColumnRole::Descendant => self
+                                                .column_stack
+                                                .get(stack_index + 1)
+                                                .map(|(p, _)| p == &item.path)
+                                                .unwrap_or(false),
+                                            ColumnRole::Ancestor => {
+                                                chain_highlight == Some(item.path.as_path())
+                                            }
+                                        };
                                         let is_selected = self.selected_paths.contains(&item.path)
                                             || (role == ColumnRole::Current
-                                                && self.focused_row == idx)
-                                            || chain_sel;
+                                                && self.focused_row == idx);
+                                        let is_highlighted = is_selected || is_open_in_next;
                                         let icon_spec = resolve_file_icon(
                                             &item.name,
                                             &item.extension,
@@ -7823,30 +8022,27 @@ impl ExplorerView {
                                             }
                                         }
                                         // Row band: hover/selected/opened chain row
-                                        if is_selected {
-                                            // Selection tint: straight accent alpha,
-                                            // 45 dark / 26 light (premul with raw
-                                            // rgb rendered near-opaque).
+                                        if is_highlighted {
                                             ui.painter().rect_filled(
                                                 row_rect,
-                                                Rounding::same(5.0),
-                                                Color32::from_rgba_unmultiplied(
-                                                    palette.accent.r(),
-                                                    palette.accent.g(),
-                                                    palette.accent.b(),
-                                                    if palette.is_dark { 45 } else { 26 },
-                                                ),
+                                                Rounding::same(6.0),
+                                                palette.selection,
                                             );
+                                            ui.painter().rect_stroke(
+                                                row_rect,
+                                                Rounding::same(6.0),
+                                                Stroke::new(1.5_f32, palette.accent),
+                                            );
+                                            let indicator = Rect::from_min_max(
+                                                Pos2::new(row_rect.left() + 1.5, row_rect.top() + 4.0),
+                                                Pos2::new(row_rect.left() + 4.5, row_rect.bottom() - 4.0),
+                                            );
+                                            ui.painter().rect_filled(indicator, Rounding::same(1.5), palette.accent);
                                         } else if resp.hovered() {
                                             ui.painter().rect_filled(
                                                 row_rect,
-                                                Rounding::same(5.0),
-                                                Color32::from_rgba_unmultiplied(
-                                                    palette.accent.r(),
-                                                    palette.accent.g(),
-                                                    palette.accent.b(),
-                                                    18,
-                                                ),
+                                                Rounding::same(6.0),
+                                                palette.hover,
                                             );
                                         }
                                         // Pack vector icon on left
@@ -7874,7 +8070,7 @@ impl ExplorerView {
                                             paint_alias_badge(ui.painter(), icon_rect);
                                         }
                                         // Name text right of icon, tag dots before it
-                                        let name_color = if is_selected {
+                                        let name_color = if is_highlighted {
                                             palette.text_primary
                                         } else if item.is_hidden {
                                             palette.text_muted
@@ -7910,7 +8106,7 @@ impl ExplorerView {
                                                 egui::Align2::RIGHT_CENTER,
                                                 ">",
                                                 egui::FontId::proportional(14.0),
-                                                if is_selected {
+                                                if is_highlighted {
                                                     palette.accent
                                                 } else {
                                                     palette.text_muted
@@ -7922,7 +8118,7 @@ impl ExplorerView {
                                             self.trigger_click_feedback();
                                             match role {
                                                 ColumnRole::Ancestor => {
-                                                    if !chain_sel {
+                                                    if !is_open_in_next {
                                                         self.selected_paths.clear();
                                                         self.selected_paths
                                                             .insert(item.path.clone());
@@ -7935,31 +8131,79 @@ impl ExplorerView {
                                                 }
                                                 ColumnRole::Current => {
                                                     self.focused_row = idx;
-                                                    self.selected_paths.clear();
-                                                    self.selected_paths.insert(item.path.clone());
-                                                    if item.is_dir {
-                                                        *subfolder_to_load =
-                                                            Some((0, item.path.clone()));
-                                                        self.column_preview_item = None;
-                                                        *preview_to_set = None;
+                                                    let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                                                    let shift = ui.input(|i| i.modifiers.shift);
+                                                    if ctrl {
+                                                        if is_selected {
+                                                            self.selected_paths.remove(&item.path);
+                                                        } else {
+                                                            self.selected_paths.insert(item.path.clone());
+                                                        }
+                                                        self.selection_anchor = Some(idx);
+                                                    } else if shift {
+                                                        if let Some(anchor) = self.selection_anchor {
+                                                            self.selected_paths.clear();
+                                                            let (lo, hi) = (anchor.min(idx), anchor.max(idx));
+                                                            for e in entries.iter().take(hi + 1).skip(lo) {
+                                                                self.selected_paths.insert(e.path.clone());
+                                                            }
+                                                        } else {
+                                                            self.selected_paths.clear();
+                                                            self.selected_paths.insert(item.path.clone());
+                                                            self.selection_anchor = Some(idx);
+                                                        }
                                                     } else {
-                                                        *preview_to_set = Some(item.clone());
-                                                        self.column_stack.clear();
+                                                        self.selected_paths.clear();
+                                                        self.selected_paths.insert(item.path.clone());
+                                                        self.selection_anchor = Some(idx);
+                                                        if item.is_dir {
+                                                            *subfolder_to_load =
+                                                                Some((0, item.path.clone()));
+                                                            self.column_preview_item = None;
+                                                            *preview_to_set = None;
+                                                        } else {
+                                                            *preview_to_set = Some(item.clone());
+                                                            self.column_stack.clear();
+                                                        }
                                                     }
                                                 }
                                                 ColumnRole::Descendant => {
-                                                    self.selected_paths.clear();
-                                                    self.selected_paths.insert(item.path.clone());
-                                                    if item.is_dir {
-                                                        *subfolder_to_load = Some((
-                                                            stack_index + 1,
-                                                            item.path.clone(),
-                                                        ));
-                                                        self.column_preview_item = None;
-                                                        *preview_to_set = None;
+                                                    let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                                                    let shift = ui.input(|i| i.modifiers.shift);
+                                                    if ctrl {
+                                                        if is_selected {
+                                                            self.selected_paths.remove(&item.path);
+                                                        } else {
+                                                            self.selected_paths.insert(item.path.clone());
+                                                        }
+                                                        self.selection_anchor = Some(idx);
+                                                    } else if shift {
+                                                        if let Some(anchor) = self.selection_anchor {
+                                                            self.selected_paths.clear();
+                                                            let (lo, hi) = (anchor.min(idx), anchor.max(idx));
+                                                            for e in entries.iter().take(hi + 1).skip(lo) {
+                                                                self.selected_paths.insert(e.path.clone());
+                                                            }
+                                                        } else {
+                                                            self.selected_paths.clear();
+                                                            self.selected_paths.insert(item.path.clone());
+                                                            self.selection_anchor = Some(idx);
+                                                        }
                                                     } else {
-                                                        *preview_to_set = Some(item.clone());
-                                                        self.column_stack.truncate(stack_index + 1);
+                                                        self.selected_paths.clear();
+                                                        self.selected_paths.insert(item.path.clone());
+                                                        self.selection_anchor = Some(idx);
+                                                        if item.is_dir {
+                                                            *subfolder_to_load = Some((
+                                                                stack_index + 1,
+                                                                item.path.clone(),
+                                                            ));
+                                                            self.column_preview_item = None;
+                                                            *preview_to_set = None;
+                                                        } else {
+                                                            *preview_to_set = Some(item.clone());
+                                                            self.column_stack.truncate(stack_index + 1);
+                                                        }
                                                     }
                                                 }
                                             }
@@ -8099,56 +8343,18 @@ impl ExplorerView {
                     } else {
                         0.0
                     };
-                    // Miller lineage: columns are the ancestor chain
-                    // (root-first) + the current directory + the opened
-                    // descendant stack (Finder column-view layout).
+                    // Miller lineage: the navigated directory is the primary first column (Column 0).
+                    // Subfolders opened by click form the descendant stack (Columns 1..N).
+                    // Double-clicking a folder makes that folder become the first column.
                     let cur_dir = self.current_dir.clone();
-                    let chain_cols: Vec<(PathBuf, Vec<FileItem>)> = ancestor_chain(&cur_dir)
-                        .into_iter()
-                        .map(|p| {
-                            let sub = self.get_column_entries(&p);
-                            (p, sub)
-                        })
-                        .collect();
-                    let num_cols = (chain_cols.len() + 1 + self.column_stack.len()) as f32;
+                    let num_cols = (1 + self.column_stack.len()) as f32;
                     let cols_avail_w = (avail_w - inspector_w - (num_cols * 2.0)).max(220.0);
                     let natural_col_w = cols_avail_w / num_cols;
-                    let col_w = natural_col_w.max(230.0);
+                    let col_w = natural_col_w.max(260.0);
 
                     // ==========================================
-                    // MILLER CHAIN: ancestor columns, root-first (Finder
-                    // column view renders the whole chain left of the
-                    // current directory column)
+                    // PRIMARY COLUMN (Column 0): Current Directory
                     // ==========================================
-                    for (ci, (chain_path, chain_entries)) in chain_cols.iter().enumerate() {
-                        let next_chain: PathBuf = chain_cols
-                            .get(ci + 1)
-                            .map(|(p, _)| p.clone())
-                            .unwrap_or_else(|| cur_dir.clone());
-                        self.render_miller_column(
-                            ui,
-                            palette,
-                            chain_path,
-                            chain_entries,
-                            ColumnRole::Ancestor,
-                            col_w,
-                            full_h,
-                            &selection_snapshot,
-                            icon_pack,
-                            menu_style,
-                            Some(next_chain.as_path()),
-                            0,
-                            &mut subfolder_to_load,
-                            &mut nav_into_dir,
-                            &mut preview_to_set,
-                            &mut column_drop,
-                            &mut item_intents,
-                        );
-                    }
-
-                    // Current directory column (click behavior identical
-                    // to the old primary column; the vestigial subfolder
-                    // state write is gone).
                     {
                         self.render_miller_column(
                             ui,
@@ -9611,6 +9817,113 @@ impl ExplorerView {
                         ui.end_row();
                     });
 
+                // Folder Customization Section (Professional Presets, Meme Presets, Local/CDN)
+                if item.is_dir {
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(6.0);
+
+                    ui.label(
+                        egui::RichText::new("Customize Folder Icon")
+                            .size(13.0)
+                            .strong()
+                            .color(palette.text_primary),
+                    );
+                    ui.add_space(4.0);
+
+                    ui.horizontal(|ui| {
+                        if ui.selectable_label(self.custom_icon_tab == 0, "Professional").clicked() {
+                            self.custom_icon_tab = 0;
+                        }
+                        if ui.selectable_label(self.custom_icon_tab == 1, "Funky Memes").clicked() {
+                            self.custom_icon_tab = 1;
+                        }
+                        if ui.selectable_label(self.custom_icon_tab == 2, "Custom / CDN").clicked() {
+                            self.custom_icon_tab = 2;
+                        }
+                    });
+                    ui.add_space(4.0);
+
+                    match self.custom_icon_tab {
+                        0 => {
+                            egui::ScrollArea::vertical().max_height(130.0).show(ui, |ui| {
+                                egui::Grid::new("pro_icon_presets_grid").spacing([6.0, 4.0]).show(ui, |ui| {
+                                    for (i, p) in crate::core::folder_icons::PROFESSIONAL_PRESETS.iter().enumerate() {
+                                        let btn = ui.button(format!("{} {}", p.emoji_glyph, p.label));
+                                        if btn.on_hover_text(p.description).clicked() {
+                                            crate::core::folder_icons::set_custom_folder_icon(
+                                                &item.path,
+                                                crate::core::folder_icons::FolderIconCustomization::Professional(p.id.to_string()),
+                                            );
+                                        }
+                                        if (i + 1) % 2 == 0 {
+                                            ui.end_row();
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                        1 => {
+                            egui::ScrollArea::vertical().max_height(130.0).show(ui, |ui| {
+                                egui::Grid::new("meme_icon_presets_grid").spacing([6.0, 4.0]).show(ui, |ui| {
+                                    for (i, m) in crate::core::folder_icons::MEME_PRESETS.iter().enumerate() {
+                                        let btn = ui.button(format!("{} {}", m.emoji_glyph, m.label));
+                                        if btn.on_hover_text(m.description).clicked() {
+                                            crate::core::folder_icons::set_custom_folder_icon(
+                                                &item.path,
+                                                crate::core::folder_icons::FolderIconCustomization::Meme(m.id.to_string()),
+                                            );
+                                        }
+                                        if (i + 1) % 2 == 0 {
+                                            ui.end_row();
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                        _ => {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Path / URL:").color(palette.text_muted));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.custom_icon_input)
+                                        .hint_text("C:\\icon.png or https://..."),
+                                );
+                            });
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                if ui.button("Apply Icon").clicked() {
+                                    let trimmed = self.custom_icon_input.trim();
+                                    if !trimmed.is_empty() {
+                                        let custom = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                                            crate::core::folder_icons::FolderIconCustomization::CdnUrl(trimmed.to_string())
+                                        } else {
+                                            crate::core::folder_icons::FolderIconCustomization::LocalPath(PathBuf::from(trimmed))
+                                        };
+                                        crate::core::folder_icons::set_custom_folder_icon(&item.path, custom);
+                                    }
+                                }
+                                if ui.button("Browse Image...").clicked() {
+                                    if let Some(picked) = rfd::FileDialog::new()
+                                        .add_filter("Icon / Image", &["png", "ico", "svg", "jpg", "jpeg", "webp"])
+                                        .pick_file()
+                                    {
+                                        self.custom_icon_input = picked.to_string_lossy().to_string();
+                                        crate::core::folder_icons::set_custom_folder_icon(
+                                            &item.path,
+                                            crate::core::folder_icons::FolderIconCustomization::LocalPath(picked),
+                                        );
+                                    }
+                                }
+                            });
+                        }
+                    }
+
+                    ui.add_space(4.0);
+                    if ui.button("Reset to Default Icon").clicked() {
+                        crate::core::folder_icons::clear_custom_folder_icon(&item.path);
+                    }
+                }
+
                 ui.add_space(14.0);
                 ui.separator();
                 ui.add_space(8.0);
@@ -9947,7 +10260,7 @@ fn nav_icon_button(ui: &mut Ui, glyph: IconGlyph, px: f32) -> egui::Response {
     ui.add(btn)
 }
 
-fn open_in_default_app(path: &Path) {
+pub(crate) fn open_in_default_app(path: &Path) {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::ffi::OsStrExt;

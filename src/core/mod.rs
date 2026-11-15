@@ -15,6 +15,7 @@ pub mod drag_out;
 pub mod drop_action;
 pub mod fields_config;
 pub mod file_icons;
+pub mod folder_icons;
 pub mod fs_utils;
 pub mod fuzzy;
 pub mod gesture;
@@ -31,6 +32,7 @@ pub mod pantone;
 pub mod pins;
 pub mod platform_paths;
 pub mod preview;
+pub mod qos;
 pub mod registry;
 pub mod route_planner;
 pub mod scripting;
@@ -200,3 +202,5 @@ pub fn get_system_arch_info() -> (&'static str, &'static str) {
 
     (os, arch)
 }
+
+pub use qos::{detect_cpu_topology, set_current_thread_qos, CpuTopology, ThreadQoS};

@@ -157,6 +157,9 @@ pub struct StudioView {
     // Finder-style Command Palette (Ctrl+P / Cmd+K)
     pub command_palette: CommandPalette,
 
+    /// Flag requesting window minimize animation
+    pub request_minimize: bool,
+
     // Live script execution console: worker threads send outcomes here
     // through a channel; the Scripts preferences page drains it per frame.
     pub script_console: crate::core::scripting::ScriptConsole,
@@ -206,6 +209,7 @@ impl Default for StudioView {
 
             prefs_view: crate::gui::preferences_view::PreferencesView::default(),
             command_palette: CommandPalette::default(),
+            request_minimize: false,
             script_console: crate::core::scripting::ScriptConsole::default(),
 
             conformer_unit: 0,
@@ -366,6 +370,20 @@ impl StudioView {
         let events: Vec<egui::Event> = ctx.input(|i| i.events.clone());
         let toggle_palette =
             !capturing && shortcut_pressed(&events, &config.shortcut_for("palette"));
+        let palette_cmd_mode = !capturing
+            && ctx.input(|i| {
+                (i.modifiers.ctrl || i.modifiers.command)
+                    && i.modifiers.shift
+                    && !i.modifiers.alt
+                    && i.key_pressed(egui::Key::P)
+            });
+        let palette_quick_open = !capturing
+            && ctx.input(|i| {
+                (i.modifiers.ctrl || i.modifiers.command)
+                    && !i.modifiers.shift
+                    && !i.modifiers.alt
+                    && i.key_pressed(egui::Key::P)
+            });
         // Fixed secondary alias (Ctrl+K / Cmd+K) so the palette stays
         // discoverable even after a rebind.
         let palette_alias = !capturing
@@ -375,7 +393,9 @@ impl StudioView {
                     && !i.modifiers.alt
                     && i.key_pressed(egui::Key::K)
             });
-        if toggle_palette || palette_alias {
+        if palette_cmd_mode {
+            self.command_palette.open_with_query(">");
+        } else if toggle_palette || palette_alias || palette_quick_open {
             self.command_palette.toggle();
         }
         // B-1 gate flag: explorer raw-key handling is suppressed
@@ -441,6 +461,7 @@ impl StudioView {
                 // ==============================================================
                 // ROW 1: Tabs + Drag Window Area + Window Controls
                 // ==============================================================
+                let mut do_minimize = false;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing =
                         Vec2::new(chrome_spec.spacing.toolbar_item_spacing, 0.0);
@@ -451,7 +472,7 @@ impl StudioView {
                             ui,
                             &palette,
                             || ctx.send_viewport_cmd(ViewportCommand::Close),
-                            || ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
+                            || do_minimize = true,
                             || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
                         );
                         ui.add_space(6.0);
@@ -757,11 +778,14 @@ impl StudioView {
                             ui,
                             &palette,
                             || ctx.send_viewport_cmd(ViewportCommand::Close),
-                            || ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
+                            || do_minimize = true,
                             || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
                         );
                     }
                 });
+                if do_minimize {
+                    self.request_minimize = true;
+                }
 
                 // Menubar (Thunar style)
                 if chrome_spec.menubar {
@@ -2627,9 +2651,13 @@ impl StudioView {
             });
 
         // Finder-style Command Palette Modal (Ctrl+P / Cmd+K)
-        let palette_action =
-            self.command_palette
-                .render(ctx, &palette, self.explorer_view.icon_pack);
+        let palette_action = self.command_palette.render(
+            ctx,
+            &palette,
+            self.explorer_view.icon_pack,
+            Some(&self.explorer_view.current_dir),
+            &self.explorer_view.entries,
+        );
         if let Some(action) = palette_action {
             self.handle_palette_action(action, &mut on_stage_file, &mut on_convert_batch);
         }
@@ -2737,6 +2765,62 @@ impl StudioView {
             PaletteAction::Undo => {
                 let _ = crate::core::action_journal::undo_last();
                 self.explorer_view.refresh();
+            }
+            PaletteAction::Redo => {
+                self.explorer_view.refresh();
+            }
+            PaletteAction::OpenFile(path) => {
+                crate::gui::explorer_view::open_in_default_app(&path);
+            }
+            PaletteAction::NavigateTo(path) => {
+                self.current_tab = StudioTab::FileExplorer;
+                self.explorer_view.navigate_to(path);
+                self.explorer_view.is_home_view = false;
+            }
+            PaletteAction::NewFolder => {
+                self.current_tab = StudioTab::FileExplorer;
+                self.explorer_view.show_new_folder_dialog = true;
+            }
+            PaletteAction::NewWindow => {
+                crate::gui::explorer_view::spawn_new_explorer_window(Some(&self.explorer_view.current_dir));
+            }
+            PaletteAction::NewTab => {
+                self.current_tab = StudioTab::FileExplorer;
+                self.explorer_view.add_tab(self.explorer_view.current_dir.clone());
+            }
+            PaletteAction::CloseTab => {
+                let idx = self.explorer_view.active_tab_index;
+                self.explorer_view.close_tab(idx);
+            }
+            PaletteAction::Refresh => {
+                self.explorer_view.refresh();
+            }
+            PaletteAction::FocusSearch => {
+                self.current_tab = StudioTab::FileExplorer;
+                self.explorer_view.focus_search_requested = true;
+            }
+            PaletteAction::ShowProperties => {
+                if let Some(first_path) = self.explorer_view.selected_paths().first() {
+                    if let Some(item) = self.explorer_view.entries.iter().find(|e| &e.path == first_path).cloned() {
+                        self.explorer_view.properties_item = Some(item);
+                    }
+                }
+            }
+            PaletteAction::DeleteSelected => {
+                self.explorer_view.delete_selected();
+            }
+            PaletteAction::EmptyRecycleBin => {
+                let _ = crate::core::fs_utils::empty_native_recycle_bin();
+                self.explorer_view.refresh();
+            }
+            PaletteAction::Copy => {
+                self.explorer_view.copy_selected_to_clipboard();
+            }
+            PaletteAction::Cut => {
+                self.explorer_view.cut_selected_to_clipboard();
+            }
+            PaletteAction::Paste => {
+                self.explorer_view.paste_from_clipboard();
             }
             PaletteAction::ConvertTarget(fmt) => {
                 let targets = self.explorer_view.selected_paths();

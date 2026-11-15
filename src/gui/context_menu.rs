@@ -919,65 +919,7 @@ pub fn rotate_image_90(path: &Path) -> bool {
 /// macOS: hidden `.Trash` move; Linux: `gio trash` when available.
 /// Returns `false` (caller may fall back to a permanent, logged delete).
 pub fn delete_to_trash(paths: &[std::path::PathBuf]) -> bool {
-    let valid_paths: Vec<_> = paths
-        .iter()
-        .filter(|p| !crate::core::fs_utils::is_protected_os_file(p))
-        .cloned()
-        .collect();
-    if valid_paths.is_empty() {
-        return true;
-    }
-    #[cfg(target_os = "windows")]
-    unsafe {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::UI::Shell::{
-            SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FO_DELETE,
-            SHFILEOPSTRUCTW,
-        };
-
-        // One double-NUL-terminated UTF-16 list for the whole batch.
-        let mut wide: Vec<u16> = Vec::new();
-        for p in &valid_paths {
-            let s: Vec<u16> = p
-                .as_os_str()
-                .encode_wide()
-                .chain(std::iter::once(0))
-                .collect();
-            wide.extend_from_slice(&s);
-        }
-        wide.push(0); // terminating NUL
-        let mut op = SHFILEOPSTRUCTW {
-            hwnd: std::ptr::null_mut(),
-            wFunc: FO_DELETE,
-            pFrom: wide.as_ptr(),
-            pTo: std::ptr::null(),
-            fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT) as u16,
-            fAnyOperationsAborted: 0,
-            hNameMappings: std::ptr::null_mut(),
-            lpszProgressTitle: std::ptr::null(),
-        };
-        let ok = SHFileOperationW(&mut op) == 0 && op.fAnyOperationsAborted == 0;
-        if !ok {
-            log::warn!(target: "mossambi::context_menu",
-                "SHFileOperationW(FO_DELETE, allowundo) failed for {} item(s)", valid_paths.len());
-        }
-        ok
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        // Linux desktops / GNOME: gio trash honors userland rules + XDG spec.
-        for p in &valid_paths {
-            let res = std::process::Command::new("gio")
-                .args(["trash", "--"])
-                .arg(p)
-                .status();
-            match res {
-                Ok(s) if s.success() => {}
-                _ => return false,
-            }
-        }
-        true
-    }
+    crate::core::fs_utils::delete_to_recycle_bin(paths).is_ok()
 }
 
 /// Enumerates "Send to" destinations from the Windows SendTo folder.

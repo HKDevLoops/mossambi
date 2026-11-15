@@ -392,6 +392,134 @@ pub fn resolve_recycle_bin_target() -> PathBuf {
     }
 }
 
+/// Deletes paths to the native OS Recycle Bin / Trash.
+///
+/// On Windows: uses `SHFileOperationW` with `FO_DELETE` and `FOF_ALLOWUNDO`.
+/// On Linux: uses `gio trash` (FreeDesktop Trash spec).
+/// On macOS: uses Mac trash.
+pub fn delete_to_recycle_bin(paths: &[std::path::PathBuf]) -> Result<(), String> {
+    let valid_paths: Vec<_> = paths
+        .iter()
+        .filter(|p| !is_protected_os_file(p))
+        .cloned()
+        .collect();
+    if valid_paths.is_empty() {
+        return Ok(());
+    }
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::{
+            SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FO_DELETE,
+            SHFILEOPSTRUCTW,
+        };
+
+        let mut wide: Vec<u16> = Vec::new();
+        for p in &valid_paths {
+            let s: Vec<u16> = p
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+            wide.extend_from_slice(&s);
+        }
+        wide.push(0);
+        let mut op = SHFILEOPSTRUCTW {
+            hwnd: std::ptr::null_mut(),
+            wFunc: FO_DELETE,
+            pFrom: wide.as_ptr(),
+            pTo: std::ptr::null(),
+            fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT) as u16,
+            fAnyOperationsAborted: 0,
+            hNameMappings: std::ptr::null_mut(),
+            lpszProgressTitle: std::ptr::null(),
+        };
+        let ret = SHFileOperationW(&mut op);
+        if ret == 0 && op.fAnyOperationsAborted == 0 {
+            Ok(())
+        } else {
+            Err(format!("Native Recycle Bin delete failed with code {ret}"))
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        for p in &valid_paths {
+            let res = std::process::Command::new("gio")
+                .args(["trash", "--"])
+                .arg(p)
+                .status();
+            if let Ok(s) = res {
+                if !s.success() {
+                    return Err(format!("gio trash failed for {}", p.display()));
+                }
+            } else {
+                return Err("Failed to execute trash command".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Empties the native OS Recycle Bin.
+pub fn empty_native_recycle_bin() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::Shell::{
+            SHEmptyRecycleBinW, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND,
+        };
+        let flags = SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND;
+        let ret = SHEmptyRecycleBinW(std::ptr::null_mut(), std::ptr::null(), flags);
+        if ret == 0 {
+            Ok(())
+        } else {
+            Err(format!("Empty Recycle Bin returned HRESULT 0x{:08X}", ret))
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let target = resolve_recycle_bin_target();
+        if target.exists() {
+            let _ = std::fs::remove_dir_all(&target);
+            let _ = std::fs::create_dir_all(&target);
+        }
+        Ok(())
+    }
+}
+
+/// Queries item count and total size (bytes) in the native Recycle Bin.
+pub fn query_native_recycle_bin() -> Result<(u64, u64), String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::UI::Shell::{SHQueryRecycleBinW, SHQUERYRBINFO};
+        let mut info = SHQUERYRBINFO {
+            cbSize: std::mem::size_of::<SHQUERYRBINFO>() as u32,
+            i64Size: 0,
+            i64NumItems: 0,
+        };
+        let ret = SHQueryRecycleBinW(std::ptr::null(), &mut info);
+        if ret == 0 {
+            Ok((info.i64NumItems.max(0) as u64, info.i64Size.max(0) as u64))
+        } else {
+            Err(format!("Query Recycle Bin failed with code 0x{:08X}", ret))
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let target = resolve_recycle_bin_target();
+        let mut count = 0u64;
+        let mut size = 0u64;
+        if let Ok(rd) = std::fs::read_dir(&target) {
+            for entry in rd.flatten() {
+                count += 1;
+                if let Ok(m) = entry.metadata() {
+                    size += m.len();
+                }
+            }
+        }
+        Ok((count, size))
+    }
+}
+
 /// Formats a raw byte count into human-readable B, KB, MB, or GB
 pub fn format_file_size(bytes: u64) -> String {
     if bytes < 1024 {

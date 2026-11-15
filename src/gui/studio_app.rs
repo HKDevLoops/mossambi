@@ -919,7 +919,7 @@ impl eframe::App for MossambiApp {
         );
         let sig_changed =
             ctx.data(|d| d.get_temp::<([u8; 4], [u8; 4], bool, i32)>(sig_id)) != Some(sig);
-        if self.frame_count == 1
+        if self.frame_count <= 5
             || sig_changed
             || self.last_applied_theme != Some(self.theme)
             || self.last_applied_glass != Some(current_glass)
@@ -1347,7 +1347,35 @@ impl eframe::App for MossambiApp {
                 });
         }
 
-        // 7. Edge resizing. The window has no OS title bar or frame (Finder
+        // 7. Window Minimize Motion Animation (Genie effect, Scale, Slide, Morph, Fade)
+        if self.studio_view.request_minimize {
+            self.studio_view.request_minimize = false;
+            self.window_anim_progress = Some((self.config.animations.window_anim, 0.0));
+        }
+
+        if let Some((anim, progress)) = self.window_anim_progress {
+            let dt = ctx.input(|i| i.stable_dt).min(0.05);
+            let next_p = progress + (dt / 0.28);
+            if next_p >= 1.0 {
+                self.window_anim_progress = None;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            } else {
+                self.window_anim_progress = Some((anim, next_p));
+                ctx.request_repaint();
+
+                let screen = ctx.screen_rect();
+                let palette = self.theme.colors();
+                egui::Area::new(egui::Id::new("mossambi_window_anim_overlay"))
+                    .fixed_pos(egui::Pos2::ZERO)
+                    .interactable(false)
+                    .order(egui::Order::Tooltip)
+                    .show(ctx, |ui| {
+                        render_window_animation_overlay(ui, screen, &palette, anim, next_p);
+                    });
+            }
+        }
+
+        // 8. Edge resizing. The window has no OS title bar or frame (Finder
         // chrome is drawn by the app), so Windows offers no resize border.
         // Run last so the resize cursor wins over widgets near the edge.
         edge_resize(ctx);
@@ -1574,6 +1602,115 @@ fn edge_resize(ctx: &egui::Context) {
     });
     if ctx.input(|i| i.pointer.primary_pressed()) {
         ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir));
+    }
+}
+
+fn render_window_animation_overlay(
+    ui: &mut egui::Ui,
+    screen: egui::Rect,
+    palette: &crate::gui::macos_theme::ThemePalette,
+    anim: crate::core::window_anim::WindowAnimType,
+    t: f32,
+) {
+    let t = t.clamp(0.0, 1.0);
+    let painter = ui.painter();
+
+    match anim {
+        crate::core::window_anim::WindowAnimType::Genie => {
+            // macOS Genie non-linear polynomial funnel mesh
+            let dock_target = (screen.center().x, screen.bottom() - 12.0);
+            let window_rect = (screen.left(), screen.top(), screen.width(), screen.height());
+            let slices = 24;
+            let alpha = (1.0 - t * t).clamp(0.0, 1.0);
+
+            let bg_color = egui::Color32::from_rgba_unmultiplied(
+                palette.window_bg.r(),
+                palette.window_bg.g(),
+                palette.window_bg.b(),
+                (alpha * 230.0) as u8,
+            );
+            let stroke_color = egui::Color32::from_rgba_unmultiplied(
+                palette.accent.r(),
+                palette.accent.g(),
+                palette.accent.b(),
+                (alpha * 210.0) as u8,
+            );
+
+            let mut left_edge: Vec<egui::Pos2> = Vec::with_capacity(slices + 1);
+            let mut right_edge: Vec<egui::Pos2> = Vec::with_capacity(slices + 1);
+
+            for i in 0..=slices {
+                let v = i as f32 / slices as f32;
+                let y = screen.top() + v * screen.height();
+                let p_l = crate::core::window_anim::genie_mesh_transform(
+                    screen.left(),
+                    y,
+                    window_rect,
+                    dock_target,
+                    t,
+                );
+                let p_r = crate::core::window_anim::genie_mesh_transform(
+                    screen.right(),
+                    y,
+                    window_rect,
+                    dock_target,
+                    t,
+                );
+                left_edge.push(egui::Pos2::new(p_l.x, p_l.y));
+                right_edge.push(egui::Pos2::new(p_r.x, p_r.y));
+            }
+
+            // Draw deformed quad bands
+            for i in 0..slices {
+                let tl = left_edge[i];
+                let tr = right_edge[i];
+                let br = right_edge[i + 1];
+                let bl = left_edge[i + 1];
+
+                painter.add(egui::Shape::convex_polygon(
+                    vec![tl, tr, br, bl],
+                    bg_color,
+                    egui::Stroke::NONE,
+                ));
+            }
+
+            // Draw smooth funnel outer perimeter stroke
+            for i in 0..slices {
+                painter.line_segment([left_edge[i], left_edge[i + 1]], egui::Stroke::new(1.5_f32, stroke_color));
+                painter.line_segment([right_edge[i], right_edge[i + 1]], egui::Stroke::new(1.5_f32, stroke_color));
+            }
+            if let (Some(tl), Some(tr)) = (left_edge.first(), right_edge.first()) {
+                painter.line_segment([*tl, *tr], egui::Stroke::new(1.5_f32, stroke_color));
+            }
+            if let (Some(bl), Some(br)) = (left_edge.last(), right_edge.last()) {
+                painter.line_segment([*bl, *br], egui::Stroke::new(1.5_f32, stroke_color));
+            }
+        }
+        _ => {
+            // Standard Scale / Slide / Morph / Fade transformations
+            let (scale, alpha, offset_y) = crate::core::window_anim::window_anim_geometry(anim, t);
+            let w = screen.width() * scale;
+            let h = screen.height() * scale;
+            let cx = screen.center().x;
+            let cy = screen.center().y + offset_y;
+            let rect = egui::Rect::from_center_size(egui::Pos2::new(cx, cy), egui::Vec2::new(w, h));
+
+            let bg_color = egui::Color32::from_rgba_unmultiplied(
+                palette.window_bg.r(),
+                palette.window_bg.g(),
+                palette.window_bg.b(),
+                (alpha * 235.0) as u8,
+            );
+            let stroke_color = egui::Color32::from_rgba_unmultiplied(
+                palette.accent.r(),
+                palette.accent.g(),
+                palette.accent.b(),
+                (alpha * 200.0) as u8,
+            );
+
+            painter.rect_filled(rect, egui::Rounding::same(12.0 * scale), bg_color);
+            painter.rect_stroke(rect, egui::Rounding::same(12.0 * scale), egui::Stroke::new(1.5_f32, stroke_color));
+        }
     }
 }
 

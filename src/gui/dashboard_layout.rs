@@ -62,16 +62,15 @@ pub struct ContainerMetrics {
 }
 
 /// Computes the centered container width and horizontal margin.
-/// Bounds content within max_content_width (e.g. 1440px) to prevent void expansion.
+/// Bounds content within max_content_width (e.g. 1440px) to prevent void expansion,
+/// and enforces a symmetrical outer gutter floor (24px) so content never touches the window edges.
 pub fn compute_container_metrics(viewport_width: f32, max_content_width: f32) -> ContainerMetrics {
     let tier = tier_for_width(viewport_width);
     let cap = max_content_width.max(640.0);
-    let content_width = if viewport_width < 1200.0 {
-        viewport_width.max(280.0)
-    } else {
-        viewport_width.min(cap).max(280.0)
-    };
-    let margin_x = ((viewport_width - content_width) * 0.5).max(0.0);
+    let gutter = 24.0_f32;
+    let available_w = (viewport_width - gutter * 2.0).max(280.0);
+    let content_width = available_w.min(cap);
+    let margin_x = ((viewport_width - content_width) * 0.5).max(gutter);
     ContainerMetrics {
         viewport_width,
         content_width,
@@ -304,17 +303,17 @@ mod tests {
 
     #[test]
     fn test_centered_container_metrics() {
-        // Compact window fills viewport completely
+        // Compact window has 24px outer margin floor
         let c = compute_container_metrics(750.0, 1440.0);
         assert_eq!(c.tier, DashboardTier::Compact);
-        assert_eq!(c.content_width, 750.0);
-        assert_eq!(c.margin_x, 0.0);
+        assert_eq!(c.content_width, 702.0);
+        assert_eq!(c.margin_x, 24.0);
 
-        // Medium window fills viewport
+        // Medium window has 24px outer margin floor
         let m = compute_container_metrics(1000.0, 1440.0);
         assert_eq!(m.tier, DashboardTier::Medium);
-        assert_eq!(m.content_width, 1000.0);
-        assert_eq!(m.margin_x, 0.0);
+        assert_eq!(m.content_width, 952.0);
+        assert_eq!(m.margin_x, 24.0);
 
         // Ultrawide (1920px) is capped at 1440px and centered
         let u = compute_container_metrics(1920.0, 1440.0);

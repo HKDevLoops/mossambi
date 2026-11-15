@@ -38,23 +38,23 @@ fn test_tier_breakpoints_and_labels() {
 
 #[test]
 fn test_max_width_centered_container() {
-    // Compact: fills full width, zero margin
+    // Compact (680px): outer 24px gutter -> 632px content, 24px margin
     let c = compute_container_metrics(680.0, 1440.0);
     assert_eq!(c.tier, DashboardTier::Compact);
-    assert_eq!(c.content_width, 680.0);
-    assert_eq!(c.margin_x, 0.0);
+    assert_eq!(c.content_width, 632.0);
+    assert_eq!(c.margin_x, 24.0);
 
-    // Medium: fills full width, zero margin
+    // Medium (1024px): outer 24px gutter -> 976px content, 24px margin
     let m = compute_container_metrics(1024.0, 1440.0);
     assert_eq!(m.tier, DashboardTier::Medium);
-    assert_eq!(m.content_width, 1024.0);
-    assert_eq!(m.margin_x, 0.0);
+    assert_eq!(m.content_width, 976.0);
+    assert_eq!(m.margin_x, 24.0);
 
-    // Wide: at 1300px capped at 1440px -> 1300px, zero margin
+    // Wide (1300px): outer 24px gutter -> 1252px content, 24px margin
     let w = compute_container_metrics(1300.0, 1440.0);
     assert_eq!(w.tier, DashboardTier::Wide);
-    assert_eq!(w.content_width, 1300.0);
-    assert_eq!(w.margin_x, 0.0);
+    assert_eq!(w.content_width, 1252.0);
+    assert_eq!(w.margin_x, 24.0);
 
     // Ultrawide 1080p maximized (1920px): capped at 1440px, centered with 240px margin on each side
     let u1080 = compute_container_metrics(1920.0, 1440.0);

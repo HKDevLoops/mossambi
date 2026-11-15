@@ -8,6 +8,7 @@ use crate::core::scripting::ScriptLang;
 use crate::gui::design::{radius, space, type_scale};
 use crate::gui::macos_theme::ThemePalette;
 use eframe::egui::{self, Color32, FontId, Key, Pos2, Rect, Rounding, Sense, Stroke, Vec2};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaletteAction {
@@ -19,6 +20,20 @@ pub enum PaletteAction {
     NavigateVideos,
     NavigateMusic,
     NavigateRecycleBin,
+    NavigateTo(PathBuf),
+    OpenFile(PathBuf),
+    NewFolder,
+    NewWindow,
+    NewTab,
+    CloseTab,
+    Refresh,
+    FocusSearch,
+    ShowProperties,
+    DeleteSelected,
+    EmptyRecycleBin,
+    Copy,
+    Cut,
+    Paste,
     ViewDetails,
     ViewGrid,
     ViewColumns,
@@ -34,6 +49,7 @@ pub enum PaletteAction {
     SelectAll,
     ClearSelection,
     Undo,
+    Redo,
     ConvertTarget(&'static str),
     ExamConform,
     PackZip,
@@ -268,6 +284,97 @@ pub const ALL_COMMANDS: &[CommandEntry] = &[
         glyph: IconGlyph::ActionRefresh,
         action: PaletteAction::Undo,
     },
+    CommandEntry {
+        title: "Redo Last Action",
+        category: "Edit",
+        shortcut: "Ctrl+Y",
+        glyph: IconGlyph::ActionRefresh,
+        action: PaletteAction::Redo,
+    },
+    CommandEntry {
+        title: "New Folder",
+        category: "File",
+        shortcut: "Ctrl+Shift+N",
+        glyph: IconGlyph::FolderFavorites,
+        action: PaletteAction::NewFolder,
+    },
+    CommandEntry {
+        title: "New Explorer Window",
+        category: "File",
+        shortcut: "Ctrl+N",
+        glyph: IconGlyph::ActionOpen,
+        action: PaletteAction::NewWindow,
+    },
+    CommandEntry {
+        title: "New Tab",
+        category: "File",
+        shortcut: "Ctrl+T",
+        glyph: IconGlyph::ActionOpen,
+        action: PaletteAction::NewTab,
+    },
+    CommandEntry {
+        title: "Close Current Tab",
+        category: "File",
+        shortcut: "Ctrl+W",
+        glyph: IconGlyph::ActionClose,
+        action: PaletteAction::CloseTab,
+    },
+    CommandEntry {
+        title: "Refresh Directory",
+        category: "View",
+        shortcut: "Ctrl+R",
+        glyph: IconGlyph::ActionRefresh,
+        action: PaletteAction::Refresh,
+    },
+    CommandEntry {
+        title: "Find / Search Files",
+        category: "Search",
+        shortcut: "Ctrl+F",
+        glyph: IconGlyph::Search,
+        action: PaletteAction::FocusSearch,
+    },
+    CommandEntry {
+        title: "Properties & Icon Customization",
+        category: "File",
+        shortcut: "Alt+Enter",
+        glyph: IconGlyph::ActionProperties,
+        action: PaletteAction::ShowProperties,
+    },
+    CommandEntry {
+        title: "Delete to Recycle Bin",
+        category: "File",
+        shortcut: "Delete",
+        glyph: IconGlyph::RecycleBin,
+        action: PaletteAction::DeleteSelected,
+    },
+    CommandEntry {
+        title: "Empty Recycle Bin",
+        category: "System",
+        shortcut: "Ctrl+Shift+Del",
+        glyph: IconGlyph::RecycleBin,
+        action: PaletteAction::EmptyRecycleBin,
+    },
+    CommandEntry {
+        title: "Copy Selection",
+        category: "Edit",
+        shortcut: "Ctrl+C",
+        glyph: IconGlyph::ActionCopy,
+        action: PaletteAction::Copy,
+    },
+    CommandEntry {
+        title: "Cut Selection",
+        category: "Edit",
+        shortcut: "Ctrl+X",
+        glyph: IconGlyph::ActionCut,
+        action: PaletteAction::Cut,
+    },
+    CommandEntry {
+        title: "Paste from Clipboard",
+        category: "Edit",
+        shortcut: "Ctrl+V",
+        glyph: IconGlyph::ActionPaste,
+        action: PaletteAction::Paste,
+    },
 ];
 
 #[derive(Debug, Clone)]
@@ -277,6 +384,17 @@ pub struct DynamicCommand {
     pub shortcut: String,
     pub glyph: IconGlyph,
     pub action: PaletteAction,
+}
+
+#[derive(Debug, Clone)]
+pub struct PaletteItem {
+    pub title: String,
+    pub subtitle: String,
+    pub category: String,
+    pub shortcut: String,
+    pub glyph: IconGlyph,
+    pub action: PaletteAction,
+    pub is_file: bool,
 }
 
 #[derive(Debug, Default)]
@@ -330,6 +448,12 @@ impl CommandPalette {
         self.selected_index = 0;
     }
 
+    pub fn open_with_query(&mut self, query: &str) {
+        self.is_open = true;
+        self.query = query.to_string();
+        self.selected_index = 0;
+    }
+
     pub fn close(&mut self) {
         self.is_open = false;
         self.query.clear();
@@ -340,6 +464,8 @@ impl CommandPalette {
         ctx: &egui::Context,
         palette: &ThemePalette,
         icon_pack: IconPack,
+        _current_dir: Option<&std::path::Path>,
+        current_files: &[crate::core::FileItem],
     ) -> Option<PaletteAction> {
         if !self.is_open {
             return None;
@@ -358,8 +484,8 @@ impl CommandPalette {
                 ui.painter()
                     .rect_filled(screen_rect, Rounding::ZERO, bg_col);
 
-                let panel_w = 480.0_f32.min(screen_rect.width() - 32.0);
-                let panel_h = 320.0_f32.min(screen_rect.height() - 64.0);
+                let panel_w = 540.0_f32.min(screen_rect.width() - 32.0);
+                let panel_h = 360.0_f32.min(screen_rect.height() - 64.0);
                 let panel_pos = Pos2::new(
                     screen_rect.center().x - panel_w * 0.5,
                     (screen_rect.top() + 80.0).min(screen_rect.bottom() - panel_h - 20.0),
@@ -391,7 +517,7 @@ impl CommandPalette {
                             let search_id = egui::Id::new("command_palette_input");
                             let te = egui::TextEdit::singleline(&mut self.query)
                                 .id(search_id)
-                                .hint_text("Type a command, format, or place...")
+                                .hint_text("Type '>' for commands, or search files...")
                                 .desired_width(ui.available_width() - 20.0)
                                 .font(FontId::proportional(type_scale::BODY));
                             let resp = ui.add(te);
@@ -406,27 +532,109 @@ impl CommandPalette {
                         ui.separator();
                         ui.add_space(space::XS);
 
-                        // Filter matching commands
-                        let all_cmds = Self::get_combined_commands();
-                        let q = self.query.trim().to_lowercase();
-                        let matches: Vec<&DynamicCommand> = all_cmds
-                            .iter()
-                            .filter(|cmd| {
-                                if q.is_empty() {
-                                    true
-                                } else {
-                                    cmd.title.to_lowercase().contains(&q)
-                                        || cmd.category.to_lowercase().contains(&q)
-                                }
-                            })
-                            .collect();
+                        // Determine items based on query
+                        let mut items: Vec<PaletteItem> = Vec::new();
+                        let q = self.query.trim();
 
-                        let match_count = matches.len();
+                        if q.starts_with('>') {
+                            // Command mode (VS Code parity: '>' filters commands)
+                            let cmd_q = q.trim_start_matches('>').trim().to_lowercase();
+                            let all_cmds = Self::get_combined_commands();
+                            for cmd in all_cmds {
+                                if cmd_q.is_empty()
+                                    || cmd.title.to_lowercase().contains(&cmd_q)
+                                    || cmd.category.to_lowercase().contains(&cmd_q)
+                                {
+                                    items.push(PaletteItem {
+                                        title: cmd.title,
+                                        subtitle: String::new(),
+                                        category: cmd.category,
+                                        shortcut: cmd.shortcut,
+                                        glyph: cmd.glyph,
+                                        action: cmd.action,
+                                        is_file: false,
+                                    });
+                                }
+                            }
+                        } else {
+                            // Quick Open / File Search mode (typing searches current folder files & subfolders)
+                            let file_q = q.to_lowercase();
+                            if !file_q.is_empty() {
+                                for item in current_files {
+                                    let name_match = item.name.to_lowercase().contains(&file_q);
+                                    let ext_match = item.extension.to_lowercase().contains(&file_q);
+                                    if name_match || ext_match {
+                                        let (glyph, _) = IconGlyph::resolve_with_path(
+                                            Some(&item.path),
+                                            &item.name,
+                                            &item.extension,
+                                            item.is_dir,
+                                            false,
+                                            false,
+                                            false,
+                                            false,
+                                            false,
+                                            [120, 120, 120],
+                                        );
+                                        let subtitle = if item.is_dir {
+                                            "Folder".to_string()
+                                        } else {
+                                            format!("{} - {}", item.extension, item.formatted_size())
+                                        };
+                                        let action = if item.is_dir {
+                                            PaletteAction::NavigateTo(item.path.clone())
+                                        } else {
+                                            PaletteAction::OpenFile(item.path.clone())
+                                        };
+                                        items.push(PaletteItem {
+                                            title: item.name.clone(),
+                                            subtitle,
+                                            category: if item.is_dir {
+                                                "Folder".to_string()
+                                            } else {
+                                                "File".to_string()
+                                            },
+                                            shortcut: String::new(),
+                                            glyph,
+                                            action,
+                                            is_file: true,
+                                        });
+                                        if items.len() >= 40 {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Also append matching commands
+                            let all_cmds = Self::get_combined_commands();
+                            for cmd in all_cmds {
+                                if file_q.is_empty()
+                                    || cmd.title.to_lowercase().contains(&file_q)
+                                    || cmd.category.to_lowercase().contains(&file_q)
+                                {
+                                    items.push(PaletteItem {
+                                        title: cmd.title,
+                                        subtitle: String::new(),
+                                        category: cmd.category,
+                                        shortcut: cmd.shortcut,
+                                        glyph: cmd.glyph,
+                                        action: cmd.action,
+                                        is_file: false,
+                                    });
+                                    if items.len() >= 80 {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        let match_count = items.len();
                         if match_count == 0 {
                             ui.vertical_centered(|ui| {
                                 ui.add_space(space::XL);
                                 ui.label(
-                                    egui::RichText::new("No matching commands")
+                                    egui::RichText::new("No matching commands or files")
                                         .size(type_scale::SMALL)
                                         .color(palette.text_muted),
                                 );
@@ -451,19 +659,19 @@ impl CommandPalette {
 
                         // Enter execution
                         if ui.input(|i| i.key_pressed(Key::Enter)) {
-                            if let Some(cmd) = matches.get(self.selected_index) {
-                                executed_action = Some(cmd.action.clone());
+                            if let Some(item) = items.get(self.selected_index) {
+                                executed_action = Some(item.action.clone());
                                 self.is_open = false;
                             }
                         }
 
-                        // Command rows scroll area
+                        // Items rows scroll area
                         egui::ScrollArea::vertical()
                             .auto_shrink([false; 2])
                             .show(ui, |ui| {
-                                for (idx, cmd) in matches.iter().enumerate() {
+                                for (idx, item) in items.iter().enumerate() {
                                     let is_active = idx == self.selected_index;
-                                    let row_h = 28.0;
+                                    let row_h = 30.0;
                                     let (rrect, rresp) = ui.allocate_exact_size(
                                         Vec2::new(ui.available_width(), row_h),
                                         Sense::click(),
@@ -482,6 +690,11 @@ impl CommandPalette {
                                                 if palette.is_dark { 45 } else { 26 },
                                             ),
                                         );
+                                        painter.rect_stroke(
+                                            rrect,
+                                            Rounding::same(radius::SM),
+                                            Stroke::new(1.0_f32, palette.accent),
+                                        );
                                     } else if is_hovered {
                                         painter.rect_filled(
                                             rrect,
@@ -492,13 +705,13 @@ impl CommandPalette {
 
                                     // Icon
                                     let irect = Rect::from_center_size(
-                                        Pos2::new(rrect.left() + 14.0, rrect.center().y),
-                                        Vec2::splat(15.0),
+                                        Pos2::new(rrect.left() + 15.0, rrect.center().y),
+                                        Vec2::splat(16.0),
                                     );
                                     crate::core::icon_packs::paint_icon(
                                         ui,
                                         icon_pack,
-                                        cmd.glyph,
+                                        item.glyph,
                                         irect,
                                         if is_active {
                                             [
@@ -515,7 +728,7 @@ impl CommandPalette {
                                         },
                                     );
 
-                                    // Title
+                                    // Title + Subtitle
                                     let text_color = if is_active {
                                         if palette.is_dark {
                                             palette.accent
@@ -525,19 +738,32 @@ impl CommandPalette {
                                     } else {
                                         palette.text_primary
                                     };
+
+                                    let title_x = rrect.left() + 34.0;
                                     painter.text(
-                                        Pos2::new(rrect.left() + 32.0, rrect.center().y),
+                                        Pos2::new(title_x, rrect.center().y),
                                         egui::Align2::LEFT_CENTER,
-                                        &cmd.title,
+                                        &item.title,
                                         FontId::proportional(type_scale::BODY_SM),
                                         text_color,
                                     );
 
+                                    if !item.subtitle.is_empty() {
+                                        let offset = item.title.len() as f32 * 7.5 + 16.0;
+                                        painter.text(
+                                            Pos2::new(title_x + offset, rrect.center().y),
+                                            egui::Align2::LEFT_CENTER,
+                                            &item.subtitle,
+                                            FontId::proportional(type_scale::CAPTION),
+                                            palette.text_muted,
+                                        );
+                                    }
+
                                     // Category / Shortcut on right
-                                    let meta_label = if !cmd.shortcut.is_empty() {
-                                        format!("{}  {}", cmd.category, cmd.shortcut)
+                                    let meta_label = if !item.shortcut.is_empty() {
+                                        format!("{}  {}", item.category, item.shortcut)
                                     } else {
-                                        cmd.category.clone()
+                                        item.category.clone()
                                     };
                                     painter.text(
                                         Pos2::new(rrect.right() - space::MD, rrect.center().y),
@@ -548,7 +774,7 @@ impl CommandPalette {
                                     );
 
                                     if rresp.clicked() {
-                                        executed_action = Some(cmd.action.clone());
+                                        executed_action = Some(item.action.clone());
                                         self.is_open = false;
                                     }
                                 }

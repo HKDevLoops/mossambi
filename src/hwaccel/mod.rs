@@ -225,9 +225,14 @@ fn detect_npu_engine() -> (NpuEngine, &'static str, bool) {
     (NpuEngine::CpuSimdVector, "Standard Multi-core CPU", false)
 }
 
-/// Configures the Rayon global multi-threaded pool for concurrent batch conversions.
+/// Configures the Rayon global multi-threaded pool for concurrent batch conversions
+/// with system-level Thread QoS targeting Performance cores (P-cores / Super-cores).
 pub fn init_multi_threading(threads: Option<usize>) -> usize {
-    let thread_count = threads.unwrap_or_else(|| {
+    let requested = match threads {
+        Some(0) | None => None,
+        Some(n) => Some(n),
+    };
+    let thread_count = requested.unwrap_or_else(|| {
         std::thread::available_parallelism()
             .map(|p| p.get())
             .unwrap_or(4)
@@ -236,6 +241,9 @@ pub fn init_multi_threading(threads: Option<usize>) -> usize {
     let _ = rayon::ThreadPoolBuilder::new()
         .num_threads(thread_count)
         .thread_name(|idx| format!("mossambi-worker-{}", idx))
+        .start_handler(|_idx| {
+            crate::core::qos::set_current_thread_qos(crate::core::qos::ThreadQoS::Performance);
+        })
         .build_global();
 
     thread_count

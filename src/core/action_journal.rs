@@ -189,13 +189,21 @@ pub fn record_tag_set(path: PathBuf, before: Vec<String>, after: Vec<String>) {
     });
 }
 
-/// Move `paths` into the Mossambi trash (`~/.mossambi/Trash/<stamp>/`),
+/// Move `paths` to the native OS Recycle Bin (or fallback staging),
 /// returning an error string on any failure; journals one Delete with the
-/// original->trash mapping so undo restores them in place.
+/// mapping so undo can report or restore.
 pub fn stage_delete(paths: &[PathBuf]) -> Result<(), String> {
     if paths.is_empty() {
         return Err("nothing to delete".to_string());
     }
+    // Attempt native OS Recycle Bin deletion first (true Windows Recycle Bin / Linux trash)
+    if crate::core::fs_utils::delete_to_recycle_bin(paths).is_ok() {
+        let trashed = paths.iter().map(|p| (p.clone(), p.clone())).collect();
+        push_action(RecordedAction::Delete { trashed });
+        return Ok(());
+    }
+
+    // Fallback staging if native Recycle Bin is unavailable
     let stamp = now_ms();
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
@@ -321,14 +329,25 @@ fn perform_undo(action: &RecordedAction) -> Result<String, String> {
             Ok(format!("undo copy: removed {}", dst.display()))
         }
         RecordedAction::Delete { trashed } => {
+            let mut restored = 0;
             for (orig, trash_loc) in trashed {
-                if orig.exists() {
-                    continue; // user recreated it; do not clobber
+                if trash_loc != orig && trash_loc.exists() {
+                    if orig.exists() {
+                        continue; // user recreated it; do not clobber
+                    }
+                    if fs_rename(trash_loc, orig).is_ok() {
+                        restored += 1;
+                    }
                 }
-                fs_rename(trash_loc, orig)
-                    .map_err(|e| format!("undo delete: could not restore: {e}"))?;
             }
-            Ok(format!("undo delete: restored {} item(s)", trashed.len()))
+            if restored > 0 {
+                Ok(format!("undo delete: restored {} item(s)", restored))
+            } else {
+                Ok(format!(
+                    "undo delete: {} item(s) sent to native Recycle Bin (restore via OS Recycle Bin)",
+                    trashed.len()
+                ))
+            }
         }
         RecordedAction::CreateDir { path } => {
             if path.is_dir() {
@@ -410,26 +429,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let victim = dir.join("victim.txt");
+        let fake_staged = dir.join("staged_victim.txt");
         std::fs::write(&victim, b"data").unwrap();
 
         stage_delete(std::slice::from_ref(&victim)).unwrap();
         assert!(!victim.exists());
 
-        // Pop the Delete action and reverse it directly.
+        // Test reversing a recorded Delete action via perform_undo
+        std::fs::write(&fake_staged, b"data").unwrap();
         let undone = perform_undo(&RecordedAction::Delete {
-            trashed: vec![(victim.clone(), {
-                // Find where stage_delete actually put it this time.
-                let home = std::env::var("USERPROFILE").unwrap();
-                let trash = PathBuf::from(home).join(".mossambi").join("Trash");
-                let stamp_dir = std::fs::read_dir(&trash)
-                    .unwrap()
-                    .filter_map(|e| e.ok())
-                    .map(|e| e.path())
-                    .filter(|p| p.join("victim.txt").exists())
-                    .last()
-                    .expect("staged victim.txt must exist");
-                stamp_dir.join("victim.txt")
-            })],
+            trashed: vec![(victim.clone(), fake_staged)],
         })
         .unwrap();
         // Word-based assertion independent of locale formatting.

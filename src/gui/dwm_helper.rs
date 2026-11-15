@@ -38,8 +38,8 @@ mod win32_dwm {
     };
     use windows_sys::Win32::UI::Controls::MARGINS;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetClassNameW, GetWindowLongPtrW, GetWindowThreadProcessId, SetWindowLongPtrW,
-        GWL_EXSTYLE, WS_EX_LAYERED,
+        EnumWindows, GetClassNameW, GetParent, GetWindowLongPtrW, GetWindowThreadProcessId,
+        SetWindowLongPtrW, GWL_EXSTYLE, GWL_STYLE, WS_CHILD, WS_EX_LAYERED,
     };
 
     #[repr(C)]
@@ -144,8 +144,16 @@ mod win32_dwm {
             let len = GetClassNameW(hwnd, class_name.as_mut_ptr(), 256);
             let class_str = String::from_utf16_lossy(&class_name[..len as usize]);
 
-            // Matches eframe / winit primary window class
-            if class_str == "Window Class" {
+            // Matches primary top-level window for eframe / winit (winit window, Window Class, etc.)
+            let is_top_level = GetParent(hwnd).is_null();
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+            let is_not_child = (style & (WS_CHILD as isize)) == 0;
+            let is_candidate = is_top_level
+                && is_not_child
+                && !class_str.is_empty()
+                && !class_str.contains("Message");
+
+            if is_candidate {
                 let dark_mode = (lparam & 0x10000) != 0;
                 let tag = ((lparam >> 8) & 0xFF) as u32;
                 let val = (lparam & 0xFF) as u32;
@@ -177,7 +185,7 @@ mod win32_dwm {
                 // 4. Apply system backdrop
                 match tag {
                     1 => {
-                        // Win11 DWMWA_SYSTEMBACKDROP_TYPE
+                        // Win11 DWMWA_SYSTEMBACKDROP_TYPE (build 22621+)
                         let sys_val = val as i32;
                         let _ = DwmSetWindowAttribute(
                             hwnd,
@@ -185,6 +193,17 @@ mod win32_dwm {
                             &sys_val as *const i32 as *const c_void,
                             4,
                         );
+                        // Windows 11 build 22000 fallback (DWMWA_MICA_EFFECT = 1029)
+                        if val == 2 {
+                            const DWMWA_MICA_EFFECT: u32 = 1029;
+                            let mica_on = 1i32;
+                            let _ = DwmSetWindowAttribute(
+                                hwnd,
+                                DWMWA_MICA_EFFECT,
+                                &mica_on as *const i32 as *const c_void,
+                                4,
+                            );
+                        }
                         set_accent_policy(hwnd, 0, 0);
                     }
                     2 => {
