@@ -791,6 +791,10 @@ pub struct AnimationSettings {
     pub widget_group_fanout: bool,
     #[serde(default = "default_true")]
     pub widget_elastic_hover: bool,
+    #[serde(default = "default_true")]
+    pub folder_nav_motion: bool,
+    #[serde(default = "default_true")]
+    pub click_feedback: bool,
 }
 
 fn default_spring_stiffness() -> f32 {
@@ -825,6 +829,8 @@ impl Default for AnimationSettings {
             widget_progress_ring: true,
             widget_group_fanout: true,
             widget_elastic_hover: true,
+            folder_nav_motion: true,
+            click_feedback: true,
         }
     }
 }

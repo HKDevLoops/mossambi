@@ -748,6 +748,13 @@ pub struct ExplorerView {
     /// directory actually changes).
     pub needs_breadcrumb_scroll_align: bool,
 
+    // Fluid Motion & Transitions
+    pub nav_offset_spring: crate::gui::anim::Spring,
+    pub nav_alpha_spring: crate::gui::anim::Spring,
+    pub click_depth_spring: crate::gui::anim::Spring,
+    pub view_mode_crossfade_spring: crate::gui::anim::Spring,
+    pub last_view_mode: ViewMode,
+
     // Windows 11 & macOS Home Dashboard View
     pub is_home_view: bool,
     pub show_internal_toolbar: bool,
@@ -1075,6 +1082,15 @@ impl Default for ExplorerView {
             column_cache: std::collections::HashMap::new(),
             needs_miller_scroll_align: false,
             needs_breadcrumb_scroll_align: false,
+            nav_offset_spring: crate::gui::anim::Spring::new(0.0),
+            nav_alpha_spring: crate::gui::anim::Spring::new(1.0),
+            click_depth_spring: crate::gui::anim::Spring::new(1.0),
+            view_mode_crossfade_spring: crate::gui::anim::Spring::new(1.0),
+            last_view_mode: match cfg.default_explorer_layout {
+                2 => ViewMode::Grid,
+                3 => ViewMode::Columns,
+                _ => ViewMode::Details,
+            },
             hover_preview: None,
             thumb_cache: std::collections::HashMap::new(),
             thumb_decode_budget: (0, Instant::now()),
@@ -1122,6 +1138,14 @@ impl ExplorerView {
     /// Debounce window for Grid<->Details zoom-ladder crossings: wheel
     /// wiggle inside this window is swallowed (touchpad jitter guard).
     pub const ZOOM_CROSS_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
+
+    /// Trigger subtle tactile click depression feedback (scale 0.985 -> 1.0).
+    pub fn trigger_click_feedback(&mut self) {
+        let cfg = crate::core::MossambiConfig::load();
+        if cfg.animations.click_feedback && !cfg.animations.reduced_motion {
+            self.click_depth_spring.set(0.985);
+        }
+    }
 
     /// Human readable label for a zoom level (Explorer's status-bar wording).
     pub fn zoom_level_name(level: u8) -> &'static str {
@@ -1250,6 +1274,19 @@ impl ExplorerView {
         // and keeps deeper columns; unrelated navigation closes the
         // stack.
         let old_dir = std::mem::replace(&mut self.current_dir, dir.clone());
+        let cfg = crate::core::MossambiConfig::load();
+        if cfg.animations.folder_nav_motion && !cfg.animations.reduced_motion && dir != old_dir {
+            if dir.starts_with(&old_dir) {
+                self.nav_offset_spring.set(16.0);
+                self.nav_alpha_spring.set(0.4);
+            } else if old_dir.starts_with(&dir) {
+                self.nav_offset_spring.set(-16.0);
+                self.nav_alpha_spring.set(0.4);
+            } else {
+                self.nav_offset_spring.set(8.0);
+                self.nav_alpha_spring.set(0.5);
+            }
+        }
         let lineage = lineage_policy(&dir, &old_dir, &self.column_stack);
         match lineage {
             MillerLineage::KeepStack => {
@@ -3991,6 +4028,58 @@ impl ExplorerView {
                 self.peek_item = Some(item);
             }
             return;
+        }
+
+        let cfg = crate::core::MossambiConfig::load();
+        let dt = crate::gui::anim::frame_dt(ui.ctx());
+        if cfg.animations.folder_nav_motion && !cfg.animations.reduced_motion {
+            let _ = crate::gui::anim::advance(
+                &mut self.nav_offset_spring,
+                0.0,
+                crate::core::config::AnimStyle::Natural,
+                dt,
+            );
+            let alpha = crate::gui::anim::advance(
+                &mut self.nav_alpha_spring,
+                1.0,
+                crate::core::config::AnimStyle::Natural,
+                dt,
+            );
+            if alpha < 0.99 {
+                ui.set_opacity(alpha);
+            }
+            if !self.nav_offset_spring.at_rest() || !self.nav_alpha_spring.at_rest() {
+                ui.ctx().request_repaint();
+            }
+        }
+
+        if self.last_view_mode != self.view_mode {
+            self.last_view_mode = self.view_mode;
+            if !cfg.animations.reduced_motion {
+                self.view_mode_crossfade_spring.set(0.4);
+            }
+        }
+        let view_alpha = crate::gui::anim::advance(
+            &mut self.view_mode_crossfade_spring,
+            1.0,
+            crate::core::config::AnimStyle::Natural,
+            dt,
+        );
+        if view_alpha < 0.99 {
+            ui.set_opacity(view_alpha);
+            ui.ctx().request_repaint();
+        }
+
+        if cfg.animations.click_feedback && !cfg.animations.reduced_motion {
+            let _ = crate::gui::anim::advance(
+                &mut self.click_depth_spring,
+                1.0,
+                crate::core::config::AnimStyle::Snappy,
+                dt,
+            );
+            if !self.click_depth_spring.at_rest() {
+                ui.ctx().request_repaint();
+            }
         }
 
         match self.view_mode {
