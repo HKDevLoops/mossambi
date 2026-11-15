@@ -218,8 +218,15 @@ mod tests {
         let test_file = temp_dir.join("test_file.txt");
         let _ = std::fs::write(&test_file, "hello");
 
-        std::thread::sleep(Duration::from_millis(250));
-        assert!(watcher.try_recv());
+        let mut received = false;
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_millis(50));
+            if watcher.try_recv() {
+                received = true;
+                break;
+            }
+        }
+        assert!(received);
 
         let _ = std::fs::remove_file(&test_file);
         let _ = std::fs::remove_dir(&temp_dir);
