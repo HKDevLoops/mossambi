@@ -643,6 +643,53 @@ impl Default for DesignTokens {
     }
 }
 
+/// Modular dashboard widget slot for Hyperion Slate and personalized dashboard layouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DashboardWidgetSlot {
+    QuickAccess,
+    Drives,
+    QuickActions,
+    RecentFiles,
+    Activity,
+}
+
+impl DashboardWidgetSlot {
+    pub fn all() -> [DashboardWidgetSlot; 5] {
+        [
+            Self::QuickAccess,
+            Self::Drives,
+            Self::QuickActions,
+            Self::RecentFiles,
+            Self::Activity,
+        ]
+    }
+
+    pub fn default_slots() -> Vec<DashboardWidgetSlot> {
+        vec![
+            Self::QuickAccess,
+            Self::Drives,
+            Self::QuickActions,
+            Self::RecentFiles,
+            Self::Activity,
+        ]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::QuickAccess => "Quick Access",
+            Self::Drives => "Drives & Storage",
+            Self::QuickActions => "Quick Actions",
+            Self::RecentFiles => "Recent Files",
+            Self::Activity => "System & Activity",
+        }
+    }
+}
+
+pub fn default_dashboard_slots() -> Vec<DashboardWidgetSlot> {
+    DashboardWidgetSlot::default_slots()
+}
+
 /// Explorer chrome style: macOS Finder vs Windows Explorer vs Linux desktop layouts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -1112,6 +1159,9 @@ pub struct MossambiConfig {
     /// Design style preset: Arcane Fluid, Zenith Pro, or Hyperion Slate
     #[serde(default)]
     pub design_style: DesignStyle,
+    /// Widget slot ordering for Hyperion Slate modular dashboard.
+    #[serde(default = "default_dashboard_slots")]
+    pub dashboard_slots: Vec<DashboardWidgetSlot>,
     /// Sidebar visual style: Finder, Windows, Nautilus, Thunar
     #[serde(default)]
     pub sidebar_style: SidebarStyle,
@@ -1380,6 +1430,7 @@ impl Default for MossambiConfig {
             sidebar_tools_expanded: true,
             look_preset: None,
             design_style: DesignStyle::ArcaneFluid,
+            dashboard_slots: default_dashboard_slots(),
             sidebar_style: SidebarStyle::default(),
             row_density: RowDensity::default(),
             corner_style: CornerStyle::default(),

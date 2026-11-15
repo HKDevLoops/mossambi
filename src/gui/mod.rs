@@ -5,6 +5,7 @@ pub mod command_palette;
 pub mod context_menu;
 pub mod crop_canvas;
 pub mod custom_widgets;
+pub mod dashboard_layout;
 pub mod design;
 pub mod drop_overlay;
 pub mod dwm_helper;

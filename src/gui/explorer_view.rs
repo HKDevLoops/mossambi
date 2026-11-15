@@ -834,6 +834,7 @@ pub struct ExplorerView {
     pub row_density: crate::core::config::RowDensity,
     pub calculate_checksums: bool,
     pub design_tokens: crate::core::DesignTokens,
+    pub dashboard_slots: Vec<crate::core::DashboardWidgetSlot>,
 }
 
 #[derive(Debug, Clone)]
@@ -1130,6 +1131,7 @@ impl Default for ExplorerView {
             row_density: cfg.row_density,
             calculate_checksums: cfg.calculate_checksums,
             design_tokens: cfg.tokens(),
+            dashboard_slots: cfg.dashboard_slots.clone(),
             drop_menu: None,
         };
 
@@ -4231,6 +4233,652 @@ impl ExplorerView {
         self.render_drop_menu(ui, palette, on_transcode_target);
     }
 
+    fn render_quick_access_cards(
+        &self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        pinned_folders: &[(String, &'static str, [u8; 3], PathBuf)],
+        available_w: f32,
+        nav_to: &mut Option<PathBuf>,
+        new_dash_hover: &mut Option<(FileItem, Pos2)>,
+    ) {
+        let grid = crate::gui::dashboard_layout::compute_card_grid(available_w, 110.0, 160.0, 12.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(grid.gap, grid.gap);
+
+            for (label, _glyph, rgb, path) in pinned_folders {
+                let display_label = truncate_end(label, 14);
+                let card_size = Vec2::new(grid.card_width, 82.0);
+                let (rect, resp) = ui.allocate_exact_size(card_size, egui::Sense::click());
+
+                let is_hovered = resp.hovered();
+                let bg = if is_hovered {
+                    palette.card_hover
+                } else {
+                    palette.surface_2
+                };
+                let border_stroke = Stroke::new(
+                    self.design_tokens.border_width,
+                    if is_hovered {
+                        palette.accent
+                    } else {
+                        palette.border
+                    },
+                );
+
+                ui.painter()
+                    .rect_filled(rect, Rounding::same(self.design_tokens.radius_card), bg);
+                ui.painter().rect_stroke(
+                    rect,
+                    Rounding::same(self.design_tokens.radius_card),
+                    border_stroke,
+                );
+
+                let icon_key = match label.as_str() {
+                    "Desktop" => crate::core::icon_packs::IconGlyph::FolderDesktop,
+                    "Downloads" => crate::core::icon_packs::IconGlyph::FolderDownloads,
+                    "Documents" => crate::core::icon_packs::IconGlyph::FolderDocuments,
+                    "Pictures" => crate::core::icon_packs::IconGlyph::FolderPictures,
+                    "Music" => crate::core::icon_packs::IconGlyph::FolderMusic,
+                    "Videos" => crate::core::icon_packs::IconGlyph::FolderVideos,
+                    "Recycle Bin" => crate::core::icon_packs::IconGlyph::RecycleBin,
+                    _ => crate::core::icon_packs::IconGlyph::Folder,
+                };
+                let badge_center = Pos2::new(rect.center().x, rect.top() + 30.0);
+                let big_rect = Rect::from_center_size(badge_center, Vec2::splat(32.0));
+                crate::core::icon_packs::paint_icon(
+                    ui,
+                    self.icon_pack,
+                    icon_key,
+                    big_rect,
+                    [rgb[0], rgb[1], rgb[2]],
+                );
+
+                ui.painter().text(
+                    Pos2::new(rect.center().x, rect.bottom() - 14.0),
+                    egui::Align2::CENTER_CENTER,
+                    display_label,
+                    egui::FontId::proportional(12.0),
+                    palette.text_primary,
+                );
+
+                if resp.hovered() {
+                    let card_anchor = rect.center() + Vec2::new(0.0, rect.height() * 0.5 + 14.0);
+                    *new_dash_hover = Some((FileItem::from_path(path.clone()), card_anchor));
+                }
+
+                if resp.clicked() || resp.double_clicked() {
+                    *nav_to = Some(path.clone());
+                }
+            }
+        });
+    }
+
+    fn render_drives_cards(
+        &self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        tier: crate::gui::dashboard_layout::DashboardTier,
+        available_w: f32,
+        nav_to: &mut Option<PathBuf>,
+    ) {
+        if self.drives.is_empty() {
+            ui.label(
+                egui::RichText::new("No system drives detected.")
+                    .size(12.0)
+                    .color(palette.text_muted),
+            );
+            return;
+        }
+
+        let (card_w, _cols) =
+            crate::gui::dashboard_layout::compute_drive_card_width(available_w, tier, 12.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(12.0, 12.0);
+
+            for drive in &self.drives {
+                let card_size = Vec2::new(card_w, 72.0);
+                let (rect, resp) = ui.allocate_exact_size(card_size, egui::Sense::click());
+
+                let is_hovered = resp.hovered();
+                let bg = if is_hovered {
+                    palette.card_hover
+                } else {
+                    palette.surface_2
+                };
+                let border_stroke = Stroke::new(
+                    self.design_tokens.border_width,
+                    if is_hovered {
+                        palette.accent
+                    } else {
+                        palette.border
+                    },
+                );
+
+                ui.painter()
+                    .rect_filled(rect, Rounding::same(self.design_tokens.radius_card), bg);
+                ui.painter().rect_stroke(
+                    rect,
+                    Rounding::same(self.design_tokens.radius_card),
+                    border_stroke,
+                );
+
+                let badge_center = Pos2::new(rect.left() + 24.0, rect.center().y);
+                let d_glyph = if drive.is_system {
+                    crate::core::icon_packs::IconGlyph::DriveSystem
+                } else {
+                    crate::core::icon_packs::IconGlyph::Drive
+                };
+                let big_rect = Rect::from_center_size(badge_center, Vec2::splat(28.0));
+                let d_rgb: [u8; 3] = if drive.is_system {
+                    [0, 122, 255]
+                } else {
+                    [100, 116, 139]
+                };
+                crate::core::icon_packs::paint_icon(ui, self.icon_pack, d_glyph, big_rect, d_rgb);
+
+                let text_left = rect.left() + 48.0;
+                ui.painter().text(
+                    Pos2::new(text_left, rect.top() + 10.0),
+                    egui::Align2::LEFT_TOP,
+                    &drive.display_name,
+                    egui::FontId::proportional(13.0),
+                    palette.text_primary,
+                );
+
+                let ratio = drive.usage_ratio().clamp(0.0, 1.0);
+                let gauge_color = crate::gui::dashboard_layout::storage_usage_color(ratio, palette);
+
+                // Mini circular storage usage ring on top right
+                let ring_center = Pos2::new(rect.right() - 24.0, rect.top() + 24.0);
+                let ring_r = 11.0;
+                ui.painter().circle_stroke(
+                    ring_center,
+                    ring_r,
+                    Stroke::new(
+                        2.0_f32,
+                        Color32::from_rgba_unmultiplied(
+                            palette.border.r(),
+                            palette.border.g(),
+                            palette.border.b(),
+                            100,
+                        ),
+                    ),
+                );
+                if ratio > 0.01 {
+                    let num_pts = ((32.0 * ratio) as usize).clamp(4, 32);
+                    let start_angle = -std::f32::consts::FRAC_PI_2;
+                    let sweep = std::f32::consts::TAU * ratio;
+                    let points: Vec<Pos2> = (0..=num_pts)
+                        .map(|i| {
+                            let theta = start_angle + sweep * (i as f32 / num_pts as f32);
+                            Pos2::new(
+                                ring_center.x + ring_r * theta.cos(),
+                                ring_center.y + ring_r * theta.sin(),
+                            )
+                        })
+                        .collect();
+                    ui.painter()
+                        .add(egui::Shape::line(points, Stroke::new(2.5_f32, gauge_color)));
+                }
+                ui.painter().text(
+                    Pos2::new(rect.right() - 24.0, rect.top() + 44.0),
+                    egui::Align2::CENTER_CENTER,
+                    format!("{:.0}%", ratio * 100.0),
+                    egui::FontId::monospace(9.5),
+                    palette.text_muted,
+                );
+
+                // Usage progress bar
+                let bar_y = rect.top() + 32.0;
+                let bar_w = (card_w - 92.0).max(40.0);
+                let bar_h = 4.0_f32;
+                let bar_rect =
+                    Rect::from_min_size(Pos2::new(text_left, bar_y), Vec2::new(bar_w, bar_h));
+                ui.painter().rect_filled(
+                    bar_rect,
+                    Rounding::same(2.0),
+                    Color32::from_rgba_unmultiplied(
+                        palette.border.r(),
+                        palette.border.g(),
+                        palette.border.b(),
+                        100,
+                    ),
+                );
+                let fill_w = (bar_w * ratio).max(2.0);
+                let fill_rect =
+                    Rect::from_min_size(Pos2::new(text_left, bar_y), Vec2::new(fill_w, bar_h));
+                ui.painter()
+                    .rect_filled(fill_rect, Rounding::same(2.0), gauge_color);
+
+                let capacity_text = if drive.total_bytes == 0 {
+                    "Capacity unknown"
+                } else {
+                    &drive.formatted_space()
+                };
+                ui.painter().text(
+                    Pos2::new(text_left, rect.top() + 44.0),
+                    egui::Align2::LEFT_TOP,
+                    capacity_text,
+                    egui::FontId::proportional(11.0),
+                    palette.text_secondary,
+                );
+
+                if resp.clicked() || resp.double_clicked() {
+                    *nav_to = Some(drive.path.clone());
+                }
+            }
+        });
+    }
+
+    fn render_quick_actions_bar(
+        &self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        available_w: f32,
+        action_out: &mut Option<u8>,
+    ) {
+        let actions = [
+            (
+                "New Folder",
+                crate::core::icon_packs::IconGlyph::Folder,
+                [235, 175, 60],
+                1u8,
+            ),
+            (
+                "Terminal",
+                crate::core::icon_packs::IconGlyph::PageCode,
+                [139, 92, 246],
+                2u8,
+            ),
+            (
+                "Search",
+                crate::core::icon_packs::IconGlyph::Search,
+                [59, 130, 246],
+                3u8,
+            ),
+            (
+                "Recycle Bin",
+                crate::core::icon_packs::IconGlyph::RecycleBin,
+                [16, 185, 129],
+                4u8,
+            ),
+        ];
+
+        let cols = ((available_w + 8.0) / 130.0).floor().clamp(2.0, 4.0) as usize;
+        let gap = 8.0_f32;
+        let item_w = ((available_w - (cols - 1) as f32 * gap) / cols as f32).max(90.0);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(gap, gap);
+            for (label, glyph, rgb, action_code) in actions {
+                let (rect, resp) =
+                    ui.allocate_exact_size(Vec2::new(item_w, 36.0), egui::Sense::click());
+                let is_hovered = resp.hovered();
+                let bg = if is_hovered {
+                    palette.card_hover
+                } else {
+                    palette.surface_2
+                };
+                let stroke = Stroke::new(
+                    self.design_tokens.border_width,
+                    if is_hovered {
+                        palette.accent
+                    } else {
+                        palette.border
+                    },
+                );
+
+                ui.painter()
+                    .rect_filled(rect, Rounding::same(self.design_tokens.radius_pill), bg);
+                ui.painter().rect_stroke(
+                    rect,
+                    Rounding::same(self.design_tokens.radius_pill),
+                    stroke,
+                );
+
+                let icon_rect = Rect::from_center_size(
+                    Pos2::new(rect.left() + 18.0, rect.center().y),
+                    Vec2::splat(16.0),
+                );
+                crate::core::icon_packs::paint_icon(ui, self.icon_pack, glyph, icon_rect, rgb);
+
+                ui.painter().text(
+                    Pos2::new(rect.left() + 32.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    label,
+                    egui::FontId::proportional(12.0),
+                    palette.text_primary,
+                );
+
+                if resp.clicked() {
+                    *action_out = Some(action_code);
+                }
+            }
+        });
+    }
+
+    fn render_activity_summary(
+        &self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        available_w: f32,
+        pinned_count: usize,
+    ) {
+        let total_bytes: u64 = self.drives.iter().map(|d| d.total_bytes).sum();
+        let free_bytes: u64 = self.drives.iter().map(|d| d.free_bytes).sum();
+        let used_bytes = total_bytes.saturating_sub(free_bytes);
+        let usage_ratio = if total_bytes > 0 {
+            used_bytes as f32 / total_bytes as f32
+        } else {
+            0.0
+        };
+
+        let (card_rect, resp) =
+            ui.allocate_exact_size(Vec2::new(available_w, 54.0), egui::Sense::hover());
+        let bg = if resp.hovered() {
+            palette.card_hover
+        } else {
+            palette.surface_2
+        };
+
+        ui.painter().rect_filled(
+            card_rect,
+            Rounding::same(self.design_tokens.radius_card),
+            bg,
+        );
+        ui.painter().rect_stroke(
+            card_rect,
+            Rounding::same(self.design_tokens.radius_card),
+            Stroke::new(self.design_tokens.border_width, palette.border),
+        );
+
+        let chip_w = (card_rect.width() / 3.0).floor();
+
+        // Chip 1: Total Storage
+        let chip1_rect = Rect::from_min_size(card_rect.min, Vec2::new(chip_w, card_rect.height()));
+        ui.painter().text(
+            Pos2::new(chip1_rect.center().x, chip1_rect.top() + 14.0),
+            egui::Align2::CENTER_CENTER,
+            "Total Storage",
+            egui::FontId::proportional(11.0),
+            palette.text_muted,
+        );
+        ui.painter().text(
+            Pos2::new(chip1_rect.center().x, chip1_rect.bottom() - 14.0),
+            egui::Align2::CENTER_CENTER,
+            crate::gui::dashboard_layout::format_bytes_ascii(total_bytes),
+            egui::FontId::monospace(12.5),
+            palette.text_primary,
+        );
+
+        // Chip 2: Free Space
+        let chip2_rect = Rect::from_min_size(
+            Pos2::new(card_rect.left() + chip_w, card_rect.top()),
+            Vec2::new(chip_w, card_rect.height()),
+        );
+        ui.painter().text(
+            Pos2::new(chip2_rect.center().x, chip2_rect.top() + 14.0),
+            egui::Align2::CENTER_CENTER,
+            "Free Space",
+            egui::FontId::proportional(11.0),
+            palette.text_muted,
+        );
+        ui.painter().text(
+            Pos2::new(chip2_rect.center().x, chip2_rect.bottom() - 14.0),
+            egui::Align2::CENTER_CENTER,
+            crate::gui::dashboard_layout::format_bytes_ascii(free_bytes),
+            egui::FontId::monospace(12.5),
+            palette.success,
+        );
+
+        // Chip 3: Overall Load & Shortcuts
+        let chip3_rect = Rect::from_min_size(
+            Pos2::new(card_rect.left() + chip_w * 2.0, card_rect.top()),
+            Vec2::new(
+                card_rect.right() - (card_rect.left() + chip_w * 2.0),
+                card_rect.height(),
+            ),
+        );
+        ui.painter().text(
+            Pos2::new(chip3_rect.center().x, chip3_rect.top() + 14.0),
+            egui::Align2::CENTER_CENTER,
+            format!("{} Shortcuts", pinned_count),
+            egui::FontId::proportional(11.0),
+            palette.text_muted,
+        );
+        let usage_color = crate::gui::dashboard_layout::storage_usage_color(usage_ratio, palette);
+        ui.painter().text(
+            Pos2::new(chip3_rect.center().x, chip3_rect.bottom() - 14.0),
+            egui::Align2::CENTER_CENTER,
+            format!("{:.1}% Used", usage_ratio * 100.0),
+            egui::FontId::monospace(12.5),
+            usage_color,
+        );
+    }
+
+    fn render_recent_files_view(
+        &self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        tier: crate::gui::dashboard_layout::DashboardTier,
+        available_w: f32,
+        recent_files: &[&FileItem],
+    ) {
+        if recent_files.is_empty() {
+            ui.label(
+                egui::RichText::new("No recent standalone files in home directory. Choose a folder above to browse.")
+                    .size(12.0)
+                    .color(palette.text_muted),
+            );
+            return;
+        }
+
+        let layout = crate::gui::dashboard_layout::compute_recent_table(available_w, tier);
+
+        let header_h = 24.0;
+        let (header_rect, _) =
+            ui.allocate_exact_size(Vec2::new(available_w, header_h), egui::Sense::hover());
+        ui.painter().rect_filled(
+            header_rect,
+            Rounding::same(self.design_tokens.radius_subtle),
+            palette.surface_1,
+        );
+
+        let mut x = header_rect.left() + 32.0;
+        ui.painter().text(
+            Pos2::new(x, header_rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            "Name",
+            egui::FontId::proportional(11.5),
+            palette.text_muted,
+        );
+        x += layout.name_width;
+
+        if layout.show_date {
+            ui.painter().text(
+                Pos2::new(x, header_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                "Date Modified",
+                egui::FontId::proportional(11.5),
+                palette.text_muted,
+            );
+            x += layout.date_width;
+        }
+
+        if layout.show_kind {
+            ui.painter().text(
+                Pos2::new(x, header_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                "Kind",
+                egui::FontId::proportional(11.5),
+                palette.text_muted,
+            );
+            x += layout.kind_width;
+        }
+
+        if layout.show_path {
+            ui.painter().text(
+                Pos2::new(x, header_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                "Parent Path",
+                egui::FontId::proportional(11.5),
+                palette.text_muted,
+            );
+        }
+
+        ui.painter().text(
+            Pos2::new(header_rect.right() - 14.0, header_rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            "Size",
+            egui::FontId::proportional(11.5),
+            palette.text_muted,
+        );
+
+        ui.add_space(2.0);
+
+        for (idx, item) in recent_files.iter().enumerate() {
+            let row_h = 26.0;
+            let (row_rect, row_resp) =
+                ui.allocate_exact_size(Vec2::new(available_w, row_h), egui::Sense::click());
+
+            let is_hovered = row_resp.hovered();
+            let row_bg = if is_hovered {
+                palette.card_hover
+            } else if idx % 2 == 1 {
+                palette.surface_2
+            } else {
+                Color32::from_rgba_unmultiplied(
+                    palette.surface_2.r(),
+                    palette.surface_2.g(),
+                    palette.surface_2.b(),
+                    180,
+                )
+            };
+
+            ui.painter().rect_filled(
+                row_rect,
+                Rounding::same(self.design_tokens.radius_subtle),
+                row_bg,
+            );
+
+            let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+            let (glyph_ast, accent_rgb) = crate::core::icon_packs::IconGlyph::resolve_with_path(
+                Some(&item.path),
+                &item.name,
+                &item.extension,
+                item.is_dir,
+                icon_spec.is_image,
+                icon_spec.is_media,
+                icon_spec.is_archive,
+                icon_spec.is_document,
+                icon_spec.is_code,
+                icon_spec.color_rgb,
+            );
+            let icon_rect = Rect::from_center_size(
+                Pos2::new(row_rect.left() + 16.0, row_rect.center().y),
+                Vec2::splat(18.0),
+            );
+            crate::core::icon_packs::paint_icon(
+                ui,
+                self.icon_pack,
+                glyph_ast,
+                icon_rect,
+                accent_rgb,
+            );
+
+            let name_chars = (layout.name_width / 8.5).floor() as usize;
+            let display_name = truncate_end(&item.name, name_chars.max(12));
+            let mut cur_x = row_rect.left() + 32.0;
+            ui.painter().text(
+                Pos2::new(cur_x, row_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                display_name,
+                egui::FontId::proportional(12.5),
+                palette.text_primary,
+            );
+            cur_x += layout.name_width;
+
+            if layout.show_date {
+                ui.painter().text(
+                    Pos2::new(cur_x, row_rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    item.formatted_date(),
+                    egui::FontId::proportional(11.5),
+                    palette.text_secondary,
+                );
+                cur_x += layout.date_width;
+            }
+
+            if layout.show_kind {
+                let (tag_color, tag_name) = if icon_spec.is_code {
+                    (palette.tag_code, "Code")
+                } else if icon_spec.is_media {
+                    (palette.tag_media, "Media")
+                } else if icon_spec.is_archive {
+                    (palette.tag_archive, "Archive")
+                } else if icon_spec.is_document {
+                    (palette.tag_document, "Document")
+                } else if icon_spec.is_image {
+                    (palette.tag_image, "Image")
+                } else {
+                    (palette.text_muted, icon_spec.category)
+                };
+
+                let badge_rect = Rect::from_min_size(
+                    Pos2::new(cur_x, row_rect.center().y - 8.0),
+                    Vec2::new((layout.kind_width - 16.0).max(40.0), 16.0),
+                );
+                ui.painter().rect_filled(
+                    badge_rect,
+                    Rounding::same(self.design_tokens.radius_pill),
+                    Color32::from_rgba_unmultiplied(
+                        tag_color.r(),
+                        tag_color.g(),
+                        tag_color.b(),
+                        40,
+                    ),
+                );
+                ui.painter().text(
+                    badge_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    tag_name,
+                    egui::FontId::proportional(10.0),
+                    tag_color,
+                );
+                cur_x += layout.kind_width;
+            }
+
+            if layout.show_path {
+                let parent_str = item
+                    .path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "~".to_string());
+                ui.painter().text(
+                    Pos2::new(cur_x, row_rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    truncate_end(&parent_str, 16),
+                    egui::FontId::proportional(11.0),
+                    palette.text_muted,
+                );
+            }
+
+            ui.painter().text(
+                Pos2::new(row_rect.right() - 14.0, row_rect.center().y),
+                egui::Align2::RIGHT_CENTER,
+                item.formatted_size(),
+                egui::FontId::monospace(11.0),
+                palette.text_muted,
+            );
+
+            if row_resp.double_clicked() {
+                open_in_default_app(&item.path);
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn render_home_dashboard(
         &mut self,
@@ -4244,355 +4892,549 @@ impl ExplorerView {
     ) {
         let mut nav_to: Option<PathBuf> = None;
         let mut new_dash_hover: Option<(FileItem, Pos2)> = None;
+        let mut action_out: Option<u8> = None;
+        let mut slot_swap: Option<(usize, usize)> = None;
+
+        let total_avail_w = ui.available_width();
+        let container = crate::gui::dashboard_layout::compute_container_metrics(
+            total_avail_w,
+            self.design_tokens.max_content_width,
+        );
+
+        let mut pinned_folders = vec![
+            (
+                "Desktop".to_string(),
+                "Desktop",
+                [0, 122, 255],
+                crate::core::platform_paths::desktop_dir(),
+            ),
+            (
+                "Downloads".to_string(),
+                "Downloads",
+                [20, 184, 166],
+                crate::core::platform_paths::downloads_dir(),
+            ),
+            (
+                "Documents".to_string(),
+                "Documents",
+                [59, 130, 246],
+                crate::core::platform_paths::documents_dir(),
+            ),
+            (
+                "Pictures".to_string(),
+                "Pictures",
+                [14, 165, 233],
+                crate::core::platform_paths::pictures_dir(),
+            ),
+            (
+                "Music".to_string(),
+                "Music",
+                [244, 63, 94],
+                crate::core::platform_paths::music_dir(),
+            ),
+            (
+                "Videos".to_string(),
+                "Videos",
+                [139, 92, 246],
+                crate::core::platform_paths::videos_dir(),
+            ),
+        ];
+
+        for entry in &self.entries {
+            if !entry.is_dir || entry.is_hidden || entry.is_symlink {
+                continue;
+            }
+            if !is_library_folder_name(&entry.name) {
+                continue;
+            }
+            let lower = entry.name.to_lowercase();
+            if pinned_folders
+                .iter()
+                .any(|(label, _, _, _)| label.to_lowercase() == lower)
+            {
+                continue;
+            }
+            pinned_folders.push((
+                entry.name.clone(),
+                "Folder",
+                [235, 175, 60],
+                entry.path.clone(),
+            ));
+        }
+
+        let recycle_target = crate::core::resolve_recycle_bin_target();
+        pinned_folders.push((
+            "Recycle Bin".to_string(),
+            "Recycle Bin",
+            [16, 185, 129],
+            recycle_target,
+        ));
+
+        let mut recent_files: Vec<&FileItem> = self
+            .entries
+            .iter()
+            .filter(|e| !e.is_dir && !e.is_hidden)
+            .collect();
+        recent_files.sort_by_key(|e| std::cmp::Reverse(e.modified));
+        recent_files.truncate(15);
 
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 ui.add_space(8.0);
 
-                // ==========================================
-                // 1. Quick access Header & Cards Grid
-                // ==========================================
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Quick Access").size(15.0).strong().color(palette.text_primary));
-                });
-                ui.add_space(8.0);
-
-                let mut pinned_folders = vec![
-                    (
-                        "Desktop".to_string(),
-                        "Desktop",
-                        [0, 122, 255],
-                        crate::core::platform_paths::desktop_dir(),
-                    ),
-                    (
-                        "Downloads".to_string(),
-                        "Downloads",
-                        [20, 184, 166],
-                        crate::core::platform_paths::downloads_dir(),
-                    ),
-                    (
-                        "Documents".to_string(),
-                        "Documents",
-                        [59, 130, 246],
-                        crate::core::platform_paths::documents_dir(),
-                    ),
-                    (
-                        "Pictures".to_string(),
-                        "Pictures",
-                        [14, 165, 233],
-                        crate::core::platform_paths::pictures_dir(),
-                    ),
-                    (
-                        "Music".to_string(),
-                        "Music",
-                        [244, 63, 94],
-                        crate::core::platform_paths::music_dir(),
-                    ),
-                    (
-                        "Videos".to_string(),
-                        "Videos",
-                        [139, 92, 246],
-                        crate::core::platform_paths::videos_dir(),
-                    ),
-                ];
-
-                // Only real library folders belong in Quick access. The
-                // previous code appended every visible subdirectory of the
-                // user profile, which dumped NT junctions (NetHood,
-                // PrintHood, SendTo, Start Menu, Recent, Templates, Local
-                // Settings) into the grid.
-                for entry in &self.entries {
-                    if !entry.is_dir || entry.is_hidden {
-                        continue;
+                    if container.margin_x > 0.0 {
+                        ui.add_space(container.margin_x);
                     }
-                    if !is_library_folder_name(&entry.name) {
-                        continue;
-                    }
-                    // Skip a junction: `is_symlink` is set for reparse
-                    // points that point elsewhere in the profile tree.
-                    if entry.is_symlink {
-                        continue;
-                    }
-                    let lower = entry.name.to_lowercase();
-                    if pinned_folders
-                        .iter()
-                        .any(|(label, _, _, _)| label.to_lowercase() == lower)
-                    {
-                        continue;
-                    }
-                    pinned_folders.push((entry.name.clone(), "Folder", [235, 175, 60], entry.path.clone()));
-                }
 
-                // Append Recycle Bin -> resolved cross-platform Recycle Bin target
-                let recycle_target = crate::core::resolve_recycle_bin_target();
-                pinned_folders.push((
-                    "Recycle Bin".to_string(),
-                    "Recycle Bin",
-                    [16, 185, 129],
-                    recycle_target,
-                ));
+                    ui.vertical(|ui| {
+                        ui.set_max_width(container.content_width);
+                        let content_w = container.content_width;
+                        let tier = container.tier;
 
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(12.0, 12.0);
+                        match self.design_tokens.style {
+                            crate::core::DesignStyle::ArcaneFluid => {
+                                // 1. Quick Access
+                                ui.label(
+                                    egui::RichText::new("Quick Access")
+                                        .size(15.0)
+                                        .strong()
+                                        .color(palette.text_primary),
+                                );
+                                ui.add_space(8.0);
+                                self.render_quick_access_cards(
+                                    ui,
+                                    palette,
+                                    &pinned_folders,
+                                    content_w,
+                                    &mut nav_to,
+                                    &mut new_dash_hover,
+                                );
+                                ui.add_space(20.0);
 
-                    for (label, _glyph, rgb, path) in &pinned_folders {
-                        let display_label = truncate_end(label, 14);
-                        let card_size = Vec2::new(96.0, 80.0);
-                        let (rect, resp) = ui.allocate_exact_size(card_size, egui::Sense::click());
+                                // 2. Bento Grid Section (Drives + Quick Actions / Activity)
+                                if matches!(
+                                    tier,
+                                    crate::gui::dashboard_layout::DashboardTier::Wide
+                                        | crate::gui::dashboard_layout::DashboardTier::Ultrawide
+                                ) {
+                                    let gap = 16.0;
+                                    let left_w = ((content_w - gap) * 0.58).floor();
+                                    let right_w = content_w - gap - left_w;
 
-                        let is_hovered = resp.hovered();
-                        let bg = if is_hovered {
-                            palette.card_hover
-                        } else {
-                            palette.card_bg
-                        };
-                        let border_stroke = Stroke::new(
-                            1.0_f32,
-                            if is_hovered { palette.accent } else { palette.border },
-                        );
+                                    ui.horizontal(|ui| {
+                                        ui.vertical(|ui| {
+                                            ui.set_max_width(left_w);
+                                            ui.label(
+                                                egui::RichText::new("Drives & Storage")
+                                                    .size(15.0)
+                                                    .strong()
+                                                    .color(palette.text_primary),
+                                            );
+                                            ui.add_space(8.0);
+                                            self.render_drives_cards(
+                                                ui,
+                                                palette,
+                                                tier,
+                                                left_w,
+                                                &mut nav_to,
+                                            );
+                                        });
 
-                        // Card frame with subtle depth
-                        ui.painter().rect_filled(
-                            rect,
-                            Rounding::same(self.design_tokens.radius_card),
-                            bg,
-                        );
-                        ui.painter().rect_stroke(
-                            rect,
-                            Rounding::same(self.design_tokens.radius_card),
-                            border_stroke,
-                        );
+                                        ui.add_space(gap);
 
-                        // Large squircle-less pack icon (crisp, antialiased)
-                        let icon_key = match label.as_str() {
-                            "Desktop" => crate::core::icon_packs::IconGlyph::FolderDesktop,
-                            "Downloads" => crate::core::icon_packs::IconGlyph::FolderDownloads,
-                            "Documents" => crate::core::icon_packs::IconGlyph::FolderDocuments,
-                            "Pictures" => crate::core::icon_packs::IconGlyph::FolderPictures,
-                            "Music" => crate::core::icon_packs::IconGlyph::FolderMusic,
-                            "Videos" => crate::core::icon_packs::IconGlyph::FolderVideos,
-                            "Recycle Bin" => crate::core::icon_packs::IconGlyph::RecycleBin,
-                            _ => crate::core::icon_packs::IconGlyph::Folder,
-                        };
-                        let badge_center = Pos2::new(rect.center().x, rect.top() + 30.0);
-                        let big_rect = Rect::from_center_size(badge_center, Vec2::splat(32.0));
-                        crate::core::icon_packs::paint_icon(
-                            ui,
-                            self.icon_pack,
-                            icon_key,
-                            big_rect,
-                            [rgb[0], rgb[1], rgb[2]],
-                        );
+                                        ui.vertical(|ui| {
+                                            ui.set_max_width(right_w);
+                                            ui.label(
+                                                egui::RichText::new("Quick Actions")
+                                                    .size(15.0)
+                                                    .strong()
+                                                    .color(palette.text_primary),
+                                            );
+                                            ui.add_space(8.0);
+                                            self.render_quick_actions_bar(
+                                                ui,
+                                                palette,
+                                                right_w,
+                                                &mut action_out,
+                                            );
+                                            ui.add_space(14.0);
 
-                        // Label below badge
-                        ui.painter().text(
-                            Pos2::new(rect.center().x, rect.bottom() - 14.0),
-                            egui::Align2::CENTER_CENTER,
-                            display_label,
-                            egui::FontId::proportional(12.0),
-                            palette.text_primary,
-                        );
+                                            ui.label(
+                                                egui::RichText::new("Storage Activity")
+                                                    .size(15.0)
+                                                    .strong()
+                                                    .color(palette.text_primary),
+                                            );
+                                            ui.add_space(8.0);
+                                            self.render_activity_summary(
+                                                ui,
+                                                palette,
+                                                right_w,
+                                                pinned_folders.len(),
+                                            );
+                                        });
+                                    });
+                                } else {
+                                    ui.label(
+                                        egui::RichText::new("Drives & Storage")
+                                            .size(15.0)
+                                            .strong()
+                                            .color(palette.text_primary),
+                                    );
+                                    ui.add_space(8.0);
+                                    self.render_drives_cards(
+                                        ui,
+                                        palette,
+                                        tier,
+                                        content_w,
+                                        &mut nav_to,
+                                    );
+                                    ui.add_space(16.0);
 
-                        // Full name tooltip + hover preview anchor for long hover
-                        if resp.hovered() {
-                            let card_anchor =
-                                rect.center() + Vec2::new(0.0, rect.height() * 0.5 + 14.0);
-                            new_dash_hover = Some((
-                                FileItem::from_path(path.clone()),
-                                card_anchor,
-                            ));
+                                    ui.label(
+                                        egui::RichText::new("Quick Actions")
+                                            .size(15.0)
+                                            .strong()
+                                            .color(palette.text_primary),
+                                    );
+                                    ui.add_space(8.0);
+                                    self.render_quick_actions_bar(
+                                        ui,
+                                        palette,
+                                        content_w,
+                                        &mut action_out,
+                                    );
+                                    ui.add_space(16.0);
+
+                                    ui.label(
+                                        egui::RichText::new("Storage Activity")
+                                            .size(15.0)
+                                            .strong()
+                                            .color(palette.text_primary),
+                                    );
+                                    ui.add_space(8.0);
+                                    self.render_activity_summary(
+                                        ui,
+                                        palette,
+                                        content_w,
+                                        pinned_folders.len(),
+                                    );
+                                }
+
+                                ui.add_space(20.0);
+
+                                // 3. Recent Files Table
+                                ui.label(
+                                    egui::RichText::new("Recent Files")
+                                        .size(15.0)
+                                        .strong()
+                                        .color(palette.text_primary),
+                                );
+                                ui.add_space(8.0);
+                                self.render_recent_files_view(
+                                    ui,
+                                    palette,
+                                    tier,
+                                    content_w,
+                                    &recent_files,
+                                );
+                            }
+
+                            crate::core::DesignStyle::ZenithPro => {
+                                let cockpit = crate::gui::dashboard_layout::compute_zenith_cockpit(
+                                    content_w, tier,
+                                );
+                                if cockpit.is_split {
+                                    let gap = 16.0;
+                                    ui.horizontal(|ui| {
+                                        // Left Cockpit Pane (60%)
+                                        ui.vertical(|ui| {
+                                            ui.set_max_width(cockpit.left_width);
+                                            ui.label(
+                                                egui::RichText::new("Workspace Cockpit")
+                                                    .size(15.0)
+                                                    .strong()
+                                                    .color(palette.text_primary),
+                                            );
+                                            ui.add_space(6.0);
+                                            self.render_quick_access_cards(
+                                                ui,
+                                                palette,
+                                                &pinned_folders,
+                                                cockpit.left_width,
+                                                &mut nav_to,
+                                                &mut new_dash_hover,
+                                            );
+                                            ui.add_space(14.0);
+
+                                            ui.label(
+                                                egui::RichText::new("Volume Telemetry")
+                                                    .size(14.0)
+                                                    .strong()
+                                                    .color(palette.text_primary),
+                                            );
+                                            ui.add_space(6.0);
+                                            self.render_drives_cards(
+                                                ui,
+                                                palette,
+                                                tier,
+                                                cockpit.left_width,
+                                                &mut nav_to,
+                                            );
+                                            ui.add_space(14.0);
+
+                                            ui.label(
+                                                egui::RichText::new("Operations")
+                                                    .size(14.0)
+                                                    .strong()
+                                                    .color(palette.text_primary),
+                                            );
+                                            ui.add_space(6.0);
+                                            self.render_quick_actions_bar(
+                                                ui,
+                                                palette,
+                                                cockpit.left_width,
+                                                &mut action_out,
+                                            );
+                                        });
+
+                                        ui.add_space(gap);
+
+                                        // Right Cockpit Pane (40%)
+                                        ui.vertical(|ui| {
+                                            ui.set_max_width(cockpit.right_width);
+                                            ui.label(
+                                                egui::RichText::new("Activity Telemetry")
+                                                    .size(15.0)
+                                                    .strong()
+                                                    .color(palette.text_primary),
+                                            );
+                                            ui.add_space(6.0);
+                                            self.render_activity_summary(
+                                                ui,
+                                                palette,
+                                                cockpit.right_width,
+                                                pinned_folders.len(),
+                                            );
+                                            ui.add_space(14.0);
+
+                                            ui.label(
+                                                egui::RichText::new("Recent Files")
+                                                    .size(14.0)
+                                                    .strong()
+                                                    .color(palette.text_primary),
+                                            );
+                                            ui.add_space(6.0);
+                                            self.render_recent_files_view(
+                                                ui,
+                                                palette,
+                                                tier,
+                                                cockpit.right_width,
+                                                &recent_files,
+                                            );
+                                        });
+                                    });
+                                } else {
+                                    ui.label(
+                                        egui::RichText::new("Quick Access")
+                                            .size(15.0)
+                                            .strong()
+                                            .color(palette.text_primary),
+                                    );
+                                    ui.add_space(6.0);
+                                    self.render_quick_access_cards(
+                                        ui,
+                                        palette,
+                                        &pinned_folders,
+                                        content_w,
+                                        &mut nav_to,
+                                        &mut new_dash_hover,
+                                    );
+                                    ui.add_space(14.0);
+
+                                    ui.label(
+                                        egui::RichText::new("Drives & Storage")
+                                            .size(15.0)
+                                            .strong()
+                                            .color(palette.text_primary),
+                                    );
+                                    ui.add_space(6.0);
+                                    self.render_drives_cards(
+                                        ui,
+                                        palette,
+                                        tier,
+                                        content_w,
+                                        &mut nav_to,
+                                    );
+                                    ui.add_space(14.0);
+
+                                    ui.label(
+                                        egui::RichText::new("Quick Actions")
+                                            .size(14.0)
+                                            .strong()
+                                            .color(palette.text_primary),
+                                    );
+                                    ui.add_space(6.0);
+                                    self.render_quick_actions_bar(
+                                        ui,
+                                        palette,
+                                        content_w,
+                                        &mut action_out,
+                                    );
+                                    ui.add_space(14.0);
+
+                                    ui.label(
+                                        egui::RichText::new("Storage Activity")
+                                            .size(14.0)
+                                            .strong()
+                                            .color(palette.text_primary),
+                                    );
+                                    ui.add_space(6.0);
+                                    self.render_activity_summary(
+                                        ui,
+                                        palette,
+                                        content_w,
+                                        pinned_folders.len(),
+                                    );
+                                    ui.add_space(14.0);
+
+                                    ui.label(
+                                        egui::RichText::new("Recent Files")
+                                            .size(15.0)
+                                            .strong()
+                                            .color(palette.text_primary),
+                                    );
+                                    ui.add_space(6.0);
+                                    self.render_recent_files_view(
+                                        ui,
+                                        palette,
+                                        tier,
+                                        content_w,
+                                        &recent_files,
+                                    );
+                                }
+                            }
+
+                            crate::core::DesignStyle::HyperionSlate => {
+                                let slots = self.dashboard_slots.clone();
+                                let total_slots = slots.len();
+
+                                for (i, slot) in slots.into_iter().enumerate() {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(slot.label())
+                                                .size(15.0)
+                                                .strong()
+                                                .color(palette.text_primary),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                if i + 1 < total_slots
+                                                    && ui.small_button("v").clicked()
+                                                {
+                                                    slot_swap = Some((i, i + 1));
+                                                }
+                                                if i > 0 && ui.small_button("^").clicked() {
+                                                    slot_swap = Some((i, i - 1));
+                                                }
+                                            },
+                                        );
+                                    });
+                                    ui.add_space(8.0);
+
+                                    match slot {
+                                        crate::core::DashboardWidgetSlot::QuickAccess => {
+                                            self.render_quick_access_cards(
+                                                ui,
+                                                palette,
+                                                &pinned_folders,
+                                                content_w,
+                                                &mut nav_to,
+                                                &mut new_dash_hover,
+                                            );
+                                        }
+                                        crate::core::DashboardWidgetSlot::Drives => {
+                                            self.render_drives_cards(
+                                                ui,
+                                                palette,
+                                                tier,
+                                                content_w,
+                                                &mut nav_to,
+                                            );
+                                        }
+                                        crate::core::DashboardWidgetSlot::QuickActions => {
+                                            self.render_quick_actions_bar(
+                                                ui,
+                                                palette,
+                                                content_w,
+                                                &mut action_out,
+                                            );
+                                        }
+                                        crate::core::DashboardWidgetSlot::Activity => {
+                                            self.render_activity_summary(
+                                                ui,
+                                                palette,
+                                                content_w,
+                                                pinned_folders.len(),
+                                            );
+                                        }
+                                        crate::core::DashboardWidgetSlot::RecentFiles => {
+                                            self.render_recent_files_view(
+                                                ui,
+                                                palette,
+                                                tier,
+                                                content_w,
+                                                &recent_files,
+                                            );
+                                        }
+                                    }
+                                    ui.add_space(20.0);
+                                }
+                            }
                         }
-
-                        if resp.clicked() || resp.double_clicked() {
-                            nav_to = Some(path.clone());
-                        }
-                    }
+                    });
                 });
-
-                ui.add_space(20.0);
-
-                // ==========================================
-                // 2. Drives Header & Storage Meter Cards
-                // ==========================================
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Drives").size(15.0).strong().color(palette.text_primary));
-                });
-                ui.add_space(8.0);
-
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(14.0, 12.0);
-
-                    for drive in &self.drives {
-                        let card_size = Vec2::new(210.0, 64.0);
-                        let (rect, resp) = ui.allocate_exact_size(card_size, egui::Sense::click());
-
-                        let is_hovered = resp.hovered();
-                        let bg = if is_hovered {
-                            palette.card_hover
-                        } else {
-                            palette.card_bg
-                        };
-                        let border_stroke = Stroke::new(
-                            1.0_f32,
-                            if is_hovered { palette.accent } else { palette.border },
-                        );
-
-                        ui.painter().rect_filled(
-                            rect,
-                            Rounding::same(self.design_tokens.radius_card),
-                            bg,
-                        );
-                        ui.painter().rect_stroke(
-                            rect,
-                            Rounding::same(self.design_tokens.radius_card),
-                            border_stroke,
-                        );
-
-                        // Left: Vector drive icon
-                        let badge_center = Pos2::new(rect.left() + 24.0, rect.center().y);
-                        let d_glyph = if drive.is_system {
-                            crate::core::icon_packs::IconGlyph::DriveSystem
-                        } else {
-                            crate::core::icon_packs::IconGlyph::Drive
-                        };
-                        let big_rect = Rect::from_center_size(badge_center, Vec2::splat(28.0));
-                        let d_rgb: [u8; 3] = if drive.is_system { [0, 122, 255] } else { [100, 116, 139] };
-                        crate::core::icon_packs::paint_icon(ui, self.icon_pack, d_glyph, big_rect, d_rgb);
-
-                        // Right: Title, Progress Bar, and Space details
-                        let text_left = rect.left() + 48.0;
-                        ui.painter().text(
-                            Pos2::new(text_left, rect.top() + 10.0),
-                            egui::Align2::LEFT_TOP,
-                            &drive.display_name,
-                            egui::FontId::proportional(13.0),
-                            palette.text_primary,
-                        );
-
-                        // Usage progress bar
-                        let bar_y = rect.top() + 30.0;
-                        let bar_w = 145.0_f32;
-                        let bar_h = 4.0_f32;
-                        let bar_rect = Rect::from_min_size(Pos2::new(text_left, bar_y), Vec2::new(bar_w, bar_h));
-                        ui.painter().rect_filled(
-                            bar_rect,
-                            Rounding::same(2.0),
-                            Color32::from_rgba_unmultiplied(palette.border.r(), palette.border.g(), palette.border.b(), 120),
-                        );
-                        let fill_w = (bar_w * drive.usage_ratio().clamp(0.0, 1.0)).max(2.0);
-                        let fill_rect = Rect::from_min_size(Pos2::new(text_left, bar_y), Vec2::new(fill_w, bar_h));
-                        ui.painter().rect_filled(fill_rect, Rounding::same(2.0), palette.accent);
-
-                        // Storage text (a drive whose capacity query failed gets an
-                        // explicit note instead of an empty caption)
-                        let capacity_text = if drive.total_bytes == 0 {
-                            "Capacity unknown"
-                        } else {
-                            &drive.formatted_space()
-                        };
-                        ui.painter().text(
-                            Pos2::new(text_left, rect.top() + 40.0),
-                            egui::Align2::LEFT_TOP,
-                            capacity_text,
-                            egui::FontId::proportional(11.0),
-                            palette.text_secondary,
-                        );
-
-                        if resp.clicked() || resp.double_clicked() {
-                            nav_to = Some(drive.path.clone());
-                        }
-                    }
-                });
-
-                ui.add_space(20.0);
-
-                // ==========================================
-                // 3. Network locations
-                // ==========================================
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Network Locations").size(15.0).strong().color(palette.text_primary));
-                });
-                ui.add_space(6.0);
-
-                // Empty state, not an alert: no accent badge and no dead
-                // "Disable" button (it never did anything).
-                ui.label(
-                    egui::RichText::new("No network locations found.")
-                        .size(12.5)
-                        .color(palette.text_muted),
-                );
-                ui.add_space(20.0);
-
-                // ==========================================
-                // 4. Recent Files List
-                // ==========================================
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Recent Files").size(15.0).strong().color(palette.text_primary));
-                });
-                ui.add_space(8.0);
-
-                let mut recent_files: Vec<&FileItem> = self
-                    .entries
-                    .iter()
-                    .filter(|e| !e.is_dir && !e.is_hidden)
-                    .collect();
-                recent_files.sort_by_key(|e| std::cmp::Reverse(e.modified));
-                recent_files.truncate(15);
-                if recent_files.is_empty() {
-                    ui.label(egui::RichText::new("No recent standalone files in home directory. Choose a folder above to browse.").size(12.0).color(palette.text_muted));
-                } else {
-                    for item in recent_files {
-                        let row_h = 24.0;
-                        let (row_rect, row_resp) = ui.allocate_exact_size(Vec2::new(ui.available_width() - 14.0, row_h), egui::Sense::click());
-
-                        if row_resp.hovered() {
-                            ui.painter().rect_filled(row_rect, Rounding::same(4.0), palette.card_hover);
-                        }
-
-                        let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
-                        let (glyph_ast, accent_rgb) = crate::core::icon_packs::IconGlyph::resolve_with_path(
-                            Some(&item.path),
-                            &item.name,
-                            &item.extension,
-                            item.is_dir,
-                            icon_spec.is_image,
-                            icon_spec.is_media,
-                            icon_spec.is_archive,
-                            icon_spec.is_document,
-                            icon_spec.is_code,
-                            icon_spec.color_rgb,
-                        );
-                        let icon_rect = egui::Rect::from_center_size(
-                            Pos2::new(row_rect.left() + 14.0, row_rect.center().y),
-                            Vec2::splat(18.0),
-                        );
-                        crate::core::icon_packs::paint_icon(ui, self.icon_pack, glyph_ast, icon_rect, accent_rgb);
-
-                        // File name
-                        ui.painter().text(
-                            Pos2::new(row_rect.left() + 32.0, row_rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            &item.name,
-                            egui::FontId::proportional(13.0),
-                            palette.text_primary,
-                        );
-
-                        // Size and Modified date on right
-                        ui.painter().text(
-                            Pos2::new(row_rect.right() - 12.0, row_rect.center().y),
-                            egui::Align2::RIGHT_CENTER,
-                            item.formatted_size(),
-                            egui::FontId::monospace(11.0),
-                            palette.text_muted,
-                        );
-
-                        if row_resp.double_clicked() {
-                            open_in_default_app(&item.path);
-                        }
-                    }
-                }
             });
+
+        if let Some((a, b)) = slot_swap {
+            if a < self.dashboard_slots.len() && b < self.dashboard_slots.len() {
+                self.dashboard_slots.swap(a, b);
+                let mut cfg = crate::core::config::MossambiConfig::load();
+                cfg.dashboard_slots = self.dashboard_slots.clone();
+                let _ = cfg.save();
+            }
+        }
+
+        if let Some(act) = action_out {
+            match act {
+                1 => {
+                    self.show_new_folder_dialog = true;
+                }
+                2 => {
+                    #[cfg(target_os = "windows")]
+                    {
+                        let _ = std::process::Command::new("powershell.exe")
+                            .arg("-NoExit")
+                            .arg("-Command")
+                            .arg(format!(
+                                "Set-Location -LiteralPath '{}'",
+                                self.current_dir.display()
+                            ))
+                            .spawn();
+                    }
+                }
+                3 => {
+                    self.focus_search_requested = true;
+                }
+                4 => {
+                    nav_to = Some(crate::core::resolve_recycle_bin_target());
+                }
+                _ => {}
+            }
+        }
 
         if let Some(path) = nav_to {
             self.navigate_to(path);

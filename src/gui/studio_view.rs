@@ -2495,6 +2495,7 @@ impl StudioView {
                     let mut inspect_req: Option<PathBuf> = None;
 
                     self.explorer_view.design_tokens = config.tokens();
+                    self.explorer_view.dashboard_slots = config.dashboard_slots.clone();
                     self.explorer_view.render(
                         ui,
                         &palette,

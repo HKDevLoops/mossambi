@@ -50,8 +50,9 @@ pub use action_journal::{
 };
 pub use async_worker::{AsyncWorkerPool, ItemOutcome, TaskUpdate};
 pub use config::{
-    Appearance, CornerStyle, DesignStyle, DesignTokens, DropActionPreference, ExplorerStyle,
-    GlassEffect, LookPreset, MossambiConfig, OutputMode, RowDensity, SidebarStyle, ThemeMode,
+    default_dashboard_slots, Appearance, CornerStyle, DashboardWidgetSlot, DesignStyle,
+    DesignTokens, DropActionPreference, ExplorerStyle, GlassEffect, LookPreset, MossambiConfig,
+    OutputMode, RowDensity, SidebarStyle, ThemeMode,
 };
 pub use conversion_queue::{
     ConversionQueue, QueueAction, QueueItem, QueueItemStatus, QueueSummary,
