@@ -1164,47 +1164,30 @@ impl PreferencesView {
                 let center = preview_rect.center();
                 let painter = ui.painter_at(preview_rect);
 
-                let n_slices = slices_copy.len().max(1);
+                let n_slices = slices_copy.len().clamp(1, 8);
                 let outer_r = (canvas_w * 0.38).clamp(70.0, 100.0);
                 let inner_r = (outer_r * 0.44).clamp(32.0, 46.0);
 
-                use std::f32::consts::PI;
-                let step_angle = 2.0 * PI / (n_slices as f32);
+                for (idx, slice) in slices_copy.iter().enumerate().take(n_slices) {
+                    let span = std::f32::consts::PI * 2.0 / (n_slices as f32);
+                    let r_mid = (inner_r + outer_r) * 0.5;
+                    let gap = (crate::widget::DEFAULT_WEDGE_GAP_PX / r_mid).clamp(0.01, 0.04);
+                    let mid_a = -std::f32::consts::PI / 2.0 + (idx as f32) * span;
+                    let a0 = mid_a - span * 0.5 + gap * 0.5;
+                    let a1 = mid_a + span * 0.5 - gap * 0.5;
 
-                for (idx, slice) in slices_copy.iter().enumerate() {
-                    let a0 = -PI / 2.0 + (idx as f32) * step_angle;
-                    let a1 = a0 + step_angle;
-                    let seg_steps = 16;
-                    let mut points = Vec::new();
-
-                    for s in 0..=seg_steps {
-                        let t = (s as f32) / (seg_steps as f32);
-                        let a = a0 + t * (a1 - a0);
-                        points.push(egui::pos2(
-                            center.x + outer_r * a.cos(),
-                            center.y + outer_r * a.sin(),
-                        ));
-                    }
-                    for s in (0..=seg_steps).rev() {
-                        let t = (s as f32) / (seg_steps as f32);
-                        let a = a0 + t * (a1 - a0);
-                        points.push(egui::pos2(
-                            center.x + inner_r * a.cos(),
-                            center.y + inner_r * a.sin(),
-                        ));
-                    }
-
+                    let pts = crate::widget::generate_capsule_polygon(
+                        center, inner_r, outer_r, a0, a1, 8.0, 5.0,
+                    );
                     painter.add(egui::Shape::convex_polygon(
-                        points,
+                        pts,
                         palette.card_bg,
                         Stroke::new(1.0_f32, palette.border),
                     ));
 
-                    let mid_a = (a0 + a1) * 0.5;
-                    let label_r = (inner_r + outer_r) * 0.5;
-                    let text_pos = egui::pos2(
-                        center.x + label_r * mid_a.cos(),
-                        center.y + label_r * mid_a.sin(),
+                    let text_pos = Pos2::new(
+                        center.x + r_mid * mid_a.cos(),
+                        center.y + r_mid * mid_a.sin(),
                     );
                     painter.text(
                         text_pos,
@@ -1221,7 +1204,7 @@ impl PreferencesView {
                 painter.text(
                     center,
                     Align2::CENTER_CENTER,
-                    format!("{}\n{}/12", profile_name, slices_copy.len()),
+                    format!("{}\n{}/8", profile_name, n_slices),
                     egui::FontId::proportional(design::type_scale::BODY_SM),
                     palette.accent,
                 );

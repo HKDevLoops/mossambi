@@ -626,3 +626,73 @@ fn test_scale_for_dpi_helper() {
     assert_eq!(scale_for_dpi(360.0, 2.0), 360.0);
     assert!((scale_for_dpi(360.333, 1.0) - 360.0).abs() < 1e-4);
 }
+
+#[test]
+fn test_open_animation_factors() {
+    use mossambi::widget::open_animation_factors;
+
+    let (s0, a0) = open_animation_factors(0.0);
+    assert!((s0 - 0.85).abs() < 1e-4);
+    assert!((a0 - 0.0).abs() < 1e-4);
+
+    let (s_mid, a_mid) = open_animation_factors(0.060);
+    assert!(s_mid > 0.85 && s_mid < 1.0);
+    assert!(a_mid > 0.0 && a_mid < 1.0);
+
+    let (s_end, a_end) = open_animation_factors(0.120);
+    assert_eq!(s_end, 1.0);
+    assert_eq!(a_end, 1.0);
+
+    let (s_over, a_over) = open_animation_factors(0.500);
+    assert_eq!(s_over, 1.0);
+    assert_eq!(a_over, 1.0);
+}
+
+#[test]
+fn test_hover_animation_transition() {
+    use mossambi::widget::{advance_hover_factor, hover_growth, HOVER_GROW_PX};
+
+    let f0 = advance_hover_factor(0.0, 1.0, 0.040);
+    assert!((f0 - 0.50).abs() < 1e-3);
+    assert_eq!(hover_growth(0.0), 0.0);
+    assert_eq!(hover_growth(1.0), HOVER_GROW_PX);
+    assert!((hover_growth(0.5) - 3.0).abs() < 1e-3);
+
+    let f1 = advance_hover_factor(f0, 1.0, 0.040);
+    assert!((f1 - 1.0).abs() < 1e-3);
+
+    let f_down = advance_hover_factor(1.0, 0.0, 0.040);
+    assert!((f_down - 0.50).abs() < 1e-3);
+}
+
+#[test]
+fn test_face_switch_factors() {
+    use mossambi::widget::face_switch_factors;
+    use std::f32::consts::PI;
+
+    let (rot0, a0) = face_switch_factors(0.0);
+    assert!((rot0 - (-PI / 9.0)).abs() < 1e-4);
+    assert!((a0 - 0.0).abs() < 1e-4);
+
+    let (rot_mid, a_mid) = face_switch_factors(0.090);
+    assert!(rot_mid > -PI / 9.0 && rot_mid < 0.0);
+    assert!(a_mid > 0.0 && a_mid < 1.0);
+
+    let (rot_end, a_end) = face_switch_factors(0.180);
+    assert_eq!(rot_end, 0.0);
+    assert_eq!(a_end, 1.0);
+}
+
+#[test]
+fn test_generate_capsule_polygon() {
+    use mossambi::widget::generate_capsule_polygon;
+    use std::f32::consts::PI;
+
+    let center = Pos2::new(180.0, 180.0);
+    let pts = generate_capsule_polygon(center, 60.0, 150.0, -PI / 4.0, PI / 4.0, 10.0, 6.0);
+    assert!(pts.len() >= 20);
+    for p in &pts {
+        let dist = (*p - center).length();
+        assert!((50.0..=160.0).contains(&dist));
+    }
+}

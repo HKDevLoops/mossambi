@@ -86,6 +86,8 @@ pub struct MossambiWidgetApp {
     pub drag_out_in_flight: bool,
     pub press_origin: Option<Pos2>,
     pub gesture_active: bool,
+    pub open_start: Instant,
+    pub hover_factor: f32,
 
     // Worker Channels
     pub result_rx: Receiver<WidgetResult>,
@@ -134,6 +136,8 @@ impl Default for MossambiWidgetApp {
             drag_out_in_flight: false,
             press_origin: None,
             gesture_active: false,
+            open_start: Instant::now(),
+            hover_factor: 0.0,
 
             result_rx: rx,
             result_tx: tx,
@@ -754,9 +758,54 @@ impl eframe::App for MossambiWidgetApp {
                 let donut_size = crate::widget::clamp_donut_diameter(cfg.donut.appearance.size);
                 let ppp = ctx.pixels_per_point();
                 let scaled_size = crate::widget::scale_for_dpi(donut_size, ppp);
-                self.geometry.outer_radius = (scaled_size * 0.36).clamp(100.0, 170.0);
-                self.geometry.inner_radius = cfg.donut.appearance.hole.clamp(30.0, 75.0);
+
+                // Open animation (120ms ease-out)
+                let (open_scale, open_alpha) = {
+                    let elapsed = self.open_start.elapsed().as_secs_f32();
+                    if elapsed < 0.120 {
+                        ctx.request_repaint();
+                        crate::widget::open_animation_factors(elapsed)
+                    } else {
+                        (1.0, 1.0)
+                    }
+                };
+
+                // Face switch animation (180ms smooth rotation & crossfade)
+                let (face_rot, face_alpha) = if let Some(start) = self.flip_start {
+                    let elapsed = start.elapsed().as_secs_f32();
+                    if elapsed < 0.180 {
+                        ctx.request_repaint();
+                        crate::widget::face_switch_factors(elapsed)
+                    } else {
+                        self.flip_start = None;
+                        (0.0, 1.0)
+                    }
+                } else {
+                    (0.0, 1.0)
+                };
+
+                // Hover transition (80ms smooth blend)
+                let target_hover = if self.hovered_carpel.is_some() {
+                    1.0
+                } else {
+                    0.0
+                };
+                self.hover_factor =
+                    crate::widget::advance_hover_factor(self.hover_factor, target_hover, dt);
+                if (self.hover_factor - target_hover).abs() > 0.001 {
+                    ctx.request_repaint();
+                }
+                let hover_growth_px = crate::widget::hover_growth(self.hover_factor);
+
+                self.geometry.outer_radius = (scaled_size * 0.36 * open_scale).clamp(80.0, 170.0);
+                self.geometry.inner_radius =
+                    (cfg.donut.appearance.hole * open_scale).clamp(25.0, 75.0);
                 self.geometry.hub_radius = self.geometry.inner_radius * 0.90;
+                self.geometry.anim_scale = open_scale;
+                self.geometry.anim_alpha = open_alpha * face_alpha;
+                self.geometry.anim_rotation = face_rot;
+                self.geometry.file_count = if self.current_file.is_some() { 1 } else { 0 };
+                self.geometry.category = self.current_category;
 
                 // Advance spring physics
                 crate::gui::anim::advance_with_settings(
@@ -888,9 +937,21 @@ impl eframe::App for MossambiWidgetApp {
                             (self.expanded_group, self.hovered_sub_petal)
                         {
                             self.trigger_sub_wedge(grp_idx, sub_idx);
-                        } else if self.geometry.hit_test_hub(pos) && !self.is_converting {
-                            if let Some(path) = rfd::FileDialog::new().pick_file() {
+                        } else if self.geometry.hit_test_hub(pos) {
+                            // Hub click = cancel
+                            if self.is_converting {
+                                self.is_converting = false;
+                                self.progress = 0.0;
+                            } else if self.expanded_group.is_some() {
+                                self.expanded_group = None;
+                                self.hovered_sub_petal = None;
+                            } else if self.current_file.is_some() {
+                                self.current_file = None;
+                                self.hovered_carpel = None;
+                            } else if let Some(path) = rfd::FileDialog::new().pick_file() {
                                 self.select_file(path);
+                            } else {
+                                close_requested = true;
                             }
                         } else if let Some(petal_idx) = self.hovered_carpel {
                             self.trigger_wedge(petal_idx);
@@ -902,14 +963,6 @@ impl eframe::App for MossambiWidgetApp {
                     if let Some(pos) = hover_pos {
                         self.show_context_menu = true;
                         self.context_menu_pos = pos;
-                    }
-                }
-
-                if let Some(start) = self.flip_start {
-                    if start.elapsed().as_secs_f32() < 0.20 {
-                        ctx.request_repaint();
-                    } else {
-                        self.flip_start = None;
                     }
                 }
 
@@ -977,7 +1030,7 @@ impl eframe::App for MossambiWidgetApp {
                     current_state,
                     self.hovered_carpel,
                     Some(&dynamic_hint),
-                    self.hover_pop_spring.value,
+                    hover_growth_px,
                     expanded_info,
                 );
 

@@ -36,6 +36,57 @@ pub const HOVER_GROW_PX: f32 = 6.0;
 pub const MARKING_MENU_MIN_DISTANCE: f32 = 24.0;
 pub const MAX_INNER_RING_WEDGES: usize = 8;
 
+/// Open animation progress (120ms ease-out).
+/// Returns (scale, alpha) where scale goes 0.85 -> 1.0 and alpha goes 0.0 -> 1.0.
+#[inline]
+pub fn open_animation_factors(elapsed_sec: f32) -> (f32, f32) {
+    const DURATION: f32 = 0.120;
+    if elapsed_sec >= DURATION {
+        (1.0, 1.0)
+    } else {
+        let p = (elapsed_sec / DURATION).clamp(0.0, 1.0);
+        let ease = 1.0 - (1.0 - p) * (1.0 - p);
+        let scale = 0.85 + 0.15 * ease;
+        let alpha = ease;
+        (scale, alpha)
+    }
+}
+
+/// Advance hover transition factor toward `target` (0.0 or 1.0) over 80ms.
+#[inline]
+pub fn advance_hover_factor(current: f32, target: f32, dt: f32) -> f32 {
+    const HOVER_DURATION: f32 = 0.080;
+    let step = dt / HOVER_DURATION;
+    if target > current {
+        (current + step).min(target)
+    } else {
+        (current - step).max(target)
+    }
+}
+
+/// Computes hover growth in pixels based on the hover factor (0.0..=1.0).
+/// Hovered wedge grows by up to HOVER_GROW_PX (6.0px).
+#[inline]
+pub fn hover_growth(factor: f32) -> f32 {
+    HOVER_GROW_PX * factor.clamp(0.0, 1.0)
+}
+
+/// Face switch transition (180ms smooth rotation and crossfade).
+/// Returns (rotation_radians, alpha) where rotation goes -PI/9 -> 0.0 and alpha goes 0.0 -> 1.0.
+#[inline]
+pub fn face_switch_factors(elapsed_sec: f32) -> (f32, f32) {
+    const DURATION: f32 = 0.180;
+    if elapsed_sec >= DURATION {
+        (0.0, 1.0)
+    } else {
+        let p = (elapsed_sec / DURATION).clamp(0.0, 1.0);
+        let t = p * p * (3.0 - 2.0 * p);
+        let rot = (1.0 - t) * (-std::f32::consts::PI / 9.0);
+        let alpha = t;
+        (rot, alpha)
+    }
+}
+
 /// Clamps donut diameter to the supported range [280.0, 480.0].
 pub fn clamp_donut_diameter(d: f32) -> f32 {
     d.clamp(MIN_DONUT_DIAMETER, MAX_DONUT_DIAMETER)
@@ -289,6 +340,11 @@ pub struct RadialWidgetGeometry {
     pub inner_radius: f32, // ~68.0 px
     pub hub_radius: f32,   // ~62.0 px
     pub theme: WidgetTheme,
+    pub file_count: usize,
+    pub category: crate::core::FileCategory,
+    pub anim_scale: f32,
+    pub anim_alpha: f32,
+    pub anim_rotation: f32,
 }
 
 impl Default for RadialWidgetGeometry {
@@ -299,6 +355,11 @@ impl Default for RadialWidgetGeometry {
             inner_radius: 68.0,
             hub_radius: 62.0,
             theme: WidgetTheme::Light,
+            file_count: 0,
+            category: crate::core::FileCategory::Image,
+            anim_scale: 1.0,
+            anim_alpha: 1.0,
+            anim_rotation: 0.0,
         }
     }
 }
@@ -312,6 +373,11 @@ impl RadialWidgetGeometry {
             inner_radius: r * 0.36,
             hub_radius: r * 0.32,
             theme: WidgetTheme::Light,
+            file_count: 0,
+            category: crate::core::FileCategory::Image,
+            anim_scale: 1.0,
+            anim_alpha: 1.0,
+            anim_rotation: 0.0,
         }
     }
 
@@ -405,8 +471,9 @@ impl RadialWidgetGeometry {
         expanded_group: Option<(usize, &[&str], f32, Option<usize>)>,
     ) {
         let sector_span = (2.0 * PI) / 8.0;
-        // Aesthetic radial gap between petals (~3.0 degrees)
-        let gap = 0.052;
+        let r_mid = (self.inner_radius + self.outer_radius) * 0.5;
+        // 2px linear gap between petals
+        let gap = (DEFAULT_WEDGE_GAP_PX / r_mid).clamp(0.01, 0.04);
 
         // Determine which petal is active/hovered
         let active_petal = match state {
@@ -444,10 +511,10 @@ impl RadialWidgetGeometry {
             let label = sectors.get(i).copied().unwrap_or("FMT");
             let is_hovered = active_petal == Some(i);
 
-            // Angle of sector: 0 is North (-PI/2)
-            let center_angle = -PI / 2.0 + (i as f32) * sector_span;
-            let start_angle = center_angle - (sector_span / 2.0) + gap;
-            let end_angle = center_angle + (sector_span / 2.0) - gap;
+            // Angle of sector: 0 is North (-PI/2) + animation rotation
+            let center_angle = -PI / 2.0 + (i as f32) * sector_span + self.anim_rotation;
+            let start_angle = center_angle - (sector_span / 2.0) + gap * 0.5;
+            let end_angle = center_angle + (sector_span / 2.0) - gap * 0.5;
 
             self.render_single_petal(
                 painter,
@@ -676,12 +743,31 @@ impl RadialWidgetGeometry {
             )
         };
 
+        let alpha_mul = self.anim_alpha.clamp(0.0, 1.0);
+        let scale_alpha = |c: Color32| -> Color32 {
+            Color32::from_rgba_premultiplied(
+                ((c.r() as f32) * alpha_mul) as u8,
+                ((c.g() as f32) * alpha_mul) as u8,
+                ((c.b() as f32) * alpha_mul) as u8,
+                ((c.a() as f32) * alpha_mul) as u8,
+            )
+        };
+        let fill_color = scale_alpha(fill_color);
+        let border_stroke = Stroke::new(border_stroke.width, scale_alpha(border_stroke.color));
+        let text_color = scale_alpha(text_color);
+        let icon_color = scale_alpha(icon_color);
+
         // Construct 100% organic rounded capsule polygon points
         let outer_corner_r = 13.0_f32;
         let inner_corner_r = 8.5_f32;
+        let cur_outer = if is_hovered {
+            self.outer_radius + hover_pop.min(HOVER_GROW_PX)
+        } else {
+            self.outer_radius
+        };
         let base_pts = self.generate_petal_capsule_points(
             self.inner_radius,
-            self.outer_radius,
+            cur_outer,
             start_angle,
             end_angle,
             outer_corner_r,
@@ -796,141 +882,15 @@ impl RadialWidgetGeometry {
         corner_r_outer: f32,
         corner_r_inner: f32,
     ) -> Vec<Pos2> {
-        let mut pts = Vec::with_capacity(36);
-
-        let d_theta_outer = corner_r_outer / outer_r;
-        let d_rad_outer = corner_r_outer;
-
-        let d_theta_inner = corner_r_inner / inner_r;
-        let d_rad_inner = corner_r_inner;
-
-        // 1. Left Radial Edge (from inner to outer)
-        let rad_left_in = Pos2::new(
-            self.center.x + (inner_r + d_rad_inner) * start_angle.cos(),
-            self.center.y + (inner_r + d_rad_inner) * start_angle.sin(),
-        );
-        let rad_left_out = Pos2::new(
-            self.center.x + (outer_r - d_rad_outer) * start_angle.cos(),
-            self.center.y + (outer_r - d_rad_outer) * start_angle.sin(),
-        );
-        pts.push(rad_left_in);
-        pts.push(rad_left_out);
-
-        // 2. Outer-Left Corner Fillet
-        let corner_ol_v = Pos2::new(
-            self.center.x + outer_r * start_angle.cos(),
-            self.center.y + outer_r * start_angle.sin(),
-        );
-        let arc_ol_start = Pos2::new(
-            self.center.x + outer_r * (start_angle + d_theta_outer).cos(),
-            self.center.y + outer_r * (start_angle + d_theta_outer).sin(),
-        );
-        pts.push(quadratic_bezier(
-            rad_left_out,
-            corner_ol_v,
-            arc_ol_start,
-            0.45,
-        ));
-        pts.push(quadratic_bezier(
-            rad_left_out,
-            corner_ol_v,
-            arc_ol_start,
-            0.85,
-        ));
-
-        // 3. Outer Circular Arc
-        let num_outer_arc = 6;
-        for s in 0..=num_outer_arc {
-            let t = s as f32 / num_outer_arc as f32;
-            let a = (start_angle + d_theta_outer)
-                + t * (end_angle - d_theta_outer - (start_angle + d_theta_outer));
-            pts.push(Pos2::new(
-                self.center.x + outer_r * a.cos(),
-                self.center.y + outer_r * a.sin(),
-            ));
-        }
-
-        // 4. Outer-Right Corner Fillet
-        let arc_or_end = Pos2::new(
-            self.center.x + outer_r * (end_angle - d_theta_outer).cos(),
-            self.center.y + outer_r * (end_angle - d_theta_outer).sin(),
-        );
-        let corner_or_v = Pos2::new(
-            self.center.x + outer_r * end_angle.cos(),
-            self.center.y + outer_r * end_angle.sin(),
-        );
-        let rad_right_out = Pos2::new(
-            self.center.x + (outer_r - d_rad_outer) * end_angle.cos(),
-            self.center.y + (outer_r - d_rad_outer) * end_angle.sin(),
-        );
-        pts.push(quadratic_bezier(
-            arc_or_end,
-            corner_or_v,
-            rad_right_out,
-            0.45,
-        ));
-        pts.push(quadratic_bezier(
-            arc_or_end,
-            corner_or_v,
-            rad_right_out,
-            0.85,
-        ));
-
-        // 5. Right Radial Edge (from outer to inner)
-        let rad_right_in = Pos2::new(
-            self.center.x + (inner_r + d_rad_inner) * end_angle.cos(),
-            self.center.y + (inner_r + d_rad_inner) * end_angle.sin(),
-        );
-        pts.push(rad_right_out);
-        pts.push(rad_right_in);
-
-        // 6. Inner-Right Corner Fillet
-        let corner_ir_v = Pos2::new(
-            self.center.x + inner_r * end_angle.cos(),
-            self.center.y + inner_r * end_angle.sin(),
-        );
-        let arc_ir_start = Pos2::new(
-            self.center.x + inner_r * (end_angle - d_theta_inner).cos(),
-            self.center.y + inner_r * (end_angle - d_theta_inner).sin(),
-        );
-        pts.push(quadratic_bezier(
-            rad_right_in,
-            corner_ir_v,
-            arc_ir_start,
-            0.45,
-        ));
-        pts.push(quadratic_bezier(
-            rad_right_in,
-            corner_ir_v,
-            arc_ir_start,
-            0.85,
-        ));
-
-        // 7. Inner Circular Arc
-        let num_inner_arc = 4;
-        for s in 0..=num_inner_arc {
-            let t = s as f32 / num_inner_arc as f32;
-            let a = (end_angle - d_theta_inner)
-                - t * ((end_angle - d_theta_inner) - (start_angle + d_theta_inner));
-            pts.push(Pos2::new(
-                self.center.x + inner_r * a.cos(),
-                self.center.y + inner_r * a.sin(),
-            ));
-        }
-
-        // 8. Inner-Left Corner Fillet
-        let arc_il_end = Pos2::new(
-            self.center.x + inner_r * (start_angle + d_theta_inner).cos(),
-            self.center.y + inner_r * (start_angle + d_theta_inner).sin(),
-        );
-        let corner_il_v = Pos2::new(
-            self.center.x + inner_r * start_angle.cos(),
-            self.center.y + inner_r * start_angle.sin(),
-        );
-        pts.push(quadratic_bezier(arc_il_end, corner_il_v, rad_left_in, 0.45));
-        pts.push(quadratic_bezier(arc_il_end, corner_il_v, rad_left_in, 0.85));
-
-        pts
+        generate_capsule_polygon(
+            self.center,
+            inner_r,
+            outer_r,
+            start_angle,
+            end_angle,
+            corner_r_outer,
+            corner_r_inner,
+        )
     }
 
     /// Renders vector glyph icons for each petal (Image, Document, Camera, Stack, Video, Audio)
@@ -1353,37 +1313,74 @@ impl RadialWidgetGeometry {
 
                 painter.circle(self.center, self.hub_radius, hub_fill, hub_stroke);
 
-                // Draw crisp upward arrow matching Image reference.png
-                let arrow_center = self.center - Vec2::new(0.0, 10.0);
-                let shaft_top = arrow_center - Vec2::new(0.0, 8.5);
-                let shaft_bottom = arrow_center + Vec2::new(0.0, 7.5);
-                let arrow_stroke = Stroke::new(2.4_f32, arrow_color);
+                if self.file_count > 0 {
+                    // Show domain icon + file count ("1 file" or "N files")
+                    let icon_pos = self.center - Vec2::new(0.0, 10.0);
+                    let cat_label = match self.category {
+                        crate::core::FileCategory::Image => "JPG",
+                        crate::core::FileCategory::Audio => "MP3",
+                        crate::core::FileCategory::Video => "MP4",
+                        crate::core::FileCategory::Document
+                        | crate::core::FileCategory::Spreadsheet
+                        | crate::core::FileCategory::Presentation => "PDF",
+                        crate::core::FileCategory::Archive => "ZIP",
+                        crate::core::FileCategory::Cad | crate::core::FileCategory::Models3D => {
+                            "3D"
+                        }
+                        crate::core::FileCategory::Fonts => "FONT",
+                        crate::core::FileCategory::Data
+                        | crate::core::FileCategory::Email
+                        | crate::core::FileCategory::Geo
+                        | crate::core::FileCategory::Subtitle
+                        | crate::core::FileCategory::Unknown => "FILE",
+                    };
+                    self.render_petal_icon(painter, icon_pos, cat_label, text_color);
 
-                painter.line_segment([shaft_top, shaft_bottom], arrow_stroke);
-                painter.line_segment(
-                    [shaft_top, arrow_center + Vec2::new(-5.0, -3.5)],
-                    arrow_stroke,
-                );
-                painter.line_segment(
-                    [shaft_top, arrow_center + Vec2::new(5.0, -3.5)],
-                    arrow_stroke,
-                );
+                    let count_str = if self.file_count == 1 {
+                        "1 file".to_string()
+                    } else {
+                        format!("{} files", self.file_count)
+                    };
+                    painter.text(
+                        self.center + Vec2::new(0.0, 12.0),
+                        egui::Align2::CENTER_CENTER,
+                        count_str,
+                        FontId::proportional(12.5),
+                        text_color,
+                    );
+                } else {
+                    // Draw crisp upward arrow matching Image reference.png
+                    let arrow_center = self.center - Vec2::new(0.0, 10.0);
+                    let shaft_top = arrow_center - Vec2::new(0.0, 8.5);
+                    let shaft_bottom = arrow_center + Vec2::new(0.0, 7.5);
+                    let arrow_stroke = Stroke::new(2.4_f32, arrow_color);
 
-                // Subtext "Drop files \n here"
-                painter.text(
-                    self.center + Vec2::new(0.0, 10.0),
-                    egui::Align2::CENTER_CENTER,
-                    "Drop files",
-                    FontId::proportional(13.0),
-                    text_color,
-                );
-                painter.text(
-                    self.center + Vec2::new(0.0, 23.5),
-                    egui::Align2::CENTER_CENTER,
-                    "here",
-                    FontId::proportional(12.0),
-                    text_color,
-                );
+                    painter.line_segment([shaft_top, shaft_bottom], arrow_stroke);
+                    painter.line_segment(
+                        [shaft_top, arrow_center + Vec2::new(-5.0, -3.5)],
+                        arrow_stroke,
+                    );
+                    painter.line_segment(
+                        [shaft_top, arrow_center + Vec2::new(5.0, -3.5)],
+                        arrow_stroke,
+                    );
+
+                    // Subtext "Drop files \n here"
+                    painter.text(
+                        self.center + Vec2::new(0.0, 10.0),
+                        egui::Align2::CENTER_CENTER,
+                        "Drop files",
+                        FontId::proportional(13.0),
+                        text_color,
+                    );
+                    painter.text(
+                        self.center + Vec2::new(0.0, 23.5),
+                        egui::Align2::CENTER_CENTER,
+                        "here",
+                        FontId::proportional(12.0),
+                        text_color,
+                    );
+                }
 
                 if let Some(hint) = hub_hint {
                     let pill_rect = Rect::from_center_size(
@@ -1428,4 +1425,152 @@ fn quadratic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, t: f32) -> Pos2 {
 #[inline]
 fn offset_points(pts: &[Pos2], delta: Vec2) -> Vec<Pos2> {
     pts.iter().map(|&p| p + delta).collect()
+}
+
+/// Generates a smooth, closed, organic rounded capsule polygon for a single petal.
+/// Bridges the outer arc, left radial edge, inner arc, and right radial edge with smooth corner fillets.
+pub fn generate_capsule_polygon(
+    center: Pos2,
+    inner_r: f32,
+    outer_r: f32,
+    start_angle: f32,
+    end_angle: f32,
+    corner_r_outer: f32,
+    corner_r_inner: f32,
+) -> Vec<Pos2> {
+    let mut pts = Vec::with_capacity(36);
+
+    let d_theta_outer = corner_r_outer / outer_r;
+    let d_rad_outer = corner_r_outer;
+
+    let d_theta_inner = corner_r_inner / inner_r;
+    let d_rad_inner = corner_r_inner;
+
+    // 1. Left Radial Edge (from inner to outer)
+    let rad_left_in = Pos2::new(
+        center.x + (inner_r + d_rad_inner) * start_angle.cos(),
+        center.y + (inner_r + d_rad_inner) * start_angle.sin(),
+    );
+    let rad_left_out = Pos2::new(
+        center.x + (outer_r - d_rad_outer) * start_angle.cos(),
+        center.y + (outer_r - d_rad_outer) * start_angle.sin(),
+    );
+    pts.push(rad_left_in);
+    pts.push(rad_left_out);
+
+    // 2. Outer-Left Corner Fillet
+    let corner_ol_v = Pos2::new(
+        center.x + outer_r * start_angle.cos(),
+        center.y + outer_r * start_angle.sin(),
+    );
+    let arc_ol_start = Pos2::new(
+        center.x + outer_r * (start_angle + d_theta_outer).cos(),
+        center.y + outer_r * (start_angle + d_theta_outer).sin(),
+    );
+    pts.push(quadratic_bezier(
+        rad_left_out,
+        corner_ol_v,
+        arc_ol_start,
+        0.45,
+    ));
+    pts.push(quadratic_bezier(
+        rad_left_out,
+        corner_ol_v,
+        arc_ol_start,
+        0.85,
+    ));
+
+    // 3. Outer Circular Arc
+    let num_outer_arc = 6;
+    for s in 0..=num_outer_arc {
+        let t = s as f32 / num_outer_arc as f32;
+        let a = (start_angle + d_theta_outer)
+            + t * (end_angle - d_theta_outer - (start_angle + d_theta_outer));
+        pts.push(Pos2::new(
+            center.x + outer_r * a.cos(),
+            center.y + outer_r * a.sin(),
+        ));
+    }
+
+    // 4. Outer-Right Corner Fillet
+    let arc_or_end = Pos2::new(
+        center.x + outer_r * (end_angle - d_theta_outer).cos(),
+        center.y + outer_r * (end_angle - d_theta_outer).sin(),
+    );
+    let corner_or_v = Pos2::new(
+        center.x + outer_r * end_angle.cos(),
+        center.y + outer_r * end_angle.sin(),
+    );
+    let rad_right_out = Pos2::new(
+        center.x + (outer_r - d_rad_outer) * end_angle.cos(),
+        center.y + (outer_r - d_rad_outer) * end_angle.sin(),
+    );
+    pts.push(quadratic_bezier(
+        arc_or_end,
+        corner_or_v,
+        rad_right_out,
+        0.45,
+    ));
+    pts.push(quadratic_bezier(
+        arc_or_end,
+        corner_or_v,
+        rad_right_out,
+        0.85,
+    ));
+
+    // 5. Right Radial Edge (from outer to inner)
+    let rad_right_in = Pos2::new(
+        center.x + (inner_r + d_rad_inner) * end_angle.cos(),
+        center.y + (inner_r + d_rad_inner) * end_angle.sin(),
+    );
+    pts.push(rad_right_out);
+    pts.push(rad_right_in);
+
+    // 6. Inner-Right Corner Fillet
+    let corner_ir_v = Pos2::new(
+        center.x + inner_r * end_angle.cos(),
+        center.y + inner_r * end_angle.sin(),
+    );
+    let arc_ir_start = Pos2::new(
+        center.x + inner_r * (end_angle - d_theta_inner).cos(),
+        center.y + inner_r * (end_angle - d_theta_inner).sin(),
+    );
+    pts.push(quadratic_bezier(
+        rad_right_in,
+        corner_ir_v,
+        arc_ir_start,
+        0.45,
+    ));
+    pts.push(quadratic_bezier(
+        rad_right_in,
+        corner_ir_v,
+        arc_ir_start,
+        0.85,
+    ));
+
+    // 7. Inner Circular Arc
+    let num_inner_arc = 4;
+    for s in 0..=num_inner_arc {
+        let t = s as f32 / num_inner_arc as f32;
+        let a = (end_angle - d_theta_inner)
+            - t * ((end_angle - d_theta_inner) - (start_angle + d_theta_inner));
+        pts.push(Pos2::new(
+            center.x + inner_r * a.cos(),
+            center.y + inner_r * a.sin(),
+        ));
+    }
+
+    // 8. Inner-Left Corner Fillet
+    let arc_il_end = Pos2::new(
+        center.x + inner_r * (start_angle + d_theta_inner).cos(),
+        center.y + inner_r * (start_angle + d_theta_inner).sin(),
+    );
+    let corner_il_v = Pos2::new(
+        center.x + inner_r * start_angle.cos(),
+        center.y + inner_r * start_angle.sin(),
+    );
+    pts.push(quadratic_bezier(arc_il_end, corner_il_v, rad_left_in, 0.45));
+    pts.push(quadratic_bezier(arc_il_end, corner_il_v, rad_left_in, 0.85));
+
+    pts
 }
