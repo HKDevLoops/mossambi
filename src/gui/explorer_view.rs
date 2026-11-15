@@ -721,6 +721,7 @@ pub struct ExplorerView {
     // Properties Modal State
     pub properties_item: Option<FileItem>,
     pub properties_sha256: Option<(PathBuf, String)>,
+    pub properties_rename_buf: String,
 
     // Vim & Emacs Navigation State
     pub focused_row: usize,
@@ -1089,6 +1090,7 @@ impl Default for ExplorerView {
             last_triggered_gesture: None,
             properties_item: None,
             properties_sha256: None,
+            properties_rename_buf: String::new(),
             focused_row: 0,
             last_g_press: None,
             focus_search_requested: false,
@@ -6220,13 +6222,7 @@ impl ExplorerView {
                                 Pos2::new(name_x + 2.0 + icon_side * 0.5, row_rect.center().y),
                                 Vec2::splat(icon_side),
                             );
-                            crate::core::icon_packs::paint_icon(
-                                ui,
-                                self.icon_pack,
-                                icon_glyph,
-                                icon_rect,
-                                icon_accent,
-                            );
+                            self.paint_item_icon(ui, item, icon_glyph, icon_rect, icon_accent);
                             if item.is_symlink {
                                 paint_alias_badge(ui.painter(), icon_rect);
                             }
@@ -7240,13 +7236,7 @@ impl ExplorerView {
                                             spec.is_code,
                                             spec.color_rgb,
                                         );
-                                    crate::core::icon_packs::paint_icon(
-                                        ui,
-                                        self.icon_pack,
-                                        mglyph,
-                                        mrect,
-                                        maccent,
-                                    );
+                                    self.paint_item_icon(ui, &item, mglyph, mrect, maccent);
                                     ui.vertical(|ui| {
                                         ui.label(
                                             egui::RichText::new(truncate_end(&item.name, 32))
@@ -8259,8 +8249,8 @@ impl ExplorerView {
                                             Pos2::new(row_rect.left() + 16.0, row_rect.center().y),
                                             Vec2::splat(22.0),
                                         );
-                                        crate::core::icon_packs::paint_icon(
-                                            ui, icon_pack, icon_glyph, icon_rect, accent_rgb,
+                                        self.paint_item_icon(
+                                            ui, item, icon_glyph, icon_rect, accent_rgb,
                                         );
                                         if item.is_symlink {
                                             paint_alias_badge(ui.painter(), icon_rect);
@@ -9111,7 +9101,7 @@ impl ExplorerView {
                 icon_spec.color_rgb,
             );
             let (irect, _) = ui.allocate_exact_size(Vec2::splat(72.0), egui::Sense::hover());
-            crate::core::icon_packs::paint_icon(ui, self.icon_pack, glyph, irect, accent);
+            self.paint_item_icon(ui, item, glyph, irect, accent);
             ui.add_space(4.0);
             ui.label(
                 egui::RichText::new(&item.name)
@@ -9977,236 +9967,376 @@ fn compute_file_sha256(path: &Path) -> Option<String> {
     Some(hex)
 }
 
-fn render_file_info_metric_cards(
+fn format_system_time_short(st: std::time::SystemTime) -> String {
+    let dt: chrono::DateTime<chrono::Local> = st.into();
+    dt.format("%d %b %Y, %H:%M").to_string()
+}
+
+fn format_system_time_full(st: std::time::SystemTime) -> String {
+    let dt: chrono::DateTime<chrono::Local> = st.into();
+    dt.format("%Y-%m-%d %H:%M:%S (%Z)").to_string()
+}
+
+fn render_storage_visual(ui: &mut Ui, palette: &ThemePalette, logical_bytes: u64) {
+    let cluster_size = 4096u64;
+    let on_disk_bytes = if logical_bytes > 0 {
+        logical_bytes.div_ceil(cluster_size) * cluster_size
+    } else {
+        0
+    };
+    let efficiency = if on_disk_bytes > 0 {
+        ((logical_bytes as f64 / on_disk_bytes as f64) * 100.0).min(100.0)
+    } else {
+        100.0
+    };
+
+    let avail_w = ui.available_width();
+    let (card_rect, resp) = ui.allocate_exact_size(Vec2::new(avail_w, 64.0), egui::Sense::hover());
+    ui.painter().rect_filled(
+        card_rect,
+        Rounding::same(design::radius::SM),
+        palette.surface_2,
+    );
+    ui.painter().rect_stroke(
+        card_rect,
+        Rounding::same(design::radius::SM),
+        Stroke::new(1.0_f32, palette.border),
+    );
+
+    let col_w = (card_rect.width() - 16.0) * 0.5;
+    // Left column: Logical Size
+    let left_top = egui::pos2(card_rect.left() + 10.0, card_rect.top() + 8.0);
+    ui.painter().text(
+        left_top,
+        egui::Align2::LEFT_TOP,
+        "Logical Size",
+        egui::FontId::proportional(design::type_scale::MICRO),
+        palette.text_muted,
+    );
+    let left_val = egui::pos2(card_rect.left() + 10.0, card_rect.top() + 22.0);
+    ui.painter().text(
+        left_val,
+        egui::Align2::LEFT_TOP,
+        format_file_size(logical_bytes),
+        egui::FontId::proportional(design::type_scale::BODY),
+        palette.text_primary,
+    );
+    let left_sub = egui::pos2(card_rect.left() + 10.0, card_rect.top() + 42.0);
+    ui.painter().text(
+        left_sub,
+        egui::Align2::LEFT_TOP,
+        format!("{} bytes", format_number_commas(logical_bytes)),
+        egui::FontId::monospace(10.0),
+        palette.text_secondary,
+    );
+
+    // Right column: On-Disk Allocation
+    let right_top = egui::pos2(card_rect.left() + col_w + 16.0, card_rect.top() + 8.0);
+    ui.painter().text(
+        right_top,
+        egui::Align2::LEFT_TOP,
+        "On-Disk Allocation",
+        egui::FontId::proportional(design::type_scale::MICRO),
+        palette.text_muted,
+    );
+    let right_val = egui::pos2(card_rect.left() + col_w + 16.0, card_rect.top() + 22.0);
+    ui.painter().text(
+        right_val,
+        egui::Align2::LEFT_TOP,
+        format_file_size(on_disk_bytes),
+        egui::FontId::proportional(design::type_scale::BODY),
+        palette.text_primary,
+    );
+    let right_sub = egui::pos2(card_rect.left() + col_w + 16.0, card_rect.top() + 42.0);
+    ui.painter().text(
+        right_sub,
+        egui::Align2::LEFT_TOP,
+        format!("{:.1}% cluster efficiency", efficiency),
+        egui::FontId::proportional(design::type_scale::MICRO),
+        palette.accent,
+    );
+
+    resp.on_hover_text(format!(
+        "Storage breakdown:\n- Logical data size: {} bytes\n- Disk allocated: {} bytes (in 4KB filesystem clusters)\n- Storage packing efficiency: {:.2}%",
+        format_number_commas(logical_bytes),
+        format_number_commas(on_disk_bytes),
+        efficiency
+    ));
+}
+
+fn render_parent_folder_bar(
     ui: &mut Ui,
     palette: &ThemePalette,
-    item: &FileItem,
-    icon_spec: &crate::core::FileIconSpec,
+    item_bytes: u64,
+    parent_total_bytes: u64,
 ) {
-    let avail_w = ui.available_width();
-    let single_col = avail_w < 240.0;
-    let card_w = if single_col {
-        avail_w
-    } else {
-        ((avail_w - 8.0) / 2.0).floor().max(100.0)
-    };
-    let card_h = 56.0_f32;
+    let total = parent_total_bytes.max(item_bytes).max(1);
+    let ratio = (item_bytes as f32 / total as f32).clamp(0.001, 1.0);
+    let pct = ratio * 100.0;
 
-    let render_card = |ui: &mut Ui,
-                       tag: &str,
-                       val: String,
-                       sub: &str,
-                       is_mono: bool,
-                       hover_cb: Box<dyn FnOnce(&mut Ui)>| {
-        let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, card_h), egui::Sense::hover());
-        let is_hovered = resp.hovered();
-        let bg = if is_hovered {
-            palette.card_hover
-        } else {
-            palette.surface_2
-        };
-        ui.painter()
-            .rect_filled(rect, Rounding::same(design::radius::SM), bg);
-        ui.painter().rect_stroke(
-            rect,
-            Rounding::same(design::radius::SM),
-            Stroke::new(
-                1.0_f32,
-                if is_hovered {
+    let avail_w = ui.available_width();
+    let bar_h = 8.0_f32;
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(avail_w, bar_h), egui::Sense::hover());
+
+    ui.painter()
+        .rect_filled(rect, Rounding::same(4.0), palette.surface_2);
+    let filled_w = (rect.width() * ratio).max(4.0);
+    let filled_rect = Rect::from_min_size(rect.min, Vec2::new(filled_w, bar_h));
+    ui.painter()
+        .rect_filled(filled_rect, Rounding::same(4.0), palette.accent);
+
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(format!(
+                "{:.1}% of parent folder contents ({})",
+                pct,
+                format_file_size(total)
+            ))
+            .size(design::type_scale::MICRO)
+            .color(palette.text_secondary),
+        );
+    });
+
+    resp.on_hover_text(format!(
+        "Proportion of parent folder:\n- This item: {} bytes ({})\n- Total folder items: {} bytes ({})\n- Ratio: {:.2}%",
+        format_number_commas(item_bytes),
+        format_file_size(item_bytes),
+        format_number_commas(total),
+        format_file_size(total),
+        pct
+    ));
+}
+
+fn render_timeline_dots(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    created: Option<std::time::SystemTime>,
+    modified: Option<std::time::SystemTime>,
+    accessed: Option<std::time::SystemTime>,
+) {
+    let events = [
+        ("Created", created),
+        ("Modified", modified),
+        ("Accessed", accessed),
+    ];
+
+    ui.vertical(|ui| {
+        for (i, (label, time_opt)) in events.iter().enumerate() {
+            ui.horizontal(|ui| {
+                // Circular timeline node
+                let (node_rect, node_resp) =
+                    ui.allocate_exact_size(Vec2::splat(12.0), egui::Sense::hover());
+                let is_mod = *label == "Modified";
+                let dot_color = if is_mod {
                     palette.accent
                 } else {
-                    palette.border
-                },
-            ),
-        );
+                    palette.text_secondary
+                };
+                ui.painter()
+                    .circle_filled(node_rect.center(), 3.5, dot_color);
+                ui.painter().circle_stroke(
+                    node_rect.center(),
+                    4.5,
+                    Stroke::new(1.0_f32, palette.border),
+                );
 
-        let tag_pos = egui::Pos2::new(rect.left() + 8.0, rect.top() + 6.0);
-        ui.painter().text(
-            tag_pos,
-            egui::Align2::LEFT_TOP,
-            tag,
-            egui::FontId::monospace(10.0),
-            palette.accent,
-        );
+                let (short_text, full_text) = if let Some(t) = time_opt {
+                    (format_system_time_short(*t), format_system_time_full(*t))
+                } else {
+                    ("--".to_string(), "Timestamp not available".to_string())
+                };
 
-        let val_font = if is_mono {
-            egui::FontId::monospace(design::type_scale::BODY_SM)
+                let resp = ui.label(
+                    egui::RichText::new(format!("{}: {}", label, short_text))
+                        .size(design::type_scale::BODY_SM)
+                        .color(if is_mod {
+                            palette.text_primary
+                        } else {
+                            palette.text_secondary
+                        }),
+                );
+
+                resp.on_hover_text(format!("{} exact timestamp:\n{}", label, full_text));
+                node_resp.on_hover_text(format!("{} exact timestamp:\n{}", label, full_text));
+            });
+
+            // Connector line between nodes
+            if i < events.len() - 1 {
+                let (line_rect, _) =
+                    ui.allocate_exact_size(Vec2::new(12.0, 6.0), egui::Sense::hover());
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(line_rect.center().x, line_rect.top()),
+                        egui::pos2(line_rect.center().x, line_rect.bottom()),
+                    ],
+                    Stroke::new(1.5_f32, palette.border),
+                );
+            }
+        }
+    });
+}
+
+fn render_permission_chips(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    meta: Option<&std::fs::Metadata>,
+    octal_str: &str,
+) {
+    let is_readonly = meta.map(|m| m.permissions().readonly()).unwrap_or(false);
+
+    let chips = [
+        ("Read", "Allowed", true),
+        (
+            "Write",
+            if is_readonly { "Read-Only" } else { "Allowed" },
+            !is_readonly,
+        ),
+        ("POSIX", octal_str, false),
+        ("Owner", "Current User", false),
+        ("Access", "Private", false),
+    ];
+
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+        for (category, value, is_good) in chips {
+            let label = format!("{}: {}", category, value);
+            let chip_w = (label.len() as f32 * 7.0 + 16.0).max(64.0);
+            let (rect, resp) =
+                ui.allocate_exact_size(Vec2::new(chip_w, 22.0), egui::Sense::hover());
+            let fill = if is_good {
+                Color32::from_rgba_unmultiplied(34, 197, 94, if palette.is_dark { 25 } else { 35 })
+            } else {
+                palette.surface_2
+            };
+            ui.painter()
+                .rect_filled(rect, Rounding::same(design::radius::PILL), fill);
+            ui.painter().rect_stroke(
+                rect,
+                Rounding::same(design::radius::PILL),
+                Stroke::new(
+                    1.0_f32,
+                    if is_good {
+                        Color32::from_rgb(34, 197, 94)
+                    } else {
+                        palette.border
+                    },
+                ),
+            );
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                &label,
+                egui::FontId::proportional(design::type_scale::MICRO),
+                palette.text_primary,
+            );
+            resp.on_hover_text(format!("Filesystem access permission: {}", label));
+        }
+    });
+}
+
+fn render_open_with_section(ui: &mut Ui, palette: &ThemePalette, extension: &str) {
+    let app_opt = crate::core::shell_icons::get_default_app_for_extension(extension);
+
+    let (card_rect, resp) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 48.0), egui::Sense::hover());
+    ui.painter().rect_filled(
+        card_rect,
+        Rounding::same(design::radius::SM),
+        palette.surface_2,
+    );
+    ui.painter().rect_stroke(
+        card_rect,
+        Rounding::same(design::radius::SM),
+        Stroke::new(1.0_f32, palette.border),
+    );
+
+    if let Some((app_name, exe_path)) = &app_opt {
+        // App shell icon
+        let icon_rect = Rect::from_center_size(
+            egui::pos2(card_rect.left() + 20.0, card_rect.center().y),
+            Vec2::splat(28.0),
+        );
+        let tex_opt =
+            crate::core::shell_icons::get_or_request_shell_icon(ui.ctx(), exe_path, false, false);
+        if let Some(tex) = tex_opt {
+            let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+            ui.painter().image(tex.id(), icon_rect, uv, Color32::WHITE);
         } else {
-            egui::FontId::proportional(design::type_scale::BODY_SM)
-        };
-        let val_pos = egui::Pos2::new(rect.left() + 8.0, rect.top() + 20.0);
+            crate::core::icon_packs::paint_icon(
+                ui,
+                crate::core::icon_packs::IconPack::Fluent,
+                crate::core::icon_packs::IconGlyph::ActionOpen,
+                icon_rect,
+                [palette.accent.r(), palette.accent.g(), palette.accent.b()],
+            );
+        }
+
+        let name_pos = egui::pos2(card_rect.left() + 42.0, card_rect.top() + 8.0);
         ui.painter().text(
-            val_pos,
+            name_pos,
             egui::Align2::LEFT_TOP,
-            val,
-            val_font,
+            app_name,
+            egui::FontId::proportional(design::type_scale::BODY_SM),
             palette.text_primary,
         );
 
-        let sub_pos = egui::Pos2::new(rect.left() + 8.0, rect.top() + 38.0);
+        let path_pos = egui::pos2(card_rect.left() + 42.0, card_rect.top() + 26.0);
+        let exe_display = exe_path.to_string_lossy();
+        let short_exe = if exe_display.len() > 42 {
+            format!("...{}", &exe_display[exe_display.len() - 39..])
+        } else {
+            exe_display.to_string()
+        };
         ui.painter().text(
-            sub_pos,
+            path_pos,
             egui::Align2::LEFT_TOP,
-            sub,
+            short_exe,
             egui::FontId::proportional(design::type_scale::MICRO),
             palette.text_muted,
         );
 
-        resp.on_hover_ui(|ui| {
-            hover_cb(ui);
-        });
-    };
-
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
-
-        // 1. Storage
-        let bytes_fmt = format_number_commas(item.size_bytes);
-        let cluster_kb = if item.size_bytes > 0 {
-            item.size_bytes.div_ceil(4096) * 4
-        } else {
-            0
-        };
-        let item_path = item.path.clone();
-        let is_dir = item.is_dir;
-        render_card(
-            ui,
-            "[SIZE]",
-            item.formatted_size(),
-            "Physical Storage",
-            false,
-            Box::new(move |ui| {
-                ui.label(
-                    egui::RichText::new("Storage Allocation")
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                ui.separator();
-                ui.label(format!("Exact Size: {} bytes", bytes_fmt));
-                ui.label(format!("On Disk: ~{} KB (4KB clusters)", cluster_kb));
-                if is_dir {
-                    if let Ok(entries) = std::fs::read_dir(&item_path) {
-                        ui.label(format!("Direct Items: {}", entries.count()));
-                    }
-                }
-            }),
+        resp.on_hover_text(format!(
+            "Default application for .{} files:\n{}\nPath: {}",
+            extension,
+            app_name,
+            exe_path.display()
+        ));
+    } else {
+        let label_pos = egui::pos2(card_rect.left() + 16.0, card_rect.center().y - 8.0);
+        ui.painter().text(
+            label_pos,
+            egui::Align2::LEFT_CENTER,
+            "System default registered application",
+            egui::FontId::proportional(design::type_scale::BODY_SM),
+            palette.text_secondary,
         );
-
-        // 2. Format
-        let val_fmt = if item.is_dir {
-            "Folder".to_string()
-        } else if item.extension.is_empty() {
-            "Binary".to_string()
-        } else {
-            item.extension.clone()
-        };
-        let cat_label = icon_spec.category;
-        let ext_clone = item.extension.clone();
-        render_card(
-            ui,
-            "[KIND]",
-            val_fmt,
-            cat_label,
-            false,
-            Box::new(move |ui| {
-                ui.label(
-                    egui::RichText::new("Format & MIME Type")
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                ui.separator();
-                ui.label(format!("Category: {}", cat_label));
-                ui.label(format!("MIME: {}", mime_for_ext(&ext_clone)));
-                if !ext_clone.is_empty() {
-                    ui.label(format!("Extension: .{}", ext_clone.to_lowercase()));
-                }
-            }),
-        );
-
-        // 3. Modified Timeline
-        let mod_date = item.formatted_date();
-        let short_date = mod_date.split(' ').next().unwrap_or(&mod_date).to_string();
-        let item_path2 = item.path.clone();
-        render_card(
-            ui,
-            "[TIME]",
-            short_date,
-            "Last Modified",
-            false,
-            Box::new(move |ui| {
-                ui.label(
-                    egui::RichText::new("Filesystem Timeline")
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                ui.separator();
-                ui.label(format!("Modified: {}", mod_date));
-                if let Ok(meta) = std::fs::metadata(&item_path2) {
-                    if let Ok(c) = meta.created() {
-                        let secs = c
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs();
-                        ui.label(format!("Created Epoch: {}", secs));
-                    }
-                    if let Ok(a) = meta.accessed() {
-                        let secs = a
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs();
-                        ui.label(format!("Accessed Epoch: {}", secs));
-                    }
-                }
-            }),
-        );
-
-        // 4. Permissions
-        let perms = item.formatted_permissions();
-        let octal = item.formatted_octal_permissions();
-        let item_path3 = item.path.clone();
-        render_card(
-            ui,
-            "[LOCK]",
-            perms,
-            &format!("Mode {}", octal),
-            true,
-            Box::new(move |ui| {
-                ui.label(
-                    egui::RichText::new("Access Privileges")
-                        .strong()
-                        .color(palette.text_primary),
-                );
-                ui.separator();
-                ui.label(format!("POSIX Octal: {}", octal));
-                ui.label("Owner: Read & Write");
-                ui.label("Group: Read Only");
-                ui.label("Others: Read Only");
-                if let Ok(meta) = std::fs::metadata(&item_path3) {
-                    ui.label(format!("Read-only flag: {}", meta.permissions().readonly()));
-                }
-            }),
-        );
-    });
+        resp.on_hover_text(format!("System default handler for .{} files", extension));
+    }
 }
 
 impl ExplorerView {
     fn render_properties_modal(&mut self, ctx: &egui::Context, palette: &ThemePalette) {
-        let item = match &self.properties_item {
+        let mut item = match &self.properties_item {
             Some(i) => i.clone(),
             None => return,
         };
 
+        if self.properties_rename_buf.is_empty() {
+            self.properties_rename_buf = item.name.clone();
+        }
+
         let mut close_modal = false;
         let mut reveal_path: Option<PathBuf> = None;
         let mut peek_item: Option<FileItem> = None;
+        let mut rename_to: Option<String> = None;
 
         let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
 
         egui::Window::new(format!("Info - {}", item.name))
             .collapsible(false)
             .resizable(true)
-            .default_width(460.0)
-            .min_width(380.0)
+            .default_width(500.0)
+            .min_width(460.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .frame(
                 egui::Frame::window(&ctx.style())
@@ -10217,60 +10347,133 @@ impl ExplorerView {
             )
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
-                    .max_height(560.0)
+                    .max_height(600.0)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        // 1. Hero Identity Banner
+                        // 1. Hero Identity Header (64x64 Preview / Shell Icon, Editable Name, Type Badge, Formatted Size)
                         ui.horizontal(|ui| {
-                            let (picon_rect, _) =
-                                ui.allocate_exact_size(Vec2::splat(56.0), egui::Sense::hover());
-                            let (pglyph, paccent) = crate::core::icon_packs::IconGlyph::resolve_with_path(
-                                Some(&item.path),
-                                &item.name,
-                                &item.extension,
-                                item.is_dir,
-                                icon_spec.is_image,
-                                icon_spec.is_media,
-                                icon_spec.is_archive,
-                                icon_spec.is_document,
-                                icon_spec.is_code,
-                                icon_spec.color_rgb,
-                            );
-                            crate::core::icon_packs::paint_icon(
-                                ui,
-                                self.icon_pack,
-                                pglyph,
-                                picon_rect,
-                                paccent,
-                            );
-                            ui.add_space(8.0);
+                            let (picon_rect, picon_resp) =
+                                ui.allocate_exact_size(Vec2::splat(64.0), egui::Sense::hover());
+
+                            let thumb_opt = if icon_spec.is_image {
+                                load_image_thumbnail(ctx, &item.path)
+                            } else {
+                                None
+                            };
+
+                            if let Some(tex) = thumb_opt {
+                                let uv =
+                                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                                ui.painter().image(tex.id(), picon_rect, uv, Color32::WHITE);
+                            } else {
+                                let (pglyph, paccent) =
+                                    crate::core::icon_packs::IconGlyph::resolve_with_path(
+                                        Some(&item.path),
+                                        &item.name,
+                                        &item.extension,
+                                        item.is_dir,
+                                        icon_spec.is_image,
+                                        icon_spec.is_media,
+                                        icon_spec.is_archive,
+                                        icon_spec.is_document,
+                                        icon_spec.is_code,
+                                        icon_spec.color_rgb,
+                                    );
+                                self.paint_item_icon(ui, &item, pglyph, picon_rect, paccent);
+                            }
+
+                            picon_resp.on_hover_text(format!(
+                                "{}\nPath: {}\nType: {}",
+                                item.name,
+                                item.path.display(),
+                                if item.is_dir {
+                                    "Folder"
+                                } else {
+                                    &item.extension
+                                }
+                            ));
+
+                            ui.add_space(10.0);
                             ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new(&item.name)
-                                        .size(16.0)
-                                        .strong()
-                                        .color(palette.text_primary),
-                                );
+                                // Editable file / folder name
                                 ui.horizontal(|ui| {
-                                    let kind_text = if item.is_dir {
+                                    let edit_resp = ui.add(
+                                        egui::TextEdit::singleline(&mut self.properties_rename_buf)
+                                            .desired_width(260.0)
+                                            .font(egui::FontId::proportional(
+                                                design::type_scale::BODY_LG,
+                                            )),
+                                    );
+                                    if edit_resp.lost_focus()
+                                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        rename_to =
+                                            Some(self.properties_rename_buf.trim().to_string());
+                                    }
+                                    if ui.small_button("Rename").clicked() {
+                                        rename_to =
+                                            Some(self.properties_rename_buf.trim().to_string());
+                                    }
+                                });
+
+                                ui.add_space(2.0);
+
+                                // Type Badge Pill + Size
+                                ui.horizontal(|ui| {
+                                    let badge_label = if item.is_dir {
                                         "Folder".to_string()
                                     } else {
-                                        format!("{} File", item.extension)
+                                        let ext = item.extension.to_ascii_uppercase();
+                                        if ext.is_empty() {
+                                            "File".to_string()
+                                        } else {
+                                            format!("{} File", ext)
+                                        }
                                     };
-                                    ui.label(
-                                        egui::RichText::new(kind_text)
-                                            .size(design::type_scale::SMALL)
+
+                                    let badge_w = badge_label.len() as f32 * 7.5 + 16.0;
+                                    let (badge_rect, _) = ui.allocate_exact_size(
+                                        Vec2::new(badge_w, 20.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().rect_filled(
+                                        badge_rect,
+                                        Rounding::same(design::radius::PILL),
+                                        palette.surface_2,
+                                    );
+                                    ui.painter().rect_stroke(
+                                        badge_rect,
+                                        Rounding::same(design::radius::PILL),
+                                        Stroke::new(1.0_f32, palette.border),
+                                    );
+                                    ui.painter().text(
+                                        badge_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        &badge_label,
+                                        egui::FontId::proportional(design::type_scale::MICRO),
+                                        palette.text_primary,
+                                    );
+
+                                    ui.add_space(6.0);
+                                    let size_lbl = ui.label(
+                                        egui::RichText::new(item.formatted_size())
+                                            .size(design::type_scale::BODY_SM)
                                             .color(palette.text_secondary),
                                     );
-                                    ui.label(
-                                        egui::RichText::new(format!("| {}", item.formatted_size()))
-                                            .size(design::type_scale::SMALL)
-                                            .color(palette.text_muted),
-                                    );
+                                    size_lbl.on_hover_text(format!(
+                                        "Exact logical size: {} bytes",
+                                        format_number_commas(item.size_bytes)
+                                    ));
                                 });
+
+                                ui.add_space(2.0);
                                 ui.horizontal(|ui| {
                                     let path_str = item.path.to_string_lossy().to_string();
-                                    if ui.small_button("Copy Path").clicked() {
+                                    if ui
+                                        .small_button("Copy Path")
+                                        .on_hover_text(&path_str)
+                                        .clicked()
+                                    {
                                         ui.output_mut(|o| o.copied_text = path_str);
                                     }
                                     if ui.small_button("Copy Name").clicked() {
@@ -10280,16 +10483,11 @@ impl ExplorerView {
                             });
                         });
 
-                        ui.add_space(10.0);
-
-                        // 2. Pictorial Quick-Metric Bento Cards (Hover Enriched)
-                        render_file_info_metric_cards(ui, palette, &item, &icon_spec);
-
-                        ui.add_space(10.0);
+                        ui.add_space(12.0);
                         ui.separator();
                         ui.add_space(6.0);
 
-                        // 3. Collapsible Section: General
+                        // 2. Collapsible Section: General
                         egui::CollapsingHeader::new(
                             egui::RichText::new("General")
                                 .size(design::type_scale::BODY_SM)
@@ -10298,62 +10496,70 @@ impl ExplorerView {
                         )
                         .default_open(true)
                         .show(ui, |ui| {
-                            egui::Grid::new("props_general_grid")
-                                .num_columns(2)
-                                .spacing([12.0, 6.0])
-                                .show(ui, |ui| {
-                                    ui.label(egui::RichText::new("Location:").color(palette.text_muted));
-                                    let parent_str = item
-                                        .path
-                                        .parent()
-                                        .map(|p| p.to_string_lossy().to_string())
-                                        .unwrap_or_else(|| "-".to_string());
-                                    ui.label(egui::RichText::new(parent_str).color(palette.text_primary));
-                                    ui.end_row();
+                            ui.add_space(4.0);
+                            // On-Disk vs Logical Size Split Card
+                            render_storage_visual(ui, palette, item.size_bytes);
+                            ui.add_space(6.0);
 
-                                    ui.label(egui::RichText::new("Exact Size:").color(palette.text_muted));
-                                    let size_detail = format!("{} ({} bytes)", item.formatted_size(), format_number_commas(item.size_bytes));
-                                    ui.label(
-                                        egui::RichText::new(size_detail)
-                                            .monospace()
-                                            .color(palette.text_primary),
-                                    );
-                                    ui.end_row();
+                            // Size Bar vs Parent Folder
+                            let parent_total: u64 = self.entries.iter().map(|e| e.size_bytes).sum();
+                            render_parent_folder_bar(
+                                ui,
+                                palette,
+                                item.size_bytes,
+                                parent_total.max(item.size_bytes),
+                            );
+                            ui.add_space(6.0);
 
-                                    ui.label(egui::RichText::new("Modified:").color(palette.text_muted));
-                                    ui.label(egui::RichText::new(item.formatted_date()).color(palette.text_primary));
-                                    ui.end_row();
+                            // Location with full path tooltip
+                            let parent_str = item
+                                .path
+                                .parent()
+                                .map(|p| p.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "-".to_string());
 
-                                    ui.label(egui::RichText::new("Checksum:").color(palette.text_muted));
-                                    let has_hash = self.properties_sha256.as_ref().map(|(p, h)| (p == &item.path, h.clone()));
-                                    if let Some((true, hash)) = has_hash {
-                                        ui.horizontal(|ui| {
-                                            let short_hash = if hash.len() > 16 {
-                                                format!("{}...{}", &hash[..8], &hash[hash.len()-8..])
-                                            } else {
-                                                hash.clone()
-                                            };
-                                            ui.label(egui::RichText::new(short_hash).monospace().color(palette.accent));
-                                            if ui.small_button("Copy SHA-256").on_hover_text(&hash).clicked() {
-                                                ui.output_mut(|o| o.copied_text = hash);
-                                            }
-                                        });
-                                    } else if item.is_dir {
-                                        ui.label(egui::RichText::new("N/A (Directory)").color(palette.text_muted));
-                                    } else {
-                                        if ui.small_button("Compute SHA-256").clicked() {
-                                            if let Some(h) = compute_file_sha256(&item.path) {
-                                                self.properties_sha256 = Some((item.path.clone(), h));
-                                            }
-                                        }
-                                    }
-                                    ui.end_row();
-                                });
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Location:")
+                                        .color(palette.text_muted)
+                                        .size(design::type_scale::BODY_SM),
+                                );
+                                let loc_lbl = ui.label(
+                                    egui::RichText::new(truncate_middle(&parent_str, 48))
+                                        .size(design::type_scale::BODY_SM)
+                                        .color(palette.text_primary),
+                                );
+                                loc_lbl.on_hover_text(format!(
+                                    "Full parent directory:\n{}",
+                                    parent_str
+                                ));
+                            });
+
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new("Timeline")
+                                    .size(design::type_scale::MICRO)
+                                    .color(palette.text_muted),
+                            );
+                            ui.add_space(2.0);
+                            let accessed_time = std::fs::metadata(&item.path)
+                                .ok()
+                                .and_then(|m| m.accessed().ok());
+                            // Created / Modified / Accessed Timeline Dots
+                            render_timeline_dots(
+                                ui,
+                                palette,
+                                item.created,
+                                item.modified,
+                                accessed_time,
+                            );
                         });
 
-                        ui.add_space(4.0);
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(6.0);
 
-                        // 4. Collapsible Section: Deep Metadata (More Info)
+                        // 3. Collapsible Section: More Info (Deep Metadata, Checksums)
                         egui::CollapsingHeader::new(
                             egui::RichText::new("More Info")
                                 .size(design::type_scale::BODY_SM)
@@ -10362,185 +10568,179 @@ impl ExplorerView {
                         )
                         .default_open(true)
                         .show(ui, |ui| {
-                            egui::Grid::new("props_deep_meta_grid")
+                            egui::Grid::new("props_more_info_grid")
                                 .num_columns(2)
                                 .spacing([12.0, 6.0])
                                 .show(ui, |ui| {
                                     if icon_spec.is_image {
-                                        ui.label(egui::RichText::new("Resolution:").color(palette.text_muted));
+                                        ui.label(
+                                            egui::RichText::new("Dimensions:")
+                                                .color(palette.text_muted),
+                                        );
                                         if let Ok((w, h)) = image::image_dimensions(&item.path) {
                                             let mp = (w as f64 * h as f64) / 1_000_000.0;
-                                            ui.label(egui::RichText::new(format!("{} x {} px ({:.2} MP)", w, h, mp)).color(palette.text_primary));
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "{} x {} px ({:.2} MP)",
+                                                    w, h, mp
+                                                ))
+                                                .color(palette.text_primary),
+                                            );
                                         } else {
-                                            ui.label(egui::RichText::new("Standard image asset").color(palette.text_secondary));
+                                            ui.label(
+                                                egui::RichText::new("Standard image asset")
+                                                    .color(palette.text_secondary),
+                                            );
                                         }
                                         ui.end_row();
                                     }
 
                                     if icon_spec.is_code || icon_spec.is_document {
-                                        ui.label(egui::RichText::new("Content Stats:").color(palette.text_muted));
+                                        ui.label(
+                                            egui::RichText::new("Content Stats:")
+                                                .color(palette.text_muted),
+                                        );
                                         if let Ok(text) = std::fs::read_to_string(&item.path) {
                                             let lines = text.lines().count();
-                                            let non_empty = text.lines().filter(|l| !l.trim().is_empty()).count();
-                                            ui.label(egui::RichText::new(format!("{} lines ({} content lines)", lines, non_empty)).color(palette.text_primary));
+                                            let non_empty = text
+                                                .lines()
+                                                .filter(|l| !l.trim().is_empty())
+                                                .count();
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "{} lines ({} non-empty)",
+                                                    lines, non_empty
+                                                ))
+                                                .color(palette.text_primary),
+                                            );
                                         } else {
-                                            ui.label(egui::RichText::new(format!("{} document stream", item.extension)).color(palette.text_secondary));
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "{} document stream",
+                                                    item.extension
+                                                ))
+                                                .color(palette.text_secondary),
+                                            );
                                         }
                                         ui.end_row();
                                     }
 
                                     if item.is_dir {
-                                        ui.label(egui::RichText::new("Directory Count:").color(palette.text_muted));
+                                        ui.label(
+                                            egui::RichText::new("Folder Items:")
+                                                .color(palette.text_muted),
+                                        );
                                         if let Ok(entries) = std::fs::read_dir(&item.path) {
                                             let count = entries.count();
-                                            ui.label(egui::RichText::new(format!("{} immediate items", count)).color(palette.text_primary));
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "{} immediate items",
+                                                    count
+                                                ))
+                                                .color(palette.text_primary),
+                                            );
                                         } else {
-                                            ui.label(egui::RichText::new("Directory container").color(palette.text_secondary));
+                                            ui.label(
+                                                egui::RichText::new("Directory container")
+                                                    .color(palette.text_secondary),
+                                            );
                                         }
                                         ui.end_row();
                                     }
 
-                                    ui.label(egui::RichText::new("MIME Type:").color(palette.text_muted));
-                                    ui.label(egui::RichText::new(mime_for_ext(&item.extension)).monospace().color(palette.text_secondary));
+                                    ui.label(
+                                        egui::RichText::new("MIME Type:").color(palette.text_muted),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(mime_for_ext(&item.extension))
+                                            .monospace()
+                                            .color(palette.text_secondary),
+                                    );
+                                    ui.end_row();
+
+                                    ui.label(
+                                        egui::RichText::new("SHA-256 Checksum:")
+                                            .color(palette.text_muted),
+                                    );
+                                    let has_hash = self
+                                        .properties_sha256
+                                        .as_ref()
+                                        .map(|(p, h)| (p == &item.path, h.clone()));
+                                    if let Some((true, hash)) = has_hash {
+                                        ui.horizontal(|ui| {
+                                            let short_hash = if hash.len() > 16 {
+                                                format!(
+                                                    "{}...{}",
+                                                    &hash[..8],
+                                                    &hash[hash.len() - 8..]
+                                                )
+                                            } else {
+                                                hash.clone()
+                                            };
+                                            ui.label(
+                                                egui::RichText::new(short_hash)
+                                                    .monospace()
+                                                    .color(palette.accent),
+                                            );
+                                            if ui
+                                                .small_button("Copy SHA-256")
+                                                .on_hover_text(&hash)
+                                                .clicked()
+                                            {
+                                                ui.output_mut(|o| o.copied_text = hash);
+                                            }
+                                        });
+                                    } else if item.is_dir {
+                                        ui.label(
+                                            egui::RichText::new("N/A (Directory)")
+                                                .color(palette.text_muted),
+                                        );
+                                    } else if ui.small_button("Compute SHA-256").clicked() {
+                                        if let Some(h) = compute_file_sha256(&item.path) {
+                                            self.properties_sha256 = Some((item.path.clone(), h));
+                                        }
+                                    }
                                     ui.end_row();
                                 });
                         });
 
-                        ui.add_space(4.0);
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(6.0);
 
-                        // 5. Collapsible Section: Sharing & Permissions
+                        // 4. Collapsible Section: Permissions & Sharing
                         egui::CollapsingHeader::new(
-                            egui::RichText::new("Sharing & Permissions")
+                            egui::RichText::new("Permissions & Sharing")
                                 .size(design::type_scale::BODY_SM)
                                 .strong()
                                 .color(palette.text_primary),
                         )
-                        .default_open(false)
+                        .default_open(true)
                         .show(ui, |ui| {
-                            egui::Grid::new("props_permissions_grid")
-                                .num_columns(2)
-                                .spacing([12.0, 6.0])
-                                .show(ui, |ui| {
-                                    ui.label(egui::RichText::new("Owner Access:").color(palette.text_muted));
-                                    ui.label(egui::RichText::new("Read & Write").color(palette.text_primary));
-                                    ui.end_row();
-
-                                    ui.label(egui::RichText::new("Group Access:").color(palette.text_muted));
-                                    ui.label(egui::RichText::new("Read only").color(palette.text_secondary));
-                                    ui.end_row();
-
-                                    ui.label(egui::RichText::new("Everyone Access:").color(palette.text_muted));
-                                    ui.label(egui::RichText::new("Read only").color(palette.text_secondary));
-                                    ui.end_row();
-
-                                    ui.label(egui::RichText::new("POSIX Octal:").color(palette.text_muted));
-                                    ui.label(egui::RichText::new(format!("{} ({})", item.formatted_permissions(), item.formatted_octal_permissions())).monospace().color(palette.text_secondary));
-                                    ui.end_row();
-                                });
+                            let item_meta = std::fs::metadata(&item.path).ok();
+                            render_permission_chips(
+                                ui,
+                                palette,
+                                item_meta.as_ref(),
+                                &item.formatted_octal_permissions(),
+                            );
                         });
 
-                        // 6. Folder Customization Section (for directories)
-                        if item.is_dir {
-                            ui.add_space(4.0);
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+
+                        // 5. Collapsible Section: Open With (Official Application Icon + Handler)
+                        if !item.is_dir {
                             egui::CollapsingHeader::new(
-                                egui::RichText::new("Folder Icon Customization")
+                                egui::RichText::new("Open With")
                                     .size(design::type_scale::BODY_SM)
                                     .strong()
                                     .color(palette.text_primary),
                             )
                             .default_open(true)
                             .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    if design::segmented_pill(ui, palette, self.custom_icon_tab == 0, "Professional").clicked() {
-                                        self.custom_icon_tab = 0;
-                                    }
-                                    if design::segmented_pill(ui, palette, self.custom_icon_tab == 1, "Meme Vault").clicked() {
-                                        self.custom_icon_tab = 1;
-                                    }
-                                    if design::segmented_pill(ui, palette, self.custom_icon_tab == 2, "Custom / CDN").clicked() {
-                                        self.custom_icon_tab = 2;
-                                    }
-                                });
-                                ui.add_space(6.0);
-
-                                match self.custom_icon_tab {
-                                    0 => {
-                                        egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
-                                            egui::Grid::new("pro_icon_presets_grid").spacing([6.0, 4.0]).show(ui, |ui| {
-                                                for (i, p) in crate::core::folder_icons::PROFESSIONAL_PRESETS.iter().enumerate() {
-                                                    let btn = ui.button(format!("{} {}", p.emoji_glyph, p.label));
-                                                    if btn.on_hover_text(p.description).clicked() {
-                                                        crate::core::folder_icons::set_custom_folder_icon(
-                                                            &item.path,
-                                                            crate::core::folder_icons::FolderIconCustomization::Professional(p.id.to_string()),
-                                                        );
-                                                    }
-                                                    if (i + 1) % 2 == 0 {
-                                                        ui.end_row();
-                                                    }
-                                                }
-                                            });
-                                        });
-                                    }
-                                    1 => {
-                                        egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
-                                            egui::Grid::new("meme_icon_presets_grid").spacing([6.0, 4.0]).show(ui, |ui| {
-                                                for (i, m) in crate::core::folder_icons::MEME_PRESETS.iter().enumerate() {
-                                                    let btn = ui.button(format!("{} {}", m.emoji_glyph, m.label));
-                                                    if btn.on_hover_text(m.description).clicked() {
-                                                        crate::core::folder_icons::set_custom_folder_icon(
-                                                            &item.path,
-                                                            crate::core::folder_icons::FolderIconCustomization::Meme(m.id.to_string()),
-                                                        );
-                                                    }
-                                                    if (i + 1) % 2 == 0 {
-                                                        ui.end_row();
-                                                    }
-                                                }
-                                            });
-                                        });
-                                    }
-                                    _ => {
-                                        ui.horizontal(|ui| {
-                                            ui.label(egui::RichText::new("Path / URL:").color(palette.text_muted));
-                                            ui.add(
-                                                egui::TextEdit::singleline(&mut self.custom_icon_input)
-                                                    .hint_text("C:\\icon.png or https://..."),
-                                            );
-                                        });
-                                        ui.add_space(4.0);
-                                        ui.horizontal(|ui| {
-                                            if ui.button("Apply Icon").clicked() {
-                                                let trimmed = self.custom_icon_input.trim();
-                                                if !trimmed.is_empty() {
-                                                    let custom = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-                                                        crate::core::folder_icons::FolderIconCustomization::CdnUrl(trimmed.to_string())
-                                                    } else {
-                                                        crate::core::folder_icons::FolderIconCustomization::LocalPath(PathBuf::from(trimmed))
-                                                    };
-                                                    crate::core::folder_icons::set_custom_folder_icon(&item.path, custom);
-                                                }
-                                            }
-                                            if ui.button("Browse Image...").clicked() {
-                                                if let Some(picked) = rfd::FileDialog::new()
-                                                    .add_filter("Icon / Image", &["png", "ico", "svg", "jpg", "jpeg", "webp"])
-                                                    .pick_file()
-                                                {
-                                                    self.custom_icon_input = picked.to_string_lossy().to_string();
-                                                    crate::core::folder_icons::set_custom_folder_icon(
-                                                        &item.path,
-                                                        crate::core::folder_icons::FolderIconCustomization::LocalPath(picked),
-                                                    );
-                                                }
-                                            }
-                                        });
-                                    }
-                                }
-
-                                ui.add_space(4.0);
-                                if ui.button("Reset to Default Icon").clicked() {
-                                    crate::core::folder_icons::clear_custom_folder_icon(&item.path);
-                                }
+                                render_open_with_section(ui, palette, &item.extension);
                             });
                         }
                     });
@@ -10551,11 +10751,11 @@ impl ExplorerView {
 
                 // Action Buttons Footer
                 ui.horizontal(|ui| {
-                    if ui.button("Reveal in Explorer").clicked() {
+                    if ui.button("Reveal in File Explorer").clicked() {
                         reveal_path = item.path.parent().map(|p| p.to_path_buf());
                     }
 
-                    if !item.is_dir && ui.button("Quick Look").clicked() {
+                    if !item.is_dir && ui.button("Quick Look (Space)").clicked() {
                         peek_item = Some(item.clone());
                     }
 
@@ -10566,6 +10766,21 @@ impl ExplorerView {
                     });
                 });
             });
+
+        // Handle inline rename
+        if let Some(new_name) = rename_to {
+            if !new_name.is_empty() && new_name != item.name {
+                let new_path = item.path.with_file_name(&new_name);
+                if std::fs::rename(&item.path, &new_path).is_ok() {
+                    crate::core::action_journal::record_rename(item.path.clone(), new_path.clone());
+                    item.path = new_path;
+                    item.name = new_name;
+                    self.properties_item = Some(item.clone());
+                    self.properties_rename_buf = item.name.clone();
+                    self.navigate_to(self.current_dir.clone());
+                }
+            }
+        }
 
         if let Some(parent) = reveal_path {
             open_in_file_manager(&parent);
@@ -11240,6 +11455,37 @@ fn menu_row_glyph(
 }
 
 impl ExplorerView {
+    /// Paints the official icon for a file, directory or app.
+    /// Uses real Windows shell icons (SHGetFileInfo) off the UI thread where available,
+    /// and falls back to official Microsoft Fluent UI system icons.
+    pub fn paint_item_icon(
+        &self,
+        ui: &Ui,
+        item: &FileItem,
+        fallback_glyph: IconGlyph,
+        rect: Rect,
+        fallback_accent: [u8; 3],
+    ) {
+        let large = rect.width() > 24.0;
+        if let Some(tex) = crate::core::shell_icons::get_or_request_shell_icon(
+            ui.ctx(),
+            &item.path,
+            item.is_dir,
+            large,
+        ) {
+            let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+            ui.painter().image(tex.id(), rect, uv, Color32::WHITE);
+        } else {
+            crate::core::icon_packs::paint_icon(
+                ui,
+                self.icon_pack,
+                fallback_glyph,
+                rect,
+                fallback_accent,
+            );
+        }
+    }
+
     /// Records a transient user-visible status note (auto-fades in render).
     pub fn show_status_note(&mut self, note: Result<String, String>) {
         let text = match note {
@@ -11967,6 +12213,7 @@ impl ExplorerView {
         sort_desc: bool,
         current_view: ViewMode,
     ) -> CanvasMenuIntents {
+        menu_ui.set_min_width(240.0);
         let mut intent = CanvasMenuIntents::default();
         fm::menu_header(menu_ui, "Explorer", tint);
         menu_ui.separator();
@@ -12191,6 +12438,7 @@ impl ExplorerView {
         item: &FileItem,
         targets: &[PathBuf],
     ) -> ItemMenuIntents {
+        menu_ui.set_min_width(240.0);
         let mut intent = ItemMenuIntents::default();
         let is_dir = item.is_dir;
         let path: PathBuf = item.path.clone();

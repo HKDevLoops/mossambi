@@ -898,7 +898,7 @@ impl PreferencesView {
                         egui::Button::new(
                             egui::RichText::new("Clear history")
                                 .size(design::type_scale::BODY_SM)
-                                .color(palette.accent),
+                                .color(palette.text_primary),
                         )
                         .fill(palette.card_hover)
                         .stroke(Stroke::new(1.0_f32, palette.border))
@@ -1142,73 +1142,14 @@ impl PreferencesView {
 
                 // Front / Back toggle pills
                 ui.horizontal_wrapped(|ui| {
-                    let front_btn = egui::Button::new(
-                        egui::RichText::new(format!("Front {}", front_len))
-                            .size(design::type_scale::BODY_SM)
-                            .color(if !self.donut_view_back {
-                                palette.accent
-                            } else {
-                                palette.text_secondary
-                            }),
-                    )
-                    .fill(if !self.donut_view_back {
-                        palette.card_hover
-                    } else {
-                        palette.card_bg
-                    })
-                    .stroke(Stroke::new(
-                        1.0_f32,
-                        if !self.donut_view_back {
-                            palette.accent
-                        } else {
-                            palette.border
-                        },
-                    ))
-                    .rounding(Rounding::same(design::radius::PILL));
-                    let front_resp = ui.add(front_btn);
-                    design::paint_pill_ring(
-                        ui.painter(),
-                        front_resp.rect,
-                        Rounding::same(design::radius::PILL),
-                        design::pill_state(&front_resp, !self.donut_view_back),
-                        palette.accent,
-                    );
-                    if front_resp.clicked() {
+                    let is_front = !self.donut_view_back;
+                    let front_label = format!("Front {}", front_len);
+                    if design::segmented_pill(ui, palette, is_front, &front_label).clicked() {
                         self.donut_view_back = false;
                     }
 
-                    let back_btn = egui::Button::new(
-                        egui::RichText::new(format!("Back {}", back_len))
-                            .size(design::type_scale::BODY_SM)
-                            .color(if self.donut_view_back {
-                                palette.accent
-                            } else {
-                                palette.text_secondary
-                            }),
-                    )
-                    .fill(if self.donut_view_back {
-                        palette.card_hover
-                    } else {
-                        palette.card_bg
-                    })
-                    .stroke(Stroke::new(
-                        1.0_f32,
-                        if self.donut_view_back {
-                            palette.accent
-                        } else {
-                            palette.border
-                        },
-                    ))
-                    .rounding(Rounding::same(design::radius::PILL));
-                    let back_resp = ui.add(back_btn);
-                    design::paint_pill_ring(
-                        ui.painter(),
-                        back_resp.rect,
-                        Rounding::same(design::radius::PILL),
-                        design::pill_state(&back_resp, self.donut_view_back),
-                        palette.accent,
-                    );
-                    if back_resp.clicked() {
+                    let back_label = format!("Back {}", back_len);
+                    if design::segmented_pill(ui, palette, !is_front, &back_label).clicked() {
                         self.donut_view_back = true;
                     }
                 });
@@ -1518,38 +1459,7 @@ impl PreferencesView {
                 ui.horizontal_wrapped(|ui| {
                     for cat in categories {
                         let active = self.donut_preset_category == cat;
-                        let btn = egui::Button::new(
-                            egui::RichText::new(cat)
-                                .size(design::type_scale::MICRO)
-                                .color(if active {
-                                    palette.accent
-                                } else {
-                                    palette.text_secondary
-                                }),
-                        )
-                        .fill(if active {
-                            palette.card_hover
-                        } else {
-                            palette.card_bg
-                        })
-                        .stroke(Stroke::new(
-                            1.0_f32,
-                            if active {
-                                palette.accent
-                            } else {
-                                palette.border
-                            },
-                        ))
-                        .rounding(Rounding::same(design::radius::PILL));
-                        let cat_resp = ui.add(btn);
-                        design::paint_pill_ring(
-                            ui.painter(),
-                            cat_resp.rect,
-                            Rounding::same(design::radius::PILL),
-                            design::pill_state(&cat_resp, active),
-                            palette.accent,
-                        );
-                        if cat_resp.clicked() {
+                        if design::segmented_pill(ui, palette, active, cat).clicked() {
                             self.donut_preset_category = cat.to_string();
                         }
                     }
@@ -1923,30 +1833,7 @@ impl PreferencesView {
 
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let text = if current { "On" } else { "Off" };
-                            let btn = egui::Button::new(
-                                egui::RichText::new(text)
-                                    .size(design::type_scale::BODY_SM)
-                                    .color(if current {
-                                        palette.accent
-                                    } else {
-                                        palette.text_secondary
-                                    }),
-                            )
-                            .fill(if current {
-                                palette.card_hover
-                            } else {
-                                palette.card_bg
-                            })
-                            .stroke(Stroke::new(
-                                1.0_f32,
-                                if current {
-                                    palette.accent
-                                } else {
-                                    palette.border
-                                },
-                            ))
-                            .rounding(Rounding::same(design::radius::SM));
-                            if ui.add_sized(Vec2::new(50.0, 24.0), btn).clicked() {
+                            if design::segmented_pill(ui, palette, current, text).clicked() {
                                 self.cfg.fields.set_field_enabled(spec.key, !current);
                                 *dirty = true;
                             }
@@ -3670,9 +3557,13 @@ impl PreferencesView {
                         .color(palette.text_muted),
                 );
                 for lang in [ScriptLang::Rhai, ScriptLang::Lua] {
-                    if ui
-                        .selectable_label(self.script_edit_lang == lang, lang.label())
-                        .clicked()
+                    if design::segmented_pill(
+                        ui,
+                        palette,
+                        self.script_edit_lang == lang,
+                        lang.label(),
+                    )
+                    .clicked()
                     {
                         self.script_edit_lang = lang;
                     }
@@ -3869,7 +3760,7 @@ impl PreferencesView {
                 ui.label(
                     egui::RichText::new(&topo.cpu_name)
                         .size(design::type_scale::BODY_SM)
-                        .color(palette.accent),
+                        .color(palette.text_primary),
                 );
             });
             ui.label(

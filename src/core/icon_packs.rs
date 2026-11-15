@@ -1198,14 +1198,58 @@ fn page_emblem(glyph: IconGlyph, st: &PackStyle, accent: &str) -> Option<String>
 
 /// Full 100x100 SVG for a glyph in the requested pack
 pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String {
-    if let Some(sf) = glyph.special_folder() {
-        return special_folder_svg(pack, sf);
-    }
-    let st = pack.style();
     let accent = format!(
         "#{:02X}{:02X}{:02X}",
         accent_rgb[0], accent_rgb[1], accent_rgb[2]
     );
+
+    // Official Microsoft Fluent UI System Icons for toolbar, actions, and Fluent pack
+    let is_action = matches!(
+        glyph,
+        IconGlyph::ActionBack
+            | IconGlyph::ActionForward
+            | IconGlyph::ActionUp
+            | IconGlyph::ActionRefresh
+            | IconGlyph::ActionNewFolder
+            | IconGlyph::ActionOpen
+            | IconGlyph::ActionFolderOpen
+            | IconGlyph::ActionEdit
+            | IconGlyph::ActionDelete
+            | IconGlyph::ActionCopy
+            | IconGlyph::ActionCut
+            | IconGlyph::ActionRename
+            | IconGlyph::ActionProperties
+            | IconGlyph::ActionTerminal
+            | IconGlyph::ActionCheck
+            | IconGlyph::ActionSelectAll
+            | IconGlyph::ActionPaste
+            | IconGlyph::ActionEye
+            | IconGlyph::ActionPin
+            | IconGlyph::ActionShield
+            | IconGlyph::ActionCompress
+            | IconGlyph::ActionExtract
+            | IconGlyph::ActionShortcut
+            | IconGlyph::ActionSort
+            | IconGlyph::ActionFilter
+            | IconGlyph::ActionMore
+            | IconGlyph::ActionColumns
+            | IconGlyph::ActionList
+    );
+
+    if pack == IconPack::Fluent || is_action {
+        if let Some(fluent_svg) = crate::core::fluent_icons::fluent_svg_for_glyph(
+            glyph,
+            pack == IconPack::Fluent,
+            &accent,
+        ) {
+            return fluent_svg;
+        }
+    }
+
+    if let Some(sf) = glyph.special_folder() {
+        return special_folder_svg(pack, sf);
+    }
+    let st = pack.style();
     let head =
         "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'>\n";
     match glyph {

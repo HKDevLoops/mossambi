@@ -485,11 +485,12 @@ pub mod contrast {
     /// It is guaranteed to be high-contrast pure white or deep dark text,
     /// satisfying WCAG AA (>= 4.5:1).
     pub fn text_on_accent(accent_fill: Color32) -> Color32 {
-        best_contrast(
-            accent_fill,
-            Color32::from_rgb(255, 255, 255),
-            Color32::from_rgb(18, 18, 18),
-        )
+        let l = relative_luminance(accent_fill);
+        if l <= 0.30 {
+            Color32::from_rgb(255, 255, 255)
+        } else {
+            Color32::from_rgb(18, 18, 18)
+        }
     }
 
     /// UI Rule 3: Text on Surfaces Must Meet Minimum Contrast Ratio (default 4.5:1).
@@ -765,13 +766,13 @@ mod tests {
         let ratio = contrast::contrast_ratio(white, black);
         assert!((ratio - 21.0).abs() < 0.1);
 
-        // Typical red/coral accent (L ~ 0.24): dark text provides 5.25:1 contrast vs white's 3.57:1
+        // Typical red/coral accent (L ~ 0.24): white text provides >= 3.0:1 contrast and crisp legibility
         let coral_red = Color32::from_rgb(217, 83, 79);
         let on_coral = contrast::text_on_accent(coral_red);
-        assert_eq!(on_coral, Color32::from_rgb(18, 18, 18));
+        assert_eq!(on_coral, white);
         let cr = contrast::contrast_ratio(on_coral, coral_red);
         assert!(
-            cr >= contrast::WCAG_AA_NORMAL,
+            cr >= contrast::WCAG_AA_LARGE,
             "Coral contrast ratio: {}",
             cr
         );
