@@ -741,7 +741,8 @@ impl PreferencesView {
                         .color(palette.text_primary),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let (pill_rect, _) = ui.allocate_exact_size(Vec2::new(76.0, 22.0), Sense::hover());
+                    let (pill_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(76.0, 22.0), Sense::hover());
                     ui.painter().rect_filled(
                         pill_rect,
                         Rounding::same(11.0),
@@ -866,7 +867,8 @@ impl PreferencesView {
                         .color(palette.text_primary),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let (badge_rect, _) = ui.allocate_exact_size(Vec2::new(70.0, 22.0), Sense::hover());
+                    let (badge_rect, _) =
+                        ui.allocate_exact_size(Vec2::new(70.0, 22.0), Sense::hover());
                     ui.painter().rect_filled(
                         badge_rect,
                         Rounding::same(design::radius::XS),
@@ -1031,7 +1033,7 @@ impl PreferencesView {
                             ui.painter().rect_stroke(card_rect, Rounding::same(design::radius::SM), Stroke::new(1.0_f32, palette.accent));
                         }
 
-                        let text_color = if is_selected { palette.accent } else { palette.text_primary };
+                        let text_color = if is_selected { palette.text_primary } else { palette.text_secondary };
                         let label_pos = egui::pos2(card_rect.min.x + 8.0, card_rect.center().y - 7.0);
                         ui.painter().text(
                             label_pos,
@@ -2187,7 +2189,8 @@ impl PreferencesView {
             let ap_mut = &mut self.cfg.appearance;
             setting_row(ui, palette, "Appearance", "", dirty, |ui, dirty| {
                 for v in crate::core::Appearance::all().into_iter().rev() {
-                    if ui.selectable_label(*ap_mut == v, v.label()).clicked() {
+                    let active = *ap_mut == v;
+                    if design::segmented_pill(ui, palette, active, v.label()).clicked() {
                         *ap_mut = v;
                         *dirty = true;
                     }
@@ -2205,7 +2208,8 @@ impl PreferencesView {
                 dirty,
                 |ui, dirty| {
                     for s in crate::core::DesignStyle::all() {
-                        if ui.selectable_label(*ds_mut == s, s.label()).clicked() {
+                        let active = *ds_mut == s;
+                        if design::segmented_pill(ui, palette, active, s.label()).clicked() {
                             *ds_mut = s;
                             *dirty = true;
                         }
@@ -2279,10 +2283,8 @@ impl PreferencesView {
                 |ui, dirty| {
                     for v in [1.5_f32, 1.25, 1.1, 1.0, 0.9] {
                         let label = format!("{:.0}%", v * 100.0);
-                        if ui
-                            .selectable_label((*sc_mut - v).abs() < 0.01, label)
-                            .clicked()
-                        {
+                        let active = (*sc_mut - v).abs() < 0.01;
+                        if design::segmented_pill(ui, palette, active, &label).clicked() {
                             *sc_mut = v;
                             *dirty = true;
                         }
@@ -2299,34 +2301,7 @@ impl PreferencesView {
                     (GlassEffect::Opaque, "Opaque"),
                 ] {
                     let active = *glass_mut == v;
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(lab)
-                                    .size(design::type_scale::SMALL)
-                                    .color(if active {
-                                        palette.accent
-                                    } else {
-                                        palette.text_secondary
-                                    }),
-                            )
-                            .fill(if active {
-                                palette.card_hover
-                            } else {
-                                Color32::TRANSPARENT
-                            })
-                            .stroke(Stroke::new(
-                                1.0_f32,
-                                if active {
-                                    palette.accent
-                                } else {
-                                    palette.border
-                                },
-                            ))
-                            .rounding(Rounding::same(design::radius::XS)),
-                        )
-                        .clicked()
-                    {
+                    if design::segmented_pill(ui, palette, active, lab).clicked() {
                         *glass_mut = v;
                         *dirty = true;
                     }
@@ -2360,34 +2335,7 @@ impl PreferencesView {
                     (MenuStyle::Linux, "Linux"),
                 ] {
                     let active = *ms_mut == v;
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(lab)
-                                    .size(design::type_scale::SMALL)
-                                    .color(if active {
-                                        palette.accent
-                                    } else {
-                                        palette.text_secondary
-                                    }),
-                            )
-                            .fill(if active {
-                                palette.card_hover
-                            } else {
-                                Color32::TRANSPARENT
-                            })
-                            .stroke(Stroke::new(
-                                1.0_f32,
-                                if active {
-                                    palette.accent
-                                } else {
-                                    palette.border
-                                },
-                            ))
-                            .rounding(Rounding::same(design::radius::XS)),
-                        )
-                        .clicked()
-                    {
+                    if design::segmented_pill(ui, palette, active, lab).clicked() {
                         *ms_mut = v;
                         *dirty = true;
                     }
@@ -2398,7 +2346,7 @@ impl PreferencesView {
             setting_row(ui, palette, "Corner style", "", dirty, |ui, dirty| {
                 for v in CornerStyle::all() {
                     let active = *cs_mut == v;
-                    if ui.selectable_label(active, v.label()).clicked() {
+                    if design::segmented_pill(ui, palette, active, v.label()).clicked() {
                         *cs_mut = v;
                         *dirty = true;
                     }
@@ -2409,7 +2357,7 @@ impl PreferencesView {
             setting_row(ui, palette, "Row density", "", dirty, |ui, dirty| {
                 for v in RowDensity::all() {
                     let active = *rd_mut == v;
-                    if ui.selectable_label(active, v.label()).clicked() {
+                    if design::segmented_pill(ui, palette, active, v.label()).clicked() {
                         *rd_mut = v;
                         *dirty = true;
                     }
@@ -2420,7 +2368,7 @@ impl PreferencesView {
             setting_row(ui, palette, "Sidebar style", "", dirty, |ui, dirty| {
                 for v in SidebarStyle::all() {
                     let active = *ss_mut == v;
-                    if ui.selectable_label(active, v.label()).clicked() {
+                    if design::segmented_pill(ui, palette, active, v.label()).clicked() {
                         *ss_mut = v;
                         *dirty = true;
                     }
@@ -2431,7 +2379,7 @@ impl PreferencesView {
             setting_row(ui, palette, "Toolbar layout", "", dirty, |ui, dirty| {
                 for v in ExplorerStyle::all() {
                     let active = *es_mut == *v;
-                    if ui.selectable_label(active, v.name()).clicked() {
+                    if design::segmented_pill(ui, palette, active, v.name()).clicked() {
                         *es_mut = *v;
                         *dirty = true;
                     }
@@ -2525,34 +2473,7 @@ impl PreferencesView {
                     (CheckboxMode::Off, "Hidden"),
                 ] {
                     let active = *cm_mut == v;
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(lab)
-                                    .size(design::type_scale::SMALL)
-                                    .color(if active {
-                                        palette.accent
-                                    } else {
-                                        palette.text_secondary
-                                    }),
-                            )
-                            .fill(if active {
-                                palette.card_hover
-                            } else {
-                                Color32::TRANSPARENT
-                            })
-                            .stroke(Stroke::new(
-                                1.0_f32,
-                                if active {
-                                    palette.accent
-                                } else {
-                                    palette.border
-                                },
-                            ))
-                            .rounding(Rounding::same(design::radius::XS)),
-                        )
-                        .clicked()
-                    {
+                    if design::segmented_pill(ui, palette, active, lab).clicked() {
                         *cm_mut = v;
                         *dirty = true;
                     }
@@ -2945,34 +2866,7 @@ impl PreferencesView {
                 |ui, dirty| {
                     for (i, name) in layouts.iter().enumerate() {
                         let active = *lay_mut as usize == i;
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new(*name)
-                                        .size(design::type_scale::SMALL)
-                                        .color(if active {
-                                            palette.accent
-                                        } else {
-                                            palette.text_secondary
-                                        }),
-                                )
-                                .fill(if active {
-                                    palette.card_hover
-                                } else {
-                                    Color32::TRANSPARENT
-                                })
-                                .stroke(Stroke::new(
-                                    1.0_f32,
-                                    if active {
-                                        palette.accent
-                                    } else {
-                                        palette.border
-                                    },
-                                ))
-                                .rounding(Rounding::same(design::radius::XS)),
-                            )
-                            .clicked()
-                        {
+                        if design::segmented_pill(ui, palette, active, name).clicked() {
                             *lay_mut = i as u8;
                             *dirty = true;
                         }
@@ -3262,7 +3156,11 @@ impl PreferencesView {
                             "{} physical cores  |  {} logical threads  |  {}",
                             topo.physical_cores,
                             topo.total_logical_cores,
-                            if topo.is_hybrid { "Heterogeneous Hybrid Architecture" } else { "Classical Multicore Architecture (Ryzen / Core)" }
+                            if topo.is_hybrid {
+                                "Heterogeneous Hybrid Architecture"
+                            } else {
+                                "Classical Multicore Architecture (Ryzen / Core)"
+                            }
                         ))
                         .size(design::type_scale::CAPTION)
                         .color(palette.text_secondary),
@@ -3273,9 +3171,14 @@ impl PreferencesView {
             ui.add_space(design::space::SM);
 
             // Visual Core Partitioning breakdown
-            let (part_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.0), Sense::hover());
+            let (part_rect, _) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.0), Sense::hover());
             let painter = ui.painter_at(part_rect);
-            painter.rect_filled(part_rect, Rounding::same(design::radius::XS), palette.card_hover);
+            painter.rect_filled(
+                part_rect,
+                Rounding::same(design::radius::XS),
+                palette.card_hover,
+            );
 
             let total_t = topo.total_logical_cores.max(1) as f32;
             let p_ratio = (topo.p_cores as f32 / total_t).clamp(0.05, 0.9);
@@ -3287,8 +3190,14 @@ impl PreferencesView {
             let s_w = (w - p_w - e_w).max(4.0);
 
             let p_rect = Rect::from_min_size(part_rect.min, Vec2::new(p_w, part_rect.height()));
-            let e_rect = Rect::from_min_size(part_rect.min + Vec2::new(p_w, 0.0), Vec2::new(e_w, part_rect.height()));
-            let s_rect = Rect::from_min_size(part_rect.min + Vec2::new(p_w + e_w, 0.0), Vec2::new(s_w, part_rect.height()));
+            let e_rect = Rect::from_min_size(
+                part_rect.min + Vec2::new(p_w, 0.0),
+                Vec2::new(e_w, part_rect.height()),
+            );
+            let s_rect = Rect::from_min_size(
+                part_rect.min + Vec2::new(p_w + e_w, 0.0),
+                Vec2::new(s_w, part_rect.height()),
+            );
 
             painter.rect_filled(p_rect, Rounding::ZERO, Color32::from_rgb(70, 140, 240));
             painter.rect_filled(e_rect, Rounding::ZERO, Color32::from_rgb(50, 180, 120));
@@ -3398,34 +3307,7 @@ impl PreferencesView {
                     (OutputMode::Custom, "Custom"),
                 ] {
                     let active = *om_mut == v;
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(lab)
-                                    .size(design::type_scale::SMALL)
-                                    .color(if active {
-                                        palette.accent
-                                    } else {
-                                        palette.text_secondary
-                                    }),
-                            )
-                            .fill(if active {
-                                palette.card_hover
-                            } else {
-                                Color32::TRANSPARENT
-                            })
-                            .stroke(Stroke::new(
-                                1.0_f32,
-                                if active {
-                                    palette.accent
-                                } else {
-                                    palette.border
-                                },
-                            ))
-                            .rounding(Rounding::same(design::radius::XS)),
-                        )
-                        .clicked()
-                    {
+                    if design::segmented_pill(ui, palette, active, lab).clicked() {
                         *om_mut = v;
                         *dirty = true;
                     }
@@ -3539,7 +3421,8 @@ impl PreferencesView {
             let ab_conv = &mut self.cfg.conv_audio_bitrate;
             setting_row(ui, palette, "Audio bitrate", &ab_lbl, dirty, |ui, dirty| {
                 for v in ["320k", "256k", "192k", "128k"] {
-                    if ui.selectable_label(ab_mut.as_str() == v, v).clicked() {
+                    let active = ab_mut.as_str() == v;
+                    if design::segmented_pill(ui, palette, active, v).clicked() {
                         *ab_mut = v.to_string();
                         *ab_conv = v.to_string();
                         *dirty = true;
@@ -3589,7 +3472,8 @@ impl PreferencesView {
             let vp_conv = &mut self.cfg.conv_video_preset;
             setting_row(ui, palette, "Video preset", &vp_lbl, dirty, |ui, dirty| {
                 for v in ["High Quality", "Balanced", "Fast"] {
-                    if ui.selectable_label(vp_mut.as_str() == v, v).clicked() {
+                    let active = vp_mut.as_str() == v;
+                    if design::segmented_pill(ui, palette, active, v).clicked() {
                         *vp_mut = v.to_string();
                         *vp_conv = v.to_string();
                         *dirty = true;
@@ -3631,7 +3515,8 @@ impl PreferencesView {
                 dirty,
                 |ui, dirty| {
                     for v in ["Ultra", "Normal", "Fast"] {
-                        if ui.selectable_label(ac_mut.as_str() == v, v).clicked() {
+                        let active = ac_mut.as_str() == v;
+                        if design::segmented_pill(ui, palette, active, v).clicked() {
                             *ac_mut = v.to_string();
                             *ac_conv = v.to_string();
                             *dirty = true;
@@ -3992,7 +3877,11 @@ impl PreferencesView {
                     "Topology: {} physical cores, {} logical threads ({})",
                     topo.physical_cores,
                     topo.total_logical_cores,
-                    if topo.is_hybrid { "Modern Hybrid P/E" } else { "Classical Multicore" }
+                    if topo.is_hybrid {
+                        "Modern Hybrid P/E"
+                    } else {
+                        "Classical Multicore"
+                    }
                 ))
                 .size(design::type_scale::CAPTION)
                 .color(palette.text_secondary),
@@ -4037,9 +3926,11 @@ impl PreferencesView {
                         .color(palette.text_primary),
                 );
                 ui.label(
-                    egui::RichText::new("Windows Native Recycle Bin (SHFileOperation + Undo Ctrl+Z)")
-                        .size(design::type_scale::BODY_SM)
-                        .color(palette.text_secondary),
+                    egui::RichText::new(
+                        "Windows Native Recycle Bin (SHFileOperation + Undo Ctrl+Z)",
+                    )
+                    .size(design::type_scale::BODY_SM)
+                    .color(palette.text_secondary),
                 );
             });
         });
@@ -4047,9 +3938,11 @@ impl PreferencesView {
         section(ui, palette, "Architecture & Standards");
         card(ui, palette, |ui| {
             ui.label(
-                egui::RichText::new("Standards: Pure 7-bit ASCII verified, Apple HIG & Windows 11 Fluent design.")
-                    .size(design::type_scale::BODY_SM)
-                    .color(palette.text_secondary),
+                egui::RichText::new(
+                    "Standards: Pure 7-bit ASCII verified, Apple HIG & Windows 11 Fluent design.",
+                )
+                .size(design::type_scale::BODY_SM)
+                .color(palette.text_secondary),
             );
             ui.label(
                 egui::RichText::new("Conversion Engine: 255 formats with zero-loss guarantee and GPU DirectML acceleration.")
@@ -4223,17 +4116,14 @@ fn setting_row(
             ui.add_space(4.0);
         });
     } else {
-        // Standard wide viewport: label left, control right-aligned
+        // Standard wide viewport: label left, control right-aligned with ample breathing room
         ui.allocate_ui_with_layout(
             Vec2::new(w, 34.0),
             Layout::left_to_right(Align::Center),
             |ui| {
-                let r = ui.max_rect();
-                ui.set_clip_rect(r);
-                let ctrl_width = 240.0_f32;
-                let left_w = (ui.available_width() - ctrl_width - 8.0).max(120.0);
+                let label_w = 170.0_f32.min(w * 0.32);
                 ui.allocate_ui_with_layout(
-                    Vec2::new(left_w, 34.0),
+                    Vec2::new(label_w, 34.0),
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.add_space(design::space::XS);
@@ -4245,7 +4135,7 @@ fn setting_row(
                     },
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
                     let x0 = ui.cursor().right();
                     body(ui, dirty);
                     let control_w = x0 - ui.cursor().right();

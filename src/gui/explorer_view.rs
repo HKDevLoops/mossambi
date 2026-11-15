@@ -720,6 +720,7 @@ pub struct ExplorerView {
 
     // Properties Modal State
     pub properties_item: Option<FileItem>,
+    pub properties_sha256: Option<(PathBuf, String)>,
 
     // Vim & Emacs Navigation State
     pub focused_row: usize,
@@ -1087,6 +1088,7 @@ impl Default for ExplorerView {
             gesture_active: false,
             last_triggered_gesture: None,
             properties_item: None,
+            properties_sha256: None,
             focused_row: 0,
             last_g_press: None,
             focus_search_requested: false,
@@ -9904,7 +9906,290 @@ impl ExplorerView {
             self.peek_item = None;
         }
     }
+}
 
+// ---------------------------------------------------------------------------
+// File Info & Properties Inspection Helpers (Minimal & Detail-Rich)
+// ---------------------------------------------------------------------------
+
+fn format_number_commas(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+    for (i, ch) in chars.iter().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(*ch);
+    }
+    out
+}
+
+fn mime_for_ext(ext: &str) -> &'static str {
+    match ext.to_ascii_uppercase().as_str() {
+        "PNG" => "image/png",
+        "JPG" | "JPEG" => "image/jpeg",
+        "GIF" => "image/gif",
+        "WEBP" => "image/webp",
+        "SVG" => "image/svg+xml",
+        "PDF" => "application/pdf",
+        "RS" => "text/x-rust",
+        "PY" => "text/x-python",
+        "JS" => "application/javascript",
+        "TS" => "application/typescript",
+        "JSON" => "application/json",
+        "TOML" => "text/x-toml",
+        "MD" | "TXT" => "text/plain",
+        "MP4" => "video/mp4",
+        "MKV" => "video/x-matroska",
+        "MOV" => "video/quicktime",
+        "MP3" => "audio/mpeg",
+        "FLAC" => "audio/flac",
+        "WAV" => "audio/wav",
+        "ZIP" => "application/zip",
+        "TAR" => "application/x-tar",
+        "GZ" => "application/gzip",
+        _ => "application/octet-stream",
+    }
+}
+
+fn compute_file_sha256(path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let bytes_read = file.read(&mut buffer).ok()?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+    let hash = hasher.finalize();
+    let mut hex = String::with_capacity(64);
+    for byte in hash {
+        use std::fmt::Write;
+        let _ = write!(&mut hex, "{:02x}", byte);
+    }
+    Some(hex)
+}
+
+fn render_file_info_metric_cards(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    item: &FileItem,
+    icon_spec: &crate::core::FileIconSpec,
+) {
+    let avail_w = ui.available_width();
+    let single_col = avail_w < 240.0;
+    let card_w = if single_col {
+        avail_w
+    } else {
+        ((avail_w - 8.0) / 2.0).floor().max(100.0)
+    };
+    let card_h = 56.0_f32;
+
+    let render_card = |ui: &mut Ui,
+                       tag: &str,
+                       val: String,
+                       sub: &str,
+                       is_mono: bool,
+                       hover_cb: Box<dyn FnOnce(&mut Ui)>| {
+        let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, card_h), egui::Sense::hover());
+        let is_hovered = resp.hovered();
+        let bg = if is_hovered {
+            palette.card_hover
+        } else {
+            palette.surface_2
+        };
+        ui.painter()
+            .rect_filled(rect, Rounding::same(design::radius::SM), bg);
+        ui.painter().rect_stroke(
+            rect,
+            Rounding::same(design::radius::SM),
+            Stroke::new(
+                1.0_f32,
+                if is_hovered {
+                    palette.accent
+                } else {
+                    palette.border
+                },
+            ),
+        );
+
+        let tag_pos = egui::Pos2::new(rect.left() + 8.0, rect.top() + 6.0);
+        ui.painter().text(
+            tag_pos,
+            egui::Align2::LEFT_TOP,
+            tag,
+            egui::FontId::monospace(10.0),
+            palette.accent,
+        );
+
+        let val_font = if is_mono {
+            egui::FontId::monospace(design::type_scale::BODY_SM)
+        } else {
+            egui::FontId::proportional(design::type_scale::BODY_SM)
+        };
+        let val_pos = egui::Pos2::new(rect.left() + 8.0, rect.top() + 20.0);
+        ui.painter().text(
+            val_pos,
+            egui::Align2::LEFT_TOP,
+            val,
+            val_font,
+            palette.text_primary,
+        );
+
+        let sub_pos = egui::Pos2::new(rect.left() + 8.0, rect.top() + 38.0);
+        ui.painter().text(
+            sub_pos,
+            egui::Align2::LEFT_TOP,
+            sub,
+            egui::FontId::proportional(design::type_scale::MICRO),
+            palette.text_muted,
+        );
+
+        resp.on_hover_ui(|ui| {
+            hover_cb(ui);
+        });
+    };
+
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+
+        // 1. Storage
+        let bytes_fmt = format_number_commas(item.size_bytes);
+        let cluster_kb = if item.size_bytes > 0 {
+            item.size_bytes.div_ceil(4096) * 4
+        } else {
+            0
+        };
+        let item_path = item.path.clone();
+        let is_dir = item.is_dir;
+        render_card(
+            ui,
+            "[SIZE]",
+            item.formatted_size(),
+            "Physical Storage",
+            false,
+            Box::new(move |ui| {
+                ui.label(
+                    egui::RichText::new("Storage Allocation")
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.separator();
+                ui.label(format!("Exact Size: {} bytes", bytes_fmt));
+                ui.label(format!("On Disk: ~{} KB (4KB clusters)", cluster_kb));
+                if is_dir {
+                    if let Ok(entries) = std::fs::read_dir(&item_path) {
+                        ui.label(format!("Direct Items: {}", entries.count()));
+                    }
+                }
+            }),
+        );
+
+        // 2. Format
+        let val_fmt = if item.is_dir {
+            "Folder".to_string()
+        } else if item.extension.is_empty() {
+            "Binary".to_string()
+        } else {
+            item.extension.clone()
+        };
+        let cat_label = icon_spec.category;
+        let ext_clone = item.extension.clone();
+        render_card(
+            ui,
+            "[KIND]",
+            val_fmt,
+            cat_label,
+            false,
+            Box::new(move |ui| {
+                ui.label(
+                    egui::RichText::new("Format & MIME Type")
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.separator();
+                ui.label(format!("Category: {}", cat_label));
+                ui.label(format!("MIME: {}", mime_for_ext(&ext_clone)));
+                if !ext_clone.is_empty() {
+                    ui.label(format!("Extension: .{}", ext_clone.to_lowercase()));
+                }
+            }),
+        );
+
+        // 3. Modified Timeline
+        let mod_date = item.formatted_date();
+        let short_date = mod_date.split(' ').next().unwrap_or(&mod_date).to_string();
+        let item_path2 = item.path.clone();
+        render_card(
+            ui,
+            "[TIME]",
+            short_date,
+            "Last Modified",
+            false,
+            Box::new(move |ui| {
+                ui.label(
+                    egui::RichText::new("Filesystem Timeline")
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.separator();
+                ui.label(format!("Modified: {}", mod_date));
+                if let Ok(meta) = std::fs::metadata(&item_path2) {
+                    if let Ok(c) = meta.created() {
+                        let secs = c
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        ui.label(format!("Created Epoch: {}", secs));
+                    }
+                    if let Ok(a) = meta.accessed() {
+                        let secs = a
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        ui.label(format!("Accessed Epoch: {}", secs));
+                    }
+                }
+            }),
+        );
+
+        // 4. Permissions
+        let perms = item.formatted_permissions();
+        let octal = item.formatted_octal_permissions();
+        let item_path3 = item.path.clone();
+        render_card(
+            ui,
+            "[LOCK]",
+            perms,
+            &format!("Mode {}", octal),
+            true,
+            Box::new(move |ui| {
+                ui.label(
+                    egui::RichText::new("Access Privileges")
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.separator();
+                ui.label(format!("POSIX Octal: {}", octal));
+                ui.label("Owner: Read & Write");
+                ui.label("Group: Read Only");
+                ui.label("Others: Read Only");
+                if let Ok(meta) = std::fs::metadata(&item_path3) {
+                    ui.label(format!("Read-only flag: {}", meta.permissions().readonly()));
+                }
+            }),
+        );
+    });
+}
+
+impl ExplorerView {
     fn render_properties_modal(&mut self, ctx: &egui::Context, palette: &ThemePalette) {
         let item = match &self.properties_item {
             Some(i) => i.clone(),
@@ -9917,220 +10202,352 @@ impl ExplorerView {
 
         let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
 
-        egui::Window::new(format!("Properties - {}", item.name))
+        egui::Window::new(format!("Info - {}", item.name))
             .collapsible(false)
-            .resizable(false)
-            .default_width(380.0)
+            .resizable(true)
+            .default_width(460.0)
+            .min_width(380.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .frame(
                 egui::Frame::window(&ctx.style())
                     .fill(palette.card_bg)
                     .stroke(Stroke::new(1.0_f32, palette.border))
                     .rounding(Rounding::same(12.0))
-                    .inner_margin(egui::Margin::same(18.0)),
+                    .inner_margin(egui::Margin::same(16.0)),
             )
             .show(ctx, |ui| {
-                // Header with large icon and name
-                ui.horizontal(|ui| {
-                    let (picon_rect, _) =
-                        ui.allocate_exact_size(Vec2::splat(64.0), egui::Sense::hover());
-                    let (pglyph, paccent) = crate::core::icon_packs::IconGlyph::resolve_with_path(
-                        Some(&item.path),
-                        &item.name,
-                        &item.extension,
-                        item.is_dir,
-                        icon_spec.is_image,
-                        icon_spec.is_media,
-                        icon_spec.is_archive,
-                        icon_spec.is_document,
-                        icon_spec.is_code,
-                        icon_spec.color_rgb,
-                    );
-                    crate::core::icon_packs::paint_icon(
-                        ui,
-                        self.icon_pack,
-                        pglyph,
-                        picon_rect,
-                        paccent,
-                    );
-                    ui.add_space(8.0);
-                    ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new(&item.name)
-                                .size(16.0)
+                egui::ScrollArea::vertical()
+                    .max_height(560.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        // 1. Hero Identity Banner
+                        ui.horizontal(|ui| {
+                            let (picon_rect, _) =
+                                ui.allocate_exact_size(Vec2::splat(56.0), egui::Sense::hover());
+                            let (pglyph, paccent) = crate::core::icon_packs::IconGlyph::resolve_with_path(
+                                Some(&item.path),
+                                &item.name,
+                                &item.extension,
+                                item.is_dir,
+                                icon_spec.is_image,
+                                icon_spec.is_media,
+                                icon_spec.is_archive,
+                                icon_spec.is_document,
+                                icon_spec.is_code,
+                                icon_spec.color_rgb,
+                            );
+                            crate::core::icon_packs::paint_icon(
+                                ui,
+                                self.icon_pack,
+                                pglyph,
+                                picon_rect,
+                                paccent,
+                            );
+                            ui.add_space(8.0);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    egui::RichText::new(&item.name)
+                                        .size(16.0)
+                                        .strong()
+                                        .color(palette.text_primary),
+                                );
+                                ui.horizontal(|ui| {
+                                    let kind_text = if item.is_dir {
+                                        "Folder".to_string()
+                                    } else {
+                                        format!("{} File", item.extension)
+                                    };
+                                    ui.label(
+                                        egui::RichText::new(kind_text)
+                                            .size(design::type_scale::SMALL)
+                                            .color(palette.text_secondary),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(format!("| {}", item.formatted_size()))
+                                            .size(design::type_scale::SMALL)
+                                            .color(palette.text_muted),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    let path_str = item.path.to_string_lossy().to_string();
+                                    if ui.small_button("Copy Path").clicked() {
+                                        ui.output_mut(|o| o.copied_text = path_str);
+                                    }
+                                    if ui.small_button("Copy Name").clicked() {
+                                        ui.output_mut(|o| o.copied_text = item.name.clone());
+                                    }
+                                });
+                            });
+                        });
+
+                        ui.add_space(10.0);
+
+                        // 2. Pictorial Quick-Metric Bento Cards (Hover Enriched)
+                        render_file_info_metric_cards(ui, palette, &item, &icon_spec);
+
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+
+                        // 3. Collapsible Section: General
+                        egui::CollapsingHeader::new(
+                            egui::RichText::new("General")
+                                .size(design::type_scale::BODY_SM)
                                 .strong()
                                 .color(palette.text_primary),
-                        );
-                        ui.label(
-                            egui::RichText::new(if item.is_dir {
-                                "Folder".to_string()
-                            } else {
-                                format!("{} File", item.extension)
-                            })
-                            .size(12.0)
-                            .color(palette.text_secondary),
-                        );
-                    });
-                });
+                        )
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            egui::Grid::new("props_general_grid")
+                                .num_columns(2)
+                                .spacing([12.0, 6.0])
+                                .show(ui, |ui| {
+                                    ui.label(egui::RichText::new("Location:").color(palette.text_muted));
+                                    let parent_str = item
+                                        .path
+                                        .parent()
+                                        .map(|p| p.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| "-".to_string());
+                                    ui.label(egui::RichText::new(parent_str).color(palette.text_primary));
+                                    ui.end_row();
 
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(8.0);
+                                    ui.label(egui::RichText::new("Exact Size:").color(palette.text_muted));
+                                    let size_detail = format!("{} ({} bytes)", item.formatted_size(), format_number_commas(item.size_bytes));
+                                    ui.label(
+                                        egui::RichText::new(size_detail)
+                                            .monospace()
+                                            .color(palette.text_primary),
+                                    );
+                                    ui.end_row();
 
-                // Properties Grid
-                egui::Grid::new("properties_info_grid")
-                    .num_columns(2)
-                    .spacing([12.0, 8.0])
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new("Location:").color(palette.text_muted));
-                        let parent_str = item
-                            .path
-                            .parent()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "-".to_string());
-                        ui.label(egui::RichText::new(parent_str).color(palette.text_primary));
-                        ui.end_row();
+                                    ui.label(egui::RichText::new("Modified:").color(palette.text_muted));
+                                    ui.label(egui::RichText::new(item.formatted_date()).color(palette.text_primary));
+                                    ui.end_row();
 
-                        ui.label(egui::RichText::new("Size:").color(palette.text_muted));
-                        let size_detail =
-                            format!("{} ({} bytes)", item.formatted_size(), item.size_bytes);
-                        ui.label(
-                            egui::RichText::new(size_detail)
-                                .monospace()
-                                .color(palette.text_primary),
-                        );
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Modified:").color(palette.text_muted));
-                        ui.label(
-                            egui::RichText::new(item.formatted_date()).color(palette.text_primary),
-                        );
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Category:").color(palette.text_muted));
-                        ui.label(egui::RichText::new(icon_spec.category).color(palette.accent));
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Full Path:").color(palette.text_muted));
-                        ui.horizontal(|ui| {
-                            let path_str = item.path.to_string_lossy().to_string();
-                            if ui.button("Copy Path").clicked() {
-                                ui.output_mut(|o| o.copied_text = path_str);
-                            }
+                                    ui.label(egui::RichText::new("Checksum:").color(palette.text_muted));
+                                    let has_hash = self.properties_sha256.as_ref().map(|(p, h)| (p == &item.path, h.clone()));
+                                    if let Some((true, hash)) = has_hash {
+                                        ui.horizontal(|ui| {
+                                            let short_hash = if hash.len() > 16 {
+                                                format!("{}...{}", &hash[..8], &hash[hash.len()-8..])
+                                            } else {
+                                                hash.clone()
+                                            };
+                                            ui.label(egui::RichText::new(short_hash).monospace().color(palette.accent));
+                                            if ui.small_button("Copy SHA-256").on_hover_text(&hash).clicked() {
+                                                ui.output_mut(|o| o.copied_text = hash);
+                                            }
+                                        });
+                                    } else if item.is_dir {
+                                        ui.label(egui::RichText::new("N/A (Directory)").color(palette.text_muted));
+                                    } else {
+                                        if ui.small_button("Compute SHA-256").clicked() {
+                                            if let Some(h) = compute_file_sha256(&item.path) {
+                                                self.properties_sha256 = Some((item.path.clone(), h));
+                                            }
+                                        }
+                                    }
+                                    ui.end_row();
+                                });
                         });
-                        ui.end_row();
-                    });
 
-                // Folder Customization Section (Professional Presets, Meme Presets, Local/CDN)
-                if item.is_dir {
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(6.0);
+                        ui.add_space(4.0);
 
-                    ui.label(
-                        egui::RichText::new("Customize Folder Icon")
-                            .size(13.0)
-                            .strong()
-                            .color(palette.text_primary),
-                    );
-                    ui.add_space(4.0);
-
-                    ui.horizontal(|ui| {
-                        if ui.selectable_label(self.custom_icon_tab == 0, "Professional").clicked() {
-                            self.custom_icon_tab = 0;
-                        }
-                        if ui.selectable_label(self.custom_icon_tab == 1, "Funky Memes").clicked() {
-                            self.custom_icon_tab = 1;
-                        }
-                        if ui.selectable_label(self.custom_icon_tab == 2, "Custom / CDN").clicked() {
-                            self.custom_icon_tab = 2;
-                        }
-                    });
-                    ui.add_space(4.0);
-
-                    match self.custom_icon_tab {
-                        0 => {
-                            egui::ScrollArea::vertical().max_height(130.0).show(ui, |ui| {
-                                egui::Grid::new("pro_icon_presets_grid").spacing([6.0, 4.0]).show(ui, |ui| {
-                                    for (i, p) in crate::core::folder_icons::PROFESSIONAL_PRESETS.iter().enumerate() {
-                                        let btn = ui.button(format!("{} {}", p.emoji_glyph, p.label));
-                                        if btn.on_hover_text(p.description).clicked() {
-                                            crate::core::folder_icons::set_custom_folder_icon(
-                                                &item.path,
-                                                crate::core::folder_icons::FolderIconCustomization::Professional(p.id.to_string()),
-                                            );
-                                        }
-                                        if (i + 1) % 2 == 0 {
-                                            ui.end_row();
-                                        }
-                                    }
-                                });
-                            });
-                        }
-                        1 => {
-                            egui::ScrollArea::vertical().max_height(130.0).show(ui, |ui| {
-                                egui::Grid::new("meme_icon_presets_grid").spacing([6.0, 4.0]).show(ui, |ui| {
-                                    for (i, m) in crate::core::folder_icons::MEME_PRESETS.iter().enumerate() {
-                                        let btn = ui.button(format!("{} {}", m.emoji_glyph, m.label));
-                                        if btn.on_hover_text(m.description).clicked() {
-                                            crate::core::folder_icons::set_custom_folder_icon(
-                                                &item.path,
-                                                crate::core::folder_icons::FolderIconCustomization::Meme(m.id.to_string()),
-                                            );
-                                        }
-                                        if (i + 1) % 2 == 0 {
-                                            ui.end_row();
-                                        }
-                                    }
-                                });
-                            });
-                        }
-                        _ => {
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("Path / URL:").color(palette.text_muted));
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.custom_icon_input)
-                                        .hint_text("C:\\icon.png or https://..."),
-                                );
-                            });
-                            ui.add_space(4.0);
-                            ui.horizontal(|ui| {
-                                if ui.button("Apply Icon").clicked() {
-                                    let trimmed = self.custom_icon_input.trim();
-                                    if !trimmed.is_empty() {
-                                        let custom = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-                                            crate::core::folder_icons::FolderIconCustomization::CdnUrl(trimmed.to_string())
+                        // 4. Collapsible Section: Deep Metadata (More Info)
+                        egui::CollapsingHeader::new(
+                            egui::RichText::new("More Info")
+                                .size(design::type_scale::BODY_SM)
+                                .strong()
+                                .color(palette.text_primary),
+                        )
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            egui::Grid::new("props_deep_meta_grid")
+                                .num_columns(2)
+                                .spacing([12.0, 6.0])
+                                .show(ui, |ui| {
+                                    if icon_spec.is_image {
+                                        ui.label(egui::RichText::new("Resolution:").color(palette.text_muted));
+                                        if let Ok((w, h)) = image::image_dimensions(&item.path) {
+                                            let mp = (w as f64 * h as f64) / 1_000_000.0;
+                                            ui.label(egui::RichText::new(format!("{} x {} px ({:.2} MP)", w, h, mp)).color(palette.text_primary));
                                         } else {
-                                            crate::core::folder_icons::FolderIconCustomization::LocalPath(PathBuf::from(trimmed))
-                                        };
-                                        crate::core::folder_icons::set_custom_folder_icon(&item.path, custom);
+                                            ui.label(egui::RichText::new("Standard image asset").color(palette.text_secondary));
+                                        }
+                                        ui.end_row();
+                                    }
+
+                                    if icon_spec.is_code || icon_spec.is_document {
+                                        ui.label(egui::RichText::new("Content Stats:").color(palette.text_muted));
+                                        if let Ok(text) = std::fs::read_to_string(&item.path) {
+                                            let lines = text.lines().count();
+                                            let non_empty = text.lines().filter(|l| !l.trim().is_empty()).count();
+                                            ui.label(egui::RichText::new(format!("{} lines ({} content lines)", lines, non_empty)).color(palette.text_primary));
+                                        } else {
+                                            ui.label(egui::RichText::new(format!("{} document stream", item.extension)).color(palette.text_secondary));
+                                        }
+                                        ui.end_row();
+                                    }
+
+                                    if item.is_dir {
+                                        ui.label(egui::RichText::new("Directory Count:").color(palette.text_muted));
+                                        if let Ok(entries) = std::fs::read_dir(&item.path) {
+                                            let count = entries.count();
+                                            ui.label(egui::RichText::new(format!("{} immediate items", count)).color(palette.text_primary));
+                                        } else {
+                                            ui.label(egui::RichText::new("Directory container").color(palette.text_secondary));
+                                        }
+                                        ui.end_row();
+                                    }
+
+                                    ui.label(egui::RichText::new("MIME Type:").color(palette.text_muted));
+                                    ui.label(egui::RichText::new(mime_for_ext(&item.extension)).monospace().color(palette.text_secondary));
+                                    ui.end_row();
+                                });
+                        });
+
+                        ui.add_space(4.0);
+
+                        // 5. Collapsible Section: Sharing & Permissions
+                        egui::CollapsingHeader::new(
+                            egui::RichText::new("Sharing & Permissions")
+                                .size(design::type_scale::BODY_SM)
+                                .strong()
+                                .color(palette.text_primary),
+                        )
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            egui::Grid::new("props_permissions_grid")
+                                .num_columns(2)
+                                .spacing([12.0, 6.0])
+                                .show(ui, |ui| {
+                                    ui.label(egui::RichText::new("Owner Access:").color(palette.text_muted));
+                                    ui.label(egui::RichText::new("Read & Write").color(palette.text_primary));
+                                    ui.end_row();
+
+                                    ui.label(egui::RichText::new("Group Access:").color(palette.text_muted));
+                                    ui.label(egui::RichText::new("Read only").color(palette.text_secondary));
+                                    ui.end_row();
+
+                                    ui.label(egui::RichText::new("Everyone Access:").color(palette.text_muted));
+                                    ui.label(egui::RichText::new("Read only").color(palette.text_secondary));
+                                    ui.end_row();
+
+                                    ui.label(egui::RichText::new("POSIX Octal:").color(palette.text_muted));
+                                    ui.label(egui::RichText::new(format!("{} ({})", item.formatted_permissions(), item.formatted_octal_permissions())).monospace().color(palette.text_secondary));
+                                    ui.end_row();
+                                });
+                        });
+
+                        // 6. Folder Customization Section (for directories)
+                        if item.is_dir {
+                            ui.add_space(4.0);
+                            egui::CollapsingHeader::new(
+                                egui::RichText::new("Folder Icon Customization")
+                                    .size(design::type_scale::BODY_SM)
+                                    .strong()
+                                    .color(palette.text_primary),
+                            )
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    if design::segmented_pill(ui, palette, self.custom_icon_tab == 0, "Professional").clicked() {
+                                        self.custom_icon_tab = 0;
+                                    }
+                                    if design::segmented_pill(ui, palette, self.custom_icon_tab == 1, "Meme Vault").clicked() {
+                                        self.custom_icon_tab = 1;
+                                    }
+                                    if design::segmented_pill(ui, palette, self.custom_icon_tab == 2, "Custom / CDN").clicked() {
+                                        self.custom_icon_tab = 2;
+                                    }
+                                });
+                                ui.add_space(6.0);
+
+                                match self.custom_icon_tab {
+                                    0 => {
+                                        egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                                            egui::Grid::new("pro_icon_presets_grid").spacing([6.0, 4.0]).show(ui, |ui| {
+                                                for (i, p) in crate::core::folder_icons::PROFESSIONAL_PRESETS.iter().enumerate() {
+                                                    let btn = ui.button(format!("{} {}", p.emoji_glyph, p.label));
+                                                    if btn.on_hover_text(p.description).clicked() {
+                                                        crate::core::folder_icons::set_custom_folder_icon(
+                                                            &item.path,
+                                                            crate::core::folder_icons::FolderIconCustomization::Professional(p.id.to_string()),
+                                                        );
+                                                    }
+                                                    if (i + 1) % 2 == 0 {
+                                                        ui.end_row();
+                                                    }
+                                                }
+                                            });
+                                        });
+                                    }
+                                    1 => {
+                                        egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                                            egui::Grid::new("meme_icon_presets_grid").spacing([6.0, 4.0]).show(ui, |ui| {
+                                                for (i, m) in crate::core::folder_icons::MEME_PRESETS.iter().enumerate() {
+                                                    let btn = ui.button(format!("{} {}", m.emoji_glyph, m.label));
+                                                    if btn.on_hover_text(m.description).clicked() {
+                                                        crate::core::folder_icons::set_custom_folder_icon(
+                                                            &item.path,
+                                                            crate::core::folder_icons::FolderIconCustomization::Meme(m.id.to_string()),
+                                                        );
+                                                    }
+                                                    if (i + 1) % 2 == 0 {
+                                                        ui.end_row();
+                                                    }
+                                                }
+                                            });
+                                        });
+                                    }
+                                    _ => {
+                                        ui.horizontal(|ui| {
+                                            ui.label(egui::RichText::new("Path / URL:").color(palette.text_muted));
+                                            ui.add(
+                                                egui::TextEdit::singleline(&mut self.custom_icon_input)
+                                                    .hint_text("C:\\icon.png or https://..."),
+                                            );
+                                        });
+                                        ui.add_space(4.0);
+                                        ui.horizontal(|ui| {
+                                            if ui.button("Apply Icon").clicked() {
+                                                let trimmed = self.custom_icon_input.trim();
+                                                if !trimmed.is_empty() {
+                                                    let custom = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                                                        crate::core::folder_icons::FolderIconCustomization::CdnUrl(trimmed.to_string())
+                                                    } else {
+                                                        crate::core::folder_icons::FolderIconCustomization::LocalPath(PathBuf::from(trimmed))
+                                                    };
+                                                    crate::core::folder_icons::set_custom_folder_icon(&item.path, custom);
+                                                }
+                                            }
+                                            if ui.button("Browse Image...").clicked() {
+                                                if let Some(picked) = rfd::FileDialog::new()
+                                                    .add_filter("Icon / Image", &["png", "ico", "svg", "jpg", "jpeg", "webp"])
+                                                    .pick_file()
+                                                {
+                                                    self.custom_icon_input = picked.to_string_lossy().to_string();
+                                                    crate::core::folder_icons::set_custom_folder_icon(
+                                                        &item.path,
+                                                        crate::core::folder_icons::FolderIconCustomization::LocalPath(picked),
+                                                    );
+                                                }
+                                            }
+                                        });
                                     }
                                 }
-                                if ui.button("Browse Image...").clicked() {
-                                    if let Some(picked) = rfd::FileDialog::new()
-                                        .add_filter("Icon / Image", &["png", "ico", "svg", "jpg", "jpeg", "webp"])
-                                        .pick_file()
-                                    {
-                                        self.custom_icon_input = picked.to_string_lossy().to_string();
-                                        crate::core::folder_icons::set_custom_folder_icon(
-                                            &item.path,
-                                            crate::core::folder_icons::FolderIconCustomization::LocalPath(picked),
-                                        );
-                                    }
+
+                                ui.add_space(4.0);
+                                if ui.button("Reset to Default Icon").clicked() {
+                                    crate::core::folder_icons::clear_custom_folder_icon(&item.path);
                                 }
                             });
                         }
-                    }
+                    });
 
-                    ui.add_space(4.0);
-                    if ui.button("Reset to Default Icon").clicked() {
-                        crate::core::folder_icons::clear_custom_folder_icon(&item.path);
-                    }
-                }
-
-                ui.add_space(14.0);
+                ui.add_space(10.0);
                 ui.separator();
-                ui.add_space(8.0);
+                ui.add_space(6.0);
 
                 // Action Buttons Footer
                 ui.horizontal(|ui| {

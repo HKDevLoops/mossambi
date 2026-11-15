@@ -631,8 +631,18 @@ pub fn apply_theme_visuals(ctx: &egui::Context, palette: &ThemePalette) {
     visuals.widgets.hovered.rounding = Rounding::same(6.0);
 
     visuals.widgets.active.bg_fill = palette.accent;
-    visuals.widgets.active.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
+    visuals.widgets.active.fg_stroke = Stroke::new(
+        1.2_f32,
+        crate::gui::design::contrast::text_on_accent(palette.accent),
+    );
     visuals.widgets.active.rounding = Rounding::same(6.0);
+
+    visuals.widgets.open.bg_fill = palette.accent;
+    visuals.widgets.open.fg_stroke = Stroke::new(
+        1.2_f32,
+        crate::gui::design::contrast::text_on_accent(palette.accent),
+    );
+    visuals.widgets.open.rounding = Rounding::same(6.0);
 
     let sel_alpha = if palette.is_translucent {
         if palette.is_dark {
@@ -651,7 +661,11 @@ pub fn apply_theme_visuals(ctx: &egui::Context, palette: &ThemePalette) {
         palette.accent.b(),
         sel_alpha,
     );
-    visuals.selection.stroke = Stroke::new(1.0_f32, palette.accent);
+    // UI Rule: Egui uses visuals.selection.stroke.color as the text color for
+    // selectable_label. It must NEVER be palette.accent because text on accent
+    // fill must have guaranteed high contrast!
+    let sel_text_color = crate::gui::design::contrast::text_on_accent(visuals.selection.bg_fill);
+    visuals.selection.stroke = Stroke::new(1.0_f32, sel_text_color);
 
     ctx.set_visuals(visuals);
 }
@@ -674,16 +688,27 @@ pub fn render_segmented_switch(
         track_frame.show(ui, |ui| {
             for (val, label) in options {
                 let is_active = selected.as_str() == *val;
+                let text_color = if is_active {
+                    crate::gui::design::contrast::text_on_accent(theme.accent)
+                } else {
+                    theme.text_secondary
+                };
                 let btn = ui.add(
-                    egui::Button::new(egui::RichText::new(*label).size(19.0).color(if is_active {
-                        Color32::WHITE
-                    } else {
-                        theme.text_muted
-                    }))
+                    egui::Button::new(
+                        egui::RichText::new(*label)
+                            .size(crate::gui::design::type_scale::SMALL)
+                            .strong()
+                            .color(text_color),
+                    )
                     .fill(if is_active {
                         theme.accent
                     } else {
                         Color32::TRANSPARENT
+                    })
+                    .stroke(if is_active {
+                        Stroke::NONE
+                    } else {
+                        Stroke::new(1.0_f32, theme.border)
                     })
                     .rounding(Rounding::same(6.0)),
                 );

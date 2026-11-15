@@ -1117,7 +1117,9 @@ pub fn render_sidebar_row(
     }
 
     if let Some(ref tip) = spec.tooltip {
-        row_resp.clone().on_hover_ui(|ui| show_tooltip(ui, tip.clone()));
+        row_resp
+            .clone()
+            .on_hover_ui(|ui| show_tooltip(ui, tip.clone()));
     }
 
     SidebarRowClick {

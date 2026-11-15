@@ -1669,11 +1669,12 @@ impl StudioView {
             });
 
         // 2. Left Sidebar Panel (Pinned, Drives, Cloud, Network, Tags, Tools)
-        let target_sidebar_w = if config.sidebar_collapsed || self.current_tab == StudioTab::Preferences {
-            0.0_f32
-        } else {
-            chrome_spec.sidebar.width
-        };
+        let target_sidebar_w =
+            if config.sidebar_collapsed || self.current_tab == StudioTab::Preferences {
+                0.0_f32
+            } else {
+                chrome_spec.sidebar.width
+            };
         let dt = crate::gui::anim::frame_dt(ctx);
         let current_sidebar_w = if config.animations.reduced_motion {
             self.sidebar_width_spring.set(target_sidebar_w);
@@ -2579,149 +2580,149 @@ impl StudioView {
             .frame(central_frame)
             .show(ctx, |ui| {
                 match self.current_tab {
-                StudioTab::FileExplorer => {
-                    let mut staged: Option<PathBuf> = None;
-                    let mut transcode_reqs: Vec<(PathBuf, String)> = Vec::new();
-                    let mut exam_req: Option<PathBuf> = None;
-                    let mut pack_req: Option<Vec<PathBuf>> = None;
-                    let mut inspect_req: Option<PathBuf> = None;
+                    StudioTab::FileExplorer => {
+                        let mut staged: Option<PathBuf> = None;
+                        let mut transcode_reqs: Vec<(PathBuf, String)> = Vec::new();
+                        let mut exam_req: Option<PathBuf> = None;
+                        let mut pack_req: Option<Vec<PathBuf>> = None;
+                        let mut inspect_req: Option<PathBuf> = None;
 
-                    self.explorer_view.design_tokens = config.tokens();
-                    self.explorer_view.dashboard_slots = config.dashboard_slots.clone();
-                    self.explorer_view.render(
-                        ui,
-                        &palette,
-                        |p| staged = Some(p),
-                        |p, t| transcode_reqs.push((p, t)),
-                        |p| exam_req = Some(p),
-                        |list| pack_req = Some(list),
-                        |p| inspect_req = Some(p),
-                    );
+                        self.explorer_view.design_tokens = config.tokens();
+                        self.explorer_view.dashboard_slots = config.dashboard_slots.clone();
+                        self.explorer_view.render(
+                            ui,
+                            &palette,
+                            |p| staged = Some(p),
+                            |p, t| transcode_reqs.push((p, t)),
+                            |p| exam_req = Some(p),
+                            |list| pack_req = Some(list),
+                            |p| inspect_req = Some(p),
+                        );
 
-                    if let Some(p) = staged {
-                        on_stage_file(p);
-                    }
-                    if !transcode_reqs.is_empty() {
-                        // Group the (multi-select) requests by target format so
-                        // each group becomes ONE batch conversion instead of
-                        // N single-file conversions clobbering each other.
-                        let mut groups: Vec<(String, Vec<PathBuf>)> = Vec::new();
-                        for (p, t) in transcode_reqs {
-                            match groups.iter_mut().find(|(ft, _)| *ft == t) {
-                                Some((_, list)) => list.push(p),
-                                None => groups.push((t, vec![p])),
+                        if let Some(p) = staged {
+                            on_stage_file(p);
+                        }
+                        if !transcode_reqs.is_empty() {
+                            // Group the (multi-select) requests by target format so
+                            // each group becomes ONE batch conversion instead of
+                            // N single-file conversions clobbering each other.
+                            let mut groups: Vec<(String, Vec<PathBuf>)> = Vec::new();
+                            for (p, t) in transcode_reqs {
+                                match groups.iter_mut().find(|(ft, _)| *ft == t) {
+                                    Some((_, list)) => list.push(p),
+                                    None => groups.push((t, vec![p])),
+                                }
+                            }
+                            for (t, mut paths) in groups {
+                                paths.sort();
+                                paths.dedup();
+                                if let Some(first) = paths.first() {
+                                    on_stage_file(first.clone());
+                                }
+                                log::info!("Explorer batch: {} file(s) -> {}", paths.len(), t);
+                                on_convert_batch(paths, t);
                             }
                         }
-                        for (t, mut paths) in groups {
-                            paths.sort();
-                            paths.dedup();
-                            if let Some(first) = paths.first() {
+                        if let Some(p) = exam_req {
+                            on_stage_file(p);
+                            self.current_tab = StudioTab::ExamStudio;
+                            quick_settings.exam_mode_enabled = true;
+                        }
+                        if let Some(list) = pack_req {
+                            if let Some(first) = list.first() {
                                 on_stage_file(first.clone());
                             }
-                            log::info!("Explorer batch: {} file(s) -> {}", paths.len(), t);
-                            on_convert_batch(paths, t);
+                            self.current_tab = StudioTab::ArchiveSuite;
+                        }
+                        if let Some(p) = inspect_req {
+                            on_stage_file(p.clone());
+                            self.current_tab = StudioTab::QualityInspector;
+                            if !self.inspection_busy {
+                                self.inspection_busy = true;
+                                self.inspection_status = "Inspecting in background...".to_string();
+                                crate::core::tool_console::inspect_file_async(
+                                    self.tool_console.sender(),
+                                    p,
+                                );
+                            }
                         }
                     }
-                    if let Some(p) = exam_req {
-                        on_stage_file(p);
-                        self.current_tab = StudioTab::ExamStudio;
-                        quick_settings.exam_mode_enabled = true;
+                    StudioTab::Preferences => {
+                        self.render_preferences_tab(
+                            ui,
+                            &palette,
+                            current_theme,
+                            quick_settings,
+                            config,
+                        );
                     }
-                    if let Some(list) = pack_req {
-                        if let Some(first) = list.first() {
-                            on_stage_file(first.clone());
-                        }
-                        self.current_tab = StudioTab::ArchiveSuite;
-                    }
-                    if let Some(p) = inspect_req {
-                        on_stage_file(p.clone());
-                        self.current_tab = StudioTab::QualityInspector;
-                        if !self.inspection_busy {
-                            self.inspection_busy = true;
-                            self.inspection_status = "Inspecting in background...".to_string();
-                            crate::core::tool_console::inspect_file_async(
-                                self.tool_console.sender(),
-                                p,
-                            );
-                        }
-                    }
-                }
-                StudioTab::Preferences => {
-                    self.render_preferences_tab(
-                        ui,
-                        &palette,
-                        current_theme,
-                        quick_settings,
-                        config,
-                    );
-                }
-                other => {
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            let content_w = 680.0_f32.min(ui.available_width() - 48.0);
-                            let pad_x = ((ui.available_width() - content_w) * 0.5).max(24.0);
-                            ui.horizontal(|ui| {
-                                ui.add_space(pad_x);
-                                ui.vertical(|ui| {
-                                    ui.set_width(content_w);
-                                    ui.add_space(16.0);
-                                    match other {
-                                        StudioTab::FileExplorer | StudioTab::Preferences => {
-                                            unreachable!()
+                    other => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                let content_w = 680.0_f32.min(ui.available_width() - 48.0);
+                                let pad_x = ((ui.available_width() - content_w) * 0.5).max(24.0);
+                                ui.horizontal(|ui| {
+                                    ui.add_space(pad_x);
+                                    ui.vertical(|ui| {
+                                        ui.set_width(content_w);
+                                        ui.add_space(16.0);
+                                        match other {
+                                            StudioTab::FileExplorer | StudioTab::Preferences => {
+                                                unreachable!()
+                                            }
+                                            StudioTab::Transcoder => {
+                                                self.render_transcoder_tab(
+                                                    ui,
+                                                    &palette,
+                                                    current_file,
+                                                    quick_settings,
+                                                    &mut on_pick_file,
+                                                    &mut on_convert_batch,
+                                                );
+                                            }
+                                            StudioTab::ExamStudio => {
+                                                self.render_exam_studio_tab(
+                                                    ui,
+                                                    &palette,
+                                                    current_file,
+                                                    quick_settings,
+                                                    &mut on_pick_file,
+                                                    on_open_folder,
+                                                );
+                                            }
+                                            StudioTab::QualityInspector => {
+                                                self.render_quality_inspector_tab(
+                                                    ui,
+                                                    &palette,
+                                                    current_file,
+                                                    &mut on_pick_file,
+                                                );
+                                            }
+                                            StudioTab::ArchiveSuite => {
+                                                self.render_archive_tab(
+                                                    ui,
+                                                    &palette,
+                                                    current_file,
+                                                    quick_settings,
+                                                    &mut on_pick_file,
+                                                    &mut on_convert_batch,
+                                                );
+                                            }
+                                            StudioTab::HardwareTelemetry => {
+                                                self.render_telemetry_tab(ui, &palette);
+                                            }
                                         }
-                                        StudioTab::Transcoder => {
-                                            self.render_transcoder_tab(
-                                                ui,
-                                                &palette,
-                                                current_file,
-                                                quick_settings,
-                                                &mut on_pick_file,
-                                                &mut on_convert_batch,
-                                            );
-                                        }
-                                        StudioTab::ExamStudio => {
-                                            self.render_exam_studio_tab(
-                                                ui,
-                                                &palette,
-                                                current_file,
-                                                quick_settings,
-                                                &mut on_pick_file,
-                                                on_open_folder,
-                                            );
-                                        }
-                                        StudioTab::QualityInspector => {
-                                            self.render_quality_inspector_tab(
-                                                ui,
-                                                &palette,
-                                                current_file,
-                                                &mut on_pick_file,
-                                            );
-                                        }
-                                        StudioTab::ArchiveSuite => {
-                                            self.render_archive_tab(
-                                                ui,
-                                                &palette,
-                                                current_file,
-                                                quick_settings,
-                                                &mut on_pick_file,
-                                                &mut on_convert_batch,
-                                            );
-                                        }
-                                        StudioTab::HardwareTelemetry => {
-                                            self.render_telemetry_tab(ui, &palette);
-                                        }
-                                    }
+                                    });
                                 });
                             });
-                        });
+                    }
                 }
-            }
 
-            if self.current_tab != StudioTab::FileExplorer {
-                self.explorer_view.render_floating_preview(ui, &palette);
-            }
-        });
+                if self.current_tab != StudioTab::FileExplorer {
+                    self.explorer_view.render_floating_preview(ui, &palette);
+                }
+            });
 
         // Finder-style Command Palette Modal (Ctrl+P / Cmd+K)
         let palette_action = self.command_palette.render(
