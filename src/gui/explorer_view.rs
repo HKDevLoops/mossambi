@@ -1491,6 +1491,52 @@ impl ExplorerView {
         self.selection_anchor = None;
     }
 
+    /// Standard Windows Explorer / macOS Finder multi-selection semantics:
+    /// - `Ctrl + Shift + Click`: Extends range selection from anchor to `idx` without clearing existing selection.
+    /// - `Shift + Click`: Replaces selection with continuous range from anchor (or 0) to `idx`.
+    ///   Preserves original anchor so repeated Shift-clicks pivot around the original anchor.
+    /// - `Ctrl + Click` / `Cmd + Click`: Toggles the clicked item in/out of selection.
+    /// - Plain `Click`: Clears selection and selects only the clicked item.
+    pub fn handle_item_click_selection(
+        &mut self,
+        idx: usize,
+        path: PathBuf,
+        is_selected: bool,
+        ctrl: bool,
+        shift: bool,
+        entries: &[FileItem],
+    ) {
+        if ctrl && shift {
+            let anchor = self.selection_anchor.unwrap_or(0);
+            let (lo, hi) = (anchor.min(idx), anchor.max(idx));
+            for e in entries.iter().take(hi + 1).skip(lo) {
+                self.selected_paths.insert(e.path.clone());
+            }
+            self.selection_anchor = Some(idx);
+        } else if shift {
+            self.selected_paths.clear();
+            let anchor = self.selection_anchor.unwrap_or(0);
+            let (lo, hi) = (anchor.min(idx), anchor.max(idx));
+            for e in entries.iter().take(hi + 1).skip(lo) {
+                self.selected_paths.insert(e.path.clone());
+            }
+            if self.selection_anchor.is_none() {
+                self.selection_anchor = Some(anchor);
+            }
+        } else if ctrl {
+            if is_selected {
+                self.selected_paths.remove(&path);
+            } else {
+                self.selected_paths.insert(path);
+            }
+            self.selection_anchor = Some(idx);
+        } else {
+            self.selected_paths.clear();
+            self.selected_paths.insert(path);
+            self.selection_anchor = Some(idx);
+        }
+    }
+
     pub fn selected_paths(&self) -> Vec<PathBuf> {
         let mut paths: Vec<PathBuf> = self.selected_paths.iter().cloned().collect();
         paths.sort();
@@ -1938,7 +1984,7 @@ impl ExplorerView {
 
                 // Vim & Emacs Navigation (Active when not typing in text boxes)
                 if !is_typing {
-                    // Vim `j` / Down: Cursor Down
+                    // Vim `j` / Down: Cursor Down (Shift+Down extends selection)
                     if total_nav_items > 0
                         && ((i.key_pressed(egui::Key::J)
                             && !i.modifiers.command
@@ -1948,14 +1994,22 @@ impl ExplorerView {
                                 && !i.modifiers.ctrl
                                 && !i.modifiers.command))
                     {
+                        let shift = i.modifiers.shift;
                         self.focused_row = (self.focused_row + 1).min(total_nav_items - 1);
                         if let Some(item) = nav_entries.get(self.focused_row) {
-                            self.selected_paths.clear();
-                            self.selected_paths.insert(item.path.clone());
+                            let is_sel = self.selected_paths.contains(&item.path);
+                            self.handle_item_click_selection(
+                                self.focused_row,
+                                item.path.clone(),
+                                is_sel,
+                                false,
+                                shift,
+                                &nav_entries,
+                            );
                         }
                     }
 
-                    // Vim `k` / Up / Emacs `Ctrl+P`: Cursor Up
+                    // Vim `k` / Up / Emacs `Ctrl+P`: Cursor Up (Shift+Up extends selection)
                     if total_nav_items > 0
                         && ((i.key_pressed(egui::Key::K)
                             && !i.modifiers.command
@@ -1965,10 +2019,18 @@ impl ExplorerView {
                             || ((i.modifiers.ctrl || i.modifiers.command)
                                 && i.key_pressed(egui::Key::P)))
                     {
+                        let shift = i.modifiers.shift;
                         self.focused_row = self.focused_row.saturating_sub(1);
                         if let Some(item) = nav_entries.get(self.focused_row) {
-                            self.selected_paths.clear();
-                            self.selected_paths.insert(item.path.clone());
+                            let is_sel = self.selected_paths.contains(&item.path);
+                            self.handle_item_click_selection(
+                                self.focused_row,
+                                item.path.clone(),
+                                is_sel,
+                                false,
+                                shift,
+                                &nav_entries,
+                            );
                         }
                     }
 
@@ -4892,30 +4954,14 @@ impl ExplorerView {
                 self.trigger_click_feedback();
                 let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                 let shift = ui.input(|i| i.modifiers.shift);
-                if ctrl {
-                    if is_sel {
-                        self.selected_paths.remove(&item.path);
-                    } else {
-                        self.selected_paths.insert(item.path.clone());
-                    }
-                    self.selection_anchor = Some(idx);
-                } else if shift {
-                    if let Some(anchor) = self.selection_anchor {
-                        self.selected_paths.clear();
-                        let (lo, hi) = (anchor.min(idx), anchor.max(idx));
-                        for e in recent_files.iter().take(hi + 1).skip(lo) {
-                            self.selected_paths.insert(e.path.clone());
-                        }
-                    } else {
-                        self.selected_paths.clear();
-                        self.selected_paths.insert(item.path.clone());
-                        self.selection_anchor = Some(idx);
-                    }
-                } else {
-                    self.selected_paths.clear();
-                    self.selected_paths.insert(item.path.clone());
-                    self.selection_anchor = Some(idx);
-                }
+                self.handle_item_click_selection(
+                    idx,
+                    item.path.clone(),
+                    is_sel,
+                    ctrl,
+                    shift,
+                    recent_files,
+                );
             }
         }
     }
@@ -5961,12 +6007,16 @@ impl ExplorerView {
                             );
                         }
                         if cb_resp.clicked() {
-                            if is_selected {
-                                self.selected_paths.remove(&item.path);
-                            } else {
-                                self.selected_paths.insert(item.path.clone());
-                            }
-                            self.selection_anchor = Some(idx);
+                            let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                            let shift = ui.input(|i| i.modifiers.shift);
+                            self.handle_item_click_selection(
+                                idx,
+                                item.path.clone(),
+                                is_selected,
+                                ctrl || !shift,
+                                shift,
+                                &entries,
+                            );
                         }
                     }
 
@@ -6163,30 +6213,14 @@ impl ExplorerView {
                         self.focused_row = idx;
                         let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                         let shift = ui.input(|i| i.modifiers.shift);
-                        if ctrl {
-                            if is_selected {
-                                self.selected_paths.remove(&item.path);
-                            } else {
-                                self.selected_paths.insert(item.path.clone());
-                            }
-                            self.selection_anchor = Some(idx);
-                        } else if shift {
-                            if let Some(anchor) = self.selection_anchor {
-                                self.selected_paths.clear();
-                                let (lo, hi) = (anchor.min(idx), anchor.max(idx));
-                                for e in entries.iter().take(hi + 1).skip(lo) {
-                                    self.selected_paths.insert(e.path.clone());
-                                }
-                            } else {
-                                self.selected_paths.clear();
-                                self.selected_paths.insert(item.path.clone());
-                                self.selection_anchor = Some(idx);
-                            }
-                        } else {
-                            self.selected_paths.clear();
-                            self.selected_paths.insert(item.path.clone());
-                            self.selection_anchor = Some(idx);
-                        }
+                        self.handle_item_click_selection(
+                            idx,
+                            item.path.clone(),
+                            is_selected,
+                            ctrl,
+                            shift,
+                            &entries,
+                        );
                     }
 
                     // Drag source (Explorer rule): dragging a selected item
@@ -6372,7 +6406,7 @@ impl ExplorerView {
                     Rounding::same(2.0),
                     Stroke::new(1.0_f32, palette.accent),
                 );
-                let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
+                let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
                 let hits: Vec<PathBuf> = marquee_rects
                     .iter()
                     .enumerate()
@@ -7325,25 +7359,16 @@ impl ExplorerView {
                             );
                         }
                         if cb_resp.clicked() {
+                            let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                             let shift = ui.input(|i| i.modifiers.shift);
-                            if shift {
-                                if let Some(anchor) = self.selection_anchor {
-                                    let (lo, hi) = (anchor.min(idx), anchor.max(idx));
-                                    for e in entries.iter().take(hi + 1).skip(lo) {
-                                        self.selected_paths.insert(e.path.clone());
-                                    }
-                                } else {
-                                    self.selected_paths.insert(item.path.clone());
-                                    self.selection_anchor = Some(idx);
-                                }
-                            } else {
-                                if is_checked {
-                                    self.selected_paths.remove(&item.path);
-                                } else {
-                                    self.selected_paths.insert(item.path.clone());
-                                }
-                                self.selection_anchor = Some(idx);
-                            }
+                            self.handle_item_click_selection(
+                                idx,
+                                item.path.clone(),
+                                is_checked,
+                                ctrl || !shift,
+                                shift,
+                                &entries,
+                            );
                         }
 
                         // Drag source (Explorer rule: selected set or the
@@ -7594,30 +7619,14 @@ impl ExplorerView {
                             self.focused_row = idx;
                             let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                             let shift = ui.input(|i| i.modifiers.shift);
-                            if ctrl {
-                                if is_checked {
-                                    self.selected_paths.remove(&item.path);
-                                } else {
-                                    self.selected_paths.insert(item.path.clone());
-                                }
-                                self.selection_anchor = Some(idx);
-                            } else if shift {
-                                if let Some(anchor) = self.selection_anchor {
-                                    self.selected_paths.clear();
-                                    let (lo, hi) = (anchor.min(idx), anchor.max(idx));
-                                    for e in entries.iter().take(hi + 1).skip(lo) {
-                                        self.selected_paths.insert(e.path.clone());
-                                    }
-                                } else {
-                                    self.selected_paths.clear();
-                                    self.selected_paths.insert(item.path.clone());
-                                    self.selection_anchor = Some(idx);
-                                }
-                            } else {
-                                self.selected_paths.clear();
-                                self.selected_paths.insert(item.path.clone());
-                                self.selection_anchor = Some(idx);
-                            }
+                            self.handle_item_click_selection(
+                                idx,
+                                item.path.clone(),
+                                is_checked,
+                                ctrl,
+                                shift,
+                                &entries,
+                            );
                         }
 
                         if resp.hovered() {
@@ -7710,7 +7719,7 @@ impl ExplorerView {
                     Rounding::same(2.0),
                     Stroke::new(1.0_f32, palette.accent),
                 );
-                let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
+                let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
                 let hits: Vec<PathBuf> = marquee_rects
                     .iter()
                     .enumerate()
@@ -8133,29 +8142,15 @@ impl ExplorerView {
                                                     self.focused_row = idx;
                                                     let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                                                     let shift = ui.input(|i| i.modifiers.shift);
-                                                    if ctrl {
-                                                        if is_selected {
-                                                            self.selected_paths.remove(&item.path);
-                                                        } else {
-                                                            self.selected_paths.insert(item.path.clone());
-                                                        }
-                                                        self.selection_anchor = Some(idx);
-                                                    } else if shift {
-                                                        if let Some(anchor) = self.selection_anchor {
-                                                            self.selected_paths.clear();
-                                                            let (lo, hi) = (anchor.min(idx), anchor.max(idx));
-                                                            for e in entries.iter().take(hi + 1).skip(lo) {
-                                                                self.selected_paths.insert(e.path.clone());
-                                                            }
-                                                        } else {
-                                                            self.selected_paths.clear();
-                                                            self.selected_paths.insert(item.path.clone());
-                                                            self.selection_anchor = Some(idx);
-                                                        }
-                                                    } else {
-                                                        self.selected_paths.clear();
-                                                        self.selected_paths.insert(item.path.clone());
-                                                        self.selection_anchor = Some(idx);
+                                                    self.handle_item_click_selection(
+                                                        idx,
+                                                        item.path.clone(),
+                                                        is_selected,
+                                                        ctrl,
+                                                        shift,
+                                                        entries,
+                                                    );
+                                                    if !ctrl && !shift {
                                                         if item.is_dir {
                                                             *subfolder_to_load =
                                                                 Some((0, item.path.clone()));
@@ -8170,29 +8165,15 @@ impl ExplorerView {
                                                 ColumnRole::Descendant => {
                                                     let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
                                                     let shift = ui.input(|i| i.modifiers.shift);
-                                                    if ctrl {
-                                                        if is_selected {
-                                                            self.selected_paths.remove(&item.path);
-                                                        } else {
-                                                            self.selected_paths.insert(item.path.clone());
-                                                        }
-                                                        self.selection_anchor = Some(idx);
-                                                    } else if shift {
-                                                        if let Some(anchor) = self.selection_anchor {
-                                                            self.selected_paths.clear();
-                                                            let (lo, hi) = (anchor.min(idx), anchor.max(idx));
-                                                            for e in entries.iter().take(hi + 1).skip(lo) {
-                                                                self.selected_paths.insert(e.path.clone());
-                                                            }
-                                                        } else {
-                                                            self.selected_paths.clear();
-                                                            self.selected_paths.insert(item.path.clone());
-                                                            self.selection_anchor = Some(idx);
-                                                        }
-                                                    } else {
-                                                        self.selected_paths.clear();
-                                                        self.selected_paths.insert(item.path.clone());
-                                                        self.selection_anchor = Some(idx);
+                                                    self.handle_item_click_selection(
+                                                        idx,
+                                                        item.path.clone(),
+                                                        is_selected,
+                                                        ctrl,
+                                                        shift,
+                                                        entries,
+                                                    );
+                                                    if !ctrl && !shift {
                                                         if item.is_dir {
                                                             *subfolder_to_load = Some((
                                                                 stack_index + 1,
@@ -12212,5 +12193,77 @@ mod rename_stem_tests {
         assert_eq!(rename_stem_chars(".gitignore", false), 10);
         assert_eq!(rename_stem_chars("folder.v2", true), 9);
         assert_eq!(rename_stem_chars("noext", false), 5);
+    }
+}
+
+#[cfg(test)]
+mod multi_selection_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn make_test_items(count: usize) -> Vec<FileItem> {
+        (0..count)
+            .map(|i| FileItem::from_path(PathBuf::from(format!("/test/file_{i}.txt"))))
+            .collect()
+    }
+
+    #[test]
+    fn test_plain_click_selects_single() {
+        let mut view = ExplorerView::default();
+        let items = make_test_items(10);
+
+        view.handle_item_click_selection(3, items[3].path.clone(), false, false, false, &items);
+        assert_eq!(view.selected_paths.len(), 1);
+        assert!(view.selected_paths.contains(&items[3].path));
+        assert_eq!(view.selection_anchor, Some(3));
+    }
+
+    #[test]
+    fn test_shift_click_range_selection() {
+        let mut view = ExplorerView::default();
+        let items = make_test_items(10);
+
+        // Click item 2 (sets anchor to 2)
+        view.handle_item_click_selection(2, items[2].path.clone(), false, false, false, &items);
+        assert_eq!(view.selected_paths.len(), 1);
+
+        // Shift-click item 5 (selects items 2, 3, 4, 5)
+        view.handle_item_click_selection(5, items[5].path.clone(), false, false, true, &items);
+        assert_eq!(view.selected_paths.len(), 4);
+        for item in items.iter().take(6).skip(2) {
+            assert!(view.selected_paths.contains(&item.path));
+        }
+        // Anchor remains at 2 for re-pivoting
+        assert_eq!(view.selection_anchor, Some(2));
+
+        // Re-pivot: Shift-click item 3 (narrows selection to 2, 3)
+        view.handle_item_click_selection(3, items[3].path.clone(), true, false, true, &items);
+        assert_eq!(view.selected_paths.len(), 2);
+        assert!(view.selected_paths.contains(&items[2].path));
+        assert!(view.selected_paths.contains(&items[3].path));
+        assert!(!view.selected_paths.contains(&items[4].path));
+    }
+
+    #[test]
+    fn test_ctrl_click_toggle_and_ctrl_shift_union() {
+        let mut view = ExplorerView::default();
+        let items = make_test_items(10);
+
+        // Plain click item 1
+        view.handle_item_click_selection(1, items[1].path.clone(), false, false, false, &items);
+        // Ctrl-click item 7 (toggles item 7 on, anchor becomes 7)
+        view.handle_item_click_selection(7, items[7].path.clone(), false, true, false, &items);
+        assert_eq!(view.selected_paths.len(), 2);
+        assert!(view.selected_paths.contains(&items[1].path));
+        assert!(view.selected_paths.contains(&items[7].path));
+        assert_eq!(view.selection_anchor, Some(7));
+
+        // Ctrl+Shift click item 9 (unions range 7..=9 with existing items without clearing item 1)
+        view.handle_item_click_selection(9, items[9].path.clone(), false, true, true, &items);
+        assert_eq!(view.selected_paths.len(), 4);
+        assert!(view.selected_paths.contains(&items[1].path));
+        assert!(view.selected_paths.contains(&items[7].path));
+        assert!(view.selected_paths.contains(&items[8].path));
+        assert!(view.selected_paths.contains(&items[9].path));
     }
 }
