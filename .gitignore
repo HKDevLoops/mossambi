@@ -45,3 +45,19 @@ UI-bugs/
 Big_session.md
 graphify-out/
 ref/
+
+# Documentation, plans and specifications
+docs/
+DOCS/
+[Dd]ocs/
+
+# Planning, task tracking and agent files
+.superpowers/
+skills-lock.json
+PROGRESS.md
+TASKS.md
+TODO.md
+VERIFICATION.md
+gemini.md
+GEMINI.md
+
