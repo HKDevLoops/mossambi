@@ -9243,7 +9243,7 @@ impl ExplorerView {
                             let entries_clone = self.entries.clone();
                             for item in entries_clone {
                                 let is_sel = self.selected_paths.contains(&item.path);
-                                let prefix = if item.is_dir { "[DIR] " } else { "      " };
+                                let prefix = if item.is_dir { "DIR   " } else { "      " };
                                 let label_text = format!("{}{}", prefix, item.name);
                                 let resp = ui.selectable_label(
                                     is_sel,
@@ -9336,7 +9336,7 @@ impl ExplorerView {
                             let entries_clone = self.secondary_entries.clone();
                             for item in entries_clone {
                                 let is_sel = self.secondary_selected_paths.contains(&item.path);
-                                let prefix = if item.is_dir { "[DIR] " } else { "      " };
+                                let prefix = if item.is_dir { "DIR   " } else { "      " };
                                 let label_text = format!("{}{}", prefix, item.name);
                                 let resp = ui.selectable_label(
                                     is_sel,
