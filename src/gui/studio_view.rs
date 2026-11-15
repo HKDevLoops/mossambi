@@ -2494,6 +2494,7 @@ impl StudioView {
                     let mut pack_req: Option<Vec<PathBuf>> = None;
                     let mut inspect_req: Option<PathBuf> = None;
 
+                    self.explorer_view.design_tokens = config.tokens();
                     self.explorer_view.render(
                         ui,
                         &palette,

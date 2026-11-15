@@ -343,33 +343,22 @@ pub struct SemanticColors {
 impl SemanticColors {
     /// Derives semantic roles from a theme palette.
     pub fn from_palette(p: &crate::gui::macos_theme::ThemePalette) -> Self {
-        let (accent, selection_fill) = if p.is_dark {
-            (
-                p.accent,
-                Color32::from_rgba_unmultiplied(p.accent.r(), p.accent.g(), p.accent.b(), 45),
-            )
-        } else {
-            (
-                p.accent,
-                Color32::from_rgba_unmultiplied(p.accent.r(), p.accent.g(), p.accent.b(), 26),
-            )
-        };
         Self {
             canvas: p.window_bg,
-            chrome: p.sidebar_bg,
-            surface: p.card_bg,
-            surface_raised: p.card_hover,
+            chrome: p.surface_1,
+            surface: p.surface_2,
+            surface_raised: p.surface_3,
             border_subtle: p.divider,
             border_strong: p.border,
             text_primary: p.text_primary,
             text_secondary: p.text_secondary,
             text_tertiary: p.text_muted,
-            accent,
-            selection_fill,
-            hover_fill: p.card_hover,
-            danger: Color32::from_rgb(255, 95, 86),
-            warning: Color32::from_rgb(255, 189, 46),
-            success: Color32::from_rgb(52, 199, 89),
+            accent: p.accent,
+            selection_fill: p.selection,
+            hover_fill: p.hover,
+            danger: p.error,
+            warning: p.warn,
+            success: p.success,
         }
     }
 }

@@ -515,6 +515,134 @@ impl CornerStyle {
     }
 }
 
+/// Design style preset: Arcane Fluid (default), Zenith Pro, or Hyperion Slate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DesignStyle {
+    #[default]
+    ArcaneFluid,
+    ZenithPro,
+    HyperionSlate,
+}
+
+impl DesignStyle {
+    pub fn all() -> [DesignStyle; 3] {
+        [Self::ArcaneFluid, Self::ZenithPro, Self::HyperionSlate]
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::ArcaneFluid => "Arcane Fluid",
+            Self::ZenithPro => "Zenith Pro",
+            Self::HyperionSlate => "Hyperion Slate",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::ArcaneFluid => {
+                "Arc-inspired fluid spaces, 10px rounded cards, and responsive bento grid"
+            }
+            Self::ZenithPro => {
+                "Swiss precision, 4px crisp radii, high data density, and tabular alignment"
+            }
+            Self::HyperionSlate => {
+                "Neo-custom hacker aesthetic, 12px pill shapes, and widget-ready layout"
+            }
+        }
+    }
+
+    pub fn tokens(&self) -> DesignTokens {
+        match self {
+            Self::ArcaneFluid => DesignTokens {
+                style: *self,
+                space_xxs: 4.0,
+                space_xs: 8.0,
+                space_sm: 12.0,
+                space_md: 16.0,
+                space_lg: 24.0,
+                space_xl: 32.0,
+                radius_card: 10.0,
+                radius_pill: 6.0,
+                radius_menu: 8.0,
+                radius_subtle: 4.0,
+                border_width: 1.0,
+                border_subtle_alpha: 35,
+                specular_alpha: 22,
+                min_glass_opacity: 0.85,
+                default_surface_opacity: 0.90,
+                max_content_width: 1440.0,
+            },
+            Self::ZenithPro => DesignTokens {
+                style: *self,
+                space_xxs: 4.0,
+                space_xs: 8.0,
+                space_sm: 12.0,
+                space_md: 16.0,
+                space_lg: 24.0,
+                space_xl: 32.0,
+                radius_card: 4.0,
+                radius_pill: 3.0,
+                radius_menu: 4.0,
+                radius_subtle: 2.0,
+                border_width: 1.0,
+                border_subtle_alpha: 45,
+                specular_alpha: 8,
+                min_glass_opacity: 0.95,
+                default_surface_opacity: 0.98,
+                max_content_width: 1600.0,
+            },
+            Self::HyperionSlate => DesignTokens {
+                style: *self,
+                space_xxs: 4.0,
+                space_xs: 8.0,
+                space_sm: 12.0,
+                space_md: 16.0,
+                space_lg: 24.0,
+                space_xl: 32.0,
+                radius_card: 12.0,
+                radius_pill: 8.0,
+                radius_menu: 10.0,
+                radius_subtle: 6.0,
+                border_width: 1.5,
+                border_subtle_alpha: 60,
+                specular_alpha: 32,
+                min_glass_opacity: 0.80,
+                default_surface_opacity: 0.88,
+                max_content_width: 1500.0,
+            },
+        }
+    }
+}
+
+/// Shared design tokens derived from the active DesignStyle preset.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DesignTokens {
+    pub style: DesignStyle,
+    pub space_xxs: f32,
+    pub space_xs: f32,
+    pub space_sm: f32,
+    pub space_md: f32,
+    pub space_lg: f32,
+    pub space_xl: f32,
+    pub radius_card: f32,
+    pub radius_pill: f32,
+    pub radius_menu: f32,
+    pub radius_subtle: f32,
+    pub border_width: f32,
+    pub border_subtle_alpha: u8,
+    pub specular_alpha: u8,
+    pub min_glass_opacity: f32,
+    pub default_surface_opacity: f32,
+    pub max_content_width: f32,
+}
+
+impl Default for DesignTokens {
+    fn default() -> Self {
+        DesignStyle::default().tokens()
+    }
+}
+
 /// Explorer chrome style: macOS Finder vs Windows Explorer vs Linux desktop layouts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -981,6 +1109,9 @@ pub struct MossambiConfig {
     /// Look preset: Finder, Windows Explorer, Nautilus/GNOME, Thunar
     #[serde(default)]
     pub look_preset: Option<LookPreset>,
+    /// Design style preset: Arcane Fluid, Zenith Pro, or Hyperion Slate
+    #[serde(default)]
+    pub design_style: DesignStyle,
     /// Sidebar visual style: Finder, Windows, Nautilus, Thunar
     #[serde(default)]
     pub sidebar_style: SidebarStyle,
@@ -1248,6 +1379,7 @@ impl Default for MossambiConfig {
             sidebar_tags_expanded: true,
             sidebar_tools_expanded: true,
             look_preset: None,
+            design_style: DesignStyle::ArcaneFluid,
             sidebar_style: SidebarStyle::default(),
             row_density: RowDensity::default(),
             corner_style: CornerStyle::default(),
@@ -1290,6 +1422,11 @@ pub const DEFAULT_SHORTCUTS: &[(&str, &str)] = &[
 ];
 
 impl MossambiConfig {
+    /// Returns the active design tokens derived from the configured DesignStyle.
+    pub fn tokens(&self) -> DesignTokens {
+        self.design_style.tokens()
+    }
+
     /// Applies an operating-system look preset while keeping individual settings overridable.
     pub fn apply_look_preset(&mut self, preset: LookPreset) {
         self.look_preset = Some(preset);

@@ -192,31 +192,36 @@ impl ThemeStyle {
     ) -> ThemePalette {
         let pt = self.to_pantone();
         let (bg_r, bg_g, bg_b) = pt.bg.to_rgb();
-        let (surf_r, surf_g, surf_b) = pt.surface.to_rgb();
+        let (s1_r, s1_g, s1_b) = pt.surface_1.to_rgb();
+        let (s2_r, s2_g, s2_b) = pt.surface_2.to_rgb();
+        let (s3_r, s3_g, s3_b) = pt.surface_3.to_rgb();
         let (bord_r, bord_g, bord_b) = pt.border.to_rgb();
         let (tp_r, tp_g, tp_b) = pt.text_primary.to_rgb();
         let (ts_r, ts_g, ts_b) = pt.text_secondary.to_rgb();
         let (tm_r, tm_g, tm_b) = pt.text_muted.to_rgb();
         let (acc_r, acc_g, acc_b) = pt.accent.to_rgb();
-        let (hi_r, hi_g, hi_b) = pt.highlight.to_rgb();
+        let (aa_r, aa_g, aa_b) = pt.accent_alt.to_rgb();
+        let (sel_r, sel_g, sel_b) = pt.selection.to_rgb();
+        let (hov_r, hov_g, hov_b) = pt.hover.to_rgb();
+        let (suc_r, suc_g, suc_b) = pt.success.to_rgb();
+        let (wrn_r, wrn_g, wrn_b) = pt.warn.to_rgb();
+        let (err_r, err_g, err_b) = pt.error.to_rgb();
+        let (tc_r, tc_g, tc_b) = pt.tag_code.to_rgb();
+        let (tm2_r, tm2_g, tm2_b) = pt.tag_media.to_rgb();
+        let (ta_r, ta_g, ta_b) = pt.tag_archive.to_rgb();
+        let (td_r, td_g, td_b) = pt.tag_document.to_rgb();
+        let (ti_r, ti_g, ti_b) = pt.tag_image.to_rgb();
 
         let clamped_opacity = opacity.clamp(0.30, 1.00);
 
         match effect {
             crate::core::GlassEffect::Opaque => {
                 if pt.is_dark {
-                    let card_hover_r = surf_r.saturating_add(14);
-                    let card_hover_g = surf_g.saturating_add(14);
-                    let card_hover_b = surf_b.saturating_add(14);
                     ThemePalette {
                         window_bg: Color32::from_rgb(bg_r, bg_g, bg_b),
-                        sidebar_bg: Color32::from_rgb(
-                            bg_r.saturating_add(6),
-                            bg_g.saturating_add(6),
-                            bg_b.saturating_add(6),
-                        ),
-                        card_bg: Color32::from_rgb(surf_r, surf_g, surf_b),
-                        card_hover: Color32::from_rgb(card_hover_r, card_hover_g, card_hover_b),
+                        sidebar_bg: Color32::from_rgb(s1_r, s1_g, s1_b),
+                        card_bg: Color32::from_rgb(s2_r, s2_g, s2_b),
+                        card_hover: Color32::from_rgb(hov_r, hov_g, hov_b),
                         border: Color32::from_rgb(bord_r, bord_g, bord_b),
                         specular: Color32::from_rgba_premultiplied(255, 255, 255, 18),
                         divider: Color32::from_rgb(
@@ -228,23 +233,30 @@ impl ThemeStyle {
                         text_secondary: Color32::from_rgb(ts_r, ts_g, ts_b),
                         text_muted: Color32::from_rgb(tm_r, tm_g, tm_b),
                         accent: Color32::from_rgb(acc_r, acc_g, acc_b),
-                        highlight: Color32::from_rgb(hi_r, hi_g, hi_b),
+                        highlight: Color32::from_rgb(aa_r, aa_g, aa_b),
                         is_translucent: false,
                         is_dark: true,
+                        surface_1: Color32::from_rgb(s1_r, s1_g, s1_b),
+                        surface_2: Color32::from_rgb(s2_r, s2_g, s2_b),
+                        surface_3: Color32::from_rgb(s3_r, s3_g, s3_b),
+                        selection: Color32::from_rgb(sel_r, sel_g, sel_b),
+                        hover: Color32::from_rgb(hov_r, hov_g, hov_b),
+                        accent_alt: Color32::from_rgb(aa_r, aa_g, aa_b),
+                        success: Color32::from_rgb(suc_r, suc_g, suc_b),
+                        warn: Color32::from_rgb(wrn_r, wrn_g, wrn_b),
+                        error: Color32::from_rgb(err_r, err_g, err_b),
+                        tag_code: Color32::from_rgb(tc_r, tc_g, tc_b),
+                        tag_media: Color32::from_rgb(tm2_r, tm2_g, tm2_b),
+                        tag_archive: Color32::from_rgb(ta_r, ta_g, ta_b),
+                        tag_document: Color32::from_rgb(td_r, td_g, td_b),
+                        tag_image: Color32::from_rgb(ti_r, ti_g, ti_b),
                     }
                 } else {
-                    let card_hover_r = surf_r.saturating_sub(10);
-                    let card_hover_g = surf_g.saturating_sub(10);
-                    let card_hover_b = surf_b.saturating_sub(10);
                     ThemePalette {
                         window_bg: Color32::from_rgb(bg_r, bg_g, bg_b),
-                        sidebar_bg: Color32::from_rgb(
-                            bg_r.saturating_sub(6),
-                            bg_g.saturating_sub(6),
-                            bg_b.saturating_sub(6),
-                        ),
-                        card_bg: Color32::from_rgb(255, 255, 255), // Pure crisp white cards for Fluent light aesthetic
-                        card_hover: Color32::from_rgb(card_hover_r, card_hover_g, card_hover_b),
+                        sidebar_bg: Color32::from_rgb(s1_r, s1_g, s1_b),
+                        card_bg: Color32::from_rgb(s2_r, s2_g, s2_b),
+                        card_hover: Color32::from_rgb(hov_r, hov_g, hov_b),
                         border: Color32::from_rgb(bord_r, bord_g, bord_b),
                         specular: Color32::from_rgba_premultiplied(255, 255, 255, 120),
                         divider: Color32::from_rgb(bord_r, bord_g, bord_b),
@@ -252,9 +264,23 @@ impl ThemeStyle {
                         text_secondary: Color32::from_rgb(ts_r, ts_g, ts_b),
                         text_muted: Color32::from_rgb(tm_r, tm_g, tm_b),
                         accent: Color32::from_rgb(acc_r, acc_g, acc_b),
-                        highlight: Color32::from_rgb(hi_r, hi_g, hi_b),
+                        highlight: Color32::from_rgb(aa_r, aa_g, aa_b),
                         is_translucent: false,
                         is_dark: false,
+                        surface_1: Color32::from_rgb(s1_r, s1_g, s1_b),
+                        surface_2: Color32::from_rgb(s2_r, s2_g, s2_b),
+                        surface_3: Color32::from_rgb(s3_r, s3_g, s3_b),
+                        selection: Color32::from_rgb(sel_r, sel_g, sel_b),
+                        hover: Color32::from_rgb(hov_r, hov_g, hov_b),
+                        accent_alt: Color32::from_rgb(aa_r, aa_g, aa_b),
+                        success: Color32::from_rgb(suc_r, suc_g, suc_b),
+                        warn: Color32::from_rgb(wrn_r, wrn_g, wrn_b),
+                        error: Color32::from_rgb(err_r, err_g, err_b),
+                        tag_code: Color32::from_rgb(tc_r, tc_g, tc_b),
+                        tag_media: Color32::from_rgb(tm2_r, tm2_g, tm2_b),
+                        tag_archive: Color32::from_rgb(ta_r, ta_g, ta_b),
+                        tag_document: Color32::from_rgb(td_r, td_g, td_b),
+                        tag_image: Color32::from_rgb(ti_r, ti_g, ti_b),
                     }
                 }
             }
@@ -326,6 +352,21 @@ pub struct ThemePalette {
     pub highlight: Color32,
     pub is_translucent: bool,
     pub is_dark: bool,
+    // Semantic tokens per Proposal D1
+    pub surface_1: Color32,
+    pub surface_2: Color32,
+    pub surface_3: Color32,
+    pub selection: Color32,
+    pub hover: Color32,
+    pub accent_alt: Color32,
+    pub success: Color32,
+    pub warn: Color32,
+    pub error: Color32,
+    pub tag_code: Color32,
+    pub tag_media: Color32,
+    pub tag_archive: Color32,
+    pub tag_document: Color32,
+    pub tag_image: Color32,
 }
 
 // ---------------------------------------------------------------------------
@@ -696,8 +737,11 @@ fn glassify(mut p: ThemePalette, effect: crate::core::GlassEffect, opacity: f32)
 
     p.window_bg = glass_fill(chrome_base, effect, Surface::Chrome, p.is_dark);
     p.sidebar_bg = glass_fill(sidebar_base, effect, Surface::Sidebar, p.is_dark);
+    p.surface_1 = p.sidebar_bg;
     p.card_bg = glass_fill(card_base, effect, Surface::Card, p.is_dark);
+    p.surface_2 = p.card_bg;
     p.card_hover = glass_fill(hover_base, effect, Surface::Card, p.is_dark);
+    p.hover = p.card_hover;
     p.is_translucent = true;
 
     // Guarantee WCAG contrast >= 4.5:1 for primary text against window_bg

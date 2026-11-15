@@ -833,6 +833,7 @@ pub struct ExplorerView {
     pub secondary_dir_watcher: crate::core::DirWatcher,
     pub row_density: crate::core::config::RowDensity,
     pub calculate_checksums: bool,
+    pub design_tokens: crate::core::DesignTokens,
 }
 
 #[derive(Debug, Clone)]
@@ -1128,6 +1129,7 @@ impl Default for ExplorerView {
             secondary_dir_watcher: crate::core::DirWatcher::new(),
             row_density: cfg.row_density,
             calculate_checksums: cfg.calculate_checksums,
+            design_tokens: cfg.tokens(),
             drop_menu: None,
         };
 
@@ -4351,8 +4353,16 @@ impl ExplorerView {
                         );
 
                         // Card frame with subtle depth
-                        ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
-                        ui.painter().rect_stroke(rect, Rounding::same(8.0), border_stroke);
+                        ui.painter().rect_filled(
+                            rect,
+                            Rounding::same(self.design_tokens.radius_card),
+                            bg,
+                        );
+                        ui.painter().rect_stroke(
+                            rect,
+                            Rounding::same(self.design_tokens.radius_card),
+                            border_stroke,
+                        );
 
                         // Large squircle-less pack icon (crisp, antialiased)
                         let icon_key = match label.as_str() {
@@ -4428,8 +4438,16 @@ impl ExplorerView {
                             if is_hovered { palette.accent } else { palette.border },
                         );
 
-                        ui.painter().rect_filled(rect, Rounding::same(8.0), bg);
-                        ui.painter().rect_stroke(rect, Rounding::same(8.0), border_stroke);
+                        ui.painter().rect_filled(
+                            rect,
+                            Rounding::same(self.design_tokens.radius_card),
+                            bg,
+                        );
+                        ui.painter().rect_stroke(
+                            rect,
+                            Rounding::same(self.design_tokens.radius_card),
+                            border_stroke,
+                        );
 
                         // Left: Vector drive icon
                         let badge_center = Pos2::new(rect.left() + 24.0, rect.center().y);

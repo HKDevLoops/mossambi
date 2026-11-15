@@ -486,6 +486,12 @@ impl PreferencesView {
         out.push(PreferenceHit {
             category_id: "appearance",
             category_title: "Appearance",
+            setting_label: "Design style",
+            value_label: self.cfg.design_style.label().to_string(),
+        });
+        out.push(PreferenceHit {
+            category_id: "appearance",
+            category_title: "Appearance",
             setting_label: "Glass effect",
             value_label: glass_label(self.cfg.glass_effect).to_string(),
         });
@@ -2131,6 +2137,25 @@ impl PreferencesView {
                     }
                 }
             });
+            ui.add_space(design::space::XS);
+            ui.separator();
+            ui.add_space(design::space::XS);
+            let ds_mut = &mut self.cfg.design_style;
+            setting_row(
+                ui,
+                palette,
+                "Design Style",
+                ds_mut.description(),
+                dirty,
+                |ui, dirty| {
+                    for s in crate::core::DesignStyle::all() {
+                        if ui.selectable_label(*ds_mut == s, s.label()).clicked() {
+                            *ds_mut = s;
+                            *dirty = true;
+                        }
+                    }
+                },
+            );
         });
         ui.add_space(design::space::SM);
         // Compact swatch grid (2 responsive columns fitting cleanly in bounded card).

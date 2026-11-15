@@ -43,12 +43,26 @@ fn test_theme_integrity() {
         for c in [
             &theme.bg,
             &theme.surface,
+            &theme.surface_1,
+            &theme.surface_2,
+            &theme.surface_3,
             &theme.border,
             &theme.text_primary,
             &theme.text_secondary,
             &theme.text_muted,
             &theme.accent,
             &theme.highlight,
+            &theme.accent_alt,
+            &theme.selection,
+            &theme.hover,
+            &theme.success,
+            &theme.warn,
+            &theme.error,
+            &theme.tag_code,
+            &theme.tag_media,
+            &theme.tag_archive,
+            &theme.tag_document,
+            &theme.tag_image,
         ] {
             assert_eq!(c.hex.len(), 7, "hex {} must be #RRGGBB", c.hex);
             assert!(c.hex.starts_with('#'), "hex {} must start with #", c.hex);
@@ -145,4 +159,39 @@ fn test_defaults() {
     assert!(ThemeMode::default().is_dark());
     assert_eq!(ThemeStyle::default(), ThemeStyle::Rangalipi);
     assert_eq!(ThemeStyle::Rangalipi.to_pantone().id, "rangalipi");
+}
+
+#[test]
+fn test_wcag_contrast_floors_for_all_themes() {
+    for theme in THEMES.iter() {
+        // Primary text >= 4.5:1 against surface_2 (cards) and surface_3 (popovers)
+        let cr2 = theme.text_primary.contrast_ratio(&theme.surface_2);
+        assert!(
+            cr2 >= 4.5,
+            "Theme '{}' primary text ({}) vs surface_2 ({}) has contrast {:.2} < 4.5",
+            theme.name,
+            theme.text_primary.hex,
+            theme.surface_2.hex,
+            cr2
+        );
+        let cr3 = theme.text_primary.contrast_ratio(&theme.surface_3);
+        assert!(
+            cr3 >= 4.5,
+            "Theme '{}' primary text ({}) vs surface_3 ({}) has contrast {:.2} < 4.5",
+            theme.name,
+            theme.text_primary.hex,
+            theme.surface_3.hex,
+            cr3
+        );
+        // Secondary text >= 3.0:1 against surface_2
+        let cr_sec = theme.text_secondary.contrast_ratio(&theme.surface_2);
+        assert!(
+            cr_sec >= 3.0,
+            "Theme '{}' secondary text ({}) vs surface_2 ({}) has contrast {:.2} < 3.0",
+            theme.name,
+            theme.text_secondary.hex,
+            theme.surface_2.hex,
+            cr_sec
+        );
+    }
 }
