@@ -583,7 +583,12 @@ pub fn menu_item_toggle(
 
 /// Measures a label and chops it with an ASCII ellipsis until it fits the
 /// given width budget (Finder truncation style: one line, ellipsis at end).
-fn elide_to_width(ui: &Ui, label: &str, max_width: f32, font: eframe::egui::FontId) -> String {
+pub(crate) fn elide_to_width(
+    ui: &Ui,
+    label: &str,
+    max_width: f32,
+    font: eframe::egui::FontId,
+) -> String {
     if max_width <= 0.0 {
         return label.to_owned();
     }

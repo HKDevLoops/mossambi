@@ -1515,6 +1515,24 @@ impl ExplorerView {
         }
     }
 
+    /// Syncs Miller column preview and stack when selection changes via keyboard or click.
+    pub fn sync_miller_selection(&mut self, item: &FileItem) {
+        if self.view_mode != ViewMode::Columns {
+            return;
+        }
+        if !item.is_dir {
+            self.column_preview_item = Some(item.clone());
+            self.column_stack.clear();
+            self.needs_miller_scroll_align = true;
+        } else {
+            let sub_entries = self.get_column_entries(&item.path);
+            self.column_stack.clear();
+            self.column_stack.push((item.path.clone(), sub_entries));
+            self.column_preview_item = None;
+            self.needs_miller_scroll_align = true;
+        }
+    }
+
     pub fn add_tab(&mut self, path: PathBuf) {
         let home_opt = crate::core::platform_paths::home_dir_opt();
         let is_home = Some(&path) == home_opt.as_ref();
@@ -2206,6 +2224,9 @@ impl ExplorerView {
                                 shift,
                                 &nav_entries,
                             );
+                            if !shift {
+                                self.sync_miller_selection(item);
+                            }
                         }
                     }
 
@@ -2231,6 +2252,9 @@ impl ExplorerView {
                                 shift,
                                 &nav_entries,
                             );
+                            if !shift {
+                                self.sync_miller_selection(item);
+                            }
                         }
                     }
 
@@ -2242,6 +2266,11 @@ impl ExplorerView {
                         || (i.modifiers.alt && i.key_pressed(egui::Key::ArrowLeft))
                         || ((i.modifiers.ctrl || i.modifiers.command)
                             && i.key_pressed(egui::Key::B))
+                        || (self.view_mode == ViewMode::Columns
+                            && i.key_pressed(egui::Key::ArrowLeft)
+                            && !i.modifiers.alt
+                            && !i.modifiers.ctrl
+                            && !i.modifiers.command)
                         || i.key_pressed(egui::Key::Backspace)
                     {
                         if let Some(parent) = self.current_dir.parent() {
@@ -2272,6 +2301,11 @@ impl ExplorerView {
                         || (!finder_keys && enter)
                         || ((i.modifiers.ctrl || i.modifiers.command)
                             && (i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::O)))
+                        || (self.view_mode == ViewMode::Columns
+                            && i.key_pressed(egui::Key::ArrowRight)
+                            && !i.modifiers.alt
+                            && !i.modifiers.ctrl
+                            && !i.modifiers.command)
                     {
                         if let Some(item) = nav_entries.get(self.focused_row) {
                             if item.is_dir {
@@ -2317,6 +2351,7 @@ impl ExplorerView {
                             if let Some(item) = nav_entries.first() {
                                 self.selected_paths.clear();
                                 self.selected_paths.insert(item.path.clone());
+                                self.sync_miller_selection(item);
                             }
                         } else {
                             let now = Instant::now();
@@ -2327,6 +2362,7 @@ impl ExplorerView {
                                     if let Some(item) = nav_entries.first() {
                                         self.selected_paths.clear();
                                         self.selected_paths.insert(item.path.clone());
+                                        self.sync_miller_selection(item);
                                     }
                                     self.last_g_press = None;
                                 } else {
@@ -2350,6 +2386,7 @@ impl ExplorerView {
                         if let Some(item) = nav_entries.get(self.focused_row) {
                             self.selected_paths.clear();
                             self.selected_paths.insert(item.path.clone());
+                            self.sync_miller_selection(item);
                         }
                     }
 
@@ -3740,10 +3777,12 @@ impl ExplorerView {
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(3.0, 0.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
                     for (i, seg) in segments.iter().enumerate() {
                         if i > 0 {
+                            ui.add_space(2.0);
                             crate::gui::finder_chrome::paint_path_chevron(ui, palette.text_muted);
+                            ui.add_space(2.0);
                         }
                         let is_current = seg.target_path == current_dir;
 
@@ -3753,8 +3792,6 @@ impl ExplorerView {
                         } else {
                             IconGlyph::Folder
                         };
-                        let (icon_rect, _) =
-                            ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::hover());
                         let tint = if is_current {
                             [palette.accent.r(), palette.accent.g(), palette.accent.b()]
                         } else {
@@ -3764,6 +3801,38 @@ impl ExplorerView {
                                 palette.text_secondary.b(),
                             ]
                         };
+
+                        let label_font = egui::FontId::proportional(12.5);
+                        let text_color = if is_current {
+                            palette.text_primary
+                        } else {
+                            palette.text_secondary
+                        };
+                        let galley =
+                            ui.painter()
+                                .layout_no_wrap(seg.label.clone(), label_font, text_color);
+                        let icon_side = 16.0;
+                        let gap = 4.0;
+                        let pad_x = 4.0;
+                        let seg_w = pad_x * 2.0 + icon_side + gap + galley.size().x;
+                        let (seg_rect, resp) =
+                            ui.allocate_exact_size(Vec2::new(seg_w, 24.0), egui::Sense::click());
+
+                        if resp.hovered() {
+                            ui.painter().rect_filled(
+                                seg_rect,
+                                Rounding::same(4.0),
+                                palette.card_hover,
+                            );
+                        }
+
+                        let icon_rect = Rect::from_center_size(
+                            Pos2::new(
+                                seg_rect.left() + pad_x + icon_side * 0.5,
+                                seg_rect.center().y,
+                            ),
+                            Vec2::splat(icon_side),
+                        );
                         crate::core::icon_packs::paint_icon(
                             ui,
                             self.icon_pack,
@@ -3772,19 +3841,12 @@ impl ExplorerView {
                             tint,
                         );
 
-                        let text =
-                            egui::RichText::new(&seg.label)
-                                .size(12.5)
-                                .color(if is_current {
-                                    palette.text_primary
-                                } else {
-                                    palette.text_secondary
-                                });
-                        let btn = egui::Button::new(text)
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::NONE)
-                            .min_size(Vec2::new(0.0, 24.0));
-                        let resp = ui.add(btn);
+                        let text_pos = Pos2::new(
+                            seg_rect.left() + pad_x + icon_side + gap,
+                            seg_rect.center().y - galley.size().y * 0.5,
+                        );
+                        ui.painter().galley(text_pos, galley, text_color);
+
                         if resp.clicked() {
                             let target = seg.target_path.clone();
                             self.navigate_to(target);
@@ -5929,6 +5991,29 @@ impl ExplorerView {
         self.render_hover_preview(ui, palette);
     }
 
+    fn paint_sort_chevron(
+        painter: &egui::Painter,
+        center: Pos2,
+        direction: SortDirection,
+        color: Color32,
+    ) {
+        let s = 3.5_f32;
+        let pts = match direction {
+            SortDirection::Ascending => [
+                Pos2::new(center.x - s, center.y + s * 0.5),
+                Pos2::new(center.x, center.y - s * 0.5),
+                Pos2::new(center.x + s, center.y + s * 0.5),
+            ],
+            SortDirection::Descending => [
+                Pos2::new(center.x - s, center.y - s * 0.5),
+                Pos2::new(center.x, center.y + s * 0.5),
+                Pos2::new(center.x + s, center.y - s * 0.5),
+            ],
+        };
+        painter.line_segment([pts[0], pts[1]], Stroke::new(1.4_f32, color));
+        painter.line_segment([pts[1], pts[2]], Stroke::new(1.4_f32, color));
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn render_details_table(
         &mut self,
@@ -6050,37 +6135,44 @@ impl ExplorerView {
                     ),
                 );
             }
-            let arrow = if is_active {
-                format!(" {}", self.sort_direction.indicator())
-            } else {
-                String::new()
-            };
             let funnel = if filter_active {
                 format!(" {}", FILTER_FUNNEL_GLYPH)
             } else {
                 String::new()
             };
-            let align = if right_align {
-                egui::Align2::RIGHT_CENTER
+            let text_color = if is_active || filter_active {
+                palette.accent
             } else {
-                egui::Align2::LEFT_CENTER
+                palette.text_muted
             };
+            let label_text = format!("{}{}", col.label(), funnel);
+            let font = egui::FontId::proportional(11.5);
+            let galley = hp.layout_no_wrap(label_text, font, text_color);
+            let text_w = galley.size().x;
+            let sort_reserve = if is_active { 12.0 } else { 0.0 };
             let tx = if right_align {
-                hrect.right() - col_pad
+                hrect.right() - col_pad - sort_reserve - text_w
             } else {
                 hrect.left() + col_pad
             };
-            hp.text(
-                Pos2::new(tx, hrect.center().y),
-                align,
-                format!("{}{}{}", col.label(), arrow, funnel),
-                egui::FontId::proportional(11.5),
-                if is_active || filter_active {
-                    palette.accent
-                } else {
-                    palette.text_muted
-                },
+            hp.galley(
+                Pos2::new(tx, hrect.center().y - galley.size().y * 0.5),
+                galley,
+                text_color,
             );
+            if is_active {
+                let arrow_x = if right_align {
+                    hrect.right() - col_pad - 4.0
+                } else {
+                    tx + text_w + 7.0
+                };
+                Self::paint_sort_chevron(
+                    &hp,
+                    Pos2::new(arrow_x, hrect.center().y),
+                    self.sort_direction,
+                    palette.accent,
+                );
+            }
             if resp.clicked() {
                 header_sort = Some(col.sort_column());
             }
@@ -6352,8 +6444,8 @@ impl ExplorerView {
                             }
                             let name_font = egui::FontId::proportional(font_sz + 0.5);
                             // The name text starts after the icon + tag dots.
-                            let name_pos_x = name_x + 28.0 + dots_w;
-                            let name_avail = w - 32.0 - col_pad - dots_w;
+                            let name_pos_x = icon_rect.right() + 6.0 + dots_w;
+                            let name_avail = (cell_rect.right() - name_pos_x - col_pad).max(20.0);
                             let display = truncate_middle(&item.name, (name_avail / 7.0) as usize);
                             rp.text(
                                 Pos2::new(name_pos_x, row_rect.center().y),
@@ -8413,7 +8505,7 @@ impl ExplorerView {
                                         let col_tags =
                                             crate::core::tags::read_tags_cache(&item.path);
                                         let col_dots_w = tag_dots_width(&col_tags);
-                                        let col_name_x = row_rect.left() + 34.0 + col_dots_w;
+                                        let col_name_x = icon_rect.right() + 6.0 + col_dots_w;
                                         ui.painter().text(
                                             Pos2::new(col_name_x, row_rect.center().y),
                                             egui::Align2::LEFT_CENTER,
@@ -8431,19 +8523,29 @@ impl ExplorerView {
                                         }
                                         // Folder chevron on far right (Finder style)
                                         if item.is_dir {
-                                            ui.painter().text(
-                                                Pos2::new(
-                                                    row_rect.right() - 8.0,
-                                                    row_rect.center().y,
-                                                ),
-                                                egui::Align2::RIGHT_CENTER,
-                                                ">",
-                                                egui::FontId::proportional(14.0),
-                                                if is_highlighted {
-                                                    palette.accent
-                                                } else {
-                                                    palette.text_muted
-                                                },
+                                            let c = Pos2::new(
+                                                row_rect.right() - 10.0,
+                                                row_rect.center().y,
+                                            );
+                                            let s = 3.2_f32;
+                                            let ch_col = if is_highlighted {
+                                                palette.accent
+                                            } else {
+                                                palette.text_muted
+                                            };
+                                            ui.painter().line_segment(
+                                                [
+                                                    Pos2::new(c.x - s * 0.5, c.y - s),
+                                                    Pos2::new(c.x + s * 0.5, c.y),
+                                                ],
+                                                Stroke::new(1.4_f32, ch_col),
+                                            );
+                                            ui.painter().line_segment(
+                                                [
+                                                    Pos2::new(c.x + s * 0.5, c.y),
+                                                    Pos2::new(c.x - s * 0.5, c.y + s),
+                                                ],
+                                                Stroke::new(1.4_f32, ch_col),
                                             );
                                         }
                                         // Role-specific click dispatch
@@ -8765,6 +8867,8 @@ impl ExplorerView {
         }
         if let Some(preview_item) = preview_to_set {
             self.column_preview_item = Some(preview_item);
+            self.needs_miller_scroll_align = true;
+            ui.ctx().request_repaint();
         }
         if let Some(peek_item) = peek_to_open {
             self.peek_item = Some(peek_item);
@@ -8876,6 +8980,109 @@ impl ExplorerView {
         }
     }
 
+    fn render_inspector_action_button(
+        &self,
+        ui: &mut Ui,
+        palette: &ThemePalette,
+        glyph: crate::core::icon_packs::IconGlyph,
+        label: &str,
+        primary: bool,
+        width: f32,
+    ) -> egui::Response {
+        let height = if primary { 32.0 } else { 28.0 };
+        let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::click());
+
+        let is_hovered = resp.hovered();
+        let is_active = resp.is_pointer_button_down_on();
+
+        let (bg_col, stroke, fg_col) = if primary {
+            let base = palette.accent;
+            let fg = crate::gui::design::contrast::text_on_accent(base);
+            if is_active {
+                (base.linear_multiply(0.85), Stroke::NONE, fg)
+            } else if is_hovered {
+                (base.linear_multiply(1.1), Stroke::NONE, fg)
+            } else {
+                (base, Stroke::NONE, fg)
+            }
+        } else {
+            let is_dark = palette.is_dark;
+            let (bg, st_col) = if is_active {
+                (
+                    if is_dark {
+                        Color32::from_white_alpha(36)
+                    } else {
+                        Color32::from_black_alpha(26)
+                    },
+                    palette.accent,
+                )
+            } else if is_hovered {
+                (
+                    if is_dark {
+                        Color32::from_white_alpha(22)
+                    } else {
+                        Color32::from_black_alpha(16)
+                    },
+                    palette.border,
+                )
+            } else {
+                (
+                    if is_dark {
+                        Color32::from_white_alpha(10)
+                    } else {
+                        Color32::from_black_alpha(8)
+                    },
+                    palette.border.linear_multiply(0.6),
+                )
+            };
+            let fg = if is_hovered || is_active {
+                palette.text_primary
+            } else {
+                palette.text_secondary
+            };
+            (bg, Stroke::new(1.0_f32, st_col), fg)
+        };
+
+        ui.painter().rect(rect, Rounding::same(6.0), bg_col, stroke);
+
+        // Content: Icon + Label centered
+        let icon_sz = if primary { 16.0 } else { 14.0 };
+        let gap = 6.0;
+        let font = if primary {
+            egui::FontId::proportional(12.5)
+        } else {
+            egui::FontId::proportional(11.5)
+        };
+
+        let max_label_w = (width - icon_sz - gap - 16.0).max(10.0);
+        let elided = crate::gui::file_menu::elide_to_width(ui, label, max_label_w, font.clone());
+        let galley = ui.painter().layout_no_wrap(elided.clone(), font, fg_col);
+
+        let total_content_w = icon_sz + gap + galley.size().x;
+        let start_x = (rect.center().x - total_content_w * 0.5).max(rect.left() + 6.0);
+
+        // Paint icon
+        let icon_rect = Rect::from_center_size(
+            Pos2::new(start_x + icon_sz * 0.5, rect.center().y),
+            Vec2::splat(icon_sz),
+        );
+        let fg_rgb = [fg_col.r(), fg_col.g(), fg_col.b()];
+        crate::core::icon_packs::paint_icon(ui, self.icon_pack, glyph, icon_rect, fg_rgb);
+
+        // Paint label
+        let text_pos = Pos2::new(
+            start_x + icon_sz + gap,
+            rect.center().y - galley.size().y * 0.5,
+        );
+        ui.painter().galley(text_pos, galley, fg_col);
+
+        if resp.hovered() && elided != label {
+            resp.on_hover_text(label)
+        } else {
+            resp
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn render_inspector_card(
         &mut self,
@@ -8927,12 +9134,22 @@ impl ExplorerView {
                                             .rounding(Rounding::same(8.0)),
                                     );
                                     ui.add_space(4.0);
-                                    ui.label(
-                                        egui::RichText::new(&item_clone.name)
+                                    let max_name_w = (inspector_w - 32.0).max(60.0);
+                                    let elided_name = crate::gui::file_menu::elide_to_width(
+                                        ui,
+                                        &item_clone.name,
+                                        max_name_w,
+                                        egui::FontId::proportional(14.0),
+                                    );
+                                    let name_lbl = ui.label(
+                                        egui::RichText::new(&elided_name)
                                             .size(14.0)
                                             .strong()
                                             .color(palette.text_primary),
                                     );
+                                    if elided_name != item_clone.name {
+                                        name_lbl.on_hover_text(&item_clone.name);
+                                    }
                                     ui.label(
                                         egui::RichText::new(icon_spec.category)
                                             .size(12.0)
@@ -9029,119 +9246,195 @@ impl ExplorerView {
                         ui.separator();
                         ui.add_space(6.0);
 
-                        // File Properties Grid
-                        egui::Grid::new("inspector_props_grid")
-                            .num_columns(2)
-                            .spacing([12.0, 5.0])
+                        // File Properties Card
+                        ui.add_space(4.0);
+                        egui::Frame::none()
+                            .fill(if palette.is_dark {
+                                Color32::from_white_alpha(10)
+                            } else {
+                                Color32::from_black_alpha(8)
+                            })
+                            .stroke(Stroke::new(1.0_f32, palette.border.linear_multiply(0.6)))
+                            .rounding(Rounding::same(8.0))
+                            .inner_margin(egui::Margin::symmetric(10.0, 8.0))
                             .show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new("Kind:")
-                                        .size(12.0)
-                                        .color(palette.text_muted),
-                                );
-                                ui.label(
-                                    egui::RichText::new(if item_clone.is_dir {
-                                        "Folder"
-                                    } else {
-                                        &item_clone.extension
-                                    })
-                                    .size(12.0)
-                                    .strong()
-                                    .color(palette.text_primary),
-                                );
-                                ui.end_row();
+                                egui::Grid::new("inspector_props_grid")
+                                    .num_columns(2)
+                                    .spacing([12.0, 6.0])
+                                    .show(ui, |ui| {
+                                        let kind_str = if item_clone.is_dir {
+                                            "Folder".to_string()
+                                        } else if !icon_spec.category.is_empty()
+                                            && !item_clone.extension.is_empty()
+                                        {
+                                            format!(
+                                                "{} ({})",
+                                                icon_spec.category,
+                                                item_clone.extension.to_uppercase()
+                                            )
+                                        } else if !item_clone.extension.is_empty() {
+                                            item_clone.extension.to_uppercase()
+                                        } else {
+                                            "Document".to_string()
+                                        };
 
-                                ui.label(
-                                    egui::RichText::new("Size:")
-                                        .size(12.0)
-                                        .color(palette.text_muted),
-                                );
-                                ui.label(
-                                    egui::RichText::new(item_clone.formatted_size())
-                                        .size(12.0)
-                                        .color(palette.text_secondary),
-                                );
-                                ui.end_row();
-
-                                ui.label(
-                                    egui::RichText::new("Modified:")
-                                        .size(12.0)
-                                        .color(palette.text_muted),
-                                );
-                                ui.label(
-                                    egui::RichText::new(item_clone.formatted_date())
-                                        .size(12.0)
-                                        .color(palette.text_secondary),
-                                );
-                                ui.end_row();
-
-                                ui.label(
-                                    egui::RichText::new("Permissions:")
-                                        .size(12.0)
-                                        .color(palette.text_muted),
-                                );
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{} ({})",
-                                        item_clone.formatted_permissions(),
-                                        item_clone.formatted_octal_permissions()
-                                    ))
-                                    .size(12.0)
-                                    .monospace()
-                                    .color(palette.text_secondary),
-                                );
-                                ui.end_row();
-
-                                if item_clone.is_symlink {
-                                    ui.label(
-                                        egui::RichText::new("Symlink:")
-                                            .size(12.0)
-                                            .color(palette.text_muted),
-                                    );
-                                    let target_str = item_clone
-                                        .symlink_target
-                                        .as_ref()
-                                        .map(|p| p.to_string_lossy().to_string())
-                                        .unwrap_or_else(|| "unknown".into());
-                                    ui.label(
-                                        egui::RichText::new(format!("> {}", target_str))
-                                            .size(12.0)
-                                            .color(palette.accent),
-                                    );
-                                    ui.end_row();
-                                }
-
-                                ui.label(
-                                    egui::RichText::new("Hidden:")
-                                        .size(12.0)
-                                        .color(palette.text_muted),
-                                );
-                                ui.label(
-                                    egui::RichText::new(if item_clone.is_hidden {
-                                        "Yes"
-                                    } else {
-                                        "No"
-                                    })
-                                    .size(12.0)
-                                    .color(palette.text_secondary),
-                                );
-                                ui.end_row();
-
-                                // SHA-256 Checksum calculation
-                                ui.label(
-                                    egui::RichText::new("SHA-256:")
-                                        .size(12.0)
-                                        .color(palette.text_muted),
-                                );
-                                if !self.calculate_checksums {
-                                    ui.horizontal(|ui| {
                                         ui.label(
-                                            egui::RichText::new("Off in Settings")
-                                                .size(11.0)
-                                                .italics()
+                                            egui::RichText::new("Kind:")
+                                                .size(11.5)
                                                 .color(palette.text_muted),
                                         );
-                                        if ui
+                                        ui.label(
+                                            egui::RichText::new(kind_str)
+                                                .size(11.5)
+                                                .strong()
+                                                .color(palette.text_primary),
+                                        );
+                                        ui.end_row();
+
+                                        ui.label(
+                                            egui::RichText::new("Size:")
+                                                .size(11.5)
+                                                .color(palette.text_muted),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(item_clone.formatted_size())
+                                                .size(11.5)
+                                                .color(palette.text_secondary),
+                                        );
+                                        ui.end_row();
+
+                                        ui.label(
+                                            egui::RichText::new("Created:")
+                                                .size(11.5)
+                                                .color(palette.text_muted),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(item_clone.formatted_created())
+                                                .size(11.5)
+                                                .color(palette.text_secondary),
+                                        );
+                                        ui.end_row();
+
+                                        ui.label(
+                                            egui::RichText::new("Modified:")
+                                                .size(11.5)
+                                                .color(palette.text_muted),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(item_clone.formatted_date())
+                                                .size(11.5)
+                                                .color(palette.text_secondary),
+                                        );
+                                        ui.end_row();
+
+                                        ui.label(
+                                            egui::RichText::new("Permissions:")
+                                                .size(11.5)
+                                                .color(palette.text_muted),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{} ({})",
+                                                item_clone.formatted_permissions(),
+                                                item_clone.formatted_octal_permissions()
+                                            ))
+                                            .size(11.5)
+                                            .monospace()
+                                            .color(palette.text_secondary),
+                                        );
+                                        ui.end_row();
+
+                                        if item_clone.is_symlink {
+                                            ui.label(
+                                                egui::RichText::new("Symlink:")
+                                                    .size(11.5)
+                                                    .color(palette.text_muted),
+                                            );
+                                            let target_str = item_clone
+                                                .symlink_target
+                                                .as_ref()
+                                                .map(|p| p.to_string_lossy().to_string())
+                                                .unwrap_or_else(|| "unknown".into());
+                                            ui.label(
+                                                egui::RichText::new(format!("> {}", target_str))
+                                                    .size(11.5)
+                                                    .color(palette.accent),
+                                            );
+                                            ui.end_row();
+                                        }
+
+                                        if item_clone.is_hidden {
+                                            ui.label(
+                                                egui::RichText::new("Hidden:")
+                                                    .size(11.5)
+                                                    .color(palette.text_muted),
+                                            );
+                                            ui.label(
+                                                egui::RichText::new("Yes")
+                                                    .size(11.5)
+                                                    .color(palette.text_secondary),
+                                            );
+                                            ui.end_row();
+                                        }
+
+                                        // SHA-256 Checksum calculation
+                                        ui.label(
+                                            egui::RichText::new("SHA-256:")
+                                                .size(11.5)
+                                                .color(palette.text_muted),
+                                        );
+                                        if !self.calculate_checksums {
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new("Off in Settings")
+                                                        .size(11.0)
+                                                        .italics()
+                                                        .color(palette.text_muted),
+                                                );
+                                                if ui
+                                                    .button(
+                                                        egui::RichText::new("Compute").size(10.5),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    let h = crate::codec::calculate_sha256(
+                                                        &item_clone.path,
+                                                    )
+                                                    .unwrap_or_else(|_| "Error".into());
+                                                    self.peek_hash_cache =
+                                                        Some((item_clone.path.clone(), h));
+                                                }
+                                            });
+                                        } else if let Some((cached_p, hash)) = &self.peek_hash_cache
+                                        {
+                                            if cached_p == &item_clone.path {
+                                                let short_hash = if hash.len() > 16 {
+                                                    format!("{}...", &hash[..16])
+                                                } else {
+                                                    hash.clone()
+                                                };
+                                                ui.label(
+                                                    egui::RichText::new(short_hash)
+                                                        .size(11.0)
+                                                        .monospace()
+                                                        .color(palette.accent),
+                                                )
+                                                .on_hover_text(hash);
+                                            } else {
+                                                let h = crate::codec::calculate_sha256(
+                                                    &item_clone.path,
+                                                )
+                                                .unwrap_or_else(|_| "Error".into());
+                                                self.peek_hash_cache =
+                                                    Some((item_clone.path.clone(), h));
+                                            }
+                                        } else if item_clone.size_bytes <= 16 * 1024 * 1024 {
+                                            let h =
+                                                crate::codec::calculate_sha256(&item_clone.path)
+                                                    .unwrap_or_else(|_| "Error".into());
+                                            self.peek_hash_cache =
+                                                Some((item_clone.path.clone(), h));
+                                        } else if ui
                                             .button(egui::RichText::new("Compute").size(10.5))
                                             .clicked()
                                         {
@@ -9151,38 +9444,8 @@ impl ExplorerView {
                                             self.peek_hash_cache =
                                                 Some((item_clone.path.clone(), h));
                                         }
+                                        ui.end_row();
                                     });
-                                } else if let Some((cached_p, hash)) = &self.peek_hash_cache {
-                                    if cached_p == &item_clone.path {
-                                        let short_hash = if hash.len() > 16 {
-                                            format!("{}...", &hash[..16])
-                                        } else {
-                                            hash.clone()
-                                        };
-                                        ui.label(
-                                            egui::RichText::new(short_hash)
-                                                .size(11.0)
-                                                .monospace()
-                                                .color(palette.accent),
-                                        );
-                                    } else {
-                                        let h = crate::codec::calculate_sha256(&item_clone.path)
-                                            .unwrap_or_else(|_| "Error".into());
-                                        self.peek_hash_cache = Some((item_clone.path.clone(), h));
-                                    }
-                                } else if item_clone.size_bytes <= 16 * 1024 * 1024 {
-                                    let h = crate::codec::calculate_sha256(&item_clone.path)
-                                        .unwrap_or_else(|_| "Error".into());
-                                    self.peek_hash_cache = Some((item_clone.path.clone(), h));
-                                } else if ui
-                                    .button(egui::RichText::new("Compute").size(10.5))
-                                    .clicked()
-                                {
-                                    let h = crate::codec::calculate_sha256(&item_clone.path)
-                                        .unwrap_or_else(|_| "Error".into());
-                                    self.peek_hash_cache = Some((item_clone.path.clone(), h));
-                                }
-                                ui.end_row();
                             });
 
                         ui.add_space(8.0);
@@ -9190,40 +9453,126 @@ impl ExplorerView {
                         ui.add_space(6.0);
 
                         // Quick Action Buttons
-                        ui.vertical_centered_justified(|ui| {
-                            if ui
-                                .button(egui::RichText::new("Quick Look (Space)").strong())
-                                .clicked()
-                            {
-                                *peek_to_open = Some(item_clone.clone());
-                            }
+                        let full_w = ui.available_width();
+                        if self
+                            .render_inspector_action_button(
+                                ui,
+                                palette,
+                                crate::core::icon_packs::IconGlyph::ActionEye,
+                                "Quick Look (Space)",
+                                true,
+                                full_w,
+                            )
+                            .clicked()
+                        {
+                            *peek_to_open = Some(item_clone.clone());
+                        }
+
+                        ui.add_space(6.0);
+                        let is_wide = full_w >= 290.0;
+                        let sec_btn_w = if is_wide {
+                            ((full_w - 6.0) * 0.5).floor()
+                        } else {
+                            full_w
+                        };
+
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+
                             if !item_clone.is_dir {
-                                if ui.button("Transcode / Convert").clicked() {
+                                if self
+                                    .render_inspector_action_button(
+                                        ui,
+                                        palette,
+                                        crate::core::icon_packs::IconGlyph::ActionRefresh,
+                                        "Transcode / Convert",
+                                        false,
+                                        sec_btn_w,
+                                    )
+                                    .clicked()
+                                {
                                     on_transcode_target(item_clone.path.clone(), "ALL".into());
                                 }
-                                if icon_spec.is_image && ui.button("Rotate 90 deg").clicked() {
+
+                                if icon_spec.is_image
+                                    && self
+                                        .render_inspector_action_button(
+                                            ui,
+                                            palette,
+                                            crate::core::icon_packs::IconGlyph::ActionRotate,
+                                            "Rotate 90 deg",
+                                            false,
+                                            sec_btn_w,
+                                        )
+                                        .clicked()
+                                {
                                     if let Ok(()) = rotate_image_file_90(&item_clone.path) {
                                         self.thumb_cache.remove(&item_clone.path);
                                     }
                                 }
-                            } else if ui.button("Pack into ZIP Archive").clicked() {
+                            }
+
+                            if self
+                                .render_inspector_action_button(
+                                    ui,
+                                    palette,
+                                    crate::core::icon_packs::IconGlyph::ActionCompress,
+                                    "Pack into ZIP",
+                                    false,
+                                    sec_btn_w,
+                                )
+                                .clicked()
+                            {
                                 on_pack_archive(vec![item_clone.path.clone()]);
                             }
-                            if ui.button("Reveal in System Explorer").clicked() {
+
+                            if self
+                                .render_inspector_action_button(
+                                    ui,
+                                    palette,
+                                    crate::core::icon_packs::IconGlyph::ActionFolderOpen,
+                                    "Reveal in Explorer",
+                                    false,
+                                    sec_btn_w,
+                                )
+                                .clicked()
+                            {
                                 reveal_in_file_manager(&item_clone.path);
                             }
-                            if ui.button("Copy Full Path").clicked() {
+
+                            if self
+                                .render_inspector_action_button(
+                                    ui,
+                                    palette,
+                                    crate::core::icon_packs::IconGlyph::ActionCopy,
+                                    "Copy Full Path",
+                                    false,
+                                    sec_btn_w,
+                                )
+                                .clicked()
+                            {
                                 ui.ctx().output_mut(|o| {
                                     o.copied_text = item_clone.path.to_string_lossy().to_string();
                                 });
                             }
-                            if ui.button("Open Terminal Here").clicked() {
-                                let dir_target = if item_clone.is_dir {
-                                    &item_clone.path
-                                } else {
-                                    item_clone.path.parent().unwrap_or(&item_clone.path)
-                                };
-                                open_terminal_in_dir(dir_target);
+
+                            let terminal_target = if item_clone.is_dir {
+                                &item_clone.path
+                            } else {
+                                item_clone.path.parent().unwrap_or(&item_clone.path)
+                            };
+                            if self
+                                .render_inspector_action_button(
+                                    ui,
+                                    palette,
+                                    crate::core::icon_packs::IconGlyph::ActionTerminal,
+                                    "Open Terminal",
+                                    false,
+                                    sec_btn_w,
+                                )
+                                .clicked()
+                            {
+                                open_terminal_in_dir(terminal_target);
                             }
                         });
                     });
@@ -9254,12 +9603,22 @@ impl ExplorerView {
             let (irect, _) = ui.allocate_exact_size(Vec2::splat(72.0), egui::Sense::hover());
             self.paint_item_icon(ui, item, glyph, irect, accent);
             ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(&item.name)
+            let max_name_w = (ui.available_width() - 20.0).max(60.0);
+            let elided_name = crate::gui::file_menu::elide_to_width(
+                ui,
+                &item.name,
+                max_name_w,
+                egui::FontId::proportional(14.0),
+            );
+            let name_lbl = ui.label(
+                egui::RichText::new(&elided_name)
                     .size(14.0)
                     .strong()
                     .color(palette.text_primary),
             );
+            if elided_name != item.name {
+                name_lbl.on_hover_text(&item.name);
+            }
             ui.label(
                 egui::RichText::new(icon_spec.category)
                     .size(12.0)

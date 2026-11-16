@@ -210,15 +210,23 @@ fn draw_x_glyph(painter: &egui::Painter, center: egui::Pos2, size: f32) {
 /// from eating clicks and is centered vertically by the horizontal
 /// layout, like the text separators it replaces.
 pub fn paint_path_chevron(ui: &mut Ui, color: Color32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(5.5, 10.0), Sense::hover());
-    ui.painter().add(egui::Shape::line(
-        vec![
-            rect.left_top() + Vec2::new(0.9, 1.1),
-            rect.right_center() - Vec2::new(0.9, 0.0),
-            rect.left_bottom() + Vec2::new(0.9, -1.1),
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(6.0, 10.0), Sense::hover());
+    let c = rect.center();
+    let s = 3.2_f32;
+    ui.painter().line_segment(
+        [
+            Pos2::new(c.x - s * 0.5, c.y - s),
+            Pos2::new(c.x + s * 0.5, c.y),
         ],
-        Stroke::new(1.8_f32, color),
-    ));
+        Stroke::new(1.4_f32, color),
+    );
+    ui.painter().line_segment(
+        [
+            Pos2::new(c.x + s * 0.5, c.y),
+            Pos2::new(c.x - s * 0.5, c.y + s),
+        ],
+        Stroke::new(1.4_f32, color),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -591,11 +599,7 @@ pub fn render_path_bar(
             let last = segments.len().saturating_sub(1);
             for (i, seg) in segments.iter().enumerate() {
                 if i > 0 {
-                    ui.label(
-                        egui::RichText::new(">")
-                            .size(type_scale::CAPTION)
-                            .color(palette.text_muted),
-                    );
+                    paint_path_chevron(ui, palette.text_muted);
                 }
                 let is_last = i == last;
                 let label = design::elide_middle(ui, seg, &font_id, 220.0);
@@ -1037,7 +1041,7 @@ pub fn render_sidebar_row(
         painter.rect_filled(bar_rect, Rounding::same(1.5), palette.accent);
     }
 
-    let icon_side = 24.0;
+    let icon_side = 22.0;
     let icon_rect = Rect::from_center_size(
         Pos2::new(rect.min.x + 10.0 + icon_side / 2.0, rect.center().y),
         Vec2::splat(icon_side),
@@ -1053,7 +1057,7 @@ pub fn render_sidebar_row(
     };
     crate::core::icon_packs::paint_icon(ui, spec.pack, spec.glyph, icon_rect, icon_rgb);
 
-    let label_x = rect.min.x + 10.0 + icon_side + space::MD;
+    let label_x = icon_rect.right() + space::SM;
     let label_max_w = (rect.max.x - label_x - pin_strip_w - space::SM).max(space::LG);
     let font_id = FontId::proportional(14.0);
     let display_label = design::elide_end(ui, spec.label, &font_id, label_max_w);

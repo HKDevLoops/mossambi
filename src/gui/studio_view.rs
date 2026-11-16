@@ -1243,10 +1243,12 @@ impl StudioView {
                                                                 segments.iter().enumerate()
                                                             {
                                                                 if idx > 0 {
+                                                                    ui.add_space(2.0);
                                                                     crate::gui::finder_chrome::paint_path_chevron(
                                                                         ui,
                                                                         palette.text_muted,
                                                                     );
+                                                                    ui.add_space(2.0);
                                                                 }
                                                                 let is_current =
                                                                     idx + 1 == num_segs;
@@ -1270,56 +1272,63 @@ impl StudioView {
                                                                     IconGlyph::Folder
                                                                 };
 
-                                                                let seg_resp = ui.horizontal(|ui| {
-                                                                    let (s_icon_rect, _) = ui
-                                                                        .allocate_exact_size(
-                                                                            Vec2::splat(16.0),
-                                                                            Sense::hover(),
-                                                                        );
-                                                                    crate::core::icon_packs::paint_icon(
-                                                                        ui,
-                                                                        pack,
-                                                                        glyph,
-                                                                        s_icon_rect,
-                                                                        if is_current {
-                                                                            [
-                                                                                palette.accent.r(),
-                                                                                palette.accent.g(),
-                                                                                palette.accent.b(),
-                                                                            ]
-                                                                        } else {
-                                                                            muted_rgb
-                                                                        },
+                                                                let text_color = if is_current {
+                                                                    palette.text_primary
+                                                                } else {
+                                                                    palette.text_secondary
+                                                                };
+                                                                let label_font = FontId::proportional(12.5);
+                                                                let galley = ui.painter().layout_no_wrap(
+                                                                    seg.label.clone(),
+                                                                    label_font,
+                                                                    text_color,
+                                                                );
+                                                                let icon_side = 16.0;
+                                                                let gap = 4.0;
+                                                                let pad_x = 4.0;
+                                                                let seg_w = pad_x * 2.0 + icon_side + gap + galley.size().x;
+                                                                let (seg_rect, seg_resp) = ui.allocate_exact_size(
+                                                                    Vec2::new(seg_w, 24.0),
+                                                                    Sense::click(),
+                                                                );
+                                                                if seg_resp.hovered() {
+                                                                    ui.painter().rect_filled(
+                                                                        seg_rect,
+                                                                        Rounding::same(4.0),
+                                                                        palette.card_hover,
                                                                     );
-                                                                    let text = egui::RichText::new(
-                                                                        &seg.label,
-                                                                    )
-                                                                    .size(12.5)
-                                                                    .color(
-                                                                        if is_current {
-                                                                            palette.text_primary
-                                                                        } else {
-                                                                            palette.text_secondary
-                                                                        },
-                                                                    );
-                                                                    ui.add(
-                                                                        egui::Button::new(text)
-                                                                            .fill(
-                                                                                Color32::TRANSPARENT,
-                                                                            )
-                                                                            .stroke(Stroke::NONE)
-                                                                            .rounding(
-                                                                                Rounding::same(4.0),
-                                                                            ),
-                                                                    )
-                                                                });
+                                                                }
+                                                                let s_icon_rect = Rect::from_center_size(
+                                                                    Pos2::new(seg_rect.left() + pad_x + icon_side * 0.5, seg_rect.center().y),
+                                                                    Vec2::splat(icon_side),
+                                                                );
+                                                                crate::core::icon_packs::paint_icon(
+                                                                    ui,
+                                                                    pack,
+                                                                    glyph,
+                                                                    s_icon_rect,
+                                                                    if is_current {
+                                                                        [
+                                                                            palette.accent.r(),
+                                                                            palette.accent.g(),
+                                                                            palette.accent.b(),
+                                                                        ]
+                                                                    } else {
+                                                                        muted_rgb
+                                                                    },
+                                                                );
+                                                                let text_pos = Pos2::new(
+                                                                    seg_rect.left() + pad_x + icon_side + gap,
+                                                                    seg_rect.center().y - galley.size().y * 0.5,
+                                                                );
+                                                                ui.painter().galley(text_pos, galley, text_color);
 
-                                                                if seg_resp.inner.clicked() {
+                                                                if seg_resp.clicked() {
                                                                     nav_target =
                                                                         Some(seg.target_path.clone());
                                                                 }
 
-                                                                seg_resp.inner.context_menu(
+                                                                seg_resp.context_menu(
                                                                     |menu_ui| {
                                                                         menu_ui.set_max_width(220.0);
                                                                         let parent_dir = seg
