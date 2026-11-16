@@ -39,6 +39,8 @@ pub struct MossambiApp {
     pub is_converting: bool,
     pub last_completed_output: Option<PathBuf>,
     pub completion_time: Option<Instant>,
+    /// When the current conversion batch started (toast elapsed gate).
+    pub conversion_started: Option<Instant>,
     pub status_message: String,
 
     // Background worker channels
@@ -110,6 +112,7 @@ impl Default for MossambiApp {
             is_converting: false,
             last_completed_output: None,
             completion_time: None,
+            conversion_started: None,
             status_message: "Ready. Drop any file or select a preset to begin.".to_string(),
 
             result_receiver: rx,
@@ -136,6 +139,72 @@ impl Default for MossambiApp {
 }
 
 impl MossambiApp {
+    /// Toasts the outcome of a finished conversion batch (notification
+    /// spec: gate = enabled AND (unfocused OR the job took > 10 s)).
+    fn toast_batch_outcome(&mut self, ctx: &egui::Context, failed_hint: bool, fallback_body: &str) {
+        use crate::core::conversion_queue::QueueItemStatus;
+        use crate::platform::notify::{notify, should_notify, NotifyKind};
+
+        let enabled = crate::core::MossambiConfig::load().notifications_enabled;
+        let elapsed = self
+            .conversion_started
+            .take()
+            .map(|t| Instant::now().duration_since(t));
+        let focused = ctx.input(|i| i.viewport().focused);
+        if !should_notify(enabled, focused, elapsed) {
+            return;
+        }
+
+        let items = self.studio_view.queue.items();
+        if items.is_empty() {
+            // Legacy (non-queue) path: report the worker's own summary.
+            let kind = if failed_hint {
+                NotifyKind::Error
+            } else {
+                NotifyKind::Done
+            };
+            notify("Conversion finished", fallback_body, kind, None);
+            return;
+        }
+        let done = items
+            .iter()
+            .filter(|i| i.status == QueueItemStatus::Done)
+            .count();
+        let failed = items
+            .iter()
+            .filter(|i| i.status == QueueItemStatus::Failed)
+            .count();
+        if done == 0 && failed == 0 {
+            return; // fully cancelled run: nothing to report
+        }
+        let body = format!("{} succeeded, {} failed.", done, failed);
+        let kind = if failed > 0 || failed_hint {
+            NotifyKind::Error
+        } else {
+            NotifyKind::Done
+        };
+        let open_path = items
+            .iter()
+            .find(|i| i.status == QueueItemStatus::Done)
+            .and_then(|i| i.outputs.first().cloned());
+        notify("Conversion finished", &body, kind, open_path.as_deref());
+    }
+
+    /// Toasts a job failure with a short reason (notification spec).
+    fn toast_job_error(&mut self, ctx: &egui::Context, reason: &str) {
+        use crate::platform::notify::{notify, should_notify, NotifyKind};
+
+        let enabled = crate::core::MossambiConfig::load().notifications_enabled;
+        let elapsed = self
+            .conversion_started
+            .take()
+            .map(|t| Instant::now().duration_since(t));
+        let focused = ctx.input(|i| i.viewport().focused);
+        if should_notify(enabled, focused, elapsed) {
+            notify("Conversion failed", reason, NotifyKind::Error, None);
+        }
+    }
+
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         Self::new_with_path(cc, None)
     }
@@ -323,6 +392,7 @@ impl MossambiApp {
             return;
         }
         self.is_converting = true;
+        self.conversion_started = Some(Instant::now());
         self.studio_view.batch_progress = Some(0.0);
 
         let sender = self.result_sender.clone();
@@ -1079,6 +1149,8 @@ impl eframe::App for MossambiApp {
                     self.studio_view.batch_progress = None;
                     self.status_message = format!("Conversion stalled: {}", error);
                     log::error!("worker reported failure: {}", error);
+                    let reason = self.status_message.clone();
+                    self.toast_job_error(ctx, &reason);
                 }
             }
         }
@@ -1159,11 +1231,14 @@ impl eframe::App for MossambiApp {
                     }
                     self.status_message =
                         "Batch finished - details in the conversion queue.".to_string();
+                    self.toast_batch_outcome(ctx, false, "Batch finished.");
                 }
                 ConversionResult::Failure(err) => {
                     log::error!("Studio conversion finished: {}", err);
                     self.completion_time = Some(Instant::now());
                     self.status_message = err;
+                    let reason = self.status_message.clone();
+                    self.toast_batch_outcome(ctx, true, &reason);
                 }
             }
         }

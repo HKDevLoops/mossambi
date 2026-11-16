@@ -18,6 +18,10 @@ pub mod windows;
 #[cfg(unix)]
 pub mod unix;
 
+/// Native toast notifications: Windows Action Center toasts; a logged
+/// no-op on other platforms. Pure builders here are headless-testable.
+pub mod notify;
+
 /// Returns the unified configuration directory `<home>/.config/mossambi` across ALL OSes.
 /// (Windows: `%USERPROFILE%\.config\mossambi`, macOS/Linux: `$HOME/.config/mossambi`).
 /// Guaranteed to be `.config/mossambi` across all targets (not AppData, not ~/Library).

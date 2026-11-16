@@ -60,6 +60,8 @@ mlua = { version = "0.10", features = ["lua54", "vendored"] }
 # proc-macro and the generated interfaces stay ABI-compatible.
 windows = { version = "0.59", features = [
     "Data_Pdf",
+    "Data_Xml_Dom",
+    "UI_Notifications",
     "Storage",
     "Storage_Streams",
     "Win32_Foundation",

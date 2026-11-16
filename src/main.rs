@@ -368,6 +368,11 @@ fn main() -> Result<()> {
         return handle_themes(as_json);
     }
 
+    // 6. Intercept mossambi:// deep links (toast protocol activation).
+    if let Some(link) = args.iter().skip(1).find(|a| a.starts_with("mossambi://")) {
+        return handle_deep_link(link);
+    }
+
     let cli = Cli::parse();
 
     // Wire the rayon global pool from live config knobs BEFORE any conversion
@@ -1158,6 +1163,24 @@ fn handle_widget(pos: Option<&str>, _active_drag: bool, file: Option<PathBuf>) -
 fn handle_gui(initial_path: Option<PathBuf>) -> Result<()> {
     mossambi::gui::run_studio_with_path(initial_path)
         .map_err(|e| anyhow::anyhow!("Studio GUI error: {}", e))
+}
+
+/// Handles a mossambi:// deep link (toast protocol activation): open
+/// navigates to the path, reveal navigates to its parent folder. No GUI
+/// single-instance/IPC mechanism exists yet, so we just start with that
+/// path (per the notification spec's fallback).
+fn handle_deep_link(arg: &str) -> Result<()> {
+    match mossambi::platform::notify::parse_mossambi_url(arg) {
+        Some((kind, path)) => {
+            let target = mossambi::platform::notify::navigate_target_for(kind, &path);
+            log::info!("deep link {} -> navigate to {}", arg, target.display());
+            handle_gui(Some(target))
+        }
+        None => {
+            log::warn!("unrecognised deep link: {}", arg);
+            Ok(())
+        }
+    }
 }
 
 fn handle_tui(initial_path: Option<PathBuf>) -> Result<()> {

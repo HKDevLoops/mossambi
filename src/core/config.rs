@@ -1273,6 +1273,9 @@ pub struct MossambiConfig {
     /// Whether to disable recording recent conversions history
     #[serde(default)]
     pub disable_conversion_history: bool,
+    /// Show native toast notifications for finished/failed jobs
+    #[serde(default = "default_true")]
+    pub notifications_enabled: bool,
     /// Maximum count of recent conversions kept in history
     #[serde(default = "default_conversion_history_limit")]
     pub conversion_history_limit: usize,
@@ -1498,6 +1501,7 @@ impl Default for MossambiConfig {
             browser_staging_dir: None,
             browser_save_converted_only: true,
             disable_conversion_history: false,
+            notifications_enabled: true,
             conversion_history_limit: default_conversion_history_limit(),
         }
     }

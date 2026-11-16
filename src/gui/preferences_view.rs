@@ -781,6 +781,15 @@ impl PreferencesView {
                 &mut self.cfg.save_geospatial_as_zip,
                 dirty,
             );
+
+            toggle_row(
+                ui,
+                palette,
+                "Show toast notifications",
+                "Windows Action Center toasts when a batch finishes or fails while the window is in the background (or when a job runs longer than 10 seconds).\nOff: never show system notifications.",
+                &mut self.cfg.notifications_enabled,
+                dirty,
+            );
         });
 
         ui.add_space(design::space::MD);

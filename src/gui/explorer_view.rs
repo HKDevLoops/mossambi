@@ -697,6 +697,8 @@ pub struct ExplorerView {
     // Async Background Filesystem Worker
     pub fs_worker_tx: Sender<FsOperation>,
     pub fs_worker_rx: Receiver<FsOpResult>,
+    /// When the current background copy/move batch was queued (toast gate).
+    pub fs_op_started: Option<Instant>,
 
     // Background Folder-Size Worker (Finder-style recursive byte totals)
     pub dir_sizes: std::collections::HashMap<PathBuf, (Option<std::time::SystemTime>, u64)>,
@@ -1078,6 +1080,7 @@ impl Default for ExplorerView {
             scan_rx,
             fs_worker_tx,
             fs_worker_rx,
+            fs_op_started: None,
             dir_sizes: crate::core::fs_utils::load_dir_size_cache_from(
                 &crate::core::fs_utils::dir_size_cache_path(),
             ),
@@ -1712,7 +1715,7 @@ impl ExplorerView {
     }
 
     /// Process incoming background directory scanning batches and filesystem watcher events
-    pub fn poll_background_scans(&mut self) {
+    pub fn poll_background_scans(&mut self, window_focused: Option<bool>) {
         if self.dir_watcher.try_recv() {
             let dir = self.current_dir.clone();
             let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
@@ -1766,6 +1769,33 @@ impl ExplorerView {
             }
             let dir = self.current_dir.clone();
             self.navigate_to(dir);
+
+            // Toast per the notification gate: enabled AND (unfocused OR
+            // the batch ran longer than 10 s). Quick foreground pastes
+            // stay silent.
+            let elapsed = self
+                .fs_op_started
+                .take()
+                .map(|t| Instant::now().duration_since(t));
+            let enabled = crate::core::MossambiConfig::load().notifications_enabled;
+            if crate::platform::notify::should_notify(enabled, window_focused, elapsed) {
+                let (kind, body) = if res.errors.is_empty() {
+                    (
+                        crate::platform::notify::NotifyKind::Done,
+                        format!("{} {} item(s).", res.op_name, res.count),
+                    )
+                } else {
+                    (
+                        crate::platform::notify::NotifyKind::Error,
+                        format!(
+                            "{} finished with {} error(s).",
+                            res.op_name,
+                            res.errors.len()
+                        ),
+                    )
+                };
+                crate::platform::notify::notify("File operation", &body, kind, None);
+            }
         }
 
         // -- Folder-size worker: drain results, throttle requests, flush --
@@ -1968,7 +1998,8 @@ impl ExplorerView {
         mut on_pack_archive: impl FnMut(Vec<PathBuf>),
         mut on_inspect_file: impl FnMut(PathBuf),
     ) {
-        self.poll_background_scans();
+        let window_focused = ui.ctx().input(|i| i.viewport().focused);
+        self.poll_background_scans(window_focused);
 
         // Drive refresh hook: re-enumerate volumes every 5 s (cheap Win32
         // lookup) so free space, mounts, and unmounts stay current for the
@@ -9499,6 +9530,7 @@ impl ExplorerView {
                     self.current_dir.clone(),
                 )
             };
+            self.fs_op_started = Some(Instant::now());
             let _ = self.fs_worker_tx.send(FsOperation::Copy {
                 sources: src_paths,
                 dest_dir,
@@ -9520,6 +9552,7 @@ impl ExplorerView {
                     self.current_dir.clone(),
                 )
             };
+            self.fs_op_started = Some(Instant::now());
             let _ = self.fs_worker_tx.send(FsOperation::Move {
                 sources: src_paths,
                 dest_dir,
@@ -11658,6 +11691,7 @@ impl ExplorerView {
         }
 
         let sources = paths.to_vec();
+        self.fs_op_started = Some(Instant::now());
         if copy {
             log::info!(
                 "Dispatching async copy of {} item(s) to {}",
@@ -12291,6 +12325,7 @@ impl ExplorerView {
         }
         let cut = self.clipboard_is_cut;
         let dest_dir = self.current_dir.clone();
+        self.fs_op_started = Some(Instant::now());
         if cut {
             let _ = self
                 .fs_worker_tx
