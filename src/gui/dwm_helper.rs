@@ -27,6 +27,18 @@ pub fn apply_system_backdrop(dark_mode: bool, effect: GlassEffect, opacity: f32)
     }
 }
 
+/// Returns the HWND of the application's top-level window (0 if not found).
+pub fn find_main_window_hwnd() -> isize {
+    #[cfg(target_os = "windows")]
+    {
+        win32_dwm::find_main_hwnd()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        0
+    }
+}
+
 #[cfg(target_os = "windows")]
 mod win32_dwm {
     use super::{choose_backdrop, Backdrop, GlassEffect};
@@ -114,6 +126,40 @@ mod win32_dwm {
             .trim()
             .parse()
             .unwrap_or(0)
+    }
+
+    pub fn find_main_hwnd() -> isize {
+        unsafe extern "system" fn enum_find_main(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            let current_pid = std::process::id();
+            let mut wnd_pid = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut wnd_pid);
+
+            if wnd_pid == current_pid {
+                let mut class_name = [0u16; 256];
+                let len = GetClassNameW(hwnd, class_name.as_mut_ptr(), 256);
+                let class_str = String::from_utf16_lossy(&class_name[..len as usize]);
+
+                let is_top_level = GetParent(hwnd).is_null();
+                let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                let is_not_child = (style & (WS_CHILD as isize)) == 0;
+                if is_top_level
+                    && is_not_child
+                    && !class_str.is_empty()
+                    && !class_str.contains("Message")
+                {
+                    let out = lparam as *mut isize;
+                    *out = hwnd as isize;
+                    return 0; // stop
+                }
+            }
+            1
+        }
+
+        let mut found: isize = 0;
+        unsafe {
+            EnumWindows(Some(enum_find_main), &mut found as *mut isize as LPARAM);
+        }
+        found
     }
 
     pub fn apply_dwm_attributes(dark_mode: bool, effect: GlassEffect) {

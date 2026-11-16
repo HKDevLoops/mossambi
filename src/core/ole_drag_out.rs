@@ -33,13 +33,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use windows::core::{implement, w, Error, HRESULT};
 use windows::Win32::Foundation::{
-    GlobalFree, BOOL, DATA_S_SAMEFORMATETC, DRAGDROP_S_CANCEL, DRAGDROP_S_DROP,
+    GlobalFree, BOOL, COLORREF, DATA_S_SAMEFORMATETC, DRAGDROP_S_CANCEL, DRAGDROP_S_DROP,
     DRAGDROP_S_USEDEFAULTCURSORS, DV_E_FORMATETC, DV_E_TYMED, E_FAIL, E_NOTIMPL, E_POINTER,
-    HGLOBAL, POINT,
+    HGLOBAL, POINT, SIZE,
 };
+use windows::Win32::Graphics::Gdi::{CreateBitmap, DeleteObject};
 use windows::Win32::System::Com::{
-    IAdviseSink, IDataObject, IDataObject_Impl, IEnumFORMATETC, IEnumFORMATETC_Impl, IEnumSTATDATA,
-    DATADIR_GET, DVASPECT_CONTENT, FORMATETC, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
+    CoCreateInstance, IAdviseSink, IDataObject, IDataObject_Impl, IEnumFORMATETC,
+    IEnumFORMATETC_Impl, IEnumSTATDATA, CLSCTX_INPROC_SERVER, DATADIR_GET, DVASPECT_CONTENT,
+    FORMATETC, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
 };
 use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
 use windows::Win32::System::Memory::{
@@ -47,12 +49,12 @@ use windows::Win32::System::Memory::{
 };
 use windows::Win32::System::Ole::{
     DoDragDrop, IDropSource, IDropSource_Impl, OleInitialize, OleUninitialize, CF_HDROP,
-    DROPEFFECT, DROPEFFECT_COPY,
+    DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE,
 };
 use windows::Win32::System::SystemServices::{
     MK_LBUTTON, MK_MBUTTON, MK_RBUTTON, MODIFIERKEYS_FLAGS,
 };
-use windows::Win32::UI::Shell::DROPFILES;
+use windows::Win32::UI::Shell::{DragQueryFileW, IDragSourceHelper, DROPFILES, HDROP, SHDRAGIMAGE};
 
 /// Button state that still counts as "user is dragging".
 const DRAG_BUTTON_MASK: u32 = MK_LBUTTON.0 | MK_MBUTTON.0 | MK_RBUTTON.0;
@@ -70,16 +72,24 @@ fn hr(code: HRESULT) -> Error {
 /// How an OLE drag-out ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DragOutOutcome {
-    /// True = a target accepted the drop (always copy semantics).
+    /// True = a target accepted the drop.
     pub dropped: bool,
     /// True = the user aborted (Esc / focus loss / release off any target).
     pub cancelled: bool,
+    /// Dropeffect returned by target (COPY / MOVE / LINK).
+    pub effect: u32,
 }
 
 impl DragOutOutcome {
     pub fn describe(&self) -> &'static str {
         if self.dropped {
-            "File(s) dropped out (copy)"
+            if self.effect == DROPEFFECT_MOVE.0 {
+                "File(s) dropped out (move)"
+            } else if self.effect == DROPEFFECT_LINK.0 {
+                "File(s) dropped out (link)"
+            } else {
+                "File(s) dropped out (copy)"
+            }
         } else if self.cancelled {
             "Drag cancelled"
         } else {
@@ -561,6 +571,125 @@ impl Drop for OleThreadGuard {
     }
 }
 
+const CLSID_DRAG_DROP_HELPER: windows::core::GUID =
+    windows::core::GUID::from_u128(0x4657278a_411b_11d2_839a_00c04fd918d0);
+
+/// Attaches a custom drag image (thumbnail stack + count badge) to `IDataObject`
+/// using `IDragSourceHelper::InitializeFromBitmap`.
+pub fn attach_drag_image(data_object: &IDataObject, count: usize) {
+    unsafe {
+        let helper: Result<IDragSourceHelper, _> =
+            CoCreateInstance(&CLSID_DRAG_DROP_HELPER, None, CLSCTX_INPROC_SERVER);
+        let helper = match helper {
+            Ok(h) => h,
+            Err(e) => {
+                log::debug!("IDragSourceHelper unavailable: {:?}", e);
+                return;
+            }
+        };
+
+        let width = 64i32;
+        let height = 64i32;
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+
+        let card_w = 44;
+        let card_h = 44;
+        let cards = count.clamp(1, 3);
+        for c in (0..cards).rev() {
+            let ox = (c as i32) * 4 + 4;
+            let oy = (c as i32) * 4 + 4;
+            for y in oy..(oy + card_h).min(height) {
+                for x in ox..(ox + card_w).min(width) {
+                    let idx = ((y * width + x) * 4) as usize;
+                    let is_border =
+                        x == ox || x == ox + card_w - 1 || y == oy || y == oy + card_h - 1;
+                    if is_border {
+                        pixels[idx] = 120;
+                        pixels[idx + 1] = 120;
+                        pixels[idx + 2] = 120;
+                        pixels[idx + 3] = 255;
+                    } else {
+                        let tint = 50 + (c as u8) * 20;
+                        pixels[idx] = tint + 20;
+                        pixels[idx + 1] = tint + 10;
+                        pixels[idx + 2] = tint;
+                        pixels[idx + 3] = 230;
+                    }
+                }
+            }
+        }
+
+        if count > 1 {
+            let bx = 36;
+            let by = 36;
+            let bw = 24;
+            let bh = 20;
+            for y in by..(by + bh).min(height) {
+                for x in bx..(bx + bw).min(width) {
+                    let idx = ((y * width + x) * 4) as usize;
+                    pixels[idx] = 79;
+                    pixels[idx + 1] = 88;
+                    pixels[idx + 2] = 228;
+                    pixels[idx + 3] = 255;
+                }
+            }
+        }
+
+        let hbmp = CreateBitmap(width, height, 1, 32, Some(pixels.as_ptr() as *const _));
+
+        if !hbmp.is_invalid() {
+            let shdi = SHDRAGIMAGE {
+                sizeDragImage: SIZE {
+                    cx: width,
+                    cy: height,
+                },
+                ptOffset: POINT {
+                    x: width / 2,
+                    y: height / 2,
+                },
+                hbmpDragImage: hbmp,
+                crColorKey: COLORREF(0),
+            };
+
+            let init_res = helper.InitializeFromBitmap(&shdi, data_object);
+            if let Err(e) = init_res {
+                log::debug!("InitializeFromBitmap failed: {:?}", e);
+                let _ = DeleteObject(hbmp.into());
+            }
+        }
+    }
+}
+
+/// Helper to extract list of PathBuf from an HGLOBAL containing DROPFILES.
+pub fn extract_paths_from_hdrop(hglobal: HGLOBAL) -> Vec<PathBuf> {
+    if hglobal.is_invalid() {
+        return Vec::new();
+    }
+    unsafe {
+        let hdrop = HDROP(hglobal.0);
+        let count = DragQueryFileW(hdrop, 0xFFFFFFFF, None);
+        let mut paths = Vec::with_capacity(count as usize);
+        let mut buf = vec![0u16; 1024];
+        for i in 0..count {
+            let len = DragQueryFileW(hdrop, i, Some(&mut buf));
+            if len > 0 {
+                let s = String::from_utf16_lossy(&buf[..len as usize]);
+                paths.push(PathBuf::from(s));
+            }
+        }
+        paths
+    }
+}
+
+/// Builds an IDataObject carrying CF_HDROP for the given paths.
+pub fn create_files_data_object(paths: &[PathBuf]) -> Result<IDataObject, String> {
+    let obj = FilesDataObject::new(paths)
+        .map_err(|e| format!("Failed to create FilesDataObject: {:?}", e))?;
+    let data_object: IDataObject = obj.into();
+    attach_drag_image(&data_object, paths.len());
+    Ok(data_object)
+}
+
 /// Runs the modal `DoDragDrop` loop for the given paths.
 ///
 /// SAFETY: must run on the thread that owns the mouse press. `DoDragDrop`
@@ -578,30 +707,38 @@ unsafe fn run_ole_drag(paths: &[PathBuf]) -> Result<DragOutOutcome, Error> {
     }
 
     let data_object: IDataObject = FilesDataObject::new(paths)?.into();
+    attach_drag_image(&data_object, paths.len());
     let drop_source: IDropSource = DropSourceDefault.into();
 
-    log::info!("OLE drag-out started ({} file(s), copy-only)", paths.len());
+    log::info!(
+        "OLE drag-out started ({} file(s), COPY|MOVE|LINK)",
+        paths.len()
+    );
 
+    let allowed_effects = DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK;
     let mut effect = DROPEFFECT(0); // DROPEFFECT_NONE
                                     // SAFETY: both interfaces outlive the modal loop; the effect pointer
                                     // is written by OLE during the call.
     let verdict_hr =
-        unsafe { DoDragDrop(&data_object, &drop_source, DROPEFFECT_COPY, &mut effect) };
+        unsafe { DoDragDrop(&data_object, &drop_source, allowed_effects, &mut effect) };
 
     if verdict_hr == DRAGDROP_S_DROP || verdict_hr == HRESULT(0) {
         log::info!(
-            "OLE drag-out dropped (effect=copy), result=0x{:08X}",
+            "OLE drag-out dropped (effect={}), result=0x{:08X}",
+            effect.0,
             verdict_hr.0 as u32
         );
         Ok(DragOutOutcome {
             dropped: true,
             cancelled: false,
+            effect: effect.0,
         })
     } else if verdict_hr == DRAGDROP_S_CANCEL {
         log::info!("OLE drag-out cancelled by user");
         Ok(DragOutOutcome {
             dropped: false,
             cancelled: true,
+            effect: 0,
         })
     } else {
         Err(hr(verdict_hr))

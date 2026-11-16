@@ -820,6 +820,12 @@ pub struct ExplorerView {
     /// non-modal feedback (auto-fades after a few seconds).
     status_note: Option<(String, Instant)>,
 
+    /// Spring-loaded folder hover timer: (folder path, hover start time).
+    /// Navigates into the hovered folder after 700ms during an active drag.
+    spring_hover_dir: Option<(PathBuf, Instant)>,
+    /// Tracks if main window drop target has been registered.
+    drop_target_registered: bool,
+
     // Dual-Pane Split View Architecture (Dolphin / Total Commander style)
     pub split_view_enabled: bool,
     pub active_pane: usize,
@@ -1143,6 +1149,8 @@ impl Default for ExplorerView {
             custom_icon_input: String::new(),
             custom_icon_tab: 0,
             status_note: None,
+            spring_hover_dir: None,
+            drop_target_registered: false,
             split_view_enabled: false,
             active_pane: 0,
             secondary_dir: current_dir.clone(),
@@ -1974,9 +1982,29 @@ impl ExplorerView {
             self.last_drives_refresh = Some(Instant::now());
         }
 
-        // 1. External OS Drag & Drop Ingestion
-        let (dropped_files, is_hovered) =
+        if !self.drop_target_registered {
+            let hwnd = crate::gui::dwm_helper::find_main_window_hwnd();
+            if hwnd != 0 {
+                let _ = crate::core::ole_drop_target::register_main_drop_target(hwnd as usize);
+                self.drop_target_registered = true;
+            }
+        }
+
+        // 1. External OS Drag & Drop Ingestion (winit + Windows OLE IDropTarget)
+        let ole_hover = crate::core::ole_drop_target::current_drag_hover();
+        let (dropped_files, raw_hovered) =
             ui.input(|i| (i.raw.dropped_files.clone(), !i.raw.hovered_files.is_empty()));
+        let is_hovered = raw_hovered || ole_hover.is_active;
+
+        // Drain any external drops received via OLE IDropTarget
+        let ole_drops = crate::core::ole_drop_target::poll_external_drops();
+        for drop_ev in ole_drops {
+            if !drop_ev.paths.is_empty() {
+                let copy = drop_ev.effect != 2; // DROPEFFECT_MOVE == 2
+                let dest = self.current_dir.clone();
+                self.perform_drop(dest, &drop_ev.paths, copy);
+            }
+        }
 
         if is_hovered {
             ui.add_space(4.0);
@@ -4390,8 +4418,9 @@ impl ExplorerView {
             ),
         }
 
-        // Drag ghost badge hovering at the pointer: live text "Move" / "Copy" / "Link"
-        // based on active modifiers and user preference.
+        // Drag ghost stack + count badge pill following the pointer:
+        // Stack of up to 3 thumbnails with soft shadows, count badge pill
+        // filled with palette.accent and high-contrast text_on_accent.
         if egui::DragAndDrop::has_payload_of_type::<FileDragPayload>(ui.ctx()) {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(16));
@@ -4403,41 +4432,92 @@ impl ExplorerView {
                 )
             });
             let cfg = crate::core::MossambiConfig::load();
-            let badge_text = if alt || (ctrl && shift) {
-                "Link"
-            } else if shift {
-                "Move"
-            } else if ctrl {
-                "Copy"
-            } else {
-                match cfg.drop_action_pref {
-                    crate::core::DropActionPreference::AlwaysCopy => "Copy",
-                    crate::core::DropActionPreference::AlwaysMove => "Move",
-                    crate::core::DropActionPreference::AlwaysAsk => "Ask",
-                    crate::core::DropActionPreference::SmartDefault => "Move",
-                }
-            };
+            let count = egui::DragAndDrop::payload::<FileDragPayload>(ui.ctx())
+                .map(|p| p.paths.len())
+                .unwrap_or(1);
+            let ghost_layout = crate::core::drag_out::compute_drag_ghost_layout(
+                count,
+                ctrl,
+                shift,
+                alt,
+                cfg.drop_action_pref,
+            );
+
             if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
                 let bp = ui.painter().clone().with_layer_id(egui::LayerId::new(
                     egui::Order::Tooltip,
-                    egui::Id::new("mossambi_dnd_badge"),
+                    egui::Id::new("mossambi_dnd_ghost_stack"),
                 ));
-                let font = egui::FontId::proportional(13.0);
-                let galley = ui.painter().layout_no_wrap(
-                    badge_text.to_string(),
-                    font.clone(),
-                    palette.text_primary,
+
+                // Render stack of up to 3 cards
+                let card_w = 44.0_f32;
+                let card_h = 44.0_f32;
+                for (idx, &(ox, oy)) in ghost_layout.card_offsets.iter().enumerate().rev() {
+                    let card_pos = pos + Vec2::new(12.0 + ox, 12.0 + oy);
+                    let card_rect = Rect::from_min_size(card_pos, Vec2::new(card_w, card_h));
+
+                    // Soft shadow
+                    if !cfg.animations.reduced_motion {
+                        bp.rect_filled(
+                            card_rect.translate(Vec2::new(2.0, 3.0)),
+                            Rounding::same(6.0),
+                            Color32::from_black_alpha(45),
+                        );
+                    }
+
+                    // Card surface
+                    let surface_alpha = if idx == 0 { 245 } else { 190 };
+                    let fill = Color32::from_rgba_unmultiplied(
+                        palette.card_bg.r(),
+                        palette.card_bg.g(),
+                        palette.card_bg.b(),
+                        surface_alpha,
+                    );
+                    bp.rect_filled(card_rect, Rounding::same(6.0), fill);
+                    bp.rect_stroke(
+                        card_rect,
+                        Rounding::same(6.0),
+                        Stroke::new(1.0_f32, palette.border),
+                    );
+
+                    // Card inner border glyph
+                    let inner_rect = card_rect.shrink(8.0);
+                    bp.rect_stroke(
+                        inner_rect,
+                        Rounding::same(3.0),
+                        Stroke::new(1.0_f32, palette.text_secondary),
+                    );
+                }
+
+                // Render count badge pill (palette.accent fill, guaranteed text_on_accent)
+                let pill_pos = pos
+                    + Vec2::new(
+                        12.0 + ghost_layout.badge_offset.0,
+                        12.0 + ghost_layout.badge_offset.1,
+                    );
+                let pill_rect = Rect::from_min_size(
+                    pill_pos,
+                    Vec2::new(ghost_layout.pill_width, ghost_layout.pill_height),
                 );
-                let pill_w = (galley.size().x + 16.0).max(28.0);
-                let pill_h = 22.0;
-                let r = Rect::from_min_size(pos + Vec2::new(14.0, 14.0), Vec2::new(pill_w, pill_h));
-                bp.rect_filled(r, Rounding::same(6.0), palette.card_bg);
-                bp.rect_stroke(r, Rounding::same(6.0), Stroke::new(1.0_f32, palette.accent));
+                if !cfg.animations.reduced_motion {
+                    bp.rect_filled(
+                        pill_rect.translate(Vec2::new(1.0, 2.0)),
+                        Rounding::same(10.0),
+                        Color32::from_black_alpha(50),
+                    );
+                }
+                bp.rect_filled(pill_rect, Rounding::same(10.0), palette.accent);
+
+                let text_color = crate::gui::design::contrast::text_on_accent(palette.accent);
+                let font = egui::FontId::proportional(11.0);
+                let galley =
+                    ui.painter()
+                        .layout_no_wrap(ghost_layout.badge_text.clone(), font, text_color);
                 let text_pos = Pos2::new(
-                    r.center().x - galley.size().x * 0.5,
-                    r.center().y - galley.size().y * 0.5,
+                    pill_rect.center().x - galley.size().x * 0.5,
+                    pill_rect.center().y - galley.size().y * 0.5,
                 );
-                bp.galley(text_pos, galley, palette.text_primary);
+                bp.galley(text_pos, galley, text_color);
             }
         }
 
@@ -6413,6 +6493,18 @@ impl ExplorerView {
                         egui::DragAndDrop::set_payload(ui.ctx(), FileDragPayload { paths, button });
                     }
 
+                    // Lift effect when row is part of the actively dragged selection
+                    let is_actively_dragged =
+                        egui::DragAndDrop::has_payload_of_type::<FileDragPayload>(ui.ctx())
+                            && self.selected_paths.contains(&item.path);
+                    if is_actively_dragged && !self.animations.reduced_motion {
+                        ui.painter().rect_filled(
+                            row_rect.translate(Vec2::new(0.0, 2.0)),
+                            Rounding::same(5.0),
+                            Color32::from_black_alpha(45),
+                        );
+                    }
+
                     // Folder rows double as drop targets (move into dir,
                     // Ctrl/Cmd-drag = copy). Highlight animates via spring.
                     if item.is_dir {
@@ -6437,6 +6529,22 @@ impl ExplorerView {
                                         (a * 70.0) as u8,
                                     ),
                                 );
+
+                                // Spring-loaded folder navigation: 700ms continuous hover opens folder
+                                let now = Instant::now();
+                                let should_open = match &self.spring_hover_dir {
+                                    Some((path, start)) if path == &item.path => {
+                                        start.elapsed() >= std::time::Duration::from_millis(700)
+                                    }
+                                    _ => {
+                                        self.spring_hover_dir = Some((item.path.clone(), now));
+                                        false
+                                    }
+                                };
+                                if should_open {
+                                    self.spring_hover_dir = None;
+                                    self.navigate_to(item.path.clone());
+                                }
                             }
                         } else {
                             self.hover_anims.drive(

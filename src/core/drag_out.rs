@@ -58,3 +58,60 @@ pub fn begin_file_drag_out(paths: &[PathBuf]) -> Result<String, String> {
         }
     }
 }
+
+/// Layout metrics and badge text for DnD ghost stack following the pointer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DragGhostLayout {
+    pub card_count: usize,
+    pub card_offsets: Vec<(f32, f32)>,
+    pub badge_text: String,
+    pub badge_offset: (f32, f32),
+    pub pill_width: f32,
+    pub pill_height: f32,
+}
+
+/// Compute DnD ghost stack layout and count badge text.
+pub fn compute_drag_ghost_layout(
+    count: usize,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+    drop_pref: crate::core::config::DropActionPreference,
+) -> DragGhostLayout {
+    let card_count = count.clamp(1, 3);
+    let mut card_offsets = Vec::with_capacity(card_count);
+    for i in 0..card_count {
+        let offset = (i as f32) * 4.0;
+        card_offsets.push((-offset, -offset));
+    }
+
+    let badge_text = if alt || (ctrl && shift) {
+        "Link".to_string()
+    } else if shift {
+        "Move".to_string()
+    } else if ctrl {
+        "Copy".to_string()
+    } else if count > 1 {
+        count.to_string()
+    } else {
+        match drop_pref {
+            crate::core::config::DropActionPreference::AlwaysCopy => "Copy".to_string(),
+            crate::core::config::DropActionPreference::AlwaysMove => "Move".to_string(),
+            crate::core::config::DropActionPreference::AlwaysAsk => "Ask".to_string(),
+            crate::core::config::DropActionPreference::SmartDefault => "Move".to_string(),
+        }
+    };
+
+    let pill_width = (badge_text.len() as f32 * 8.0 + 16.0).max(24.0);
+    let pill_height = 20.0;
+    let badge_offset = (24.0, -8.0);
+
+    DragGhostLayout {
+        card_count,
+        card_offsets,
+        badge_text,
+        badge_offset,
+        pill_width,
+        pill_height,
+    }
+}
