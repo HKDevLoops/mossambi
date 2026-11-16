@@ -74,3 +74,31 @@ pub fn open_with_chooser(path: &Path) -> bool {
 pub fn is_glass_supported() -> bool {
     crate::gui::dwm_helper::backdrop_supported()
 }
+
+/// Dialog companion bar lifecycle for standard Windows Open/Save dialogs
+/// (W4b, opt-in setting `dialog_companion`). No-op on other OSes.
+pub fn dialog_companion_start() {
+    #[cfg(windows)]
+    {
+        windows::dialog_companion::start();
+    }
+}
+
+/// Stop the dialog companion bar thread (posts WM_QUIT). No-op on other OSes.
+pub fn dialog_companion_stop() {
+    #[cfg(windows)]
+    {
+        windows::dialog_companion::stop();
+    }
+}
+
+/// Start the dialog companion bar if the stored setting is enabled.
+/// Called once at GUI startup; no-op on other OSes and when the setting is off.
+pub fn dialog_companion_start_if_enabled() {
+    #[cfg(windows)]
+    {
+        if crate::core::MossambiConfig::load().dialog_companion {
+            windows::dialog_companion::start();
+        }
+    }
+}

@@ -1281,7 +1281,8 @@ pub struct MossambiConfig {
     #[serde(default)]
     pub default_file_manager: bool,
     /// Show docked companion bar on Windows Common File Dialogs (#32770).
-    #[serde(default = "default_true")]
+    /// Opt-in: off by default.
+    #[serde(default)]
     pub dialog_companion: bool,
     /// Maximum count of recent conversions kept in history
     #[serde(default = "default_conversion_history_limit")]
@@ -1510,7 +1511,7 @@ impl Default for MossambiConfig {
             disable_conversion_history: false,
             notifications_enabled: true,
             default_file_manager: false,
-            dialog_companion: true,
+            dialog_companion: false,
             conversion_history_limit: default_conversion_history_limit(),
         }
     }

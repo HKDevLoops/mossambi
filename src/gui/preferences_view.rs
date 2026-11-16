@@ -686,6 +686,15 @@ impl PreferencesView {
                 &mut self.cfg.dialog_companion,
                 dirty,
             );
+            // W4b: the companion thread follows the toggle immediately.
+            #[cfg(windows)]
+            {
+                if self.cfg.dialog_companion {
+                    crate::platform::dialog_companion_start();
+                } else {
+                    crate::platform::dialog_companion_stop();
+                }
+            }
         });
 
         ui.add_space(design::space::MD);

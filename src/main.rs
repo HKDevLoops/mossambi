@@ -1197,6 +1197,8 @@ fn handle_widget(pos: Option<&str>, _active_drag: bool, file: Option<PathBuf>) -
 fn handle_gui(initial_path: Option<PathBuf>) -> Result<()> {
     // Start background single-instance IPC listener for this primary instance
     let _ipc_guard = mossambi::platform::single_instance::start_single_instance_server(None).ok();
+    // W4b: opt-in dialog companion bar for standard Open/Save dialogs.
+    mossambi::platform::dialog_companion_start_if_enabled();
     mossambi::gui::run_studio_with_path(initial_path)
         .map_err(|e| anyhow::anyhow!("Studio GUI error: {}", e))
 }

@@ -36,3 +36,7 @@ pub fn open_in_default_app(path: &Path) -> bool {
         }
     }
 }
+
+/// W4b dialog companion bar (opt-in): pure classifier functions plus the
+/// Win32 companion thread that docks a quick-jump bar beside Open/Save dialogs.
+pub mod dialog_companion;
