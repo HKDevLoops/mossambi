@@ -76,7 +76,21 @@ pub fn parse_launch_intent<S: AsRef<str>>(args: &[S]) -> LaunchIntent {
             | "catalogue"
             | "daemon"
             | "tui"
+            | "widget"
+            | "info"
+            | "upload-ready"
+            | "config"
+            | "completions"
+            | "_carapace"
+            | "help-manual"
     ) {
+        return LaunchIntent::None;
+    }
+
+    // CLI positional conversion grammar: `mossambi <input> <format|dest> ...` is a
+    // conversion invocation, never a GUI launch intent, even when <input> already
+    // exists on disk (an existing file is only a Reveal intent when passed alone).
+    if slice.len() > 1 && Path::new(first_arg).is_file() {
         return LaunchIntent::None;
     }
 
