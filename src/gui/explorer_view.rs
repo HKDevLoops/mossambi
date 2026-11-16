@@ -729,6 +729,7 @@ pub struct ExplorerView {
     pub focused_row: usize,
     pub last_g_press: Option<Instant>,
     pub focus_search_requested: bool,
+    pub requested_open_preferences: bool,
 
     // macOS Finder & Linux System Features
     pub show_hidden_files: bool,
@@ -1012,28 +1013,16 @@ impl Default for ExplorerView {
             }
         }
 
-        let home_opt = crate::core::platform_paths::home_dir_opt();
-        let current_dir = home_opt
-            .clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let current_dir = crate::core::platform_paths::dashboard_location();
         let drives = get_system_drives();
         let scan_gen = Arc::new(AtomicU64::new(1));
 
-        let is_home = home_opt.is_some();
         let initial_tab = ExplorerTab {
             id: 1,
-            title: if is_home {
-                "Home".to_string()
-            } else {
-                current_dir
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("Files")
-                    .to_string()
-            },
-            icon: if is_home { "H" } else { "D" },
+            title: "Home".to_string(),
+            icon: "H",
             path: current_dir.clone(),
-            is_home,
+            is_home: true,
             search_query: String::new(),
         };
 
@@ -1069,7 +1058,7 @@ impl Default for ExplorerView {
             path_edit_buffer: current_dir.to_string_lossy().to_string(),
             renaming_path: None,
             show_new_folder_dialog: false,
-            is_home_view: home_opt.is_some(),
+            is_home_view: true,
             show_internal_toolbar: false,
             palette_open: false,
             new_folder_buffer: "New Folder".to_string(),
@@ -1103,6 +1092,7 @@ impl Default for ExplorerView {
             focused_row: 0,
             last_g_press: None,
             focus_search_requested: false,
+            requested_open_preferences: false,
             show_hidden_files: false,
             column_stack: Vec::new(),
             breadcrumb_popup_cache: std::collections::HashMap::new(),
@@ -1395,7 +1385,7 @@ impl ExplorerView {
 
     /// Navigate to a new directory asynchronously with zero UI hitching
     pub fn navigate_to(&mut self, dir: PathBuf) {
-        if !dir.exists() {
+        if !dir.exists() && !crate::core::platform_paths::is_dashboard_location(&dir) {
             return;
         }
 
@@ -1459,7 +1449,7 @@ impl ExplorerView {
                     // dashboard is not a listing of the parent and
                     // always starts clean.
                     self.selected_paths.clear();
-                    if crate::core::platform_paths::home_dir_opt().as_ref() != Some(&dir) {
+                    if !crate::core::platform_paths::is_dashboard_location(&dir) {
                         self.selected_paths.insert(old_dir.clone());
                     }
                     self.column_preview_item = Some(FileItem::from_path(old_dir));
@@ -1476,8 +1466,7 @@ impl ExplorerView {
             self.needs_breadcrumb_scroll_align = true;
         }
 
-        let home_opt = crate::core::platform_paths::home_dir_opt();
-        self.is_home_view = Some(&dir) == home_opt.as_ref();
+        self.is_home_view = crate::core::platform_paths::is_dashboard_location(&dir);
 
         // Update active tab metadata
         if let Some(tab) = self.tabs.get_mut(self.active_tab_index) {
@@ -1491,15 +1480,26 @@ impl ExplorerView {
             tab.icon = if self.is_home_view { "H" } else { "D" };
         }
 
-        self.dir_watcher.watch(&dir);
-
-        let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
-        spawn_async_dir_scan(
-            dir,
-            new_gen,
-            Arc::clone(&self.scan_gen),
-            self.scan_tx.clone(),
-        );
+        if self.is_home_view {
+            let user_home = crate::core::platform_paths::home_dir();
+            self.dir_watcher.watch(&user_home);
+            let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
+            spawn_async_dir_scan(
+                user_home,
+                new_gen,
+                Arc::clone(&self.scan_gen),
+                self.scan_tx.clone(),
+            );
+        } else {
+            self.dir_watcher.watch(&dir);
+            let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
+            spawn_async_dir_scan(
+                dir,
+                new_gen,
+                Arc::clone(&self.scan_gen),
+                self.scan_tx.clone(),
+            );
+        }
     }
 
     /// Fetches directory entries for Miller columns, using the fast in-memory cache
@@ -1534,8 +1534,7 @@ impl ExplorerView {
     }
 
     pub fn add_tab(&mut self, path: PathBuf) {
-        let home_opt = crate::core::platform_paths::home_dir_opt();
-        let is_home = Some(&path) == home_opt.as_ref();
+        let is_home = crate::core::platform_paths::is_dashboard_location(&path);
         let title = if is_home {
             "Home".to_string()
         } else {
@@ -1619,8 +1618,8 @@ impl ExplorerView {
     }
 
     pub fn is_home_directory(&self) -> bool {
-        let home_opt = crate::core::platform_paths::home_dir_opt();
-        Some(&self.current_dir) == home_opt.as_ref()
+        crate::core::platform_paths::is_dashboard_location(&self.current_dir)
+            || Some(&self.current_dir) == crate::core::platform_paths::home_dir_opt().as_ref()
     }
 
     pub fn go_back(&mut self) {
@@ -1726,16 +1725,18 @@ impl ExplorerView {
     }
 
     pub fn navigate_to_home(&mut self) {
-        let home_opt = crate::core::platform_paths::home_dir_opt();
-        let target = home_opt.unwrap_or_else(|| PathBuf::from("."));
+        let target = crate::core::platform_paths::dashboard_location();
         self.navigate_to(target);
-        self.is_home_view = true;
     }
 
     /// Process incoming background directory scanning batches and filesystem watcher events
     pub fn poll_background_scans(&mut self, window_focused: Option<bool>) {
         if self.dir_watcher.try_recv() {
-            let dir = self.current_dir.clone();
+            let dir = if self.is_home_view {
+                crate::core::platform_paths::home_dir()
+            } else {
+                self.current_dir.clone()
+            };
             let new_gen = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
             spawn_async_dir_scan(
                 dir,
@@ -3701,9 +3702,14 @@ impl ExplorerView {
                     .font(egui::TextStyle::Monospace),
             );
             if text_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                let new_p = PathBuf::from(&self.path_edit_buffer);
-                if new_p.exists() {
-                    self.navigate_to(new_p);
+                let trimmed = self.path_edit_buffer.trim();
+                if trimmed.eq_ignore_ascii_case("home:") || trimmed.eq_ignore_ascii_case("home") {
+                    self.navigate_to_home();
+                } else {
+                    let new_p = PathBuf::from(&self.path_edit_buffer);
+                    if new_p.exists() {
+                        self.navigate_to(new_p);
+                    }
                 }
                 self.is_editing_path = false;
             }
@@ -4035,7 +4041,7 @@ impl ExplorerView {
                             palette.accent,
                         );
                         if dash_resp.clicked() {
-                            self.is_home_view = true;
+                            self.navigate_to_home();
                         }
 
                         let btn_files = egui::Button::new(
@@ -4065,7 +4071,7 @@ impl ExplorerView {
                             palette.accent,
                         );
                         if files_resp.clicked() {
-                            self.is_home_view = false;
+                            self.navigate_to(crate::core::platform_paths::home_dir());
                         }
 
                         ui.separator();
@@ -4406,6 +4412,8 @@ impl ExplorerView {
         if self.last_view_mode != self.view_mode {
             self.last_view_mode = self.view_mode;
             if !self.animations.reduced_motion {
+                let view_anim_id = ui.id().with("file_view_mode_fade");
+                ui.ctx().animate_value_with_time(view_anim_id, 0.0, 0.0);
                 match self.view_mode {
                     ViewMode::Details => self.details_transition_spring.set(1.0),
                     ViewMode::Grid => self.grid_transition_spring.set(0.0),
@@ -4479,6 +4487,16 @@ impl ExplorerView {
                     self.new_item_entrance = None;
                 }
             }
+        }
+
+        let view_anim_id = ui.id().with("file_view_mode_fade");
+        let view_alpha = if self.animations.reduced_motion {
+            1.0
+        } else {
+            ui.ctx().animate_value_with_time(view_anim_id, 1.0, 0.150)
+        };
+        if view_alpha < 0.999 {
+            ui.set_opacity(view_alpha);
         }
 
         match self.view_mode {
@@ -5042,6 +5060,15 @@ impl ExplorerView {
         );
     }
 
+    fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+        let t = t.clamp(0.0, 1.0);
+        let r = (a.r() as f32 + (b.r() as f32 - a.r() as f32) * t).round() as u8;
+        let g = (a.g() as f32 + (b.g() as f32 - a.g() as f32) * t).round() as u8;
+        let b_ch = (a.b() as f32 + (b.b() as f32 - a.b() as f32) * t).round() as u8;
+        let alpha = (a.a() as f32 + (b.a() as f32 - a.a() as f32) * t).round() as u8;
+        Color32::from_rgba_unmultiplied(r, g, b_ch, alpha)
+    }
+
     fn render_recent_files_view(
         &mut self,
         ui: &mut Ui,
@@ -5128,7 +5155,19 @@ impl ExplorerView {
                 ui.allocate_exact_size(Vec2::new(available_w, row_h), egui::Sense::click());
 
             let is_hovered = row_resp.hovered();
-            let row_bg = if is_hovered {
+            let is_sel = self.selected_paths.contains(&item.path);
+            let target_sel = if is_sel { 1.0_f32 } else { 0.0_f32 };
+            let sel_t = if self.animations.reduced_motion {
+                target_sel
+            } else {
+                ui.ctx().animate_value_with_time(
+                    ui.id().with(("recent_sel", idx)),
+                    target_sel,
+                    0.150,
+                )
+            };
+
+            let base_bg = if is_hovered {
                 palette.card_hover
             } else if idx % 2 == 1 {
                 palette.surface_2
@@ -5141,11 +5180,37 @@ impl ExplorerView {
                 )
             };
 
+            let row_bg = if sel_t > 0.001 {
+                Self::lerp_color(base_bg, palette.selection, sel_t)
+            } else {
+                base_bg
+            };
+
             ui.painter().rect_filled(
                 row_rect,
                 Rounding::same(self.design_tokens.radius_subtle),
                 row_bg,
             );
+
+            if sel_t > 0.001 {
+                let stroke_col = Color32::from_rgba_unmultiplied(
+                    palette.accent.r(),
+                    palette.accent.g(),
+                    palette.accent.b(),
+                    (sel_t * 255.0).round() as u8,
+                );
+                ui.painter().rect_stroke(
+                    row_rect,
+                    Rounding::same(self.design_tokens.radius_subtle),
+                    Stroke::new(1.0_f32, stroke_col),
+                );
+            }
+
+            let slide_x = if self.animations.reduced_motion {
+                0.0
+            } else {
+                2.0 * sel_t
+            };
 
             let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
             let (glyph_ast, accent_rgb) = crate::core::icon_packs::IconGlyph::resolve_with_path(
@@ -5161,7 +5226,7 @@ impl ExplorerView {
                 icon_spec.color_rgb,
             );
             let icon_rect = Rect::from_center_size(
-                Pos2::new(row_rect.left() + 16.0, row_rect.center().y),
+                Pos2::new(row_rect.left() + 16.0 + slide_x, row_rect.center().y),
                 Vec2::splat(18.0),
             );
             crate::core::icon_packs::paint_icon(
@@ -5174,13 +5239,18 @@ impl ExplorerView {
 
             let name_chars = (layout.name_width / 8.5).floor() as usize;
             let display_name = truncate_end(&item.name, name_chars.max(12));
-            let mut cur_x = row_rect.left() + 32.0;
+            let mut cur_x = row_rect.left() + 32.0 + slide_x;
+            let text_color = if sel_t > 0.001 {
+                Self::lerp_color(palette.text_primary, Color32::WHITE, sel_t)
+            } else {
+                palette.text_primary
+            };
             ui.painter().text(
                 Pos2::new(cur_x, row_rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 display_name,
                 egui::FontId::proportional(12.5),
-                palette.text_primary,
+                text_color,
             );
             cur_x += layout.name_width;
 
@@ -5257,17 +5327,6 @@ impl ExplorerView {
                 egui::FontId::monospace(11.0),
                 palette.text_muted,
             );
-
-            let is_sel = self.selected_paths.contains(&item.path);
-            if is_sel {
-                ui.painter()
-                    .rect_filled(row_rect, Rounding::same(6.0), palette.selection);
-                ui.painter().rect_stroke(
-                    row_rect,
-                    Rounding::same(6.0),
-                    Stroke::new(1.0_f32, palette.accent),
-                );
-            }
 
             if row_resp.double_clicked() {
                 self.trigger_click_feedback();
@@ -6900,6 +6959,9 @@ impl ExplorerView {
         if canvas_intents.properties_dir {
             self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
         }
+        if canvas_intents.preferences {
+            self.requested_open_preferences = true;
+        }
         if let Some((session_id, cmd_id)) = canvas_intents.invoke_shell_cmd {
             crate::platform::invoke_shell_command(session_id, cmd_id, (0, 0));
         }
@@ -8213,6 +8275,9 @@ impl ExplorerView {
         if canvas_intents.properties_dir {
             self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
         }
+        if canvas_intents.preferences {
+            self.requested_open_preferences = true;
+        }
         if let Some((session_id, cmd_id)) = canvas_intents.invoke_shell_cmd {
             crate::platform::invoke_shell_command(session_id, cmd_id, (0, 0));
         }
@@ -8964,6 +9029,9 @@ impl ExplorerView {
         }
         if canvas_intents.properties_dir {
             self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
+        }
+        if canvas_intents.preferences {
+            self.requested_open_preferences = true;
         }
         if let Some((session_id, cmd_id)) = canvas_intents.invoke_shell_cmd {
             crate::platform::invoke_shell_command(session_id, cmd_id, (0, 0));
@@ -11818,6 +11886,7 @@ pub struct CanvasMenuIntents {
     pub terminal: bool,
     pub open_in_file_manager: bool,
     pub properties_dir: bool,
+    pub preferences: bool,
     /// Requested sort column (caller toggles direction when re-clicked).
     pub sort_by: Option<SortColumn>,
     /// Requested view mode (Details/Grid/Columns submenu).
@@ -12957,6 +13026,20 @@ impl ExplorerView {
         }
         if menu_row(menu_ui, true, pack, fm::MenuAction::Properties, style, tint).clicked() {
             intent.properties_dir = true;
+            menu_ui.close_menu();
+        }
+        if menu_row_glyph(
+            menu_ui,
+            true,
+            pack,
+            IconGlyph::Gear,
+            "Preferences (Ctrl+,)",
+            style,
+            tint,
+        )
+        .clicked()
+        {
+            intent.preferences = true;
             menu_ui.close_menu();
         }
 

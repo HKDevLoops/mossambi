@@ -248,7 +248,7 @@ pub enum ToolbarButtonAnim {
 
 /// Renders a toolbar icon button with micro-animations (press depth, slide, bounce, spin, pulse).
 #[allow(clippy::too_many_arguments)]
-pub fn toolbar_animated_icon_button(
+pub fn toolbar_animated_icon_button_resp(
     ui: &mut Ui,
     palette: &ThemePalette,
     pack: IconPack,
@@ -258,7 +258,7 @@ pub fn toolbar_animated_icon_button(
     active: bool,
     anim: ToolbarButtonAnim,
     click_time: &mut Option<std::time::Instant>,
-) -> bool {
+) -> (bool, egui::Response) {
     let side = 29.0;
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(side), Sense::click());
     let painter = ui.painter_at(rect);
@@ -337,8 +337,51 @@ pub fn toolbar_animated_icon_button(
         *click_time = Some(std::time::Instant::now());
         ui.ctx().request_repaint();
     }
-    resp.on_hover_ui(|ui| show_tooltip(ui, tooltip.to_owned()));
-    clicked
+    let resp = resp.on_hover_ui(|ui| show_tooltip(ui, tooltip.to_owned()));
+    (clicked, resp)
+}
+
+/// Renders a toolbar icon button with micro-animations, returning only the clicked boolean.
+#[allow(clippy::too_many_arguments)]
+pub fn toolbar_animated_icon_button(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    pack: IconPack,
+    glyph: IconGlyph,
+    accent_rgb: [u8; 3],
+    tooltip: &str,
+    active: bool,
+    anim: ToolbarButtonAnim,
+    click_time: &mut Option<std::time::Instant>,
+) -> bool {
+    toolbar_animated_icon_button_resp(
+        ui, palette, pack, glyph, accent_rgb, tooltip, active, anim, click_time,
+    )
+    .0
+}
+
+/// Returns (clicked, response).
+pub fn toolbar_icon_button_resp(
+    ui: &mut Ui,
+    palette: &ThemePalette,
+    pack: IconPack,
+    glyph: IconGlyph,
+    accent_rgb: [u8; 3],
+    tooltip: &str,
+    active: bool,
+) -> (bool, egui::Response) {
+    let mut dummy_time = None;
+    toolbar_animated_icon_button_resp(
+        ui,
+        palette,
+        pack,
+        glyph,
+        accent_rgb,
+        tooltip,
+        active,
+        ToolbarButtonAnim::None,
+        &mut dummy_time,
+    )
 }
 
 /// Returns true when clicked. The button carries no text, so it can never
@@ -352,18 +395,7 @@ pub fn toolbar_icon_button(
     tooltip: &str,
     active: bool,
 ) -> bool {
-    let mut dummy_time = None;
-    toolbar_animated_icon_button(
-        ui,
-        palette,
-        pack,
-        glyph,
-        accent_rgb,
-        tooltip,
-        active,
-        ToolbarButtonAnim::None,
-        &mut dummy_time,
-    )
+    toolbar_icon_button_resp(ui, palette, pack, glyph, accent_rgb, tooltip, active).0
 }
 
 /// Renders the tooltip body.

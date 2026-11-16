@@ -746,6 +746,13 @@ pub struct BreadcrumbSegment {
 
 /// Parses any Path into clean clickable breadcrumb segments
 pub fn parse_breadcrumbs(path: &Path) -> Vec<BreadcrumbSegment> {
+    if crate::core::platform_paths::is_dashboard_location(path) {
+        return vec![BreadcrumbSegment {
+            label: "Home".into(),
+            target_path: path.to_path_buf(),
+        }];
+    }
+
     let mut segments = Vec::new();
     let mut accum = PathBuf::new();
 

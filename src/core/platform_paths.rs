@@ -6,7 +6,21 @@
 //!
 //! macOS / Linux: Uses standard environment variables ($HOME, $XDG_DATA_HOME) and standard directories.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Special virtual location URI for the home dashboard view.
+/// This is not a filesystem path and must never match any real directory.
+pub const DASHBOARD_URI: &str = "home:";
+
+/// Returns the virtual path representing the dashboard location.
+pub fn dashboard_location() -> PathBuf {
+    PathBuf::from(DASHBOARD_URI)
+}
+
+/// Checks if a path is the virtual dashboard location.
+pub fn is_dashboard_location(path: &Path) -> bool {
+    path.as_os_str() == DASHBOARD_URI || path.to_string_lossy() == DASHBOARD_URI
+}
 
 #[cfg(windows)]
 use windows::core::GUID;
@@ -201,5 +215,19 @@ mod tests {
             Some(home) => assert_eq!(home, home_dir()),
             None => assert_eq!(home_dir().as_os_str(), "."),
         }
+    }
+
+    #[test]
+    fn test_dashboard_location_invariants() {
+        let dash = dashboard_location();
+        assert_eq!(dash.as_os_str(), DASHBOARD_URI);
+        assert!(is_dashboard_location(&dash));
+        assert!(is_dashboard_location(Path::new("home:")));
+
+        let home = home_dir();
+        assert_ne!(dash, home);
+        assert!(!is_dashboard_location(&home));
+        assert!(!is_dashboard_location(Path::new("C:\\Users\\user")));
+        assert!(!is_dashboard_location(Path::new("/home/user")));
     }
 }

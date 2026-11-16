@@ -414,6 +414,30 @@ impl StudioView {
         // while the palette modal is open (read in explorer_view).
         self.explorer_view.palette_open = self.command_palette.is_open;
 
+        if self.explorer_view.requested_open_preferences {
+            self.explorer_view.requested_open_preferences = false;
+            self.switch_to_tab(StudioTab::Preferences);
+        }
+
+        let open_preferences = !capturing
+            && ctx.input(|i| {
+                (i.modifiers.ctrl || i.modifiers.command)
+                    && !i.modifiers.shift
+                    && !i.modifiers.alt
+                    && i.key_pressed(egui::Key::Comma)
+            });
+        if open_preferences && !self.command_palette.is_open {
+            if self.current_tab == StudioTab::Preferences {
+                self.current_tab = if self.previous_tab != StudioTab::Preferences {
+                    self.previous_tab
+                } else {
+                    StudioTab::FileExplorer
+                };
+            } else {
+                self.switch_to_tab(StudioTab::Preferences);
+            }
+        }
+
         let open_new_tab = !capturing && shortcut_pressed(&events, &config.shortcut_for("new_tab"));
         if open_new_tab && !self.command_palette.is_open {
             self.switch_to_tab(StudioTab::FileExplorer);
@@ -840,6 +864,11 @@ impl StudioView {
                                     self.explorer_view.select_all();
                                     ui.close_menu();
                                 }
+                                ui.separator();
+                                if ui.button("Preferences (Ctrl+,)").clicked() {
+                                    self.switch_to_tab(StudioTab::Preferences);
+                                    ui.close_menu();
+                                }
                             });
                             ui.menu_button("View", |ui| {
                                 if ui.button("Icons View (Ctrl+1)").clicked() {
@@ -899,15 +928,34 @@ impl StudioView {
                                     ui.close_menu();
                                 }
                                 if ui.button("Home").clicked() {
-                                    if let Some(h) = crate::core::platform_paths::home_dir_opt() {
-                                        self.explorer_view.navigate_to(h);
-                                        self.explorer_view.is_home_view = true;
-                                    }
+                                    self.explorer_view.navigate_to_home();
+                                    ui.close_menu();
+                                }
+                            });
+                            ui.menu_button("Tools", |ui| {
+                                if ui.button("Transcoder").clicked() {
+                                    self.switch_to_tab(StudioTab::Transcoder);
+                                    ui.close_menu();
+                                }
+                                if ui.button("Custom Conformer").clicked() {
+                                    self.switch_to_tab(StudioTab::ExamStudio);
+                                    ui.close_menu();
+                                }
+                                if ui.button("Quality Inspector").clicked() {
+                                    self.switch_to_tab(StudioTab::QualityInspector);
+                                    ui.close_menu();
+                                }
+                                if ui.button("Archive Suite").clicked() {
+                                    self.switch_to_tab(StudioTab::ArchiveSuite);
+                                    ui.close_menu();
+                                }
+                                if ui.button("Hardware & AI").clicked() {
+                                    self.switch_to_tab(StudioTab::HardwareTelemetry);
                                     ui.close_menu();
                                 }
                             });
                             ui.menu_button("Help", |ui| {
-                                if ui.button("Preferences (Cmd+,)").clicked() {
+                                if ui.button("Preferences (Ctrl+,)").clicked() {
                                     self.switch_to_tab(StudioTab::Preferences);
                                     ui.close_menu();
                                 }
@@ -1194,20 +1242,30 @@ impl StudioView {
                                             if text_resp.lost_focus()
                                                 && ui.input(|i| i.key_pressed(egui::Key::Enter))
                                             {
-                                                let new_p = PathBuf::from(
-                                                    &self.explorer_view.path_edit_buffer,
-                                                );
-                                                if new_p.exists() {
-                                                    nav_target = Some(new_p);
+                                                let trimmed = self.explorer_view.path_edit_buffer.trim();
+                                                if trimmed.eq_ignore_ascii_case("home:") || trimmed.eq_ignore_ascii_case("home") {
+                                                    nav_target = Some(crate::core::platform_paths::dashboard_location());
+                                                } else {
+                                                    let new_p = PathBuf::from(
+                                                        &self.explorer_view.path_edit_buffer,
+                                                    );
+                                                    if new_p.exists() {
+                                                        nav_target = Some(new_p);
+                                                    }
                                                 }
                                                 self.explorer_view.is_editing_path = false;
                                             }
                                             if ui.small_button("Go").clicked() {
-                                                let new_p = PathBuf::from(
-                                                    &self.explorer_view.path_edit_buffer,
-                                                );
-                                                if new_p.exists() {
-                                                    nav_target = Some(new_p);
+                                                let trimmed = self.explorer_view.path_edit_buffer.trim();
+                                                if trimmed.eq_ignore_ascii_case("home:") || trimmed.eq_ignore_ascii_case("home") {
+                                                    nav_target = Some(crate::core::platform_paths::dashboard_location());
+                                                } else {
+                                                    let new_p = PathBuf::from(
+                                                        &self.explorer_view.path_edit_buffer,
+                                                    );
+                                                    if new_p.exists() {
+                                                        nav_target = Some(new_p);
+                                                    }
                                                 }
                                                 self.explorer_view.is_editing_path = false;
                                             }
@@ -1513,6 +1571,72 @@ impl StudioView {
                                     },
                                 );
                             }
+
+                            // Hamburger menu button (Nautilus / GNOME header bar)
+                            if chrome_spec.toolbar.contains(&ToolbarItem::Hamburger) {
+                                ui.add_space(4.0);
+                                let (h_click, h_resp) =
+                                    crate::gui::finder_chrome::toolbar_icon_button_resp(
+                                        ui,
+                                        &palette,
+                                        pack,
+                                        IconGlyph::ActionHamburger,
+                                        text_rgb,
+                                        "Menu",
+                                        false,
+                                    );
+                                let popup_id = ui.make_persistent_id("gnome_hamburger_menu_popover");
+                                if h_click {
+                                    ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+                                }
+                                egui::popup::popup_below_widget(
+                                    ui,
+                                    popup_id,
+                                    &h_resp,
+                                    egui::popup::PopupCloseBehavior::CloseOnClickOutside,
+                                    |popup_ui| {
+                                        popup_ui.set_min_width(190.0);
+                                        if popup_ui.button("Preferences (Ctrl+,)").clicked() {
+                                            self.switch_to_tab(StudioTab::Preferences);
+                                            popup_ui.memory_mut(|mem| mem.close_popup());
+                                        }
+                                        if popup_ui.button("New Window (Ctrl+N)").clicked() {
+                                            crate::gui::explorer_view::spawn_new_explorer_window(
+                                                Some(&self.explorer_view.current_dir),
+                                            );
+                                            popup_ui.memory_mut(|mem| mem.close_popup());
+                                        }
+                                        if popup_ui.button("New Folder (Ctrl+Shift+N)").clicked() {
+                                            self.explorer_view.show_new_folder_dialog = true;
+                                            popup_ui.memory_mut(|mem| mem.close_popup());
+                                        }
+                                        popup_ui.separator();
+                                        popup_ui.menu_button("Tools", |sub_ui| {
+                                            sub_ui.set_min_width(160.0);
+                                            if sub_ui.button("Transcoder").clicked() {
+                                                self.switch_to_tab(StudioTab::Transcoder);
+                                                sub_ui.memory_mut(|mem| mem.close_popup());
+                                            }
+                                            if sub_ui.button("Custom Conformer").clicked() {
+                                                self.switch_to_tab(StudioTab::ExamStudio);
+                                                sub_ui.memory_mut(|mem| mem.close_popup());
+                                            }
+                                            if sub_ui.button("Quality Inspector").clicked() {
+                                                self.switch_to_tab(StudioTab::QualityInspector);
+                                                sub_ui.memory_mut(|mem| mem.close_popup());
+                                            }
+                                            if sub_ui.button("Archive Suite").clicked() {
+                                                self.switch_to_tab(StudioTab::ArchiveSuite);
+                                                sub_ui.memory_mut(|mem| mem.close_popup());
+                                            }
+                                            if sub_ui.button("Hardware & AI").clicked() {
+                                                self.switch_to_tab(StudioTab::HardwareTelemetry);
+                                                sub_ui.memory_mut(|mem| mem.close_popup());
+                                            }
+                                        });
+                                    },
+                                );
+                            }
                         });
                     });
                     let row2_h = row2.response.rect.height();
@@ -1651,6 +1775,71 @@ impl StudioView {
                                     _ => {}
                                 }
                             }
+
+                            // Command Bar Overflow Menu: "..." ("See more")
+                            let (more_click, more_resp) =
+                                crate::gui::finder_chrome::toolbar_icon_button_resp(
+                                    ui,
+                                    &palette,
+                                    pack,
+                                    IconGlyph::ActionMore,
+                                    text_rgb,
+                                    "See more",
+                                    false,
+                                );
+                            let popup_id = ui.make_persistent_id("win11_command_bar_overflow_popover");
+                            if more_click {
+                                ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+                            }
+                            egui::popup::popup_below_widget(
+                                ui,
+                                popup_id,
+                                &more_resp,
+                                egui::popup::PopupCloseBehavior::CloseOnClickOutside,
+                                |popup_ui| {
+                                    popup_ui.set_min_width(190.0);
+                                    if popup_ui.button("Options (Preferences)").clicked() {
+                                        self.switch_to_tab(StudioTab::Preferences);
+                                        popup_ui.memory_mut(|mem| mem.close_popup());
+                                    }
+                                    if popup_ui.button("New Window (Ctrl+N)").clicked() {
+                                        crate::gui::explorer_view::spawn_new_explorer_window(
+                                            Some(&self.explorer_view.current_dir),
+                                        );
+                                        popup_ui.memory_mut(|mem| mem.close_popup());
+                                    }
+                                    popup_ui.separator();
+                                    popup_ui.menu_button("Tools", |sub_ui| {
+                                        sub_ui.set_min_width(160.0);
+                                        if sub_ui.button("Transcoder").clicked() {
+                                            self.switch_to_tab(StudioTab::Transcoder);
+                                            sub_ui.memory_mut(|mem| mem.close_popup());
+                                        }
+                                        if sub_ui.button("Custom Conformer").clicked() {
+                                            self.switch_to_tab(StudioTab::ExamStudio);
+                                            sub_ui.memory_mut(|mem| mem.close_popup());
+                                        }
+                                        if sub_ui.button("Quality Inspector").clicked() {
+                                            self.switch_to_tab(StudioTab::QualityInspector);
+                                            sub_ui.memory_mut(|mem| mem.close_popup());
+                                        }
+                                        if sub_ui.button("Archive Suite").clicked() {
+                                            self.switch_to_tab(StudioTab::ArchiveSuite);
+                                            sub_ui.memory_mut(|mem| mem.close_popup());
+                                        }
+                                        if sub_ui.button("Hardware & AI").clicked() {
+                                            self.switch_to_tab(StudioTab::HardwareTelemetry);
+                                            sub_ui.memory_mut(|mem| mem.close_popup());
+                                        }
+                                    });
+                                    popup_ui.separator();
+                                    if popup_ui.button("Properties (Alt+Enter)").clicked() {
+                                        self.explorer_view.properties_item =
+                                            Some(crate::core::FileItem::from_path(self.explorer_view.current_dir.clone()));
+                                        popup_ui.memory_mut(|mem| mem.close_popup());
+                                    }
+                                },
+                            );
                         });
                     }
                 } else {
@@ -1731,6 +1920,7 @@ impl StudioView {
                         {
                             let cur = &self.explorer_view.current_dir;
                             let mut candidates: Vec<PathBuf> = vec![
+                                crate::core::platform_paths::home_dir(),
                                 crate::core::platform_paths::desktop_dir(),
                                 crate::core::platform_paths::downloads_dir(),
                                 crate::core::platform_paths::documents_dir(),
@@ -1776,10 +1966,7 @@ impl StudioView {
                             let home_click = render_sidebar_row(ui, &palette, &home_spec);
                             if home_click.row {
                                 self.current_tab = StudioTab::FileExplorer;
-                                let home_opt = crate::core::platform_paths::home_dir_opt();
-                                let target = home_opt.unwrap_or_else(|| PathBuf::from("."));
-                                self.explorer_view.navigate_to(target);
-                                self.explorer_view.is_home_view = true;
+                                self.explorer_view.navigate_to_home();
                             }
 
                             // 2. FAVORITES Zone (static favorites + user pins,
@@ -1798,9 +1985,27 @@ impl StudioView {
                             }
 
                             let home_opt = crate::core::platform_paths::home_dir_opt();
-                        if cfg.sidebar_favorites_expanded && home_opt.is_some() {
+                        if cfg.sidebar_favorites_expanded {
+                            let user_home_info = home_opt.map(|p| {
+                                let name = p
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("User")
+                                    .to_string();
+                                (name, p)
+                            });
                             let recycle_target = crate::core::resolve_recycle_bin_target();
-                            let pinned: [(&str, IconGlyph, [u8; 3], PathBuf); 7] = [
+                            let mut pinned: Vec<(&str, IconGlyph, [u8; 3], PathBuf)> =
+                                Vec::with_capacity(8);
+                            if let Some((ref name, ref path)) = user_home_info {
+                                pinned.push((
+                                    name.as_str(),
+                                    IconGlyph::FolderHome,
+                                    [79, 168, 255],
+                                    path.clone(),
+                                ));
+                            }
+                            pinned.extend([
                                 (
                                     "Desktop",
                                     IconGlyph::FolderDesktop,
@@ -1843,7 +2048,7 @@ impl StudioView {
                                     [140, 145, 155],
                                     recycle_target,
                                 ),
-                            ];
+                            ]);
 
                             for (name, glyph, icon_col, path) in pinned {
                                 let is_active = is_sidebar_active(&path);
