@@ -6100,6 +6100,7 @@ impl ExplorerView {
                         self.sort_column,
                         dir_desc,
                         self.view_mode,
+                        &self.current_dir,
                     );
                 });
 
@@ -6667,6 +6668,9 @@ impl ExplorerView {
         }
         if canvas_intents.properties_dir {
             self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
+        }
+        if let Some((session_id, cmd_id)) = canvas_intents.invoke_shell_cmd {
+            crate::platform::invoke_shell_command(session_id, cmd_id, (0, 0));
         }
         for intent in item_intents {
             self.apply_item_intent(
@@ -7429,6 +7433,7 @@ impl ExplorerView {
                         self.sort_column,
                         dir_desc,
                         self.view_mode,
+                        &self.current_dir,
                     );
                 });
 
@@ -7977,6 +7982,9 @@ impl ExplorerView {
         if canvas_intents.properties_dir {
             self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
         }
+        if let Some((session_id, cmd_id)) = canvas_intents.invoke_shell_cmd {
+            crate::platform::invoke_shell_command(session_id, cmd_id, (0, 0));
+        }
         for intent in item_intents {
             self.apply_item_intent(
                 ui,
@@ -8482,6 +8490,7 @@ impl ExplorerView {
                         self.sort_column,
                         dir_desc,
                         self.view_mode,
+                        &self.current_dir,
                     );
                 });
 
@@ -8712,6 +8721,9 @@ impl ExplorerView {
         }
         if canvas_intents.properties_dir {
             self.properties_item = Some(FileItem::from_path(self.current_dir.clone()));
+        }
+        if let Some((session_id, cmd_id)) = canvas_intents.invoke_shell_cmd {
+            crate::platform::invoke_shell_command(session_id, cmd_id, (0, 0));
         }
         for intent in item_intents {
             self.apply_item_intent(
@@ -11312,6 +11324,8 @@ pub struct CanvasMenuIntents {
     pub view_mode: Option<ViewMode>,
     /// Invert selection within the current filtered listing.
     pub invert_selection: bool,
+    /// Invocation request for native shell context menu verb: (session_id, cmd_id).
+    pub invoke_shell_cmd: Option<(u64, u32)>,
 }
 
 /// Variants of "copy as path" (Explorer 11's flyout + terminal niceties).
@@ -11377,6 +11391,8 @@ pub struct ItemMenuIntents {
     pub clear_tag: Option<(Vec<PathBuf>, String)>,
     /// Pin/unpin a folder to the sidebar: (path, pin=true) / (path, pin=false).
     pub pin_sidebar: Option<(PathBuf, bool)>,
+    /// Invocation request for native shell context menu verb: (session_id, cmd_id).
+    pub invoke_shell_cmd: Option<(u64, u32)>,
 }
 
 /// Extension classification shared by both item menus.
@@ -12154,6 +12170,10 @@ impl ExplorerView {
                 );
             }
         }
+
+        if let Some((session_id, cmd_id)) = intent.invoke_shell_cmd {
+            crate::platform::invoke_shell_command(session_id, cmd_id, (0, 0));
+        }
     }
 
     pub fn paste_from_clipboard(&mut self) {
@@ -12228,6 +12248,7 @@ impl ExplorerView {
         current_sort: SortColumn,
         sort_desc: bool,
         current_view: ViewMode,
+        current_dir: &Path,
     ) -> CanvasMenuIntents {
         menu_ui.set_min_width(240.0);
         let mut intent = CanvasMenuIntents::default();
@@ -12436,6 +12457,20 @@ impl ExplorerView {
             intent.properties_dir = true;
             menu_ui.close_menu();
         }
+
+        let shift_held = menu_ui.input(|i| i.modifiers.shift);
+        let session_id = crate::platform::ensure_shell_menu_requested(
+            menu_ui.ctx(),
+            &[current_dir.to_path_buf()],
+            true,
+            shift_held,
+            0,
+        );
+        crate::platform::render_shell_menu_section(
+            menu_ui,
+            session_id,
+            &mut intent.invoke_shell_cmd,
+        );
         intent
     }
 
@@ -12916,6 +12951,21 @@ impl ExplorerView {
             intent.properties = Some(item.clone());
             menu_ui.close_menu();
         }
+
+        let shift_held = menu_ui.input(|i| i.modifiers.shift);
+        let session_id = crate::platform::ensure_shell_menu_requested(
+            menu_ui.ctx(),
+            targets,
+            false,
+            shift_held,
+            0,
+        );
+        crate::platform::render_shell_menu_section(
+            menu_ui,
+            session_id,
+            &mut intent.invoke_shell_cmd,
+        );
+
         intent
     }
 

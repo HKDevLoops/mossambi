@@ -5,6 +5,13 @@
 
 use std::path::{Path, PathBuf};
 
+pub mod shell_context_menu;
+pub use shell_context_menu::{
+    build_shell_menu_sync, clean_menu_title, ensure_shell_menu_requested, get_active_shell_menu,
+    invoke_shell_command, is_duplicate_verb, is_shell_menu_loading, render_shell_menu_section,
+    request_shell_menu, ShellMenuItem,
+};
+
 #[cfg(windows)]
 pub mod windows;
 

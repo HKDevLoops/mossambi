@@ -100,6 +100,14 @@ pub fn update_shell_icons(ctx: &Context) {
     }
 }
 
+/// Clears cached shell icon textures and pending requests (e.g. on file association change).
+pub fn clear_shell_icon_cache() {
+    if let Ok(mut sys) = SYSTEM.lock() {
+        sys.textures.clear();
+        sys.pending.clear();
+    }
+}
+
 /// Retrieves a cached Windows shell icon texture, or schedules background extraction.
 pub fn get_or_request_shell_icon(
     ctx: &Context,
