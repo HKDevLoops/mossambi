@@ -140,9 +140,45 @@ pub fn app_data_dir() -> PathBuf {
     }
 }
 
+/// Unified configuration directory returning `<home>/.config/mossambi` on ALL OSes
+/// (Windows: `%USERPROFILE%\.config\mossambi`, macOS/Linux: `$HOME/.config/mossambi`).
+/// Not AppData, not ~/Library.
+pub fn config_dir() -> PathBuf {
+    home_dir().join(".config").join("mossambi")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_config_dir_unified_across_all_platforms() {
+        let cfg = config_dir();
+        let expected_suffix = std::path::Path::new(".config").join("mossambi");
+        assert!(
+            cfg.ends_with(&expected_suffix),
+            "config_dir {:?} must end with .config/mossambi",
+            cfg
+        );
+        let home = home_dir();
+        assert!(
+            cfg.starts_with(&home),
+            "config_dir {:?} must be rooted in home_dir {:?}",
+            cfg,
+            home
+        );
+        let s = cfg.to_string_lossy();
+        assert!(
+            !s.contains("AppData"),
+            "config_dir must not use AppData: {}",
+            s
+        );
+        assert!(
+            !s.contains("Library"),
+            "config_dir must not use Library: {}",
+            s
+        );
+    }
 
     #[test]
     fn test_platform_paths_resolve() {

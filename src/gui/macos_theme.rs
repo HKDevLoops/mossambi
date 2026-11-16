@@ -288,9 +288,17 @@ impl ThemeStyle {
             | crate::core::GlassEffect::LiquidGlass
             | crate::core::GlassEffect::Acrylic
             | crate::core::GlassEffect::Mica => {
-                let opaque =
-                    self.colors_with_glass(crate::core::GlassEffect::Opaque, clamped_opacity);
-                glassify(opaque, effect, clamped_opacity)
+                #[cfg(target_os = "windows")]
+                {
+                    let opaque =
+                        self.colors_with_glass(crate::core::GlassEffect::Opaque, clamped_opacity);
+                    glassify(opaque, effect, clamped_opacity)
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    // Fallback on macOS/Linux: solid container
+                    self.colors_with_glass(crate::core::GlassEffect::Opaque, 1.0)
+                }
             }
         }
     }

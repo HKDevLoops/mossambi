@@ -93,9 +93,19 @@ pub fn open_with_choose(path: &Path) -> bool {
         }
         false
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        // No openas picker through xdg on Linux yet: report unsupported.
+        std::process::Command::new("open").arg(path).spawn().is_ok()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .is_ok()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
         let _ = path;
         false
     }

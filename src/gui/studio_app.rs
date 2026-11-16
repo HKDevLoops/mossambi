@@ -1391,7 +1391,14 @@ impl eframe::App for MossambiApp {
         // 7. Window Minimize Motion Animation (Genie effect, Scale, Slide, Morph, Fade)
         if self.studio_view.request_minimize {
             self.studio_view.request_minimize = false;
-            self.window_anim_progress = Some((self.config.animations.window_anim, 0.0));
+            #[cfg(target_os = "windows")]
+            {
+                self.window_anim_progress = Some((self.config.animations.window_anim, 0.0));
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
         }
 
         if let Some((anim, progress)) = self.window_anim_progress {

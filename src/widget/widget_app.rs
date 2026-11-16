@@ -225,8 +225,18 @@ impl MossambiWidgetApp {
                                 let dir = path.parent().unwrap_or(path);
                                 #[cfg(target_os = "windows")]
                                 let _ = std::process::Command::new("explorer.exe").arg(dir).spawn();
-                                #[cfg(not(target_os = "windows"))]
+                                #[cfg(target_os = "macos")]
+                                let _ = std::process::Command::new("open").arg(dir).spawn();
+                                #[cfg(target_os = "linux")]
                                 let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+                                #[cfg(not(any(
+                                    target_os = "windows",
+                                    target_os = "macos",
+                                    target_os = "linux"
+                                )))]
+                                {
+                                    let _ = dir;
+                                }
                             }
                         }
                         _ => {}

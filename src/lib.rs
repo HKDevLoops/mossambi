@@ -8,6 +8,7 @@ pub mod daemon;
 pub mod exam;
 pub mod gui;
 pub mod hwaccel;
+pub mod platform;
 pub mod tui;
 pub mod widget;
 
@@ -18,5 +19,6 @@ pub use core as mossambi_core;
 pub use exam as mossambi_exam;
 pub use gui as mossambi_gui;
 pub use hwaccel as mossambi_hwaccel;
+pub use platform as mossambi_platform;
 pub use tui as mossambi_tui;
 pub use widget as mossambi_widget;

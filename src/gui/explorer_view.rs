@@ -11137,6 +11137,10 @@ pub(crate) fn open_in_default_app(path: &Path) {
     {
         let _ = std::process::Command::new("xdg-open").arg(path).spawn();
     }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        let _ = path;
+    }
 }
 
 fn open_in_default_editor(path: &Path) {
@@ -11181,6 +11185,10 @@ fn open_in_default_editor(path: &Path) {
             let _ = std::process::Command::new("xdg-open").arg(path).spawn();
         }
     }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        let _ = path;
+    }
 }
 
 fn reveal_in_file_manager(path: &Path) {
@@ -11204,6 +11212,10 @@ fn reveal_in_file_manager(path: &Path) {
         } else {
             let _ = std::process::Command::new("xdg-open").arg(path).spawn();
         }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        let _ = path;
     }
 }
 
@@ -11259,6 +11271,10 @@ fn open_terminal_in_dir(path: &Path) {
         if !launched {
             let _ = std::process::Command::new("sh").current_dir(path).spawn();
         }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        let _ = path;
     }
 }
 

@@ -26,6 +26,8 @@
 //! shared contexts, so master handles are stored as `usize` and materialized into
 //! `HGLOBAL` on demand rather than stored as raw pointers.
 
+#![cfg(target_os = "windows")]
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
