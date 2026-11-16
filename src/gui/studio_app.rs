@@ -734,6 +734,48 @@ impl eframe::App for MossambiApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Poll and process any incoming launch intents forwarded by secondary instances
+        for intent in crate::platform::single_instance::poll_pending_ipc_intents() {
+            match intent {
+                crate::platform::args::LaunchIntent::Navigate(path) => {
+                    if path.is_dir() {
+                        self.studio_view.explorer_view.navigate_to(path);
+                    } else if let Some(parent) = path.parent() {
+                        self.studio_view
+                            .explorer_view
+                            .navigate_to(parent.to_path_buf());
+                        self.select_file(path);
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                crate::platform::args::LaunchIntent::Reveal { target, select } => {
+                    if let Some(parent) = target.parent() {
+                        self.studio_view
+                            .explorer_view
+                            .navigate_to(parent.to_path_buf());
+                    }
+                    if select {
+                        self.select_file(target);
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                crate::platform::args::LaunchIntent::DeepLink { target, .. } => {
+                    if target.is_dir() {
+                        self.studio_view.explorer_view.navigate_to(target);
+                    } else if let Some(parent) = target.parent() {
+                        self.studio_view
+                            .explorer_view
+                            .navigate_to(parent.to_path_buf());
+                        self.select_file(target);
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                crate::platform::args::LaunchIntent::None => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+            }
+        }
+
         // -- Ctrl + Mouse Wheel ----------------------------------------
         // Plain Ctrl+wheel    -> Explorer zoom ladder: five Grid icon-size
         //                       levels (0..=4, persisted); one notch below
@@ -980,6 +1022,11 @@ impl eframe::App for MossambiApp {
                 "mossambi_applied_shell_menu",
                 self.config.shell_context_menu,
                 crate::core::MossambiConfig::set_shell_context_menu,
+            ),
+            (
+                "mossambi_applied_default_handler",
+                self.config.default_file_manager,
+                crate::core::MossambiConfig::set_default_folder_handler,
             ),
         ] {
             let id = egui::Id::new(key);

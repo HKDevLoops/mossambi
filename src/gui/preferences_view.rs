@@ -658,6 +658,34 @@ impl PreferencesView {
                 &mut self.cfg.shell_context_menu,
                 dirty,
             );
+            ui.add_space(design::space::XS);
+            toggle_row(
+                ui,
+                palette,
+                "Use Mossambi as default file manager",
+                "Open folders and drives in Mossambi instead of Windows Explorer.",
+                &mut self.cfg.default_file_manager,
+                dirty,
+            );
+            if let Some(err) = crate::platform::default_handler::last_error() {
+                // Registry failure feedback shown inline next to the toggle.
+                // Danger red is theme-independent (see save banner above):
+                // ThemePalette carries no error role.
+                ui.add_space(design::space::XS);
+                ui.colored_label(
+                    Color32::from_rgb(196, 74, 66),
+                    format!("Could not update the default file manager: {err}"),
+                );
+            }
+            ui.add_space(design::space::XS);
+            toggle_row(
+                ui,
+                palette,
+                "File dialog companion bar",
+                "Dock a quick-jump bar to Open and Save file dialogs (#32770).",
+                &mut self.cfg.dialog_companion,
+                dirty,
+            );
         });
 
         ui.add_space(design::space::MD);

@@ -1276,6 +1276,13 @@ pub struct MossambiConfig {
     /// Show native toast notifications for finished/failed jobs
     #[serde(default = "default_true")]
     pub notifications_enabled: bool,
+    /// Use Mossambi as the default file manager for folders and drives
+    /// (Windows shell verbs under HKCU\Software\Classes)
+    #[serde(default)]
+    pub default_file_manager: bool,
+    /// Show docked companion bar on Windows Common File Dialogs (#32770).
+    #[serde(default = "default_true")]
+    pub dialog_companion: bool,
     /// Maximum count of recent conversions kept in history
     #[serde(default = "default_conversion_history_limit")]
     pub conversion_history_limit: usize,
@@ -1502,6 +1509,8 @@ impl Default for MossambiConfig {
             browser_save_converted_only: true,
             disable_conversion_history: false,
             notifications_enabled: true,
+            default_file_manager: false,
+            dialog_companion: true,
             conversion_history_limit: default_conversion_history_limit(),
         }
     }
@@ -1764,6 +1773,11 @@ impl MossambiConfig {
     #[cfg(not(target_os = "windows"))]
     pub fn set_shell_context_menu(_enabled: bool) -> anyhow::Result<()> {
         Ok(())
+    }
+
+    /// Sets or removes Mossambi as default folder handler in HKCU.
+    pub fn set_default_folder_handler(enabled: bool) -> anyhow::Result<()> {
+        crate::platform::default_handler::set_default_folder_handler(enabled)
     }
 
     /// Configures or removes Mossambi daemon from system autostart on boot/login.

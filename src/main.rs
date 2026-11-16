@@ -368,9 +368,43 @@ fn main() -> Result<()> {
         return handle_themes(as_json);
     }
 
-    // 6. Intercept mossambi:// deep links (toast protocol activation).
-    if let Some(link) = args.iter().skip(1).find(|a| a.starts_with("mossambi://")) {
-        return handle_deep_link(link);
+    // 6. Intercept launch intents (mossambi:// deep links, /select reveal, folder navigation, single-instance)
+    let intent = mossambi::platform::args::parse_launch_intent(&args);
+    if intent != mossambi::platform::args::LaunchIntent::None {
+        if mossambi::platform::single_instance::try_forward_to_existing_instance(&intent) {
+            log::info!("Forwarded launch intent to existing running instance; exiting.");
+            return Ok(());
+        }
+
+        match intent {
+            mossambi::platform::args::LaunchIntent::Reveal { ref target, .. } => {
+                let initial = target
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| target.clone());
+                return handle_gui(Some(initial));
+            }
+            mossambi::platform::args::LaunchIntent::DeepLink { ref target, .. } => {
+                return handle_gui(Some(target.clone()));
+            }
+            mossambi::platform::args::LaunchIntent::Navigate(ref target) => {
+                if target.to_string_lossy() == "%1" {
+                    return handle_gui(None);
+                }
+                if target.is_dir() {
+                    return handle_gui(Some(target.clone()));
+                }
+            }
+            mossambi::platform::args::LaunchIntent::None => {}
+        }
+    } else if args.len() == 1 {
+        // Double-clicked or launched with no arguments
+        if mossambi::platform::single_instance::try_forward_to_existing_instance(
+            &mossambi::platform::args::LaunchIntent::None,
+        ) {
+            log::info!("Activated existing running instance; exiting.");
+            return Ok(());
+        }
     }
 
     let cli = Cli::parse();
@@ -1161,26 +1195,10 @@ fn handle_widget(pos: Option<&str>, _active_drag: bool, file: Option<PathBuf>) -
 }
 
 fn handle_gui(initial_path: Option<PathBuf>) -> Result<()> {
+    // Start background single-instance IPC listener for this primary instance
+    let _ipc_guard = mossambi::platform::single_instance::start_single_instance_server(None).ok();
     mossambi::gui::run_studio_with_path(initial_path)
         .map_err(|e| anyhow::anyhow!("Studio GUI error: {}", e))
-}
-
-/// Handles a mossambi:// deep link (toast protocol activation): open
-/// navigates to the path, reveal navigates to its parent folder. No GUI
-/// single-instance/IPC mechanism exists yet, so we just start with that
-/// path (per the notification spec's fallback).
-fn handle_deep_link(arg: &str) -> Result<()> {
-    match mossambi::platform::notify::parse_mossambi_url(arg) {
-        Some((kind, path)) => {
-            let target = mossambi::platform::notify::navigate_target_for(kind, &path);
-            log::info!("deep link {} -> navigate to {}", arg, target.display());
-            handle_gui(Some(target))
-        }
-        None => {
-            log::warn!("unrecognised deep link: {}", arg);
-            Ok(())
-        }
-    }
 }
 
 fn handle_tui(initial_path: Option<PathBuf>) -> Result<()> {
