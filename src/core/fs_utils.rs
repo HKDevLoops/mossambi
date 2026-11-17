@@ -790,24 +790,30 @@ pub fn parse_breadcrumbs(path: &Path) -> Vec<BreadcrumbSegment> {
     segments
 }
 
-/// Recursively copies a file or directory tree to destination, returning total bytes copied.
+/// Copies a file or directory tree to destination, returning total bytes.
+///
+/// Iterative BFS with an explicit `Vec` stack instead of recursion, so deep
+/// trees cannot overflow the call stack and memory stays proportional to the
+/// widest level rather than the full path depth.
 pub fn copy_entry_recursive(src: &Path, dest: &Path) -> std::io::Result<u64> {
-    if src.is_dir() {
-        std::fs::create_dir_all(dest)?;
-        let mut total = 0u64;
-        for entry in std::fs::read_dir(src)? {
-            let entry = entry?;
-            let entry_path = entry.path();
-            let dest_child = dest.join(entry.file_name());
-            total += copy_entry_recursive(&entry_path, &dest_child)?;
+    let mut total = 0u64;
+    let mut stack: Vec<(PathBuf, PathBuf)> = vec![(src.to_path_buf(), dest.to_path_buf())];
+
+    while let Some((from, to)) = stack.pop() {
+        if from.is_dir() {
+            std::fs::create_dir_all(&to)?;
+            for entry in std::fs::read_dir(&from)? {
+                let entry = entry?;
+                stack.push((entry.path(), to.join(entry.file_name())));
+            }
+        } else {
+            if let Some(parent) = to.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            total += std::fs::copy(&from, &to)?;
         }
-        Ok(total)
-    } else {
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::copy(src, dest)
     }
+    Ok(total)
 }
 
 /// Moves a file or directory safely.
