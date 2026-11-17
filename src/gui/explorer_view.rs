@@ -1917,8 +1917,13 @@ impl ExplorerView {
         let is_searching = !q.is_empty();
         let q_lower = q.to_lowercase();
         let active_tag = self.active_tag.as_deref();
+        let sort_by_name = matches!(self.sort_column, SortColumn::Name);
 
-        let mut scored_list: Vec<(&FileItem, i64)> = self
+        // Lowercase names are computed ONCE per entry (only when needed)
+        // instead of on every sort comparison. The old comparator allocated
+        // two lowercase Strings per comparison -> O(n log n) allocations per
+        // frame; this is O(n), cutting UI-thread runtime and memory churn.
+        let mut scored_list: Vec<(&FileItem, i64, Option<String>)> = self
             .entries
             .iter()
             .filter(|e| !crate::core::is_protected_os_file(&e.path))
@@ -1940,28 +1945,36 @@ impl ExplorerView {
                 None => true,
             })
             .filter_map(|e| {
+                let name_lower = if is_searching || sort_by_name {
+                    Some(e.name.to_lowercase())
+                } else {
+                    None
+                };
                 if is_searching {
                     // Substring filter (Finder): a loose subsequence match
                     // made "dl" list nearly every file in the folder.
-                    if !e.name.to_lowercase().contains(&q_lower) {
+                    if !name_lower.as_deref().unwrap_or("").contains(&q_lower) {
                         return None;
                     }
                     let score = fuzzy_match(q, &e.name).unwrap_or(0);
-                    Some((e, score))
+                    Some((e, score, name_lower))
                 } else {
-                    Some((e, 0))
+                    Some((e, 0, name_lower))
                 }
             })
             .collect();
 
-        scored_list.sort_by(|(a, score_a), (b, score_b)| {
+        scored_list.sort_by(|(a, score_a, a_lower), (b, score_b, b_lower)| {
             // Search results keep the chosen sort (Finder): ordering by
             // fuzzy score made a Name-sorted list look shuffled.
             if a.is_dir != b.is_dir {
                 return b.is_dir.cmp(&a.is_dir);
             }
             let ordering = match self.sort_column {
-                SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortColumn::Name => a_lower
+                    .as_deref()
+                    .unwrap_or("")
+                    .cmp(b_lower.as_deref().unwrap_or("")),
                 SortColumn::Size => a.size_bytes.cmp(&b.size_bytes),
                 SortColumn::Extension => a.extension.cmp(&b.extension),
                 SortColumn::Date => cmp_opt_last(&a.modified, &b.modified),
@@ -1984,7 +1997,7 @@ impl ExplorerView {
             }
         });
 
-        scored_list.into_iter().map(|(item, _)| item).collect()
+        scored_list.into_iter().map(|(item, _, _)| item).collect()
     }
 
     /// Persists column visibility + widths to MossambiConfig via the
