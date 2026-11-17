@@ -761,9 +761,21 @@ pub fn parse_breadcrumbs(path: &Path) -> Vec<BreadcrumbSegment> {
         let raw = comp.as_os_str().to_string_lossy();
         let clean = raw.trim_end_matches(['\\', '/']);
         if !clean.is_empty() {
+            // On Windows, a bare drive prefix such as "Z:" means "current
+            // directory on Z:", not the drive root. Clicking such a segment
+            // in the path bar must navigate to the drive root instead.
+            let target = if matches!(comp, std::path::Component::Prefix(_)) {
+                let mut r = accum.clone();
+                if !r.as_os_str().to_string_lossy().ends_with(['\\', '/']) {
+                    r.push(std::path::MAIN_SEPARATOR.to_string());
+                }
+                r
+            } else {
+                accum.clone()
+            };
             segments.push(BreadcrumbSegment {
                 label: clean.to_string(),
-                target_path: accum.clone(),
+                target_path: target,
             });
         }
     }
@@ -872,6 +884,18 @@ pub fn resolve_unique_paste_path(dest: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The path bar's drive segment (e.g. "Z:") must navigate to the drive
+    /// ROOT, not the bare "Z:" prefix which Windows resolves to the current
+    /// directory on that drive (the app's install dir). Regression for the
+    /// Thunar path-bar bug reported 2026-11-17.
+    #[cfg(windows)]
+    #[test]
+    fn breadcrumb_drive_prefix_is_root() {
+        let segs = parse_breadcrumbs(std::path::Path::new("Z:\\Projects\\mossambi"));
+        assert_eq!(segs[0].label, "Z:");
+        assert_eq!(segs[0].target_path, std::path::PathBuf::from("Z:\\"));
+    }
 
     /// Verifies authentic macOS Finder date formatting (e.g. "06 Nov 2026 at 09:39").
     #[test]

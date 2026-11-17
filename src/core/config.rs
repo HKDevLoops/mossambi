@@ -1176,6 +1176,10 @@ pub struct MossambiConfig {
     /// `show_custom_pinned` is on.
     #[serde(default)]
     pub pinned_custom: Vec<String>,
+    /// Custom user-created tags (right-click menu "New Tag..."). Rendered
+    /// alongside the four presets in menus and the sidebar Tags zone.
+    #[serde(default)]
+    pub custom_tags: Vec<String>,
     /// Sidebar zone collapse states (Zen/Arc mechanics). Persisted so the
     /// sidebar keeps its shape across restarts; all zones default expanded.
     #[serde(default = "default_true")]
@@ -1473,6 +1477,7 @@ impl Default for MossambiConfig {
             show_tags_section: false,
             show_custom_pinned: false,
             pinned_custom: Vec::new(),
+            custom_tags: Vec::new(),
             sidebar_favorites_expanded: true,
             sidebar_pinned_expanded: true,
             sidebar_locations_expanded: true,

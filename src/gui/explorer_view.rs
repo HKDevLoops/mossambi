@@ -686,6 +686,8 @@ pub struct ExplorerView {
     pub renaming_path: Option<(PathBuf, String)>,
     pub show_new_folder_dialog: bool,
     pub new_folder_buffer: String,
+    pub show_new_tag_dialog: bool,
+    pub new_tag_buffer: String,
     pub clipboard_paths: Vec<PathBuf>,
     pub clipboard_is_cut: bool,
 
@@ -1062,6 +1064,8 @@ impl Default for ExplorerView {
             show_internal_toolbar: false,
             palette_open: false,
             new_folder_buffer: "New Folder".to_string(),
+            show_new_tag_dialog: false,
+            new_tag_buffer: String::new(),
             clipboard_paths: Vec::new(),
             clipboard_is_cut: false,
             scan_gen: Arc::clone(&scan_gen),
@@ -1393,6 +1397,9 @@ impl ExplorerView {
         // navigation and refresh invalidates them so the child-folder
         // dropdown never shows stale contents after a fs operation.
         self.breadcrumb_popup_cache.clear();
+        // Tag rows read through a per-process cache; every navigation and
+        // refresh forgets it so tag edits are visible immediately.
+        crate::core::tags::clear_cache();
 
         // Push to navigation history
         if self.history.get(self.history_idx) != Some(&dir) {
@@ -2164,6 +2171,7 @@ impl ExplorerView {
         let is_typing = self.is_editing_path
             || self.renaming_path.is_some()
             || self.show_new_folder_dialog
+            || self.show_new_tag_dialog
             || self.properties_item.is_some()
             || is_search_focused
             || text_field_focused;
@@ -2198,6 +2206,7 @@ impl ExplorerView {
                     self.peek_hash_cache = None;
                     self.renaming_path = None;
                     self.show_new_folder_dialog = false;
+                    self.show_new_tag_dialog = false;
                     self.properties_item = None;
                 }
 
@@ -2825,6 +2834,97 @@ impl ExplorerView {
             }
         }
 
+        // 3a. New Tag Modal Dialog (Apple Sheet aesthetic)
+        if self.show_new_tag_dialog {
+            let mut close_dialog = false;
+            let mut create_tag = false;
+
+            egui::Window::new("Create New Tag Dialog")
+                .title_bar(false)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .frame(
+                    egui::Frame::none()
+                        .fill(modal_bg)
+                        .stroke(Stroke::new(1.0_f32, palette.border))
+                        .rounding(Rounding::same(12.0))
+                        .inner_margin(egui::Margin::same(18.0)),
+                )
+                .show(ui.ctx(), |ui| {
+                    ui.label(
+                        egui::RichText::new("New Tag")
+                            .size(15.0)
+                            .strong()
+                            .color(palette.text_primary),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("Enter tag name:")
+                            .size(12.5)
+                            .color(palette.text_secondary),
+                    );
+                    ui.add_space(6.0);
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.new_tag_buffer).desired_width(260.0),
+                    );
+                    resp.request_focus();
+                    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        create_tag = true;
+                    }
+
+                    ui.add_space(14.0);
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let create_btn = ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new("Create").strong().color(Color32::WHITE),
+                                )
+                                .fill(palette.accent)
+                                .rounding(Rounding::same(6.0))
+                                .min_size(Vec2::new(72.0, 26.0)),
+                            );
+                            if create_btn.clicked() {
+                                create_tag = true;
+                            }
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Cancel").color(palette.text_primary),
+                                    )
+                                    .fill(palette.card_bg)
+                                    .stroke(Stroke::new(1.0_f32, palette.border))
+                                    .rounding(Rounding::same(6.0))
+                                    .min_size(Vec2::new(72.0, 26.0)),
+                                )
+                                .clicked()
+                            {
+                                close_dialog = true;
+                            }
+                        });
+                    });
+                });
+
+            if create_tag {
+                let custom = crate::core::MossambiConfig::load().custom_tags;
+                match crate::core::tags::sanitize_new_tag(&self.new_tag_buffer, &custom) {
+                    Ok(name) => {
+                        let mut cfg = crate::core::MossambiConfig::load();
+                        cfg.custom_tags.push(name.clone());
+                        if let Err(e) = cfg.save() {
+                            self.show_status_note(Err(format!("Could not save tag: {e}")));
+                        } else {
+                            self.show_status_note(Ok(format!("Tag \"{name}\" created")));
+                            self.show_new_tag_dialog = false;
+                            self.new_tag_buffer.clear();
+                        }
+                    }
+                    Err(msg) => self.show_status_note(Err(msg)),
+                }
+            } else if close_dialog {
+                self.show_new_tag_dialog = false;
+            }
+        }
         // 3b. Shift+Delete Permanent Deletion Confirmation Modal
         if let Some(ref targets) = self.permanent_delete_prompt.clone() {
             let mut close_dialog = false;
@@ -6911,6 +7011,10 @@ impl ExplorerView {
         if canvas_intents.new_folder {
             self.show_new_folder_dialog = true;
         }
+        if canvas_intents.new_tag {
+            self.show_new_tag_dialog = true;
+            self.new_tag_buffer.clear();
+        }
         if canvas_intents.new_window {
             spawn_new_explorer_window(Some(&self.current_dir));
         }
@@ -7376,6 +7480,7 @@ impl ExplorerView {
             || self.renaming_path.is_some()
             || self.properties_item.is_some()
             || self.show_new_folder_dialog
+            || self.show_new_tag_dialog
             || self.permanent_delete_prompt.is_some()
         {
             return;
@@ -8227,6 +8332,10 @@ impl ExplorerView {
         if canvas_intents.new_folder {
             self.show_new_folder_dialog = true;
         }
+        if canvas_intents.new_tag {
+            self.show_new_tag_dialog = true;
+            self.new_tag_buffer.clear();
+        }
         if canvas_intents.new_window {
             spawn_new_explorer_window(Some(&self.current_dir));
         }
@@ -8981,6 +9090,10 @@ impl ExplorerView {
         // Context-menu intents (mirrors the list view consumption).
         if canvas_intents.new_folder {
             self.show_new_folder_dialog = true;
+        }
+        if canvas_intents.new_tag {
+            self.show_new_tag_dialog = true;
+            self.new_tag_buffer.clear();
         }
         if canvas_intents.new_window {
             spawn_new_explorer_window(Some(&self.current_dir));
@@ -11882,6 +11995,7 @@ use crate::gui::file_menu as fm;
 #[derive(Default, Debug, Clone)]
 pub struct CanvasMenuIntents {
     pub new_folder: bool,
+    pub new_tag: bool,
     pub new_window: bool,
     pub new_tab: bool,
     pub refresh: bool,
@@ -11967,6 +12081,8 @@ pub struct ItemMenuIntents {
     pub clear_tag: Option<(Vec<PathBuf>, String)>,
     /// Pin/unpin a folder to the sidebar: (path, pin=true) / (path, pin=false).
     pub pin_sidebar: Option<(PathBuf, bool)>,
+    /// Request to open the New Tag dialog.
+    pub new_tag: bool,
     /// Invocation request for native shell context menu verb: (session_id, cmd_id).
     pub invoke_shell_cmd: Option<(u64, u32)>,
 }
@@ -12696,6 +12812,11 @@ impl ExplorerView {
             reveal_in_file_manager(&p);
         }
 
+        if intent.new_tag {
+            self.show_new_tag_dialog = true;
+            self.new_tag_buffer.clear();
+        }
+
         // -- Tags --
         //
         // Every tag change is journaled with its before/after state so the
@@ -12709,7 +12830,10 @@ impl ExplorerView {
                         crate::core::action_journal::record_tag_set(p.clone(), before, after);
                         log::info!("Tagged {} as {}", p.display(), tag);
                     }
-                    Err(e) => log::warn!("Tag failed for {}: {e}", p.display()),
+                    Err(e) => {
+                        log::warn!("Tag failed for {}: {e}", p.display());
+                        self.show_status_note(Err(e));
+                    }
                 }
             }
             self.navigate_to(self.current_dir.clone());
@@ -12723,7 +12847,10 @@ impl ExplorerView {
                         crate::core::action_journal::record_tag_set(p.clone(), before, after);
                         log::info!("Removed tag {tag} from {}", p.display());
                     }
-                    Err(e) => log::warn!("Tag removal failed for {}: {e}", p.display()),
+                    Err(e) => {
+                        log::warn!("Tag removal failed for {}: {e}", p.display());
+                        self.show_status_note(Err(e));
+                    }
                 }
             }
             self.navigate_to(self.current_dir.clone());
@@ -13435,6 +13562,7 @@ impl ExplorerView {
         {
             // Current tags of the clicked item drive the checkbox state.
             let current_tags = crate::core::tags::read_tags_cache(&path);
+            let custom_tags = crate::core::MossambiConfig::load().custom_tags;
             fm::submenu(
                 menu_ui,
                 fm::MenuAction::Tags.label(style),
@@ -13444,30 +13572,43 @@ impl ExplorerView {
                 fm::MenuAction::Tags,
                 |sub_ui| {
                     sub_ui.set_min_width(190.0);
-                    for tag_name in crate::core::tags::TAG_PRESETS {
-                        let is_tagged = current_tags.iter().any(|t| t == tag_name);
+                    for tag_name in crate::core::tags::available_tags_in(&custom_tags) {
+                        let is_tagged = current_tags
+                            .iter()
+                            .any(|t| t.eq_ignore_ascii_case(&tag_name));
                         let label = if is_tagged {
                             format!("Remove {tag_name}")
                         } else {
                             format!("Add {tag_name}")
                         };
-                        if fm::menu_item_labeled(
+                        if fm::menu_item_tag_dot(
                             sub_ui,
-                            pack,
-                            fm::MenuAction::Tags,
+                            crate::core::tags::tag_color(&tag_name),
                             &label,
-                            style,
-                            tint,
+                            None,
                         )
                         .clicked()
                         {
                             if is_tagged {
-                                intent.clear_tag = Some((targets.to_vec(), tag_name.to_string()));
+                                intent.clear_tag = Some((targets.to_vec(), tag_name.clone()));
                             } else {
-                                intent.set_tag = Some((targets.to_vec(), tag_name.to_string()));
+                                intent.set_tag = Some((targets.to_vec(), tag_name.clone()));
                             }
                             sub_ui.close_menu();
                         }
+                    }
+                    if fm::menu_item_labeled(
+                        sub_ui,
+                        pack,
+                        fm::MenuAction::Tags,
+                        "New Tag...",
+                        style,
+                        tint,
+                    )
+                    .clicked()
+                    {
+                        intent.new_tag = true;
+                        sub_ui.close_menu();
                     }
                 },
             );

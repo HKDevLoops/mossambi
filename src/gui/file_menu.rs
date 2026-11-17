@@ -333,6 +333,66 @@ pub fn menu_item_glyph(
     menu_row(ui, label, icon, None)
 }
 
+/// Render a menu row with a coloured tag dot in the icon column
+/// (Finder-style tag assignment menus). Same layout as [`menu_row`].
+pub fn menu_item_tag_dot(
+    ui: &mut Ui,
+    dot_color: Color32,
+    label: &str,
+    shortcut: Option<&str>,
+) -> Response {
+    use eframe::egui::{Align2, FontId, Pos2};
+    let text_col = ui.visuals().widgets.inactive.fg_stroke.color;
+    let hint_col = ui.visuals().weak_text_color();
+    let font = FontId::proportional(14.0);
+    let hint_font = FontId::proportional(12.0);
+    let lead = 30.0;
+    let hint_w = shortcut
+        .map(|s| {
+            ui.painter()
+                .layout_no_wrap(s.to_owned(), hint_font.clone(), hint_col)
+                .size()
+                .x
+                + 18.0
+        })
+        .unwrap_or(0.0);
+    let budget = ui.available_width() - lead - hint_w - 8.0;
+    let label = elide_to_width(ui, label, budget, font.clone());
+    let galley = ui.painter().layout_no_wrap(label, font, text_col);
+    let row_h = (galley.size().y + 10.0).max(26.0);
+    let (rect, resp) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::click());
+    let visuals = &ui.style().visuals.widgets;
+    let state = if resp.is_pointer_button_down_on() {
+        Some(&visuals.active)
+    } else if resp.hovered() {
+        Some(&visuals.hovered)
+    } else {
+        None
+    };
+    if let Some(v) = state {
+        ui.painter()
+            .rect_filled(rect.expand(v.expansion), v.rounding, v.weak_bg_fill);
+    }
+    ui.painter().circle_filled(
+        Pos2::new(rect.left() + 16.0, rect.center().y),
+        4.5,
+        dot_color,
+    );
+    let pos = Pos2::new(rect.left() + lead, rect.center().y - galley.size().y * 0.5);
+    ui.painter().galley(pos, galley.clone(), text_col);
+    if let Some(s) = shortcut {
+        ui.painter().text(
+            Pos2::new(rect.right() - 10.0, rect.center().y),
+            Align2::RIGHT_CENTER,
+            s,
+            hint_font,
+            hint_col,
+        );
+    }
+    resp.on_hover_cursor(eframe::egui::CursorIcon::Default)
+}
+
 /// One menu row: optional leading icon, label, optional right-aligned
 /// shortcut hint. Text uses the theme's text colour (it was hard-coded
 /// white, which vanished on every light theme).

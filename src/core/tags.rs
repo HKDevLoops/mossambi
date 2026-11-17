@@ -2,34 +2,63 @@
 //!
 //! Mossambi tags a file by writing a UTF-8, comma-separated label list into
 //! the file's own NTFS alternate data stream `file:tags`. Nothing outside the
-//! tagged object is touched: no sidecar files, no database, and the tag survives
-//! Explorer moves on the same volume.
+//! tagged object is touched: no sidecar files, no database, and the tag
+//! survives Explorer moves on the same volume.
 //!
 //! The four preset tag labels are also the sidebar smart-list names
-//! (Home / Work / Photos / Important) and the context-menu presets.
+//! (Home / Work / Photos / Important) and the context-menu presets. Users
+//! may also create custom tags, which are stored in the config file and
+//! rendered alongside the presets with a stable hash-based colour.
 //!
 //! Row rendering reads tags once per session per path through a small cache;
-//! [`read_tags_cache`] is the UI-facing accessor, [`set_tags`] invalidates the
-//! cached entry for that path, and navigation refreshes call [`clear_cache`].
+//! [`read_tags_cache`] is the UI-facing accessor, [`set_tags`] invalidates
+//! the cached entry for that path, and navigation refreshes call
+//! [`clear_cache`].
 
 use std::path::Path;
 #[cfg(target_os = "windows")]
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-/// The preset tag labels, in menu order (Finder uses free-form tags - we ship
-/// four and treat them as a closed set so the UI stays clean).
+/// The preset tag labels, in menu order (Finder uses free-form tags - we
+/// ship four and allow user-created custom tags on top).
 pub const TAG_PRESETS: [&str; 4] = ["Home", "Work", "Photos", "Important"];
 
-/// Display colors for the presets (macOS system palette).
+/// Display colours for the presets (macOS system palette).
 pub fn tag_color(name: &str) -> eframe::egui::Color32 {
-    match name {
-        "Home" => eframe::egui::Color32::from_rgb(0, 122, 255),
-        "Work" => eframe::egui::Color32::from_rgb(255, 149, 0),
-        "Photos" => eframe::egui::Color32::from_rgb(255, 45, 85),
-        "Important" => eframe::egui::Color32::from_rgb(52, 199, 89),
-        _ => eframe::egui::Color32::from_rgb(160, 160, 160),
+    match name.trim().to_lowercase().as_str() {
+        "home" => eframe::egui::Color32::from_rgb(0, 122, 255),
+        "work" => eframe::egui::Color32::from_rgb(255, 149, 0),
+        "photos" => eframe::egui::Color32::from_rgb(255, 45, 85),
+        "important" => eframe::egui::Color32::from_rgb(52, 199, 89),
+        norm => {
+            // Stable hash-based colour for custom / unknown tags so every
+            // surface (row dots, menu dots, sidebar) agrees on the colour
+            // without needing a config lookup per frame.
+            let idx = tag_hash(norm) % CUSTOM_TAG_COLORS.len();
+            CUSTOM_TAG_COLORS[idx]
+        }
     }
+}
+
+/// Fixed palette used for custom tags (distinct from the four presets).
+const CUSTOM_TAG_COLORS: [eframe::egui::Color32; 8] = [
+    eframe::egui::Color32::from_rgb(175, 82, 222),
+    eframe::egui::Color32::from_rgb(64, 200, 244),
+    eframe::egui::Color32::from_rgb(255, 214, 10),
+    eframe::egui::Color32::from_rgb(0, 200, 140),
+    eframe::egui::Color32::from_rgb(108, 110, 255),
+    eframe::egui::Color32::from_rgb(170, 130, 80),
+    eframe::egui::Color32::from_rgb(255, 120, 140),
+    eframe::egui::Color32::from_rgb(212, 80, 220),
+];
+
+fn tag_hash(name: &str) -> usize {
+    let mut h: u32 = 5381;
+    for b in name.bytes() {
+        h = h.wrapping_mul(33).wrapping_add(b as u32);
+    }
+    h as usize
 }
 
 /// Parse the on-disk tag payload ("Home,Work") into a list.
@@ -165,40 +194,104 @@ pub fn clear_cache() {
     }
 }
 
+/// True when `tag` names a preset or one of the supplied custom tags
+/// (case-insensitive, trimmed). Pure helper, easy to test.
+pub fn is_known_tag_in(tag: &str, custom: &[String]) -> bool {
+    let norm = tag.trim().to_lowercase();
+    if norm.is_empty() {
+        return false;
+    }
+    TAG_PRESETS.iter().any(|t| t.to_lowercase() == norm)
+        || custom.iter().any(|t| t.trim().to_lowercase() == norm)
+}
+
+/// True when `tag` names any known tag (presets + config custom tags).
+pub fn is_known_tag(tag: &str) -> bool {
+    let cfg = crate::core::MossambiConfig::load();
+    is_known_tag_in(tag, &cfg.custom_tags)
+}
+
+/// All tags offered in menus and the sidebar: presets first, then custom
+/// tags, de-duplicated case-insensitively.
+pub fn available_tags_in(custom: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = TAG_PRESETS.iter().map(|t| t.to_string()).collect();
+    for t in custom {
+        let name = t.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let norm = name.to_lowercase();
+        if !out.iter().any(|k| k.to_lowercase() == norm) {
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
+/// All tags offered in menus and the sidebar (presets + config custom tags).
+pub fn available_tags() -> Vec<String> {
+    let cfg = crate::core::MossambiConfig::load();
+    available_tags_in(&cfg.custom_tags)
+}
+
+/// Validate a candidate new-tag name. Returns the normalized name or an
+/// error string suitable for status notes.
+pub fn sanitize_new_tag(raw: &str, custom: &[String]) -> Result<String, String> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err("Tag name is empty".to_string());
+    }
+    if name.len() > 32 {
+        return Err("Tag name is too long (max 32 characters)".to_string());
+    }
+    if name.contains(',') {
+        return Err("Tag names cannot contain commas".to_string());
+    }
+    if is_known_tag_in(name, custom) {
+        return Err(format!("Tag \"{name}\" already exists"));
+    }
+    Ok(name.to_string())
+}
+
 /// Assign a tag to `path`, returning an error string suitable for status notes.
 pub fn set_tag(path: &Path, tag: &str) -> Result<(), String> {
-    if !TAG_PRESETS.contains(&tag) {
-        return Err(format!("unknown tag preset: {tag}"));
+    if !is_known_tag(tag) {
+        return Err(format!("unknown tag: {tag}"));
     }
     let mut tags = get_tags(path);
-    if tags.iter().any(|t| t == tag) {
-        return Ok(()); // idempotent
+    if tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+        return Ok(()); // idempotent (case-insensitive)
     }
     tags.push(tag.to_string());
-    write_raw(path, &join_tags(&tags))?;
+    let res = write_raw(path, &join_tags(&tags));
+    // Invalidate BEFORE returning so a failed native write (directories on
+    // NTFS have no ADS write without backup semantics) still refreshes the
+    // UI from the DB fallback, which did persist.
     invalidate_cache(path);
-    Ok(())
+    res
 }
 
 /// Remove one tag (no-op friendly when absent).
 pub fn clear_tag(path: &Path, tag: &str) -> Result<(), String> {
     let mut tags = get_tags(path);
-    tags.retain(|t| t != tag);
-    write_raw(path, &join_tags(&tags))?;
+    tags.retain(|t| !t.eq_ignore_ascii_case(tag));
+    let res = write_raw(path, &join_tags(&tags));
     invalidate_cache(path);
-    Ok(())
+    res
 }
 
 /// Overwrite the tag list exactly (undo support for the action journal).
 pub fn restore_tags(path: &Path, tags: &[String]) -> Result<(), String> {
     let clean: Vec<String> = tags
         .iter()
-        .filter(|t| TAG_PRESETS.contains(&t.as_str()))
+        .filter(|t| is_known_tag(t))
+        .collect::<Vec<_>>()
+        .into_iter()
         .map(|t| t.to_string())
         .collect();
-    write_raw(path, &join_tags(&clean))?;
+    let res = write_raw(path, &join_tags(&clean));
     invalidate_cache(path);
-    Ok(())
+    res
 }
 
 #[cfg(test)]
@@ -217,10 +310,49 @@ mod tests {
     #[test]
     fn presets_and_colors() {
         assert_eq!(TAG_PRESETS.len(), 4);
-        // All presets resolve to a color (gray fallback never used).
+        // All presets resolve to a non-custom colour.
         for t in TAG_PRESETS {
             let c = tag_color(t);
-            assert_ne!(c, tag_color("unknown-tag"));
+            assert_ne!(c, tag_color("zzz-unknown-not-in-palette-list-xyz"));
         }
+    }
+
+    #[test]
+    fn case_insensitive_colors() {
+        assert_eq!(tag_color("home"), tag_color("Home"));
+        assert_eq!(tag_color("  IMPORTANT  "), tag_color("Important"));
+    }
+
+    #[test]
+    fn custom_color_stable() {
+        let a = tag_color("Projects");
+        let b = tag_color("projects");
+        assert_eq!(a, b);
+        // Custom colour is never one of the preset colours.
+        for t in TAG_PRESETS {
+            assert_ne!(tag_color(t), a);
+        }
+    }
+
+    #[test]
+    fn known_and_available() {
+        assert!(is_known_tag_in("home", &[]));
+        assert!(is_known_tag_in("Projects", &["Projects".to_string()]));
+        assert!(!is_known_tag_in("Nope", &[]));
+        let avail = available_tags_in(&["Projects".to_string(), "home".to_string()]);
+        assert_eq!(
+            avail,
+            vec!["Home", "Work", "Photos", "Important", "Projects"]
+        );
+    }
+
+    #[test]
+    fn test_sanitize_new_tag() {
+        let customs = vec!["Projects".to_string()];
+        assert!(sanitize_new_tag("", &customs).is_err());
+        assert!(sanitize_new_tag("a,b", &customs).is_err());
+        assert!(sanitize_new_tag("Projects", &customs).is_err());
+        assert!(sanitize_new_tag("Home", &customs).is_err());
+        assert_eq!(sanitize_new_tag("Finance", &customs).unwrap(), "Finance");
     }
 }

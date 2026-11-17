@@ -2616,10 +2616,11 @@ impl StudioView {
                                 }
                             }
                             if cfg.sidebar_tags_expanded {
-                                for tag_name in crate::core::tags::TAG_PRESETS {
-                                    let tag_col = crate::core::tags::tag_color(tag_name);
+                                let custom_tags = cfg.custom_tags.clone();
+                                for tag_name in crate::core::tags::available_tags_in(&custom_tags) {
+                                    let tag_col = crate::core::tags::tag_color(&tag_name);
                                     let is_active =
-                                        self.explorer_view.active_tag.as_deref() == Some(tag_name);
+                                        self.explorer_view.active_tag.as_deref().map(|a| a.eq_ignore_ascii_case(&tag_name)).unwrap_or(false);
                                     let row_h = 24.0;
                                     let (rect, resp) = ui.allocate_exact_size(
                                         Vec2::new(ui.available_width(), row_h),
@@ -2664,7 +2665,7 @@ impl StudioView {
                                     painter.text(
                                         Pos2::new(rect.min.x + 28.0, rect.center().y),
                                         egui::Align2::LEFT_CENTER,
-                                        tag_name,
+                                        &tag_name,
                                         FontId::proportional(type_scale::BODY_SM),
                                         text_color,
                                     );
@@ -2673,7 +2674,7 @@ impl StudioView {
                                         self.explorer_view.set_active_tag(if is_active {
                                             None
                                         } else {
-                                            Some(tag_name.to_string())
+                                            Some(tag_name.clone())
                                         });
                                     }
                                     ui.add_space(1.0);
