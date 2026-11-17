@@ -25,21 +25,27 @@ pub fn render_custom_progress_bar(
     let rounding = Rounding::same(height * 0.5);
 
     // 1. Background Pill Container
-    painter.rect_filled(rect, rounding, palette.card_bg);
-    painter.rect_stroke(rect, rounding, Stroke::new(1.0_f32, palette.border));
+    crate::gui::squircle::squircle_filled(&painter, rect, rounding, palette.card_bg);
+    crate::gui::squircle::squircle_stroke(
+        &painter,
+        rect,
+        rounding,
+        Stroke::new(1.0_f32, palette.border),
+    );
 
     // 2. Active Filled Bar with Pantone Accent
     if clamped > 0.001 {
         let fill_w = (rect.width() * clamped).max(height);
         let fill_rect = Rect::from_min_size(rect.min, Vec2::new(fill_w, rect.height()));
-        painter.rect_filled(fill_rect, rounding, palette.accent);
+        crate::gui::squircle::squircle_filled(&painter, fill_rect, rounding, palette.accent);
 
         // Specular Liquid Glass Top Highlight
         let spec_rect = Rect::from_min_size(
             fill_rect.min + Vec2::new(2.0, 1.0),
             Vec2::new((fill_w - 4.0).max(0.0), (height * 0.4).max(1.0)),
         );
-        painter.rect_filled(
+        crate::gui::squircle::squircle_filled(
+            &painter,
             spec_rect,
             Rounding::same(height * 0.25),
             Color32::from_rgba_unmultiplied(255, 255, 255, 60),

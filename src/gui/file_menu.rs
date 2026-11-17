@@ -581,7 +581,8 @@ pub fn menu_item_toggle(
     };
     let tinted = |c: Color32, a: u8| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a);
     if locked {
-        ui.painter().rect_filled(
+        crate::gui::squircle::squircle_filled(
+            ui.painter(),
             rect,
             eframe::egui::Rounding::same(4.0),
             tinted(palette.card_hover, if palette.is_dark { 20 } else { 14 }),
@@ -592,13 +593,15 @@ pub fn menu_item_toggle(
         } else {
             base_alpha
         };
-        ui.painter().rect_filled(
+        crate::gui::squircle::squircle_filled(
+            ui.painter(),
             rect,
             eframe::egui::Rounding::same(4.0),
             tinted(palette.accent, a),
         );
     } else if resp.hovered() || resp.is_pointer_button_down_on() {
-        ui.painter().rect_filled(
+        crate::gui::squircle::squircle_filled(
+            ui.painter(),
             rect,
             eframe::egui::Rounding::same(4.0),
             tinted(palette.card_hover, if palette.is_dark { 45 } else { 28 }),
@@ -610,8 +613,12 @@ pub fn menu_item_toggle(
             Vec2::splat(10.0),
         );
         if shown {
-            ui.painter()
-                .rect_filled(sq, eframe::egui::Rounding::same(3.0), palette.accent);
+            crate::gui::squircle::squircle_filled(
+                ui.painter(),
+                sq,
+                eframe::egui::Rounding::same(3.0),
+                palette.accent,
+            );
             let check = if palette.is_dark {
                 Color32::from_rgb(18, 18, 18)
             } else {
@@ -633,7 +640,8 @@ pub fn menu_item_toggle(
                 eframe::egui::Stroke::new(1.6_f32, check),
             );
         } else {
-            ui.painter().rect_stroke(
+            crate::gui::squircle::squircle_stroke(
+                ui.painter(),
                 sq,
                 eframe::egui::Rounding::same(3.0),
                 eframe::egui::Stroke::new(1.0_f32, palette.text_muted),

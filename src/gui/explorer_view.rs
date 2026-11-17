@@ -3956,7 +3956,8 @@ impl ExplorerView {
                             ui.allocate_exact_size(Vec2::new(seg_w, 24.0), egui::Sense::click());
 
                         if resp.hovered() {
-                            ui.painter().rect_filled(
+                            crate::gui::squircle::squircle_filled(
+                                ui.painter(),
                                 seg_rect,
                                 Rounding::same(4.0),
                                 palette.card_hover,
@@ -4051,7 +4052,8 @@ impl ExplorerView {
                                         self.animations.hover,
                                         crate::gui::anim::frame_dt(ui.ctx()),
                                     );
-                                    ui.painter().rect_stroke(
+                                    crate::gui::squircle::squircle_stroke(
+                                        ui.painter(),
                                         resp.rect,
                                         Rounding::same(5.0),
                                         Stroke::new(
@@ -4700,7 +4702,8 @@ impl ExplorerView {
 
                     // Soft shadow
                     if !cfg.animations.reduced_motion {
-                        bp.rect_filled(
+                        crate::gui::squircle::squircle_filled(
+                            &bp,
                             card_rect.translate(Vec2::new(2.0, 3.0)),
                             Rounding::same(6.0),
                             Color32::from_black_alpha(45),
@@ -4715,8 +4718,14 @@ impl ExplorerView {
                         palette.card_bg.b(),
                         surface_alpha,
                     );
-                    bp.rect_filled(card_rect, Rounding::same(6.0), fill);
-                    bp.rect_stroke(
+                    crate::gui::squircle::squircle_filled(
+                        &bp,
+                        card_rect,
+                        Rounding::same(6.0),
+                        fill,
+                    );
+                    crate::gui::squircle::squircle_stroke(
+                        &bp,
                         card_rect,
                         Rounding::same(6.0),
                         Stroke::new(1.0_f32, palette.border),
@@ -4724,7 +4733,8 @@ impl ExplorerView {
 
                     // Card inner border glyph
                     let inner_rect = card_rect.shrink(8.0);
-                    bp.rect_stroke(
+                    crate::gui::squircle::squircle_stroke(
+                        &bp,
                         inner_rect,
                         Rounding::same(3.0),
                         Stroke::new(1.0_f32, palette.text_secondary),
@@ -4742,13 +4752,19 @@ impl ExplorerView {
                     Vec2::new(ghost_layout.pill_width, ghost_layout.pill_height),
                 );
                 if !cfg.animations.reduced_motion {
-                    bp.rect_filled(
+                    crate::gui::squircle::squircle_filled(
+                        &bp,
                         pill_rect.translate(Vec2::new(1.0, 2.0)),
                         Rounding::same(10.0),
                         Color32::from_black_alpha(50),
                     );
                 }
-                bp.rect_filled(pill_rect, Rounding::same(10.0), palette.accent);
+                crate::gui::squircle::squircle_filled(
+                    &bp,
+                    pill_rect,
+                    Rounding::same(10.0),
+                    palette.accent,
+                );
 
                 let text_color = crate::gui::design::contrast::text_on_accent(palette.accent);
                 let font = egui::FontId::proportional(11.0);
@@ -4800,9 +4816,14 @@ impl ExplorerView {
                     },
                 );
 
-                ui.painter()
-                    .rect_filled(rect, Rounding::same(self.design_tokens.radius_card), bg);
-                ui.painter().rect_stroke(
+                crate::gui::squircle::squircle_filled(
+                    ui.painter(),
+                    rect,
+                    Rounding::same(self.design_tokens.radius_card),
+                    bg,
+                );
+                crate::gui::squircle::squircle_stroke(
+                    ui.painter(),
                     rect,
                     Rounding::same(self.design_tokens.radius_card),
                     border_stroke,
@@ -4889,9 +4910,14 @@ impl ExplorerView {
                     },
                 );
 
-                ui.painter()
-                    .rect_filled(rect, Rounding::same(self.design_tokens.radius_card), bg);
-                ui.painter().rect_stroke(
+                crate::gui::squircle::squircle_filled(
+                    ui.painter(),
+                    rect,
+                    Rounding::same(self.design_tokens.radius_card),
+                    bg,
+                );
+                crate::gui::squircle::squircle_stroke(
+                    ui.painter(),
                     rect,
                     Rounding::same(self.design_tokens.radius_card),
                     border_stroke,
@@ -4969,7 +4995,8 @@ impl ExplorerView {
                 let bar_h = 4.0_f32;
                 let bar_rect =
                     Rect::from_min_size(Pos2::new(text_left, bar_y), Vec2::new(bar_w, bar_h));
-                ui.painter().rect_filled(
+                crate::gui::squircle::squircle_filled(
+                    ui.painter(),
                     bar_rect,
                     Rounding::same(2.0),
                     Color32::from_rgba_unmultiplied(
@@ -4982,8 +5009,12 @@ impl ExplorerView {
                 let fill_w = (bar_w * ratio).max(2.0);
                 let fill_rect =
                     Rect::from_min_size(Pos2::new(text_left, bar_y), Vec2::new(fill_w, bar_h));
-                ui.painter()
-                    .rect_filled(fill_rect, Rounding::same(2.0), gauge_color);
+                crate::gui::squircle::squircle_filled(
+                    ui.painter(),
+                    fill_rect,
+                    Rounding::same(2.0),
+                    gauge_color,
+                );
 
                 let capacity_text = if drive.total_bytes == 0 {
                     "Capacity unknown"
@@ -5063,9 +5094,14 @@ impl ExplorerView {
                     },
                 );
 
-                ui.painter()
-                    .rect_filled(rect, Rounding::same(self.design_tokens.radius_pill), bg);
-                ui.painter().rect_stroke(
+                crate::gui::squircle::squircle_filled(
+                    ui.painter(),
+                    rect,
+                    Rounding::same(self.design_tokens.radius_pill),
+                    bg,
+                );
+                crate::gui::squircle::squircle_stroke(
+                    ui.painter(),
                     rect,
                     Rounding::same(self.design_tokens.radius_pill),
                     stroke,
@@ -5116,12 +5152,14 @@ impl ExplorerView {
             palette.surface_2
         };
 
-        ui.painter().rect_filled(
+        crate::gui::squircle::squircle_filled(
+            ui.painter(),
             card_rect,
             Rounding::same(self.design_tokens.radius_card),
             bg,
         );
-        ui.painter().rect_stroke(
+        crate::gui::squircle::squircle_stroke(
+            ui.painter(),
             card_rect,
             Rounding::same(self.design_tokens.radius_card),
             Stroke::new(self.design_tokens.border_width, palette.border),
@@ -5222,7 +5260,8 @@ impl ExplorerView {
         let header_h = 24.0;
         let (header_rect, _) =
             ui.allocate_exact_size(Vec2::new(available_w, header_h), egui::Sense::hover());
-        ui.painter().rect_filled(
+        crate::gui::squircle::squircle_filled(
+            ui.painter(),
             header_rect,
             Rounding::same(self.design_tokens.radius_subtle),
             palette.surface_1,
@@ -5317,7 +5356,8 @@ impl ExplorerView {
                 base_bg
             };
 
-            ui.painter().rect_filled(
+            crate::gui::squircle::squircle_filled(
+                ui.painter(),
                 row_rect,
                 Rounding::same(self.design_tokens.radius_subtle),
                 row_bg,
@@ -5330,7 +5370,8 @@ impl ExplorerView {
                     palette.accent.b(),
                     (sel_t * 255.0).round() as u8,
                 );
-                ui.painter().rect_stroke(
+                crate::gui::squircle::squircle_stroke(
+                    ui.painter(),
                     row_rect,
                     Rounding::same(self.design_tokens.radius_subtle),
                     Stroke::new(1.0_f32, stroke_col),
@@ -5415,7 +5456,8 @@ impl ExplorerView {
                     Pos2::new(cur_x, row_rect.center().y - 8.0),
                     Vec2::new((layout.kind_width - 16.0).max(40.0), 16.0),
                 );
-                ui.painter().rect_filled(
+                crate::gui::squircle::squircle_filled(
+                    ui.painter(),
                     badge_rect,
                     Rounding::same(self.design_tokens.radius_pill),
                     Color32::from_rgba_unmultiplied(
@@ -6314,7 +6356,8 @@ impl ExplorerView {
             if resp.hovered() {
                 // Straight-alpha hover band: premul with raw card_hover rgb
                 // rendered near-opaque over the header row.
-                hp.rect_filled(
+                crate::gui::squircle::squircle_filled(
+                    &hp,
                     hrect.shrink2(Vec2::new(0.0, 3.0)),
                     Rounding::same(4.0),
                     Color32::from_rgba_unmultiplied(
@@ -6811,7 +6854,8 @@ impl ExplorerView {
                         egui::DragAndDrop::has_payload_of_type::<FileDragPayload>(ui.ctx())
                             && self.selected_paths.contains(&item.path);
                     if is_actively_dragged && !self.animations.reduced_motion {
-                        ui.painter().rect_filled(
+                        crate::gui::squircle::squircle_filled(
+                            ui.painter(),
                             row_rect.translate(Vec2::new(0.0, 2.0)),
                             Rounding::same(5.0),
                             Color32::from_black_alpha(45),
@@ -6832,7 +6876,8 @@ impl ExplorerView {
                                     self.animations.hover,
                                     crate::gui::anim::frame_dt(ui.ctx()),
                                 );
-                                ui.painter().rect_filled(
+                                crate::gui::squircle::squircle_filled(
+                                    ui.painter(),
                                     row_rect,
                                     Rounding::same(5.0),
                                     Color32::from_rgba_unmultiplied(
@@ -6981,7 +7026,8 @@ impl ExplorerView {
                     egui::Order::Foreground,
                     egui::Id::new("mossambi_marquee"),
                 ));
-                mp.rect_filled(
+                crate::gui::squircle::squircle_filled(
+                    &mp,
                     mrect,
                     Rounding::same(2.0),
                     Color32::from_rgba_unmultiplied(
@@ -6991,7 +7037,8 @@ impl ExplorerView {
                         30,
                     ),
                 );
-                mp.rect_stroke(
+                crate::gui::squircle::squircle_stroke(
+                    &mp,
                     mrect,
                     Rounding::same(2.0),
                     Stroke::new(1.0_f32, palette.accent),
@@ -8011,7 +8058,8 @@ impl ExplorerView {
                                         self.animations.hover,
                                         crate::gui::anim::frame_dt(ui.ctx()),
                                     );
-                                    ui.painter().rect_filled(
+                                    crate::gui::squircle::squircle_filled(
+                                        ui.painter(),
                                         rect,
                                         Rounding::same(8.0),
                                         Color32::from_rgba_unmultiplied(
@@ -8021,7 +8069,8 @@ impl ExplorerView {
                                             (a * 70.0) as u8,
                                         ),
                                     );
-                                    ui.painter().rect_stroke(
+                                    crate::gui::squircle::squircle_stroke(
+                                        ui.painter(),
                                         rect,
                                         Rounding::same(8.0),
                                         Stroke::new(2.0_f32, palette.accent),
@@ -8104,7 +8153,8 @@ impl ExplorerView {
                                     (1.0 - crop.y).clamp(0.0, 1.0),
                                 ),
                             );
-                            ui.painter().rect_filled(
+                            crate::gui::squircle::squircle_filled(
+                                ui.painter(),
                                 img_rect,
                                 Rounding::same(6.0),
                                 Color32::from_rgba_unmultiplied(
@@ -8116,7 +8166,8 @@ impl ExplorerView {
                             );
                             ui.painter_at(img_rect)
                                 .image(tex.id(), img_rect, uv, Color32::WHITE);
-                            ui.painter().rect_stroke(
+                            crate::gui::squircle::squircle_stroke(
+                                ui.painter(),
                                 img_rect,
                                 Rounding::same(6.0),
                                 Stroke::new(
@@ -8311,7 +8362,8 @@ impl ExplorerView {
                     egui::Order::Foreground,
                     egui::Id::new("mossambi_marquee_grid"),
                 ));
-                mp.rect_filled(
+                crate::gui::squircle::squircle_filled(
+                    &mp,
                     mrect,
                     Rounding::same(2.0),
                     Color32::from_rgba_unmultiplied(
@@ -8321,7 +8373,8 @@ impl ExplorerView {
                         30,
                     ),
                 );
-                mp.rect_stroke(
+                crate::gui::squircle::squircle_stroke(
+                    &mp,
                     mrect,
                     Rounding::same(2.0),
                     Stroke::new(1.0_f32, palette.accent),
@@ -8594,7 +8647,7 @@ impl ExplorerView {
                                                         self.animations.hover,
                                                         crate::gui::anim::frame_dt(ui.ctx()),
                                                     );
-                                                    ui.painter().rect_filled(
+                                                    crate::gui::squircle::squircle_filled(ui.painter(),
                                                         row_rect,
                                                         Rounding::same(5.0),
                                                         Color32::from_rgba_unmultiplied(
@@ -8652,12 +8705,12 @@ impl ExplorerView {
                                         }
                                         // Row band: hover/selected/opened chain row
                                         if is_highlighted {
-                                            ui.painter().rect_filled(
+                                            crate::gui::squircle::squircle_filled(ui.painter(),
                                                 row_rect,
                                                 Rounding::same(6.0),
                                                 palette.selection,
                                             );
-                                            ui.painter().rect_stroke(
+                                            crate::gui::squircle::squircle_stroke(ui.painter(),
                                                 row_rect,
                                                 Rounding::same(6.0),
                                                 Stroke::new(1.5_f32, palette.accent),
@@ -8666,9 +8719,9 @@ impl ExplorerView {
                                                 Pos2::new(row_rect.left() + 1.5, row_rect.top() + 4.0),
                                                 Pos2::new(row_rect.left() + 4.5, row_rect.bottom() - 4.0),
                                             );
-                                            ui.painter().rect_filled(indicator, Rounding::same(1.5), palette.accent);
+                                            crate::gui::squircle::squircle_filled(ui.painter(),  indicator, Rounding::same(1.5), palette.accent);
                                         } else if resp.hovered() {
-                                            ui.painter().rect_filled(
+                                            crate::gui::squircle::squircle_filled(ui.painter(),
                                                 row_rect,
                                                 Rounding::same(6.0),
                                                 palette.hover,
@@ -10720,12 +10773,14 @@ fn render_storage_visual(ui: &mut Ui, palette: &ThemePalette, logical_bytes: u64
 
     let avail_w = ui.available_width();
     let (card_rect, resp) = ui.allocate_exact_size(Vec2::new(avail_w, 64.0), egui::Sense::hover());
-    ui.painter().rect_filled(
+    crate::gui::squircle::squircle_filled(
+        ui.painter(),
         card_rect,
         Rounding::same(design::radius::SM),
         palette.surface_2,
     );
-    ui.painter().rect_stroke(
+    crate::gui::squircle::squircle_stroke(
+        ui.painter(),
         card_rect,
         Rounding::same(design::radius::SM),
         Stroke::new(1.0_f32, palette.border),
@@ -10806,12 +10861,20 @@ fn render_parent_folder_bar(
     let bar_h = 8.0_f32;
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(avail_w, bar_h), egui::Sense::hover());
 
-    ui.painter()
-        .rect_filled(rect, Rounding::same(4.0), palette.surface_2);
+    crate::gui::squircle::squircle_filled(
+        ui.painter(),
+        rect,
+        Rounding::same(4.0),
+        palette.surface_2,
+    );
     let filled_w = (rect.width() * ratio).max(4.0);
     let filled_rect = Rect::from_min_size(rect.min, Vec2::new(filled_w, bar_h));
-    ui.painter()
-        .rect_filled(filled_rect, Rounding::same(4.0), palette.accent);
+    crate::gui::squircle::squircle_filled(
+        ui.painter(),
+        filled_rect,
+        Rounding::same(4.0),
+        palette.accent,
+    );
 
     ui.horizontal(|ui| {
         ui.label(
@@ -10936,9 +10999,14 @@ fn render_permission_chips(
             } else {
                 palette.surface_2
             };
-            ui.painter()
-                .rect_filled(rect, Rounding::same(design::radius::PILL), fill);
-            ui.painter().rect_stroke(
+            crate::gui::squircle::squircle_filled(
+                ui.painter(),
+                rect,
+                Rounding::same(design::radius::PILL),
+                fill,
+            );
+            crate::gui::squircle::squircle_stroke(
+                ui.painter(),
                 rect,
                 Rounding::same(design::radius::PILL),
                 Stroke::new(
@@ -10967,12 +11035,14 @@ fn render_open_with_section(ui: &mut Ui, palette: &ThemePalette, extension: &str
 
     let (card_rect, resp) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 48.0), egui::Sense::hover());
-    ui.painter().rect_filled(
+    crate::gui::squircle::squircle_filled(
+        ui.painter(),
         card_rect,
         Rounding::same(design::radius::SM),
         palette.surface_2,
     );
-    ui.painter().rect_stroke(
+    crate::gui::squircle::squircle_stroke(
+        ui.painter(),
         card_rect,
         Rounding::same(design::radius::SM),
         Stroke::new(1.0_f32, palette.border),
@@ -11164,12 +11234,14 @@ impl ExplorerView {
                                         Vec2::new(badge_w, 20.0),
                                         egui::Sense::hover(),
                                     );
-                                    ui.painter().rect_filled(
+                                    crate::gui::squircle::squircle_filled(
+                                        ui.painter(),
                                         badge_rect,
                                         Rounding::same(design::radius::PILL),
                                         palette.surface_2,
                                     );
-                                    ui.painter().rect_stroke(
+                                    crate::gui::squircle::squircle_stroke(
+                                        ui.painter(),
                                         badge_rect,
                                         Rounding::same(design::radius::PILL),
                                         Stroke::new(1.0_f32, palette.border),
@@ -13753,8 +13825,9 @@ impl ExplorerView {
                 (palette.accent.b() as f32 * alpha) as u8,
                 (245.0 * alpha) as u8,
             );
-            ui.painter().rect_filled(rect, rounding, fill);
-            ui.painter().rect_stroke(
+            crate::gui::squircle::squircle_filled(ui.painter(), rect, rounding, fill);
+            crate::gui::squircle::squircle_stroke(
+                ui.painter(),
                 rect,
                 rounding,
                 Stroke::new(
@@ -13788,7 +13861,7 @@ impl ExplorerView {
             } else {
                 Color32::from_rgba_unmultiplied(0, 0, 0, bg_alpha)
             };
-            ui.painter().rect_filled(rect, rounding, bg_col);
+            crate::gui::squircle::squircle_filled(ui.painter(), rect, rounding, bg_col);
 
             let border_alpha = (55.0 * alpha) as u8;
             let border_col = if palette.is_dark {
@@ -13796,8 +13869,12 @@ impl ExplorerView {
             } else {
                 Color32::from_rgba_unmultiplied(110, 115, 125, border_alpha)
             };
-            ui.painter()
-                .rect_stroke(rect, rounding, Stroke::new(0.85_f32, border_col));
+            crate::gui::squircle::squircle_stroke(
+                ui.painter(),
+                rect,
+                rounding,
+                Stroke::new(0.85_f32, border_col),
+            );
         }
     }
 }

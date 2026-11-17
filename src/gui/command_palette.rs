@@ -481,8 +481,12 @@ impl CommandPalette {
             .show(ctx, |ui| {
                 let screen_rect = ctx.screen_rect();
                 let bg_col = Color32::from_black_alpha(110);
-                ui.painter()
-                    .rect_filled(screen_rect, Rounding::ZERO, bg_col);
+                crate::gui::squircle::squircle_filled(
+                    ui.painter(),
+                    screen_rect,
+                    Rounding::ZERO,
+                    bg_col,
+                );
 
                 let panel_w = 540.0_f32.min(screen_rect.width() - 32.0);
                 let panel_h = 360.0_f32.min(screen_rect.height() - 64.0);
@@ -684,7 +688,8 @@ impl CommandPalette {
 
                                     let painter = ui.painter_at(rrect);
                                     if is_active {
-                                        painter.rect_filled(
+                                        crate::gui::squircle::squircle_filled(
+                                            &painter,
                                             rrect,
                                             Rounding::same(radius::SM),
                                             Color32::from_rgba_unmultiplied(
@@ -694,13 +699,15 @@ impl CommandPalette {
                                                 if palette.is_dark { 45 } else { 26 },
                                             ),
                                         );
-                                        painter.rect_stroke(
+                                        crate::gui::squircle::squircle_stroke(
+                                            &painter,
                                             rrect,
                                             Rounding::same(radius::SM),
                                             Stroke::new(1.0_f32, palette.accent),
                                         );
                                     } else if is_hovered {
-                                        painter.rect_filled(
+                                        crate::gui::squircle::squircle_filled(
+                                            &painter,
                                             rrect,
                                             Rounding::same(radius::SM),
                                             palette.card_hover,

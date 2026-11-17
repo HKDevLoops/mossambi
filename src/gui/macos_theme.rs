@@ -439,7 +439,7 @@ pub fn render_sidebar_item_with_pin(
         Color32::TRANSPARENT
     };
 
-    painter.rect_filled(rect, Rounding::same(6.0), bg_color);
+    crate::gui::squircle::squircle_filled(&painter, rect, Rounding::same(6.0), bg_color);
 
     // Ring highlight system: soft accent on hover, full accent while
     // selected, strongest while pressed or keyboard-focused.
@@ -455,7 +455,12 @@ pub fn render_sidebar_item_with_pin(
     if is_selected {
         // Active vertical indicator bar in accent color
         let bar_rect = Rect::from_min_size(rect.min + Vec2::new(2.0, 5.0), Vec2::new(3.0, 16.0));
-        painter.rect_filled(bar_rect, Rounding::same(1.5), theme.accent);
+        crate::gui::squircle::squircle_filled(
+            &painter,
+            bar_rect,
+            Rounding::same(1.5),
+            theme.accent,
+        );
     }
 
     // The accent bar marks selection; the label keeps primary contrast in
@@ -576,8 +581,12 @@ pub fn render_fluent_window_controls(
         .rounding(Rounding::ZERO);
         let resp = ui.add(close_btn).on_hover_text("Close");
         if resp.hovered() {
-            ui.painter()
-                .rect_filled(resp.rect, Rounding::ZERO, Color32::from_rgb(232, 17, 35));
+            crate::gui::squircle::squircle_filled(
+                ui.painter(),
+                resp.rect,
+                Rounding::ZERO,
+                Color32::from_rgb(232, 17, 35),
+            );
             ui.painter().text(
                 resp.rect.center(),
                 egui::Align2::CENTER_CENTER,

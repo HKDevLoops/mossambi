@@ -1487,10 +1487,18 @@ impl eframe::App for MossambiApp {
                                 } else {
                                     egui::Stroke::new(1.0_f32, palette.border)
                                 };
-                                ui.painter()
-                                    .rect_filled(rect, egui::Rounding::same(8.0), bg);
-                                ui.painter()
-                                    .rect_stroke(rect, egui::Rounding::same(8.0), stroke);
+                                crate::gui::squircle::squircle_filled(
+                                    ui.painter(),
+                                    rect,
+                                    egui::Rounding::same(8.0),
+                                    bg,
+                                );
+                                crate::gui::squircle::squircle_stroke(
+                                    ui.painter(),
+                                    rect,
+                                    egui::Rounding::same(8.0),
+                                    stroke,
+                                );
 
                                 let label_color = if is_active {
                                     palette.accent
@@ -1884,8 +1892,14 @@ fn render_window_animation_overlay(
                 (alpha * 200.0) as u8,
             );
 
-            painter.rect_filled(rect, egui::Rounding::same(12.0 * scale), bg_color);
-            painter.rect_stroke(
+            crate::gui::squircle::squircle_filled(
+                painter,
+                rect,
+                egui::Rounding::same(12.0 * scale),
+                bg_color,
+            );
+            crate::gui::squircle::squircle_stroke(
+                painter,
                 rect,
                 egui::Rounding::same(12.0 * scale),
                 egui::Stroke::new(1.5_f32, stroke_color),

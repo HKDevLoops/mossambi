@@ -612,10 +612,9 @@ impl StudioView {
                                 tab_bg
                             };
 
-                            ui.painter().rect_filled(rect, Rounding::same(6.0), bg);
+                            crate::gui::squircle::squircle_filled(ui.painter(),  rect, Rounding::same(6.0), bg);
                             if is_active {
-                                ui.painter()
-                                    .rect_stroke(rect, Rounding::same(6.0), tab_stroke);
+                                crate::gui::squircle::squircle_stroke(ui.painter(),  rect, Rounding::same(6.0), tab_stroke);
                             }
 
                             // Real vector tab icon
@@ -719,9 +718,8 @@ impl StudioView {
                             let (label, glyph) = studio_tab_label(self.current_tab);
                             let (p_rect, _) =
                                 ui.allocate_exact_size(Vec2::new(130.0, 26.0), Sense::hover());
-                            ui.painter()
-                                .rect_filled(p_rect, Rounding::same(6.0), palette.card_bg);
-                            ui.painter().rect_stroke(
+                            crate::gui::squircle::squircle_filled(ui.painter(),  p_rect, Rounding::same(6.0), palette.card_bg);
+                            crate::gui::squircle::squircle_stroke(ui.painter(),
                                 p_rect,
                                 Rounding::same(6.0),
                                 Stroke::new(1.0_f32, palette.border),
@@ -1250,9 +1248,8 @@ impl StudioView {
                                     Vec2::new(ribbon_w, 28.0),
                                     Sense::hover(),
                                 );
-                                ui.painter()
-                                    .rect_filled(bc_rect, Rounding::same(6.0), palette.card_bg);
-                                ui.painter().rect_stroke(
+                                crate::gui::squircle::squircle_filled(ui.painter(),  bc_rect, Rounding::same(6.0), palette.card_bg);
+                                crate::gui::squircle::squircle_stroke(ui.painter(),
                                     bc_rect,
                                     Rounding::same(6.0),
                                     Stroke::new(1.0_f32, palette.border),
@@ -1399,7 +1396,7 @@ impl StudioView {
                                                                     Sense::click(),
                                                                 );
                                                                 if seg_resp.hovered() {
-                                                                    ui.painter().rect_filled(
+                                                                    crate::gui::squircle::squircle_filled(ui.painter(),
                                                                         seg_rect,
                                                                         Rounding::same(4.0),
                                                                         palette.card_hover,
@@ -2251,7 +2248,7 @@ impl StudioView {
                                         row_resp.dnd_hover_payload::<PinnedRowDragPayload>()
                                     {
                                         if payload.from_index != idx {
-                                            painter.rect_stroke(
+                                            crate::gui::squircle::squircle_stroke(&painter,
                                                 rect,
                                                 Rounding::same(design::radius::SM),
                                                 Stroke::new(1.5_f32, palette.accent),
@@ -2271,7 +2268,7 @@ impl StudioView {
                                         .dnd_hover_payload::<crate::gui::explorer_view::FileDragPayload>()
                                         .is_some();
                                     if is_file_drop_hovered {
-                                        painter.rect_stroke(
+                                        crate::gui::squircle::squircle_stroke(&painter,
                                             rect,
                                             Rounding::same(design::radius::SM),
                                             Stroke::new(1.5_f32, palette.accent),
@@ -2305,7 +2302,7 @@ impl StudioView {
                                     };
 
                                     if bg_color != Color32::TRANSPARENT {
-                                        painter.rect_filled(
+                                        crate::gui::squircle::squircle_filled(&painter,
                                             rect,
                                             Rounding::same(design::radius::SM),
                                             bg_color,
@@ -2317,7 +2314,7 @@ impl StudioView {
                                             rect.min + Vec2::new(2.0, 4.0),
                                             Vec2::new(3.0, (row_h - 8.0).max(4.0)),
                                         );
-                                        painter.rect_filled(
+                                        crate::gui::squircle::squircle_filled(&painter,
                                             bar_rect,
                                             Rounding::same(1.5),
                                             palette.accent,
@@ -2684,7 +2681,7 @@ impl StudioView {
                                     let is_hovered = resp.hovered();
                                     let painter = ui.painter_at(rect);
                                     if is_active {
-                                        painter.rect_filled(
+                                        crate::gui::squircle::squircle_filled(&painter,
                                             rect,
                                             Rounding::same(radius::SM),
                                             Color32::from_rgba_unmultiplied(
@@ -2695,7 +2692,7 @@ impl StudioView {
                                             ),
                                         );
                                     } else if is_hovered {
-                                        painter.rect_filled(
+                                        crate::gui::squircle::squircle_filled(&painter,
                                             rect,
                                             Rounding::same(radius::SM),
                                             palette.card_hover,
@@ -3773,8 +3770,14 @@ impl StudioView {
                         ui.allocate_exact_size(galley.size() + pad * 2.0, egui::Sense::hover());
                     if ui.is_rect_visible(rect) {
                         let p = ui.painter();
-                        p.rect_filled(rect, Rounding::same(6.0), palette.card_bg);
-                        p.rect_stroke(
+                        crate::gui::squircle::squircle_filled(
+                            p,
+                            rect,
+                            Rounding::same(6.0),
+                            palette.card_bg,
+                        );
+                        crate::gui::squircle::squircle_stroke(
+                            p,
                             rect,
                             Rounding::same(6.0),
                             Stroke::new(1.0_f32, palette.border),

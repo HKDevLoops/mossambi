@@ -135,8 +135,12 @@ pub fn render_caption_buttons(
         // Minimize
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
         if resp.hovered() {
-            ui.painter()
-                .rect_filled(rect, Rounding::ZERO, palette.card_hover);
+            crate::gui::squircle::squircle_filled(
+                ui.painter(),
+                rect,
+                Rounding::ZERO,
+                palette.card_hover,
+            );
         }
         let painter = ui.painter_at(rect);
         let stroke = Stroke::new(1.1_f32, palette.text_primary);
@@ -154,8 +158,12 @@ pub fn render_caption_buttons(
         // Maximize / Restore
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
         if resp.hovered() {
-            ui.painter()
-                .rect_filled(rect, Rounding::ZERO, palette.card_hover);
+            crate::gui::squircle::squircle_filled(
+                ui.painter(),
+                rect,
+                Rounding::ZERO,
+                palette.card_hover,
+            );
         }
         let painter = ui.painter_at(rect);
         let box_r = Rect::from_center_size(rect.center(), Vec2::splat(10.0));
@@ -167,8 +175,12 @@ pub fn render_caption_buttons(
         // Close (red on hover)
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
         if resp.hovered() {
-            ui.painter()
-                .rect_filled(rect, Rounding::ZERO, Color32::from_rgb(232, 17, 35));
+            crate::gui::squircle::squircle_filled(
+                ui.painter(),
+                rect,
+                Rounding::ZERO,
+                Color32::from_rgb(232, 17, 35),
+            );
         }
         let painter = ui.painter_at(rect);
         let close_stroke = Stroke::new(
@@ -443,7 +455,8 @@ pub fn toolbar_text_button(ui: &mut Ui, palette: &ThemePalette, label: &str, act
     if resp.hovered() {
         let painter = ui.painter();
         let rect = resp.rect;
-        painter.rect_filled(
+        crate::gui::squircle::squircle_filled(
+            painter,
             rect,
             Rounding::same(radius::MD),
             Color32::from_rgba_unmultiplied(
@@ -894,7 +907,8 @@ pub fn render_sidebar_zone_header_with_drop(
         .dnd_hover_payload::<crate::gui::explorer_view::FileDragPayload>()
         .is_some();
     if is_drop_hovered {
-        painter.rect_stroke(
+        crate::gui::squircle::squircle_stroke(
+            &painter,
             rect,
             Rounding::same(radius::XS),
             Stroke::new(1.5_f32, palette.accent),
@@ -1099,7 +1113,12 @@ pub fn render_sidebar_row(
             rect.min + Vec2::new(2.0, 4.0),
             Vec2::new(3.0, (row_h - 8.0).max(4.0)),
         );
-        painter.rect_filled(bar_rect, Rounding::same(1.5), palette.accent);
+        crate::gui::squircle::squircle_filled(
+            &painter,
+            bar_rect,
+            Rounding::same(1.5),
+            palette.accent,
+        );
     }
 
     let icon_side = 22.0;

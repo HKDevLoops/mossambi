@@ -223,7 +223,7 @@ impl PreferencesView {
                                                 self.selected = i;
                                             }
                                             if is_sel {
-                                                ui.painter().rect_filled(
+                                                crate::gui::squircle::squircle_filled(ui.painter(),
                                                     rect,
                                                     Rounding::same(design::radius::SM),
                                                     Color32::from_rgba_unmultiplied(
@@ -233,13 +233,13 @@ impl PreferencesView {
                                                         if palette.is_dark { 45 } else { 26 },
                                                     ),
                                                 );
-                                                ui.painter().rect_stroke(
+                                                crate::gui::squircle::squircle_stroke(ui.painter(),
                                                     rect,
                                                     Rounding::same(design::radius::SM),
                                                     Stroke::new(1.0_f32, palette.accent),
                                                 );
                                             } else if resp.hovered() {
-                                                ui.painter().rect_filled(
+                                                crate::gui::squircle::squircle_filled(ui.painter(),
                                                     rect,
                                                     Rounding::same(design::radius::SM),
                                                     Color32::from_rgba_unmultiplied(
@@ -312,8 +312,7 @@ impl PreferencesView {
             // 2. Subtle 1px vertical separator
             let (div_rect, _) =
                 ui.allocate_exact_size(Vec2::new(1.0, total_avail.y), Sense::hover());
-            ui.painter()
-                .rect_filled(div_rect, Rounding::ZERO, palette.border);
+            crate::gui::squircle::squircle_filled(ui.painter(),  div_rect, Rounding::ZERO, palette.border);
 
             // 3. Detail Content Pane
             let detail_w = (ui.available_width() - 8.0).max(320.0);
@@ -780,7 +779,8 @@ impl PreferencesView {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let (pill_rect, _) =
                         ui.allocate_exact_size(Vec2::new(76.0, 22.0), Sense::hover());
-                    ui.painter().rect_filled(
+                    crate::gui::squircle::squircle_filled(
+                        ui.painter(),
                         pill_rect,
                         Rounding::same(11.0),
                         Color32::from_rgba_unmultiplied(
@@ -915,7 +915,8 @@ impl PreferencesView {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let (badge_rect, _) =
                         ui.allocate_exact_size(Vec2::new(70.0, 22.0), Sense::hover());
-                    ui.painter().rect_filled(
+                    crate::gui::squircle::squircle_filled(
+                        ui.painter(),
                         badge_rect,
                         Rounding::same(design::radius::XS),
                         palette.card_hover,
@@ -972,14 +973,22 @@ impl PreferencesView {
             self.render_donut_col1(ui, col_w, palette, dirty);
             ui.add_space(design::space::MD);
             let div1_rect = ui.allocate_space(Vec2::new(col_w, 1.0)).1;
-            ui.painter()
-                .rect_filled(div1_rect, Rounding::ZERO, palette.border);
+            crate::gui::squircle::squircle_filled(
+                ui.painter(),
+                div1_rect,
+                Rounding::ZERO,
+                palette.border,
+            );
             ui.add_space(design::space::MD);
             self.render_donut_col2(ui, col_w, palette, dirty);
             ui.add_space(design::space::MD);
             let div2_rect = ui.allocate_space(Vec2::new(col_w, 1.0)).1;
-            ui.painter()
-                .rect_filled(div2_rect, Rounding::ZERO, palette.border);
+            crate::gui::squircle::squircle_filled(
+                ui.painter(),
+                div2_rect,
+                Rounding::ZERO,
+                palette.border,
+            );
             ui.add_space(design::space::MD);
             self.render_donut_col3(ui, col_w, palette, dirty);
             return;
@@ -1007,15 +1016,23 @@ impl PreferencesView {
                     ui.add_space(design::space::SM);
                     // Vertical divider line between col 1 and col 2
                     let div1_rect = ui.allocate_space(Vec2::new(1.0, 560.0)).1;
-                    ui.painter()
-                        .rect_filled(div1_rect, Rounding::ZERO, palette.border);
+                    crate::gui::squircle::squircle_filled(
+                        ui.painter(),
+                        div1_rect,
+                        Rounding::ZERO,
+                        palette.border,
+                    );
                     ui.add_space(design::space::SM);
                     self.render_donut_col2(ui, col2_w, palette, dirty);
                     ui.add_space(design::space::SM);
                     // Vertical divider line between col 2 and col 3
                     let div2_rect = ui.allocate_space(Vec2::new(1.0, 560.0)).1;
-                    ui.painter()
-                        .rect_filled(div2_rect, Rounding::ZERO, palette.border);
+                    crate::gui::squircle::squircle_filled(
+                        ui.painter(),
+                        div2_rect,
+                        Rounding::ZERO,
+                        palette.border,
+                    );
                     ui.add_space(design::space::SM);
                     self.render_donut_col3(ui, col3_w, palette, dirty);
                 });
@@ -1074,9 +1091,9 @@ impl PreferencesView {
                             Color32::TRANSPARENT
                         };
 
-                        ui.painter().rect_filled(card_rect, Rounding::same(design::radius::SM), bg_color);
+                        crate::gui::squircle::squircle_filled(ui.painter(),  card_rect, Rounding::same(design::radius::SM), bg_color);
                         if is_selected {
-                            ui.painter().rect_stroke(card_rect, Rounding::same(design::radius::SM), Stroke::new(1.0_f32, palette.accent));
+                            crate::gui::squircle::squircle_stroke(ui.painter(),  card_rect, Rounding::same(design::radius::SM), Stroke::new(1.0_f32, palette.accent));
                         }
 
                         let text_color = if is_selected { palette.text_primary } else { palette.text_secondary };
@@ -1946,7 +1963,12 @@ impl PreferencesView {
         let header_h = 12.0;
         let header_rect =
             Rect::from_min_size(preview_rect.min, Vec2::new(preview_rect.width(), header_h));
-        painter.rect_filled(header_rect, Rounding::same(3.0), palette.sidebar_bg);
+        crate::gui::squircle::squircle_filled(
+            &painter,
+            header_rect,
+            Rounding::same(3.0),
+            palette.sidebar_bg,
+        );
 
         match preset {
             LookPreset::Finder => {
@@ -1969,7 +1991,8 @@ impl PreferencesView {
             }
             LookPreset::WindowsExplorer => {
                 // Mini tabs on top left
-                painter.rect_filled(
+                crate::gui::squircle::squircle_filled(
+                    &painter,
                     Rect::from_min_size(
                         header_rect.min + Vec2::new(4.0, 2.0),
                         Vec2::new(28.0, 8.0),
@@ -1978,7 +2001,8 @@ impl PreferencesView {
                     palette.card_bg,
                 );
                 // Caption buttons on right
-                painter.rect_filled(
+                crate::gui::squircle::squircle_filled(
+                    &painter,
                     Rect::from_min_size(
                         header_rect.max - Vec2::new(14.0, 8.0),
                         Vec2::new(6.0, 4.0),
@@ -1989,7 +2013,8 @@ impl PreferencesView {
             }
             LookPreset::Nautilus => {
                 // Centered pill
-                painter.rect_filled(
+                crate::gui::squircle::squircle_filled(
+                    &painter,
                     Rect::from_center_size(header_rect.center(), Vec2::new(32.0, 7.0)),
                     Rounding::same(3.0),
                     palette.card_bg,
@@ -3107,7 +3132,8 @@ impl PreferencesView {
             let (part_rect, _) =
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), 20.0), Sense::hover());
             let painter = ui.painter_at(part_rect);
-            painter.rect_filled(
+            crate::gui::squircle::squircle_filled(
+                &painter,
                 part_rect,
                 Rounding::same(design::radius::XS),
                 palette.card_hover,
@@ -3980,8 +4006,12 @@ fn toggle_row(
                 }
                 let track_radius = 11.0;
                 let track_color = if *val { palette.accent } else { palette.border };
-                ui.painter()
-                    .rect_filled(rect, Rounding::same(track_radius), track_color);
+                crate::gui::squircle::squircle_filled(
+                    ui.painter(),
+                    rect,
+                    Rounding::same(track_radius),
+                    track_color,
+                );
 
                 // Sliding thumb circle (radius 8.5)
                 let thumb_x = if *val {
