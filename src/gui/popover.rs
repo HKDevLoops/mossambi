@@ -31,21 +31,33 @@ impl PetalPopover {
         let rect = Rect::from_min_size(Pos2::new(left, top), Vec2::new(popover_w, popover_h));
         let painter = ui.painter();
 
-        // 1. Soft Shadow
-        painter.rect_filled(
+        // 1. Soft Shadow (squircle corners match the card silhouette)
+        crate::gui::squircle::squircle_filled(
+            painter,
             rect.expand(6.0),
             Rounding::same(14.0),
             Color32::from_black_alpha(45),
         );
-        painter.rect_filled(
+        crate::gui::squircle::squircle_filled(
+            painter,
             rect.expand(2.0),
             Rounding::same(12.0),
             Color32::from_black_alpha(70),
         );
 
         // 2. Frosted macOS Card Background with 1px border
-        painter.rect_filled(rect, Rounding::same(10.0), Color32::from_rgb(28, 28, 32));
-        painter.rect_stroke(rect, Rounding::same(10.0), Stroke::new(1.0_f32, MAC_BORDER));
+        crate::gui::squircle::squircle_filled(
+            painter,
+            rect,
+            Rounding::same(10.0),
+            Color32::from_rgb(28, 28, 32),
+        );
+        crate::gui::squircle::squircle_stroke(
+            painter,
+            rect,
+            Rounding::same(10.0),
+            Stroke::new(1.0_f32, MAC_BORDER),
+        );
 
         // 3. Anchor Triangle Pointer
         let triangle_pts = if anchor_pos.y < 160.0 {
