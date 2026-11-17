@@ -10796,6 +10796,10 @@ fn format_system_time_full(st: std::time::SystemTime) -> String {
     dt.format("%Y-%m-%d %H:%M:%S (%Z)").to_string()
 }
 
+// +2px legibility bump for file-info panel labels (user request).
+const INFO_CAPTION_PX: f32 = design::type_scale::MICRO + 2.0;
+const INFO_LABEL_PX: f32 = design::type_scale::BODY_SM + 2.0;
+
 fn render_storage_visual(ui: &mut Ui, palette: &ThemePalette, logical_bytes: u64) {
     let cluster_size = 4096u64;
     let on_disk_bytes = if logical_bytes > 0 {
@@ -10831,7 +10835,7 @@ fn render_storage_visual(ui: &mut Ui, palette: &ThemePalette, logical_bytes: u64
         left_top,
         egui::Align2::LEFT_TOP,
         "Logical Size",
-        egui::FontId::proportional(design::type_scale::MICRO),
+        egui::FontId::proportional(INFO_CAPTION_PX),
         palette.text_muted,
     );
     let left_val = egui::pos2(card_rect.left() + 10.0, card_rect.top() + 22.0);
@@ -10847,7 +10851,7 @@ fn render_storage_visual(ui: &mut Ui, palette: &ThemePalette, logical_bytes: u64
         left_sub,
         egui::Align2::LEFT_TOP,
         format!("{} bytes", format_number_commas(logical_bytes)),
-        egui::FontId::monospace(10.0),
+        egui::FontId::monospace(12.0),
         palette.text_secondary,
     );
 
@@ -10857,7 +10861,7 @@ fn render_storage_visual(ui: &mut Ui, palette: &ThemePalette, logical_bytes: u64
         right_top,
         egui::Align2::LEFT_TOP,
         "On-Disk Allocation",
-        egui::FontId::proportional(design::type_scale::MICRO),
+        egui::FontId::proportional(INFO_CAPTION_PX),
         palette.text_muted,
     );
     let right_val = egui::pos2(card_rect.left() + col_w + 16.0, card_rect.top() + 22.0);
@@ -10873,7 +10877,7 @@ fn render_storage_visual(ui: &mut Ui, palette: &ThemePalette, logical_bytes: u64
         right_sub,
         egui::Align2::LEFT_TOP,
         format!("{:.1}% cluster efficiency", efficiency),
-        egui::FontId::proportional(design::type_scale::MICRO),
+        egui::FontId::proportional(INFO_CAPTION_PX),
         palette.accent,
     );
 
@@ -10921,7 +10925,7 @@ fn render_parent_folder_bar(
                 pct,
                 format_file_size(total)
             ))
-            .size(design::type_scale::MICRO)
+            .size(INFO_CAPTION_PX)
             .color(palette.text_secondary),
         );
     });
@@ -10977,7 +10981,7 @@ fn render_timeline_dots(
 
                 let resp = ui.label(
                     egui::RichText::new(format!("{}: {}", label, short_text))
-                        .size(design::type_scale::BODY_SM)
+                        .size(INFO_LABEL_PX)
                         .color(if is_mod {
                             palette.text_primary
                         } else {
@@ -11060,7 +11064,7 @@ fn render_permission_chips(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 &label,
-                egui::FontId::proportional(design::type_scale::MICRO),
+                egui::FontId::proportional(INFO_CAPTION_PX),
                 palette.text_primary,
             );
             resp.on_hover_text(format!("Filesystem access permission: {}", label));
@@ -11112,7 +11116,7 @@ fn render_open_with_section(ui: &mut Ui, palette: &ThemePalette, extension: &str
             name_pos,
             egui::Align2::LEFT_TOP,
             app_name,
-            egui::FontId::proportional(design::type_scale::BODY_SM),
+            egui::FontId::proportional(INFO_LABEL_PX),
             palette.text_primary,
         );
 
@@ -11127,7 +11131,7 @@ fn render_open_with_section(ui: &mut Ui, palette: &ThemePalette, extension: &str
             path_pos,
             egui::Align2::LEFT_TOP,
             short_exe,
-            egui::FontId::proportional(design::type_scale::MICRO),
+            egui::FontId::proportional(INFO_CAPTION_PX),
             palette.text_muted,
         );
 
@@ -11143,7 +11147,7 @@ fn render_open_with_section(ui: &mut Ui, palette: &ThemePalette, extension: &str
             label_pos,
             egui::Align2::LEFT_CENTER,
             "System default registered application",
-            egui::FontId::proportional(design::type_scale::BODY_SM),
+            egui::FontId::proportional(INFO_LABEL_PX),
             palette.text_secondary,
         );
         resp.on_hover_text(format!("System default handler for .{} files", extension));
@@ -11288,14 +11292,14 @@ impl ExplorerView {
                                         badge_rect.center(),
                                         egui::Align2::CENTER_CENTER,
                                         &badge_label,
-                                        egui::FontId::proportional(design::type_scale::MICRO),
+                                        egui::FontId::proportional(INFO_CAPTION_PX),
                                         palette.text_primary,
                                     );
 
                                     ui.add_space(6.0);
                                     let size_lbl = ui.label(
                                         egui::RichText::new(item.formatted_size())
-                                            .size(design::type_scale::BODY_SM)
+                                            .size(INFO_LABEL_PX)
                                             .color(palette.text_secondary),
                                     );
                                     size_lbl.on_hover_text(format!(
@@ -11328,7 +11332,7 @@ impl ExplorerView {
                         // 2. Collapsible Section: General
                         egui::CollapsingHeader::new(
                             egui::RichText::new("General")
-                                .size(design::type_scale::BODY_SM)
+                                .size(INFO_LABEL_PX)
                                 .strong()
                                 .color(palette.text_primary),
                         )
@@ -11360,11 +11364,11 @@ impl ExplorerView {
                                 ui.label(
                                     egui::RichText::new("Location:")
                                         .color(palette.text_muted)
-                                        .size(design::type_scale::BODY_SM),
+                                        .size(INFO_LABEL_PX),
                                 );
                                 let loc_lbl = ui.label(
                                     egui::RichText::new(truncate_middle(&parent_str, 48))
-                                        .size(design::type_scale::BODY_SM)
+                                        .size(INFO_LABEL_PX)
                                         .color(palette.text_primary),
                                 );
                                 loc_lbl.on_hover_text(format!(
@@ -11376,7 +11380,7 @@ impl ExplorerView {
                             ui.add_space(8.0);
                             ui.label(
                                 egui::RichText::new("Timeline")
-                                    .size(design::type_scale::MICRO)
+                                    .size(INFO_CAPTION_PX)
                                     .color(palette.text_muted),
                             );
                             ui.add_space(2.0);
@@ -11400,7 +11404,7 @@ impl ExplorerView {
                         // 3. Collapsible Section: More Info (Deep Metadata, Checksums)
                         egui::CollapsingHeader::new(
                             egui::RichText::new("More Info")
-                                .size(design::type_scale::BODY_SM)
+                                .size(INFO_LABEL_PX)
                                 .strong()
                                 .color(palette.text_primary),
                         )
@@ -11549,7 +11553,7 @@ impl ExplorerView {
                         // 4. Collapsible Section: Permissions & Sharing
                         egui::CollapsingHeader::new(
                             egui::RichText::new("Permissions & Sharing")
-                                .size(design::type_scale::BODY_SM)
+                                .size(INFO_LABEL_PX)
                                 .strong()
                                 .color(palette.text_primary),
                         )
@@ -11572,7 +11576,7 @@ impl ExplorerView {
                         if !item.is_dir {
                             egui::CollapsingHeader::new(
                                 egui::RichText::new("Open With")
-                                    .size(design::type_scale::BODY_SM)
+                                    .size(INFO_LABEL_PX)
                                     .strong()
                                     .color(palette.text_primary),
                             )
