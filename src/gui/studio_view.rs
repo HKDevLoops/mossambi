@@ -251,6 +251,40 @@ impl StudioView {
         }
     }
 
+    /// Visible exit affordance for every non-explorer tool view.
+    ///
+    /// Users reported that settings/tools could only be left with Ctrl+W;
+    /// this header puts a persistent Done button (plus the view title) at
+    /// the top of Preferences and every tool tab. It never touches the
+    /// explorer view, so the main file manager keeps its full canvas.
+    fn render_tool_view_header(&mut self, ui: &mut Ui, palette: &ThemePalette, title: &str) {
+        ui.horizontal(|ui| {
+            let done = ui.add(
+                egui::Button::new(egui::RichText::new("< Back").color(palette.accent))
+                    .fill(palette.card_bg)
+                    .stroke(Stroke::new(1.0_f32, palette.border))
+                    .rounding(Rounding::same(6.0)),
+            );
+            if done.clicked() {
+                self.current_tab = if self.previous_tab != self.current_tab
+                    && self.previous_tab != StudioTab::Preferences
+                {
+                    self.previous_tab
+                } else {
+                    StudioTab::FileExplorer
+                };
+            }
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(title)
+                    .size(16.0)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+        });
+        ui.separator();
+    }
+
     /// Sibling-folder menu listing, loaded once per directory and
     /// cached (F-2 fix): the context-menu closure re-runs every frame
     /// while open, so a synchronous re-list each frame would freeze
@@ -514,14 +548,12 @@ impl StudioView {
                         ui.add_space(6.0);
                     }
 
-                    // Brand Icon (enlarged Finder proportions)
-                    let (b_rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
-                    crate::core::icon_packs::paint_icon(
-                        ui,
-                        self.explorer_view.icon_pack,
-                        IconGlyph::ActionShield,
-                        b_rect,
-                        [palette.accent.r(), palette.accent.g(), palette.accent.b()],
+                    // Brand: the real Mossambi logo (replaces the placeholder shield).
+                    ui.add(
+                        egui::Image::new(egui::include_image!(
+                            "../../assets/icons/mossambi-32x32.png"
+                        ))
+                        .fit_to_exact_size(Vec2::splat(20.0)),
                     );
 
                     if chrome_spec.tab_position != TabPosition::None {
@@ -2857,6 +2889,7 @@ impl StudioView {
                         }
                     }
                     StudioTab::Preferences => {
+                        self.render_tool_view_header(ui, &palette, "Preferences");
                         self.render_preferences_tab(
                             ui,
                             &palette,
@@ -2866,6 +2899,8 @@ impl StudioView {
                         );
                     }
                     other => {
+                        let (tool_title, _) = studio_tab_label(other);
+                        self.render_tool_view_header(ui, &palette, tool_title);
                         egui::ScrollArea::vertical()
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
