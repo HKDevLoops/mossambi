@@ -755,6 +755,15 @@ pub struct ExplorerView {
     pub focus_search_requested: bool,
     pub requested_open_preferences: bool,
 
+    // Stage 2 native pop-out menus: a right-click records a request here;
+    // MossambiApp::update renders it in an immediate OS viewport so the menu
+    // can escape the window bounds. Result intents are applied next frame.
+    pub pending_native_menu: Option<NativeMenuRequest>,
+    pub deferred_native_intents: Option<NativeMenuIntents>,
+    /// Set once the native menu viewport reports focus, used to dismiss the
+    /// menu when focus later leaves it (outside click).
+    pub native_menu_focus_seen: bool,
+
     // macOS Finder & Linux System Features
     pub show_hidden_files: bool,
     pub column_stack: Vec<(PathBuf, Vec<FileItem>)>,
@@ -1119,6 +1128,9 @@ impl Default for ExplorerView {
             last_g_press: None,
             focus_search_requested: false,
             requested_open_preferences: false,
+            pending_native_menu: None,
+            deferred_native_intents: None,
+            native_menu_focus_seen: false,
             show_hidden_files: false,
             column_stack: Vec::new(),
             breadcrumb_popup_cache: std::collections::HashMap::new(),
@@ -6540,6 +6552,13 @@ impl ExplorerView {
         let peek_to_open: Option<FileItem> = None;
         let mut item_intents: Vec<ItemMenuIntents> = Vec::new();
         let mut canvas_intents = CanvasMenuIntents::default();
+        // Apply any action chosen in a native pop-out menu on the previous frame.
+        if let Some(native) = self.deferred_native_intents.take() {
+            match native {
+                NativeMenuIntents::Canvas(c) => canvas_intents = c,
+                NativeMenuIntents::Item(i) => item_intents.push(i),
+            }
+        }
         let selection_snapshot: Vec<PathBuf> =
             self.selected_paths.iter().cloned().collect::<Vec<_>>();
         let mut new_hover: Option<(FileItem, Pos2)> = None;
@@ -6569,21 +6588,20 @@ impl ExplorerView {
                     ui.make_persistent_id("explorer_canvas_bg"),
                     egui::Sense::click_and_drag(),
                 );
-                canvas_resp.context_menu(|menu_ui| {
-                    let dir_desc = self.sort_direction == SortDirection::Descending;
-                    canvas_intents = Self::run_canvas_context_menu(
-                        menu_ui,
-                        icon_pack,
-                        menu_style,
-                        palette.text_secondary,
+                if canvas_resp.secondary_clicked() {
+                    self.pending_native_menu = Some(NativeMenuRequest::Canvas {
+                        anchor: native_menu_anchor(ui),
+                        pack: icon_pack,
+                        style: menu_style,
+                        tint: palette.text_secondary,
                         has_clipboard,
-                        !entries.is_empty(),
-                        self.sort_column,
-                        dir_desc,
-                        self.view_mode,
-                        &self.current_dir,
-                    );
-                });
+                        has_entries: !entries.is_empty(),
+                        sort: self.sort_column,
+                        sort_desc: self.sort_direction == SortDirection::Descending,
+                        view: self.view_mode,
+                        dir: self.current_dir.clone(),
+                    });
+                }
 
                 // Rubber-band marquee can only start when the press began on
                 // empty canvas: rows register after the canvas and steal the
@@ -7005,7 +7023,7 @@ impl ExplorerView {
 
                     // Comprehensive Right-Click Context Menu for the File Row.
                     // Pure menu builder returns intents; mutations apply below.
-                    row_resp.context_menu(|menu_ui| {
+                    if row_resp.secondary_clicked() {
                         let targets = if selection_snapshot.len() > 1
                             && selection_snapshot.contains(&item.path)
                         {
@@ -7013,11 +7031,15 @@ impl ExplorerView {
                         } else {
                             vec![item.path.clone()]
                         };
-                        item_intents.clear();
-                        item_intents.push(Self::run_item_context_menu(
-                            menu_ui, icon_pack, menu_style, tint, item, &targets,
-                        ));
-                    });
+                        self.pending_native_menu = Some(NativeMenuRequest::Item {
+                            anchor: native_menu_anchor(ui),
+                            pack: icon_pack,
+                            style: menu_style,
+                            tint,
+                            item: item.clone(),
+                            targets,
+                        });
+                    }
                 }
                 if entries.is_empty() {
                     paint_empty_listing(ui, palette, &self.search_query);
@@ -7884,6 +7906,13 @@ impl ExplorerView {
         let peek_to_open: Option<FileItem> = None;
         let mut item_intents: Vec<ItemMenuIntents> = Vec::new();
         let mut canvas_intents = CanvasMenuIntents::default();
+        // Apply any action chosen in a native pop-out menu on the previous frame.
+        if let Some(native) = self.deferred_native_intents.take() {
+            match native {
+                NativeMenuIntents::Canvas(c) => canvas_intents = c,
+                NativeMenuIntents::Item(i) => item_intents.push(i),
+            }
+        }
         let selection_snapshot: Vec<PathBuf> =
             self.selected_paths.iter().cloned().collect::<Vec<_>>();
         let mut new_hover: Option<(FileItem, Pos2)> = None;
@@ -7942,21 +7971,20 @@ impl ExplorerView {
                     ui.make_persistent_id("explorer_grid_canvas_bg"),
                     egui::Sense::click_and_drag(),
                 );
-                canvas_resp.context_menu(|menu_ui| {
-                    let dir_desc = self.sort_direction == SortDirection::Descending;
-                    canvas_intents = Self::run_canvas_context_menu(
-                        menu_ui,
-                        icon_pack,
-                        menu_style,
-                        palette.text_secondary,
+                if canvas_resp.secondary_clicked() {
+                    self.pending_native_menu = Some(NativeMenuRequest::Canvas {
+                        anchor: native_menu_anchor(ui),
+                        pack: icon_pack,
+                        style: menu_style,
+                        tint: palette.text_secondary,
                         has_clipboard,
-                        !entries.is_empty(),
-                        self.sort_column,
-                        dir_desc,
-                        self.view_mode,
-                        &self.current_dir,
-                    );
-                });
+                        has_entries: !entries.is_empty(),
+                        sort: self.sort_column,
+                        sort_desc: self.sort_direction == SortDirection::Descending,
+                        view: self.view_mode,
+                        dir: self.current_dir.clone(),
+                    });
+                }
 
                 // Rubber-band marquee starts only from empty canvas space.
                 if canvas_resp.drag_started_by(egui::PointerButton::Primary)
@@ -8338,7 +8366,7 @@ impl ExplorerView {
                         }
 
                         // Rich Context Menu on Grid Tile (pure builder -> intents).
-                        resp.context_menu(|menu_ui| {
+                        if resp.secondary_clicked() {
                             let targets = if selection_snapshot.len() > 1
                                 && selection_snapshot.contains(&item.path)
                             {
@@ -8346,16 +8374,15 @@ impl ExplorerView {
                             } else {
                                 vec![item.path.clone()]
                             };
-                            item_intents.clear();
-                            item_intents.push(Self::run_item_context_menu(
-                                menu_ui,
-                                icon_pack,
-                                menu_style,
-                                palette.text_secondary,
-                                item,
-                                &targets,
-                            ));
-                        });
+                            self.pending_native_menu = Some(NativeMenuRequest::Item {
+                                anchor: native_menu_anchor(ui),
+                                pack: icon_pack,
+                                style: menu_style,
+                                tint: palette.text_secondary,
+                                item: item.clone(),
+                                targets,
+                            });
+                        }
                     }
                 });
                 if entries.is_empty() {
@@ -8600,7 +8627,6 @@ impl ExplorerView {
         nav_into_dir: &mut Option<PathBuf>,
         preview_to_set: &mut Option<FileItem>,
         column_drop: &mut Option<DropOp>,
-        item_intents: &mut Vec<ItemMenuIntents>,
         new_hover: &mut Option<(FileItem, Pos2)>,
     ) {
         ui.allocate_ui_with_layout(
@@ -8932,7 +8958,7 @@ impl ExplorerView {
                                         }
 
                                         // Right-click menu (same wiring as list/grid rows).
-                                        resp.context_menu(|menu_ui| {
+                                        if resp.secondary_clicked() {
                                             let targets = if selection_snapshot.len() > 1
                                                 && selection_snapshot.contains(&item.path)
                                             {
@@ -8940,16 +8966,15 @@ impl ExplorerView {
                                             } else {
                                                 vec![item.path.clone()]
                                             };
-                                            item_intents.clear();
-                                            item_intents.push(Self::run_item_context_menu(
-                                                menu_ui,
-                                                icon_pack,
-                                                menu_style,
-                                                palette.text_secondary,
-                                                item,
-                                                &targets,
-                                            ));
-                                        });
+                                            self.pending_native_menu = Some(NativeMenuRequest::Item {
+                                                anchor: native_menu_anchor(ui),
+                                                pack: icon_pack,
+                                                style: menu_style,
+                                                tint: palette.text_secondary,
+                                                item: item.clone(),
+                                                targets,
+                                            });
+                                        }
                                     }
                                 });
                             });
@@ -8988,6 +9013,13 @@ impl ExplorerView {
         // Context-menu intents (same wiring as the list/grid views).
         let mut item_intents: Vec<ItemMenuIntents> = Vec::new();
         let mut canvas_intents = CanvasMenuIntents::default();
+        // Apply any action chosen in a native pop-out menu on the previous frame.
+        if let Some(native) = self.deferred_native_intents.take() {
+            match native {
+                NativeMenuIntents::Canvas(c) => canvas_intents = c,
+                NativeMenuIntents::Item(i) => item_intents.push(i),
+            }
+        }
         let selection_snapshot: Vec<PathBuf> =
             self.selected_paths.iter().cloned().collect::<Vec<_>>();
         let icon_pack = self.icon_pack;
@@ -9026,21 +9058,20 @@ impl ExplorerView {
                     ui.make_persistent_id("explorer_miller_canvas_bg"),
                     egui::Sense::click_and_drag(),
                 );
-                canvas_resp.context_menu(|menu_ui| {
-                    let dir_desc = self.sort_direction == SortDirection::Descending;
-                    canvas_intents = Self::run_canvas_context_menu(
-                        menu_ui,
-                        icon_pack,
-                        menu_style,
-                        palette.text_secondary,
+                if canvas_resp.secondary_clicked() {
+                    self.pending_native_menu = Some(NativeMenuRequest::Canvas {
+                        anchor: native_menu_anchor(ui),
+                        pack: icon_pack,
+                        style: menu_style,
+                        tint: palette.text_secondary,
                         has_clipboard,
-                        !entries.is_empty(),
-                        self.sort_column,
-                        dir_desc,
-                        self.view_mode,
-                        &self.current_dir,
-                    );
-                });
+                        has_entries: !entries.is_empty(),
+                        sort: self.sort_column,
+                        sort_desc: self.sort_direction == SortDirection::Descending,
+                        view: self.view_mode,
+                        dir: self.current_dir.clone(),
+                    });
+                }
 
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(1.0, 0.0);
@@ -9098,7 +9129,6 @@ impl ExplorerView {
                             &mut nav_into_dir,
                             &mut preview_to_set,
                             &mut column_drop,
-                            &mut item_intents,
                             &mut new_hover,
                         );
                     }
@@ -9126,7 +9156,6 @@ impl ExplorerView {
                             &mut nav_into_dir,
                             &mut preview_to_set,
                             &mut column_drop,
-                            &mut item_intents,
                             &mut new_hover,
                         );
                     }
@@ -12154,6 +12183,51 @@ use crate::core::config::{CheckboxMode, MenuStyle};
 use crate::core::icon_packs::{IconGlyph, IconPack};
 use crate::gui::file_menu as fm;
 
+/// A context-menu request deferred from a right-click to a native pop-out
+/// viewport. egui draws ordinary context menus as `Area`s clipped to the
+/// parent window; rendering in a separate immediate viewport lets the menu
+/// escape the window bounds like a real OS menu.
+#[derive(Clone)]
+pub enum NativeMenuRequest {
+    Canvas {
+        anchor: Pos2,
+        pack: crate::core::icon_packs::IconPack,
+        style: crate::core::config::MenuStyle,
+        tint: Color32,
+        has_clipboard: bool,
+        has_entries: bool,
+        sort: SortColumn,
+        sort_desc: bool,
+        view: ViewMode,
+        dir: PathBuf,
+    },
+    Item {
+        anchor: Pos2,
+        pack: crate::core::icon_packs::IconPack,
+        style: crate::core::config::MenuStyle,
+        tint: Color32,
+        item: FileItem,
+        targets: Vec<PathBuf>,
+    },
+}
+
+impl NativeMenuRequest {
+    /// Monitor-space position where the pop-out window should open.
+    pub fn anchor(&self) -> Pos2 {
+        match self {
+            Self::Canvas { anchor, .. } | Self::Item { anchor, .. } => *anchor,
+        }
+    }
+}
+
+/// Intents produced by a native menu viewport, applied on the next frame
+/// through the explorer's existing intent-application path.
+#[allow(clippy::large_enum_variant)]
+pub enum NativeMenuIntents {
+    Canvas(CanvasMenuIntents),
+    Item(ItemMenuIntents),
+}
+
 /// Everything the empty-canvas menu may ask the caller to do.
 #[derive(Default, Debug, Clone)]
 pub struct CanvasMenuIntents {
@@ -12248,6 +12322,23 @@ pub struct ItemMenuIntents {
     pub new_tag: bool,
     /// Invocation request for native shell context menu verb: (session_id, cmd_id).
     pub invoke_shell_cmd: Option<(u64, u32)>,
+}
+
+/// Converts a viewport-local pointer position to monitor space for placing a
+/// native pop-out menu window.
+fn native_menu_anchor(ui: &Ui) -> Pos2 {
+    ui.input(|i| {
+        let local = i
+            .pointer
+            .latest_pos()
+            .unwrap_or_else(|| ui.ctx().screen_rect().center());
+        let offset = i
+            .viewport()
+            .outer_rect
+            .map(|r| r.min.to_vec2())
+            .unwrap_or(Vec2::ZERO);
+        local + offset
+    })
 }
 
 /// Extension classification shared by both item menus.
