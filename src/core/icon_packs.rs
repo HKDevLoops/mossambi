@@ -642,6 +642,7 @@ fn type_colors(kind: SpecialFolder) -> (&'static str, &'static str, &'static str
         SpecialFolder::Videos => ("#881798", "#681174", "#771485"),
         SpecialFolder::Home => ("#0078D4", "#005A9E", "#0068B8"),
         SpecialFolder::OneDrive => ("#0078D4", "#005A9E", "#0068B8"),
+        SpecialFolder::GoogleDrive => ("#34A853", "#1E7E34", "#2A9145"),
         SpecialFolder::Favorites => ("#EAA300", "#C68500", "#D89400"),
         SpecialFolder::SavedGames => ("#7C3AED", "#5B21B6", "#6D28D9"),
         SpecialFolder::Links => ("#4F46E5", "#3730A3", "#4338CA"),
@@ -839,6 +840,13 @@ fn raw_emblem(kind: SpecialFolder, is_small: bool, f: &str) -> String {
                     "<path d='M36 68 C30 68 28 62 31 57 C31 49 39 46 45 49 C48 44 58 44 61 49 C67 48 71 54 69 60 C71 63 70 68 64 68 Z' fill='none' stroke='{f}' stroke-width='3.0' stroke-linejoin='round'/>"
                 )
             }
+        }
+        SpecialFolder::GoogleDrive => {
+            let sw = if is_small { "4.2" } else { "2.8" };
+            format!(
+                "<path d='M39 71 L29 53 L34 45 L50 45 L66 45 L71 53 L61 71 Z' fill='none' stroke='{f}' stroke-width='{sw}' stroke-linejoin='round'/>\
+                 <path d='M34 45 L50 45 L29 53 Z' fill='{f}' opacity='0.35'/>"
+            )
         }
         SpecialFolder::ProgramFiles => {
             let sw = if is_small { "4.2" } else { "2.8" };

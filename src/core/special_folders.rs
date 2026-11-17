@@ -45,6 +45,7 @@ pub enum SpecialFolder {
     Searches,
     Objects3D,
     OneDrive,
+    GoogleDrive,
     ProgramFiles,
     Users,
     RecycleBin,
@@ -68,6 +69,7 @@ impl SpecialFolder {
             SpecialFolder::Searches,
             SpecialFolder::Objects3D,
             SpecialFolder::OneDrive,
+            SpecialFolder::GoogleDrive,
             SpecialFolder::ProgramFiles,
             SpecialFolder::Users,
             SpecialFolder::RecycleBin,
@@ -91,6 +93,7 @@ impl SpecialFolder {
             SpecialFolder::Searches => "searches",
             SpecialFolder::Objects3D => "objects_3d",
             SpecialFolder::OneDrive => "onedrive",
+            SpecialFolder::GoogleDrive => "google_drive",
             SpecialFolder::ProgramFiles => "program_files",
             SpecialFolder::Users => "users",
             SpecialFolder::RecycleBin => "recycle_bin",
@@ -108,6 +111,7 @@ impl SpecialFolder {
             SpecialFolder::Videos => [136, 23, 152],      // Purple
             SpecialFolder::Home => [0, 120, 215],         // Home Blue
             SpecialFolder::OneDrive => [0, 120, 212],     // Cloud Blue
+            SpecialFolder::GoogleDrive => [52, 168, 83],  // Drive Green
             SpecialFolder::Favorites => [212, 136, 6],    // Amber
             SpecialFolder::SavedGames => [109, 40, 217],  // Violet
             SpecialFolder::Links => [79, 70, 229],        // Indigo
@@ -193,6 +197,27 @@ fn init_known_folders_map() -> HashMap<PathBuf, SpecialFolder> {
                 }
             }
         }
+
+        // Google Drive for Desktop: backup/sync folders live under the user
+        // profile (e.g. "Google Drive", "Google Drive - user@example.com").
+        // Streaming-mode mounts use the drive volume label via the name
+        // fallback in `lookup_name` instead.
+        for env_var in &["GOOGLE_DRIVE", "GoogleDrive"] {
+            if let Ok(gd) = std::env::var(env_var) {
+                if !gd.trim().is_empty() {
+                    map.insert(normalize_path(Path::new(&gd)), SpecialFolder::GoogleDrive);
+                }
+            }
+        }
+        let home_dir = crate::core::platform_paths::home_dir();
+        if let Ok(entries) = std::fs::read_dir(&home_dir) {
+            for entry in entries.flatten() {
+                let lower = entry.file_name().to_string_lossy().to_lowercase();
+                if lower.starts_with("google drive") && entry.path().is_dir() {
+                    map.insert(normalize_path(&entry.path()), SpecialFolder::GoogleDrive);
+                }
+            }
+        }
     }
 
     #[cfg(not(windows))]
@@ -259,6 +284,8 @@ pub fn lookup_name(name: &str) -> Option<SpecialFolder> {
         Some(SpecialFolder::RecycleBin)
     } else if matches("onedrive") {
         Some(SpecialFolder::OneDrive)
+    } else if matches("google drive") || matches("gdrive") {
+        Some(SpecialFolder::GoogleDrive)
     } else if matches("desktop") {
         Some(SpecialFolder::Desktop)
     } else if matches("downloads") || matches("download") {
@@ -367,6 +394,15 @@ mod tests {
             lookup_name("OneDrive - Personal"),
             Some(SpecialFolder::OneDrive)
         );
+        assert_eq!(
+            lookup_name("Google Drive"),
+            Some(SpecialFolder::GoogleDrive)
+        );
+        assert_eq!(
+            lookup_name("Google Drive - user@example.com"),
+            Some(SpecialFolder::GoogleDrive)
+        );
+        assert_eq!(lookup_name("gdrive"), Some(SpecialFolder::GoogleDrive));
         assert_eq!(lookup_name("$Recycle.Bin"), Some(SpecialFolder::RecycleBin));
         assert_eq!(lookup_name("Recycle Bin"), Some(SpecialFolder::RecycleBin));
         assert_eq!(lookup_name("Trash"), Some(SpecialFolder::RecycleBin));
