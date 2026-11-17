@@ -7890,7 +7890,8 @@ impl ExplorerView {
                         // Card background on hover or selection (subtle Apple HIG outline, never covers icons)
                         // Selection tint: straight accent alpha, 45 dark / 26 light.
                         if is_checked {
-                            ui.painter().rect_filled(
+                            crate::gui::squircle::squircle_filled(
+                                ui.painter(),
                                 rect,
                                 Rounding::same(8.0),
                                 Color32::from_rgba_unmultiplied(
@@ -7900,7 +7901,8 @@ impl ExplorerView {
                                     if palette.is_dark { 45 } else { 26 },
                                 ),
                             );
-                            ui.painter().rect_stroke(
+                            crate::gui::squircle::squircle_stroke(
+                                ui.painter(),
                                 rect,
                                 Rounding::same(8.0),
                                 Stroke::new(1.2_f32, palette.accent),
@@ -7908,7 +7910,8 @@ impl ExplorerView {
                         } else if resp.hovered() {
                             // Hover tint: straight text alpha, 20 dark / 12 light
                             // (premul with raw rgb drowned the tile content).
-                            ui.painter().rect_filled(
+                            crate::gui::squircle::squircle_filled(
+                                ui.painter(),
                                 rect,
                                 Rounding::same(8.0),
                                 Color32::from_rgba_unmultiplied(
@@ -7918,7 +7921,8 @@ impl ExplorerView {
                                     if palette.is_dark { 20 } else { 12 },
                                 ),
                             );
-                            ui.painter().rect_stroke(
+                            crate::gui::squircle::squircle_stroke(
+                                ui.painter(),
                                 rect,
                                 Rounding::same(8.0),
                                 Stroke::new(
