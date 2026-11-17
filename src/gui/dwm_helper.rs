@@ -250,7 +250,20 @@ mod win32_dwm {
                                 4,
                             );
                         }
-                        set_accent_policy(hwnd, 0, 0);
+                        // winit's per-pixel-alpha GL path resets
+                        // DWMWA_SYSTEMBACKDROP_TYPE on the visible window
+                        // (readback stays 0 and external re-sets do not
+                        // stick), so acrylic-family backdrops also apply the
+                        // accent-policy acrylic, which composes correctly
+                        // with the transparent GL surface. The gradient tint
+                        // stays nearly transparent (alpha = 1): the egui
+                        // glass fills supply the tint, DWM only the blur.
+                        if val == 3 {
+                            let tint_abgr = if dark_mode { 0x011E1E1E } else { 0x01FFFFFF };
+                            set_accent_policy(hwnd, 4, tint_abgr);
+                        } else {
+                            set_accent_policy(hwnd, 0, 0);
+                        }
                     }
                     2 => {
                         // Win10 SetWindowCompositionAttribute accent policy

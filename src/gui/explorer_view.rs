@@ -3339,21 +3339,30 @@ impl ExplorerView {
 
             // Docked bottom chrome: honor ChromeSpec status_bar and path_bar_bottom
             let chrome_spec = crate::core::MossambiConfig::load().chrome_spec();
+            // Glass mode paints the single translucent layer at the outer
+            // CentralPanel; these inner docks must not double-paint window_bg
+            // over it (a second layer cancels the acrylic/mica translucency).
+            let dock_bg = if palette.is_translucent {
+                Color32::TRANSPARENT
+            } else {
+                palette.window_bg
+            };
             if chrome_spec.status_bar {
-                let status_resp =
-                    egui::TopBottomPanel::bottom("explorer_status_bar")
-                        .frame(egui::Frame::none().fill(palette.window_bg).inner_margin(
-                            egui::Margin {
+                let status_resp = egui::TopBottomPanel::bottom("explorer_status_bar")
+                    .frame(
+                        egui::Frame::none()
+                            .fill(dock_bg)
+                            .inner_margin(egui::Margin {
                                 left: 10.0,
                                 right: 10.0,
                                 top: 0.0,
                                 bottom: 2.0,
-                            },
-                        ))
-                        .show_separator_line(false)
-                        .show_inside(ui, |ui| {
-                            self.render_status_bar(ui, palette);
-                        });
+                            }),
+                    )
+                    .show_separator_line(false)
+                    .show_inside(ui, |ui| {
+                        self.render_status_bar(ui, palette);
+                    });
                 let status_rect = status_resp.response.rect;
                 ui.painter().line_segment(
                     [
@@ -3368,20 +3377,21 @@ impl ExplorerView {
                 && !self.is_home_view
                 && !parse_breadcrumbs(&self.current_dir).is_empty();
             if path_bar_visible {
-                let path_resp =
-                    egui::TopBottomPanel::bottom("explorer_path_bar")
-                        .frame(egui::Frame::none().fill(palette.window_bg).inner_margin(
-                            egui::Margin {
+                let path_resp = egui::TopBottomPanel::bottom("explorer_path_bar")
+                    .frame(
+                        egui::Frame::none()
+                            .fill(dock_bg)
+                            .inner_margin(egui::Margin {
                                 left: 10.0,
                                 right: 10.0,
                                 top: 0.0,
                                 bottom: 3.0,
-                            },
-                        ))
-                        .show_separator_line(false)
-                        .show_inside(ui, |ui| {
-                            self.render_bottom_path_bar(ui, palette);
-                        });
+                            }),
+                    )
+                    .show_separator_line(false)
+                    .show_inside(ui, |ui| {
+                        self.render_bottom_path_bar(ui, palette);
+                    });
                 let path_rect = path_resp.response.rect;
                 ui.painter().line_segment(
                     [
@@ -3397,7 +3407,7 @@ impl ExplorerView {
             egui::CentralPanel::default()
                 .frame(
                     egui::Frame::none()
-                        .fill(palette.window_bg)
+                        .fill(dock_bg)
                         .inner_margin(egui::Margin {
                             left: 10.0,
                             right: 0.0,

@@ -65,7 +65,8 @@ pub enum Backdrop {
 ///
 /// - Win11 >= 22621:
 ///   - Blur / Acrylic -> DWMSBT_TRANSIENTWINDOW (3)
-///   - Frosted -> DWMSBT_TABBEDWINDOW (4)
+///   - Frosted -> DWMSBT_TRANSIENTWINDOW (3) (acrylic blur; TABBEDWINDOW
+///     is Mica Alt, which carries no blur)
 ///   - Liquid glass -> DWMSBT_TRANSIENTWINDOW (3) plus egui specular highlights
 ///   - Mica -> DWMSBT_MAINWINDOW (2)
 ///   - Opaque / Off -> DWMSBT_NONE (1)
@@ -77,7 +78,7 @@ pub fn choose_backdrop(mode: GlassEffect, os_build: u32) -> Backdrop {
     if os_build >= 22621 {
         match mode {
             GlassEffect::Opaque => Backdrop::DwmSystem(1),
-            GlassEffect::FrostedGlass => Backdrop::DwmSystem(4),
+            GlassEffect::FrostedGlass => Backdrop::DwmSystem(3),
             GlassEffect::LiquidGlass => Backdrop::DwmSystem(3),
             GlassEffect::Acrylic => Backdrop::DwmSystem(3),
             GlassEffect::Mica => Backdrop::DwmSystem(2),
@@ -105,21 +106,21 @@ pub fn choose_backdrop(mode: GlassEffect, os_build: u32) -> Backdrop {
 /// - Sidebar >= 0.72
 /// - Chrome >= 0.60
 ///
-/// If `base.a()` specifies user intensity between 1 and 254, it maps linearly
-/// between the floor and 1.0.
-/// If `base.a() == 0 || base.a() == 255`, the default floor alpha is used.
+/// The user intensity (`base.a() / 255`) maps monotonically onto
+/// `[floor, 1.0]`: a higher configured opacity always yields a more opaque
+/// fill. `base.a() == 0` falls back to the floor; `base.a() == 255` is
+/// fully opaque (the backdrop blur is completely tinted over).
 pub fn glass_fill(base: Color32, mode: GlassEffect, surface: Surface, dark: bool) -> Color32 {
     if mode == GlassEffect::Opaque {
         return Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 255);
     }
 
     let floor = surface.alpha_floor();
-    let alpha_f = if base.a() == 0 || base.a() == 255 {
-        floor
-    } else {
-        let user_intensity = base.a() as f32 / 255.0;
-        (floor + (1.0 - floor) * user_intensity).clamp(floor, 1.0)
-    };
+    // Monotonic tint mapping: the configured opacity IS the fill opacity,
+    // clamped into the readability floor. 0 falls back to the floor and
+    // 255 means a fully opaque fill.
+    let user_intensity = base.a() as f32 / 255.0;
+    let alpha_f = user_intensity.clamp(floor, 1.0);
 
     let alpha = (alpha_f * 255.0).round().clamp(0.0, 255.0) as u8;
 
@@ -239,11 +240,11 @@ mod tests {
     fn test_choose_backdrop_win11_22621() {
         assert_eq!(
             choose_backdrop(GlassEffect::FrostedGlass, 22621),
-            Backdrop::DwmSystem(4)
+            Backdrop::DwmSystem(3)
         );
         assert_eq!(
             choose_backdrop(GlassEffect::FrostedGlass, 22631),
-            Backdrop::DwmSystem(4)
+            Backdrop::DwmSystem(3)
         );
         assert_eq!(
             choose_backdrop(GlassEffect::LiquidGlass, 22621),
