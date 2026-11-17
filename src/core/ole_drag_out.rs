@@ -48,8 +48,8 @@ use windows::Win32::System::Memory::{
     GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
 };
 use windows::Win32::System::Ole::{
-    DoDragDrop, IDropSource, IDropSource_Impl, OleInitialize, OleUninitialize, CF_HDROP,
-    DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE,
+    DoDragDrop, IDropSource, IDropSource_Impl, OleUninitialize, CF_HDROP, DROPEFFECT,
+    DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE,
 };
 use windows::Win32::System::SystemServices::{
     MK_LBUTTON, MK_MBUTTON, MK_RBUTTON, MODIFIERKEYS_FLAGS,
@@ -697,13 +697,18 @@ pub fn create_files_data_object(paths: &[PathBuf]) -> Result<IDataObject, String
 /// `Param<...>` bounds without extra AddRef.
 unsafe fn run_ole_drag(paths: &[PathBuf]) -> Result<DragOutOutcome, Error> {
     let mut guard = OleThreadGuard { initialized: false };
-    match unsafe { OleInitialize(None) } {
-        Ok(()) => guard.initialized = true,
-        Err(e) if e.code() == HR_RPC_E_CHANGED_MODE => {
-            // COM apartment already exists on this thread; proceed without
-            // unwinding someone else's initialization.
-        }
-        Err(e) => return Err(e),
+    // Call the raw ole32 entry point so S_OK and S_FALSE can be told apart.
+    // The `windows` crate maps both to Ok(()); S_FALSE means winit already
+    // initialized COM on this thread, and calling OleUninitialize from the
+    // guard's Drop would tear down the host's apartment mid-frame and break
+    // every later COM call. Only S_OK means *we* established the apartment.
+    let init_hr = unsafe { windows_sys::Win32::System::Ole::OleInitialize(std::ptr::null()) };
+    if init_hr == HR_S_OK.0 {
+        guard.initialized = true;
+    } else if init_hr == HR_S_FALSE.0 || init_hr == HR_RPC_E_CHANGED_MODE.0 {
+        // COM already initialized on this thread; proceed without unwinding.
+    } else {
+        return Err(hr(HRESULT(init_hr)));
     }
 
     let data_object: IDataObject = FilesDataObject::new(paths)?.into();

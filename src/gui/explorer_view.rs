@@ -2166,10 +2166,13 @@ impl ExplorerView {
         if egui::DragAndDrop::has_payload_of_type::<FileDragPayload>(ui.ctx()) {
             let screen_rect = ui.ctx().screen_rect();
             let (any_down, pos_outside, decided) = ui.input(|i| {
-                let p_opt = i.pointer.latest_pos();
-                let outside = match p_opt {
+                let outside = match i.pointer.latest_pos() {
                     Some(p) => !screen_rect.contains(p),
-                    None => false,
+                    // egui clears latest_pos on Event::PointerGone, i.e. the
+                    // cursor left the viewport toward another app. Guarded by
+                    // any_down && decided below, that means a decided drag is
+                    // leaving the app and must hand off to the OS.
+                    None => true,
                 };
                 (
                     i.pointer.any_down(),
