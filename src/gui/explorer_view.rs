@@ -1951,12 +1951,13 @@ impl ExplorerView {
         let q_lower = q.to_lowercase();
         let active_tag = self.active_tag.as_deref();
         let sort_by_name = matches!(self.sort_column, SortColumn::Name);
+        let sort_by_size = matches!(self.sort_column, SortColumn::Size);
 
         // Lowercase names are computed ONCE per entry (only when needed)
         // instead of on every sort comparison. The old comparator allocated
         // two lowercase Strings per comparison -> O(n log n) allocations per
         // frame; this is O(n), cutting UI-thread runtime and memory churn.
-        let mut scored_list: Vec<(&FileItem, i64, Option<String>)> = self
+        let mut scored_list: Vec<(&FileItem, i64, Option<String>, u64)> = self
             .entries
             .iter()
             .filter(|e| !crate::core::is_protected_os_file(&e.path))
@@ -1985,6 +1986,14 @@ impl ExplorerView {
                 } else {
                     None
                 };
+                // Precompute the effective (recursive) size ONCE per entry so
+                // the Size sort comparator stays O(1) instead of doing a
+                // dir_sizes HashMap lookup on every O(n log n) comparison.
+                let size = if sort_by_size {
+                    self.effective_size(e)
+                } else {
+                    0
+                };
                 if is_searching {
                     // Substring filter (Finder): a loose subsequence match
                     // made "dl" list nearly every file in the folder.
@@ -1992,47 +2001,52 @@ impl ExplorerView {
                         return None;
                     }
                     let score = fuzzy_match(q, &e.name).unwrap_or(0);
-                    Some((e, score, name_lower))
+                    Some((e, score, name_lower, size))
                 } else {
-                    Some((e, 0, name_lower))
+                    Some((e, 0, name_lower, size))
                 }
             })
             .collect();
 
-        scored_list.sort_by(|(a, score_a, a_lower), (b, score_b, b_lower)| {
-            // Search results keep the chosen sort (Finder): ordering by
-            // fuzzy score made a Name-sorted list look shuffled.
-            if a.is_dir != b.is_dir {
-                return b.is_dir.cmp(&a.is_dir);
-            }
-            let ordering = match self.sort_column {
-                SortColumn::Name => a_lower
-                    .as_deref()
-                    .unwrap_or("")
-                    .cmp(b_lower.as_deref().unwrap_or("")),
-                SortColumn::Size => self.effective_size(a).cmp(&self.effective_size(b)),
-                SortColumn::Extension => a.extension.cmp(&b.extension),
-                SortColumn::Date => cmp_opt_last(&a.modified, &b.modified),
-                SortColumn::DateCreated => cmp_opt_last(&a.created, &b.created),
-                SortColumn::Permissions => a.permissions_mode.cmp(&b.permissions_mode),
-                SortColumn::Hidden => a.is_hidden.cmp(&b.is_hidden),
-                SortColumn::Symlink => a.is_symlink.cmp(&b.is_symlink),
-                SortColumn::SymlinkTarget => cmp_opt_last(&a.symlink_target, &b.symlink_target),
-                SortColumn::Path => a.path.cmp(&b.path),
-                SortColumn::Kind => kind_key(a).cmp(kind_key(b)),
-            };
-            let directed = match self.sort_direction {
-                SortDirection::Ascending => ordering,
-                SortDirection::Descending => ordering.reverse(),
-            };
-            if is_searching {
-                directed.then_with(|| score_b.cmp(score_a))
-            } else {
-                directed
-            }
-        });
+        scored_list.sort_by(
+            |(a, score_a, a_lower, a_size), (b, score_b, b_lower, b_size)| {
+                // Search results keep the chosen sort (Finder): ordering by
+                // fuzzy score made a Name-sorted list look shuffled.
+                if a.is_dir != b.is_dir {
+                    return b.is_dir.cmp(&a.is_dir);
+                }
+                let ordering = match self.sort_column {
+                    SortColumn::Name => a_lower
+                        .as_deref()
+                        .unwrap_or("")
+                        .cmp(b_lower.as_deref().unwrap_or("")),
+                    SortColumn::Size => a_size.cmp(b_size),
+                    SortColumn::Extension => a.extension.cmp(&b.extension),
+                    SortColumn::Date => cmp_opt_last(&a.modified, &b.modified),
+                    SortColumn::DateCreated => cmp_opt_last(&a.created, &b.created),
+                    SortColumn::Permissions => a.permissions_mode.cmp(&b.permissions_mode),
+                    SortColumn::Hidden => a.is_hidden.cmp(&b.is_hidden),
+                    SortColumn::Symlink => a.is_symlink.cmp(&b.is_symlink),
+                    SortColumn::SymlinkTarget => cmp_opt_last(&a.symlink_target, &b.symlink_target),
+                    SortColumn::Path => a.path.cmp(&b.path),
+                    SortColumn::Kind => kind_key(a).cmp(kind_key(b)),
+                };
+                let directed = match self.sort_direction {
+                    SortDirection::Ascending => ordering,
+                    SortDirection::Descending => ordering.reverse(),
+                };
+                if is_searching {
+                    directed.then_with(|| score_b.cmp(score_a))
+                } else {
+                    directed
+                }
+            },
+        );
 
-        scored_list.into_iter().map(|(item, _, _)| item).collect()
+        scored_list
+            .into_iter()
+            .map(|(item, _, _, _)| item)
+            .collect()
     }
 
     /// Persists column visibility + widths to MossambiConfig via the
