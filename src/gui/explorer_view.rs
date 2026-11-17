@@ -1899,14 +1899,25 @@ impl ExplorerView {
             None => true,
         };
         if self.dir_size_cache_dirty > 0 && (self.dir_size_cache_dirty >= 100 || flush_due) {
-            if crate::core::fs_utils::save_dir_size_cache_to(
-                &crate::core::fs_utils::dir_size_cache_path(),
-                &self.dir_sizes,
-            )
-            .is_ok()
+            // Serialize + write on a short-lived worker so the pretty-JSON
+            // disk write never stalls the UI frame (a hardware spike). The
+            // dirty counter resets here; at most one flush worker is spawned
+            // per 30s window, so there is no thread pile-up.
+            let flush_path = crate::core::fs_utils::dir_size_cache_path();
+            let snapshot = self.dir_sizes.clone();
+            if let Err(e) = std::thread::Builder::new()
+                .name("mossambi-dir-size-flush".into())
+                .spawn(move || {
+                    if let Err(err) =
+                        crate::core::fs_utils::save_dir_size_cache_to(&flush_path, &snapshot)
+                    {
+                        log::warn!("Folder-size cache flush failed: {err}");
+                    }
+                })
             {
-                self.dir_size_cache_dirty = 0;
+                log::warn!("Could not spawn folder-size flush worker: {e}");
             }
+            self.dir_size_cache_dirty = 0;
             self.dir_size_last_flush = Some(now);
         }
     }
