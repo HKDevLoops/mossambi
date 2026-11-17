@@ -47,12 +47,20 @@ fn clamp_radius(r: f32, rect: Rect) -> f32 {
     r.max(0.0).min(rect.width() * 0.5).min(rect.height() * 0.5)
 }
 
-/// Build the squircle perimeter as a clockwise convex polygon.
+/// Build the squircle perimeter as a single convex, non-self-intersecting
+/// polygon.
 ///
-/// The four superellipse corner arcs are concatenated; straight rect edges
-/// are implicit between consecutive corner endpoints. Winding is forced
-/// clockwise (negative signed area in screen coordinates) for epaint's
-/// preferred fill path.
+/// Each corner is a superellipse arc (n=4) whose curvature is zero where it
+/// meets a straight edge -- the defining property of an Apple squircle. The
+/// four arcs MUST be emitted in clockwise perimeter order with alternating
+/// arc direction so consecutive arcs join along a straight edge:
+///
+///   TL (left->top) -> top edge -> TR (top->right) -> right edge ->
+///   BR (right->bottom) -> bottom edge -> BL (bottom->left) -> left edge.
+///
+/// Getting this order/direction wrong makes each arc end on a different edge
+/// from the next arc's start, producing diagonal criss-crosses instead of a
+/// clean rounded rectangle.
 pub fn squircle_path(rect: Rect, rounding: Rounding) -> Vec<Pos2> {
     let template = unit_corner();
     let nw = clamp_radius(rounding.nw, rect);
@@ -62,21 +70,27 @@ pub fn squircle_path(rect: Rect, rounding: Rounding) -> Vec<Pos2> {
 
     let mut points = Vec::with_capacity(4 * (SEGMENTS + 1));
 
-    // (corner center x, center y, x sign, y sign, radius)
+    // (center x, center y, x sign, y sign, radius, reverse arc direction)
     let corners = [
-        (rect.max.x - ne, rect.min.y + ne, 1.0, -1.0, ne), // top-right
-        (rect.max.x - se, rect.max.y - se, 1.0, 1.0, se),  // bottom-right
-        (rect.min.x + sw, rect.max.y - sw, -1.0, 1.0, sw), // bottom-left
-        (rect.min.x + nw, rect.min.y + nw, -1.0, -1.0, nw), // top-left
+        (rect.min.x + nw, rect.min.y + nw, -1.0, -1.0, nw, false), // TL: left->top
+        (rect.max.x - ne, rect.min.y + ne, 1.0, -1.0, ne, true),   // TR: top->right
+        (rect.max.x - se, rect.max.y - se, 1.0, 1.0, se, false),   // BR: right->bottom
+        (rect.min.x + sw, rect.max.y - sw, -1.0, 1.0, sw, true),   // BL: bottom->left
     ];
 
-    for (cx, cy, sx, sy, r) in corners {
-        for u in template {
-            points.push(Pos2::new(cx + sx * u.x * r, cy + sy * u.y * r));
+    for (cx, cy, sx, sy, r, reverse) in corners {
+        if reverse {
+            for u in template.iter().rev() {
+                points.push(Pos2::new(cx + sx * u.x * r, cy + sy * u.y * r));
+            }
+        } else {
+            for u in template.iter() {
+                points.push(Pos2::new(cx + sx * u.x * r, cy + sy * u.y * r));
+            }
         }
     }
 
-    // Force clockwise winding for epaint's convex fill path.
+    // Normalize winding for epaint's convex fill path (see test below).
     let twice_area: f32 = points
         .windows(2)
         .map(|pair| pair[0].x * pair[1].y - pair[1].x * pair[0].y)
