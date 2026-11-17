@@ -13097,242 +13097,250 @@ impl ExplorerView {
         current_view: ViewMode,
         current_dir: &Path,
     ) -> CanvasMenuIntents {
-        menu_ui.set_min_width(240.0);
-        let mut intent = CanvasMenuIntents::default();
-        fm::menu_header(menu_ui, "Explorer", tint);
-        menu_ui.separator();
-
-        if menu_row(menu_ui, true, pack, fm::MenuAction::NewFolder, style, tint).clicked() {
-            intent.new_folder = true;
-            menu_ui.close_menu();
-        }
-        if menu_row(menu_ui, true, pack, fm::MenuAction::NewWindow, style, tint).clicked() {
-            intent.new_window = true;
-            menu_ui.close_menu();
-        }
-        if menu_row(menu_ui, true, pack, fm::MenuAction::NewTab, style, tint).clicked() {
-            intent.new_tab = true;
-            menu_ui.close_menu();
-        }
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Refresh, style, tint).clicked() {
-            intent.refresh = true;
-            menu_ui.close_menu();
-        }
-        if menu_row_glyph(
-            menu_ui,
-            true,
-            pack,
-            IconGlyph::ActionUp,
-            "Go to Parent Folder",
-            style,
-            tint,
-        )
-        .clicked()
-        {
-            intent.go_up = true;
-            menu_ui.close_menu();
-        }
-
-        menu_ui.separator();
-        // -- Sort by submenu (re-picking the active column reverses order) --
-        fm::submenu(
-            menu_ui,
-            "Sort by",
-            pack,
-            style,
-            tint,
-            fm::MenuAction::SortBy,
-            |sub_ui| {
-                sub_ui.set_min_width(170.0);
-                for (col, label) in [
-                    (SortColumn::Name, "Name"),
-                    (SortColumn::Extension, "Kind"),
-                    (SortColumn::Size, "Size"),
-                    (SortColumn::Date, "Date Modified"),
-                    (SortColumn::Permissions, "Permissions"),
-                ] {
-                    let mark = if current_sort == col {
-                        if sort_desc {
-                            " (desc)"
-                        } else {
-                            " (asc)"
-                        }
-                    } else {
-                        ""
-                    };
-                    let item_text = format!("{label}{mark}");
-                    if fm::menu_item_glyph(
-                        sub_ui,
-                        pack,
-                        IconGlyph::ActionSort,
-                        &item_text,
-                        style,
-                        tint,
-                    )
-                    .clicked()
-                    {
-                        intent.sort_by = Some(col);
-                        sub_ui.close_menu();
-                    }
-                }
-            },
-        );
-        // -- View submenu (Details / Grid / Columns) --
-        fm::submenu(
-            menu_ui,
-            "View",
-            pack,
-            style,
-            tint,
-            fm::MenuAction::ViewMode,
-            |sub_ui| {
-                sub_ui.set_min_width(170.0);
-                for (vm, label) in [
-                    (ViewMode::Details, "Details / List"),
-                    (ViewMode::Grid, "Icons / Grid"),
-                    (ViewMode::Columns, "Miller Columns"),
-                ] {
-                    let mark = if current_view == vm { " *" } else { "" };
-                    let item_text = format!("{label}{mark}");
-                    if fm::menu_item_glyph(
-                        sub_ui,
-                        pack,
-                        IconGlyph::ActionView,
-                        &item_text,
-                        style,
-                        tint,
-                    )
-                    .clicked()
-                    {
-                        intent.view_mode = Some(vm);
-                        sub_ui.close_menu();
-                    }
-                }
-            },
-        );
-
-        // -- Custom user entries (Phase 4 menu customization) --
-        // Background-scope config entries; no target path is passed.
-        {
-            let cfg = crate::core::MossambiConfig::load();
-            let customs: Vec<_> = cfg
-                .context_menu_items
-                .iter()
-                .filter(|c| {
-                    c.show_in == crate::core::config::CustomMenuScope::All
-                        || c.show_in == crate::core::config::CustomMenuScope::Background
-                })
-                .collect();
-            if !customs.is_empty() {
+        let max_h = (menu_ui.ctx().screen_rect().height() - 24.0).max(140.0);
+        egui::ScrollArea::vertical()
+            .max_height(max_h)
+            .auto_shrink([true, true])
+            .show(menu_ui, |menu_ui| {
+                menu_ui.set_min_width(240.0);
+                let mut intent = CanvasMenuIntents::default();
+                fm::menu_header(menu_ui, "Explorer", tint);
                 menu_ui.separator();
-                for entry in customs {
-                    if fm::menu_item_custom(menu_ui, &entry.label).clicked() {
-                        let item = entry.clone();
-                        menu_ui.close_menu();
-                        crate::gui::context_menu::run_custom_item(&item, None);
+
+                if menu_row(menu_ui, true, pack, fm::MenuAction::NewFolder, style, tint).clicked() {
+                    intent.new_folder = true;
+                    menu_ui.close_menu();
+                }
+                if menu_row(menu_ui, true, pack, fm::MenuAction::NewWindow, style, tint).clicked() {
+                    intent.new_window = true;
+                    menu_ui.close_menu();
+                }
+                if menu_row(menu_ui, true, pack, fm::MenuAction::NewTab, style, tint).clicked() {
+                    intent.new_tab = true;
+                    menu_ui.close_menu();
+                }
+                if menu_row(menu_ui, true, pack, fm::MenuAction::Refresh, style, tint).clicked() {
+                    intent.refresh = true;
+                    menu_ui.close_menu();
+                }
+                if menu_row_glyph(
+                    menu_ui,
+                    true,
+                    pack,
+                    IconGlyph::ActionUp,
+                    "Go to Parent Folder",
+                    style,
+                    tint,
+                )
+                .clicked()
+                {
+                    intent.go_up = true;
+                    menu_ui.close_menu();
+                }
+
+                menu_ui.separator();
+                // -- Sort by submenu (re-picking the active column reverses order) --
+                fm::submenu(
+                    menu_ui,
+                    "Sort by",
+                    pack,
+                    style,
+                    tint,
+                    fm::MenuAction::SortBy,
+                    |sub_ui| {
+                        sub_ui.set_min_width(170.0);
+                        for (col, label) in [
+                            (SortColumn::Name, "Name"),
+                            (SortColumn::Extension, "Kind"),
+                            (SortColumn::Size, "Size"),
+                            (SortColumn::Date, "Date Modified"),
+                            (SortColumn::Permissions, "Permissions"),
+                        ] {
+                            let mark = if current_sort == col {
+                                if sort_desc {
+                                    " (desc)"
+                                } else {
+                                    " (asc)"
+                                }
+                            } else {
+                                ""
+                            };
+                            let item_text = format!("{label}{mark}");
+                            if fm::menu_item_glyph(
+                                sub_ui,
+                                pack,
+                                IconGlyph::ActionSort,
+                                &item_text,
+                                style,
+                                tint,
+                            )
+                            .clicked()
+                            {
+                                intent.sort_by = Some(col);
+                                sub_ui.close_menu();
+                            }
+                        }
+                    },
+                );
+                // -- View submenu (Details / Grid / Columns) --
+                fm::submenu(
+                    menu_ui,
+                    "View",
+                    pack,
+                    style,
+                    tint,
+                    fm::MenuAction::ViewMode,
+                    |sub_ui| {
+                        sub_ui.set_min_width(170.0);
+                        for (vm, label) in [
+                            (ViewMode::Details, "Details / List"),
+                            (ViewMode::Grid, "Icons / Grid"),
+                            (ViewMode::Columns, "Miller Columns"),
+                        ] {
+                            let mark = if current_view == vm { " *" } else { "" };
+                            let item_text = format!("{label}{mark}");
+                            if fm::menu_item_glyph(
+                                sub_ui,
+                                pack,
+                                IconGlyph::ActionView,
+                                &item_text,
+                                style,
+                                tint,
+                            )
+                            .clicked()
+                            {
+                                intent.view_mode = Some(vm);
+                                sub_ui.close_menu();
+                            }
+                        }
+                    },
+                );
+
+                // -- Custom user entries (Phase 4 menu customization) --
+                // Background-scope config entries; no target path is passed.
+                {
+                    let cfg = crate::core::MossambiConfig::load();
+                    let customs: Vec<_> = cfg
+                        .context_menu_items
+                        .iter()
+                        .filter(|c| {
+                            c.show_in == crate::core::config::CustomMenuScope::All
+                                || c.show_in == crate::core::config::CustomMenuScope::Background
+                        })
+                        .collect();
+                    if !customs.is_empty() {
+                        menu_ui.separator();
+                        for entry in customs {
+                            if fm::menu_item_custom(menu_ui, &entry.label).clicked() {
+                                let item = entry.clone();
+                                menu_ui.close_menu();
+                                crate::gui::context_menu::run_custom_item(&item, None);
+                            }
+                        }
                     }
                 }
-            }
-        }
 
-        menu_ui.separator();
-        if menu_row(
-            menu_ui,
-            has_entries,
-            pack,
-            fm::MenuAction::SelectAll,
-            style,
-            tint,
-        )
-        .clicked()
-        {
-            intent.select_all = true;
-            menu_ui.close_menu();
-        }
-        if menu_row_glyph(
-            menu_ui,
-            has_entries,
-            pack,
-            IconGlyph::ActionMore,
-            "Invert Selection",
-            style,
-            tint,
-        )
-        .clicked()
-        {
-            intent.invert_selection = true;
-            menu_ui.close_menu();
-        }
-        if menu_row_glyph(
-            menu_ui,
-            true,
-            pack,
-            IconGlyph::ActionClose,
-            "Clear Selection",
-            style,
-            tint,
-        )
-        .clicked()
-        {
-            intent.clear_selection = true;
-            menu_ui.close_menu();
-        }
-        if menu_row(
-            menu_ui,
-            has_clipboard,
-            pack,
-            fm::MenuAction::Paste,
-            style,
-            tint,
-        )
-        .clicked()
-        {
-            intent.paste = Some(Vec::new()); // caller reads clipboard_paths itself
-            menu_ui.close_menu();
-        }
+                menu_ui.separator();
+                if menu_row(
+                    menu_ui,
+                    has_entries,
+                    pack,
+                    fm::MenuAction::SelectAll,
+                    style,
+                    tint,
+                )
+                .clicked()
+                {
+                    intent.select_all = true;
+                    menu_ui.close_menu();
+                }
+                if menu_row_glyph(
+                    menu_ui,
+                    has_entries,
+                    pack,
+                    IconGlyph::ActionMore,
+                    "Invert Selection",
+                    style,
+                    tint,
+                )
+                .clicked()
+                {
+                    intent.invert_selection = true;
+                    menu_ui.close_menu();
+                }
+                if menu_row_glyph(
+                    menu_ui,
+                    true,
+                    pack,
+                    IconGlyph::ActionClose,
+                    "Clear Selection",
+                    style,
+                    tint,
+                )
+                .clicked()
+                {
+                    intent.clear_selection = true;
+                    menu_ui.close_menu();
+                }
+                if menu_row(
+                    menu_ui,
+                    has_clipboard,
+                    pack,
+                    fm::MenuAction::Paste,
+                    style,
+                    tint,
+                )
+                .clicked()
+                {
+                    intent.paste = Some(Vec::new()); // caller reads clipboard_paths itself
+                    menu_ui.close_menu();
+                }
 
-        menu_ui.separator();
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Terminal, style, tint).clicked() {
-            intent.terminal = true;
-            menu_ui.close_menu();
-        }
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Reveal, style, tint).clicked() {
-            intent.open_in_file_manager = true;
-            menu_ui.close_menu();
-        }
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Properties, style, tint).clicked() {
-            intent.properties_dir = true;
-            menu_ui.close_menu();
-        }
-        if menu_row_glyph(
-            menu_ui,
-            true,
-            pack,
-            IconGlyph::Gear,
-            "Preferences (Ctrl+,)",
-            style,
-            tint,
-        )
-        .clicked()
-        {
-            intent.preferences = true;
-            menu_ui.close_menu();
-        }
+                menu_ui.separator();
+                if menu_row(menu_ui, true, pack, fm::MenuAction::Terminal, style, tint).clicked() {
+                    intent.terminal = true;
+                    menu_ui.close_menu();
+                }
+                if menu_row(menu_ui, true, pack, fm::MenuAction::Reveal, style, tint).clicked() {
+                    intent.open_in_file_manager = true;
+                    menu_ui.close_menu();
+                }
+                if menu_row(menu_ui, true, pack, fm::MenuAction::Properties, style, tint).clicked()
+                {
+                    intent.properties_dir = true;
+                    menu_ui.close_menu();
+                }
+                if menu_row_glyph(
+                    menu_ui,
+                    true,
+                    pack,
+                    IconGlyph::Gear,
+                    "Preferences (Ctrl+,)",
+                    style,
+                    tint,
+                )
+                .clicked()
+                {
+                    intent.preferences = true;
+                    menu_ui.close_menu();
+                }
 
-        let shift_held = menu_ui.input(|i| i.modifiers.shift);
-        let session_id = crate::platform::ensure_shell_menu_requested(
-            menu_ui.ctx(),
-            &[current_dir.to_path_buf()],
-            true,
-            shift_held,
-            0,
-        );
-        crate::platform::render_shell_menu_section(
-            menu_ui,
-            session_id,
-            &mut intent.invoke_shell_cmd,
-        );
-        intent
+                let shift_held = menu_ui.input(|i| i.modifiers.shift);
+                let session_id = crate::platform::ensure_shell_menu_requested(
+                    menu_ui.ctx(),
+                    &[current_dir.to_path_buf()],
+                    true,
+                    shift_held,
+                    0,
+                );
+                crate::platform::render_shell_menu_section(
+                    menu_ui,
+                    session_id,
+                    &mut intent.invoke_shell_cmd,
+                );
+                intent
+            })
+            .inner
     }
 
     /// Shared file/folder item context menu for Details rows and Grid tiles.
@@ -13350,511 +13358,552 @@ impl ExplorerView {
         item: &FileItem,
         targets: &[PathBuf],
     ) -> ItemMenuIntents {
-        menu_ui.set_min_width(240.0);
-        let mut intent = ItemMenuIntents::default();
-        let is_dir = item.is_dir;
-        let path: PathBuf = item.path.clone();
+        let max_h = (menu_ui.ctx().screen_rect().height() - 24.0).max(140.0);
+        egui::ScrollArea::vertical()
+            .max_height(max_h)
+            .auto_shrink([true, true])
+            .show(menu_ui, |menu_ui| {
+                menu_ui.set_min_width(240.0);
+                let mut intent = ItemMenuIntents::default();
+                let is_dir = item.is_dir;
+                let path: PathBuf = item.path.clone();
 
-        // Multi-select bookkeeping (Explorer rule).
-        let multi = targets.len() > 1;
-        let file_targets: Vec<PathBuf> = targets.iter().filter(|p| p.is_file()).cloned().collect();
-        let archive_targets: Vec<PathBuf> = targets
-            .iter()
-            .filter(|p| {
-                p.extension()
-                    .map(|e| item_kind(&e.to_string_lossy().to_ascii_uppercase()).is_archive)
-                    .unwrap_or(false)
-            })
-            .cloned()
-            .collect();
+                // Multi-select bookkeeping (Explorer rule).
+                let multi = targets.len() > 1;
+                let file_targets: Vec<PathBuf> =
+                    targets.iter().filter(|p| p.is_file()).cloned().collect();
+                let archive_targets: Vec<PathBuf> = targets
+                    .iter()
+                    .filter(|p| {
+                        p.extension()
+                            .map(|e| {
+                                item_kind(&e.to_string_lossy().to_ascii_uppercase()).is_archive
+                            })
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+                    .collect();
 
-        let header = if multi {
-            pluralize_items(targets.len())
-        } else {
-            item.name.clone()
-        };
-        let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
-        let (hdr_glyph, _) = crate::core::icon_packs::IconGlyph::resolve_with_path(
-            Some(&item.path),
-            &item.name,
-            &item.extension,
-            item.is_dir,
-            icon_spec.is_image,
-            icon_spec.is_media,
-            icon_spec.is_archive,
-            icon_spec.is_document,
-            icon_spec.is_code,
-            icon_spec.color_rgb,
-        );
-        fm::menu_header_with_icon(menu_ui, pack, hdr_glyph, &header, tint);
-        menu_ui.separator();
-
-        // -- Open group --
-        if is_dir {
-            if menu_row(menu_ui, true, pack, fm::MenuAction::OpenFolder, style, tint).clicked() {
-                intent.nav_into_dir = Some(path.clone());
-                menu_ui.close_menu();
-            }
-            if menu_row(menu_ui, true, pack, fm::MenuAction::NewWindow, style, tint).clicked() {
-                intent.open_in_new_window = Some(path.clone());
-                menu_ui.close_menu();
-            }
-            if menu_row(menu_ui, true, pack, fm::MenuAction::NewTab, style, tint).clicked() {
-                intent.open_in_new_tab = Some(path.clone());
-                menu_ui.close_menu();
-            }
-        } else {
-            if menu_row(menu_ui, true, pack, fm::MenuAction::OpenFile, style, tint).clicked() {
-                intent.open_default = Some(path.clone());
-                menu_ui.close_menu();
-            }
-            if menu_row(menu_ui, !multi, pack, fm::MenuAction::Edit, style, tint).clicked() {
-                intent.open_in_editor = Some(path.clone());
-                menu_ui.close_menu();
-            }
-            let kind = item_kind(&item.extension);
-            if kind.is_media
-                && menu_row(menu_ui, !multi, pack, fm::MenuAction::Play, style, tint).clicked()
-            {
-                intent.play = Some(path.clone());
-                menu_ui.close_menu();
-            }
-            if !file_targets.is_empty()
-                && file_targets.iter().any(|p| item_kind_ext(p).is_printable)
-                && menu_row(menu_ui, true, pack, fm::MenuAction::Print, style, tint).clicked()
-            {
-                intent.print = Some(
-                    file_targets
-                        .iter()
-                        .filter(|p| item_kind_ext(p).is_printable)
-                        .cloned()
-                        .collect(),
+                let header = if multi {
+                    pluralize_items(targets.len())
+                } else {
+                    item.name.clone()
+                };
+                let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+                let (hdr_glyph, _) = crate::core::icon_packs::IconGlyph::resolve_with_path(
+                    Some(&item.path),
+                    &item.name,
+                    &item.extension,
+                    item.is_dir,
+                    icon_spec.is_image,
+                    icon_spec.is_media,
+                    icon_spec.is_archive,
+                    icon_spec.is_document,
+                    icon_spec.is_code,
+                    icon_spec.color_rgb,
                 );
-                menu_ui.close_menu();
-            }
-            if menu_row(
-                menu_ui,
-                !multi,
-                pack,
-                fm::MenuAction::QuickLook,
-                style,
-                tint,
-            )
-            .clicked()
-            {
-                intent.peek = Some(item.clone());
-                menu_ui.close_menu();
-            }
-        }
+                fm::menu_header_with_icon(menu_ui, pack, hdr_glyph, &header, tint);
+                menu_ui.separator();
 
-        menu_ui.separator();
-
-        // -- Media/image verbs (single item, non-dir) --
-        if !is_dir && !multi {
-            let kind = item_kind(&item.extension);
-            if kind.is_image
-                && menu_row(menu_ui, true, pack, fm::MenuAction::Wallpaper, style, tint).clicked()
-            {
-                intent.wallpaper = Some(path.clone());
-                menu_ui.close_menu();
-            }
-            if kind.is_image
-                && menu_row(menu_ui, true, pack, fm::MenuAction::Rotate, style, tint).clicked()
-            {
-                intent.rotate = Some(path.clone());
-                menu_ui.close_menu();
-            }
-            // Type-aware Convert submenu - the SAME engine the radial wheel
-            // uses (UniversalRegistry::get_sectors_for_file): every converter
-            // the Studio's left column offers, scoped to this file's type, so
-            // irrelevant formats never appear.
-            let sectors = crate::core::registry::UniversalRegistry::get_sectors_for_file(&path);
-            let in_ext = item.extension.to_ascii_uppercase();
-            fm::submenu(
-                menu_ui,
-                "Convert",
-                pack,
-                style,
-                tint,
-                fm::MenuAction::Transcode,
-                |sub_ui| {
-                    sub_ui.set_min_width(210.0);
-                    for fmt in &sectors {
-                        match *fmt {
-                            // MORE folds into the full list below; ALL gets its
-                            // own explicit row after the separator.
-                            "MORE" | "ALL" => continue,
-                            // Nothing to extract FROM a directory entry itself.
-                            "EXTRACT" if is_dir => continue,
-                            label => {
-                                let text = if label.eq_ignore_ascii_case(&in_ext) {
-                                    format!("Rebuild {label} (zero-loss)")
-                                } else {
-                                    format!("Convert to {label}")
-                                };
-                                if fm::menu_item_labeled(
-                                    sub_ui,
-                                    pack,
-                                    fm::MenuAction::Transcode,
-                                    &text,
-                                    style,
-                                    tint,
-                                )
-                                .clicked()
-                                {
-                                    intent.transcode = Some((targets.to_vec(), label.to_string()));
-                                    sub_ui.close_menu();
-                                }
-                            }
-                        }
+                // -- Open group --
+                if is_dir {
+                    if menu_row(menu_ui, true, pack, fm::MenuAction::OpenFolder, style, tint)
+                        .clicked()
+                    {
+                        intent.nav_into_dir = Some(path.clone());
+                        menu_ui.close_menu();
                     }
-                    sub_ui.separator();
-                    if fm::menu_item_labeled(
-                        sub_ui,
+                    if menu_row(menu_ui, true, pack, fm::MenuAction::NewWindow, style, tint)
+                        .clicked()
+                    {
+                        intent.open_in_new_window = Some(path.clone());
+                        menu_ui.close_menu();
+                    }
+                    if menu_row(menu_ui, true, pack, fm::MenuAction::NewTab, style, tint).clicked()
+                    {
+                        intent.open_in_new_tab = Some(path.clone());
+                        menu_ui.close_menu();
+                    }
+                } else {
+                    if menu_row(menu_ui, true, pack, fm::MenuAction::OpenFile, style, tint)
+                        .clicked()
+                    {
+                        intent.open_default = Some(path.clone());
+                        menu_ui.close_menu();
+                    }
+                    if menu_row(menu_ui, !multi, pack, fm::MenuAction::Edit, style, tint).clicked()
+                    {
+                        intent.open_in_editor = Some(path.clone());
+                        menu_ui.close_menu();
+                    }
+                    let kind = item_kind(&item.extension);
+                    if kind.is_media
+                        && menu_row(menu_ui, !multi, pack, fm::MenuAction::Play, style, tint)
+                            .clicked()
+                    {
+                        intent.play = Some(path.clone());
+                        menu_ui.close_menu();
+                    }
+                    if !file_targets.is_empty()
+                        && file_targets.iter().any(|p| item_kind_ext(p).is_printable)
+                        && menu_row(menu_ui, true, pack, fm::MenuAction::Print, style, tint)
+                            .clicked()
+                    {
+                        intent.print = Some(
+                            file_targets
+                                .iter()
+                                .filter(|p| item_kind_ext(p).is_printable)
+                                .cloned()
+                                .collect(),
+                        );
+                        menu_ui.close_menu();
+                    }
+                    if menu_row(
+                        menu_ui,
+                        !multi,
                         pack,
-                        fm::MenuAction::Transcode,
-                        "All formats (batch)",
+                        fm::MenuAction::QuickLook,
                         style,
                         tint,
                     )
                     .clicked()
                     {
-                        intent.transcode = Some((targets.to_vec(), "ALL".to_string()));
-                        sub_ui.close_menu();
+                        intent.peek = Some(item.clone());
+                        menu_ui.close_menu();
                     }
-                },
-            );
-        }
-        if !archive_targets.is_empty()
-            && menu_row(menu_ui, true, pack, fm::MenuAction::Extract, style, tint).clicked()
-        {
-            intent.extract = Some(archive_targets.clone());
-            menu_ui.close_menu();
-        }
-        if menu_row(menu_ui, true, pack, fm::MenuAction::PackZip, style, tint).clicked() {
-            intent.pack = Some(targets.to_vec());
-            menu_ui.close_menu();
-        }
-        if !file_targets.is_empty() {
-            if menu_row(menu_ui, true, pack, fm::MenuAction::Conform, style, tint).clicked() {
-                intent.exam_conform = Some(file_targets.clone());
-                menu_ui.close_menu();
-            }
-            if menu_row(menu_ui, true, pack, fm::MenuAction::Inspect, style, tint).clicked() {
-                intent.inspect = Some(file_targets.clone());
-                menu_ui.close_menu();
-            }
-            if !multi {
-                let candidates = crate::gui::context_menu::open_with_candidates(&path);
-                fm::submenu(
-                    menu_ui,
-                    fm::MenuAction::OpenWith.label(style),
-                    pack,
-                    style,
-                    tint,
-                    fm::MenuAction::OpenWith,
-                    |sub_ui| {
-                        sub_ui.set_min_width(170.0);
-                        for (label, command) in candidates.iter() {
+                }
+
+                menu_ui.separator();
+
+                // -- Media/image verbs (single item, non-dir) --
+                if !is_dir && !multi {
+                    let kind = item_kind(&item.extension);
+                    if kind.is_image
+                        && menu_row(menu_ui, true, pack, fm::MenuAction::Wallpaper, style, tint)
+                            .clicked()
+                    {
+                        intent.wallpaper = Some(path.clone());
+                        menu_ui.close_menu();
+                    }
+                    if kind.is_image
+                        && menu_row(menu_ui, true, pack, fm::MenuAction::Rotate, style, tint)
+                            .clicked()
+                    {
+                        intent.rotate = Some(path.clone());
+                        menu_ui.close_menu();
+                    }
+                    // Type-aware Convert submenu - the SAME engine the radial wheel
+                    // uses (UniversalRegistry::get_sectors_for_file): every converter
+                    // the Studio's left column offers, scoped to this file's type, so
+                    // irrelevant formats never appear.
+                    let sectors =
+                        crate::core::registry::UniversalRegistry::get_sectors_for_file(&path);
+                    let in_ext = item.extension.to_ascii_uppercase();
+                    fm::submenu(
+                        menu_ui,
+                        "Convert",
+                        pack,
+                        style,
+                        tint,
+                        fm::MenuAction::Transcode,
+                        |sub_ui| {
+                            sub_ui.set_min_width(210.0);
+                            for fmt in &sectors {
+                                match *fmt {
+                                    // MORE folds into the full list below; ALL gets its
+                                    // own explicit row after the separator.
+                                    "MORE" | "ALL" => continue,
+                                    // Nothing to extract FROM a directory entry itself.
+                                    "EXTRACT" if is_dir => continue,
+                                    label => {
+                                        let text = if label.eq_ignore_ascii_case(&in_ext) {
+                                            format!("Rebuild {label} (zero-loss)")
+                                        } else {
+                                            format!("Convert to {label}")
+                                        };
+                                        if fm::menu_item_labeled(
+                                            sub_ui,
+                                            pack,
+                                            fm::MenuAction::Transcode,
+                                            &text,
+                                            style,
+                                            tint,
+                                        )
+                                        .clicked()
+                                        {
+                                            intent.transcode =
+                                                Some((targets.to_vec(), label.to_string()));
+                                            sub_ui.close_menu();
+                                        }
+                                    }
+                                }
+                            }
+                            sub_ui.separator();
                             if fm::menu_item_labeled(
                                 sub_ui,
                                 pack,
-                                fm::MenuAction::OpenWith,
+                                fm::MenuAction::Transcode,
+                                "All formats (batch)",
+                                style,
+                                tint,
+                            )
+                            .clicked()
+                            {
+                                intent.transcode = Some((targets.to_vec(), "ALL".to_string()));
+                                sub_ui.close_menu();
+                            }
+                        },
+                    );
+                }
+                if !archive_targets.is_empty()
+                    && menu_row(menu_ui, true, pack, fm::MenuAction::Extract, style, tint).clicked()
+                {
+                    intent.extract = Some(archive_targets.clone());
+                    menu_ui.close_menu();
+                }
+                if menu_row(menu_ui, true, pack, fm::MenuAction::PackZip, style, tint).clicked() {
+                    intent.pack = Some(targets.to_vec());
+                    menu_ui.close_menu();
+                }
+                if !file_targets.is_empty() {
+                    if menu_row(menu_ui, true, pack, fm::MenuAction::Conform, style, tint).clicked()
+                    {
+                        intent.exam_conform = Some(file_targets.clone());
+                        menu_ui.close_menu();
+                    }
+                    if menu_row(menu_ui, true, pack, fm::MenuAction::Inspect, style, tint).clicked()
+                    {
+                        intent.inspect = Some(file_targets.clone());
+                        menu_ui.close_menu();
+                    }
+                    if !multi {
+                        let candidates = crate::gui::context_menu::open_with_candidates(&path);
+                        fm::submenu(
+                            menu_ui,
+                            fm::MenuAction::OpenWith.label(style),
+                            pack,
+                            style,
+                            tint,
+                            fm::MenuAction::OpenWith,
+                            |sub_ui| {
+                                sub_ui.set_min_width(170.0);
+                                for (label, command) in candidates.iter() {
+                                    if fm::menu_item_labeled(
+                                        sub_ui,
+                                        pack,
+                                        fm::MenuAction::OpenWith,
+                                        label,
+                                        style,
+                                        tint,
+                                    )
+                                    .clicked()
+                                    {
+                                        intent.open_with_launch =
+                                            Some((command.clone(), path.clone()));
+                                        sub_ui.close_menu();
+                                    }
+                                }
+                                if !candidates.is_empty() {
+                                    sub_ui.separator();
+                                }
+                                if fm::menu_item_labeled(
+                                    sub_ui,
+                                    pack,
+                                    fm::MenuAction::OpenWith,
+                                    "Choose another app...",
+                                    style,
+                                    tint,
+                                )
+                                .clicked()
+                                {
+                                    intent.open_with = Some(path.clone());
+                                    sub_ui.close_menu();
+                                }
+                            },
+                        );
+                    }
+                }
+                if menu_row(menu_ui, true, pack, fm::MenuAction::Duplicate, style, tint).clicked() {
+                    intent.duplicate = Some(targets.to_vec());
+                    menu_ui.close_menu();
+                }
+
+                menu_ui.separator();
+                // -- Send to (Windows SendTo folder entries) --
+                let send_dests = crate::gui::context_menu::send_to_targets();
+                if !send_dests.is_empty() {
+                    fm::submenu(
+                        menu_ui,
+                        fm::MenuAction::SendTo.label(style),
+                        pack,
+                        style,
+                        tint,
+                        fm::MenuAction::SendTo,
+                        |sub_ui| {
+                            sub_ui.set_min_width(170.0);
+                            for (label, dest) in send_dests.iter().take(12) {
+                                if fm::menu_item_glyph(
+                                    sub_ui,
+                                    pack,
+                                    IconGlyph::ActionShortcut,
+                                    label,
+                                    style,
+                                    tint,
+                                )
+                                .clicked()
+                                {
+                                    intent.send_to =
+                                        Some((targets.to_vec(), dest.clone(), label.clone()));
+                                    sub_ui.close_menu();
+                                }
+                            }
+                        },
+                    );
+                }
+
+                menu_ui.separator();
+
+                // -- Shell helpers --
+                fm::submenu(
+                    menu_ui,
+                    "Copy as path",
+                    pack,
+                    style,
+                    tint,
+                    fm::MenuAction::CopyPath,
+                    |sub_ui| {
+                        sub_ui.set_min_width(190.0);
+                        for (kind, label) in [
+                            (CopyPathKind::Full, "Native separators"),
+                            (CopyPathKind::Name, "Name only"),
+                            (CopyPathKind::Quoted, "Quoted (\"...\")"),
+                            (CopyPathKind::ForwardSlashes, "Forward slashes (/)"),
+                            (CopyPathKind::Parent, "Containing folder"),
+                        ] {
+                            if fm::menu_item_glyph(
+                                sub_ui,
+                                pack,
+                                IconGlyph::ActionPath,
                                 label,
                                 style,
                                 tint,
                             )
                             .clicked()
                             {
-                                intent.open_with_launch = Some((command.clone(), path.clone()));
+                                intent.copy_path = Some((path.clone(), kind));
                                 sub_ui.close_menu();
                             }
                         }
-                        if !candidates.is_empty() {
-                            sub_ui.separator();
-                        }
-                        if fm::menu_item_labeled(
-                            sub_ui,
-                            pack,
-                            fm::MenuAction::OpenWith,
-                            "Choose another app...",
-                            style,
-                            tint,
-                        )
-                        .clicked()
-                        {
-                            intent.open_with = Some(path.clone());
-                            sub_ui.close_menu();
-                        }
                     },
                 );
-            }
-        }
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Duplicate, style, tint).clicked() {
-            intent.duplicate = Some(targets.to_vec());
-            menu_ui.close_menu();
-        }
-
-        menu_ui.separator();
-        // -- Send to (Windows SendTo folder entries) --
-        let send_dests = crate::gui::context_menu::send_to_targets();
-        if !send_dests.is_empty() {
-            fm::submenu(
-                menu_ui,
-                fm::MenuAction::SendTo.label(style),
-                pack,
-                style,
-                tint,
-                fm::MenuAction::SendTo,
-                |sub_ui| {
-                    sub_ui.set_min_width(170.0);
-                    for (label, dest) in send_dests.iter().take(12) {
-                        if fm::menu_item_glyph(
-                            sub_ui,
-                            pack,
-                            IconGlyph::ActionShortcut,
-                            label,
-                            style,
-                            tint,
-                        )
-                        .clicked()
-                        {
-                            intent.send_to = Some((targets.to_vec(), dest.clone(), label.clone()));
-                            sub_ui.close_menu();
-                        }
-                    }
-                },
-            );
-        }
-
-        menu_ui.separator();
-
-        // -- Shell helpers --
-        fm::submenu(
-            menu_ui,
-            "Copy as path",
-            pack,
-            style,
-            tint,
-            fm::MenuAction::CopyPath,
-            |sub_ui| {
-                sub_ui.set_min_width(190.0);
-                for (kind, label) in [
-                    (CopyPathKind::Full, "Native separators"),
-                    (CopyPathKind::Name, "Name only"),
-                    (CopyPathKind::Quoted, "Quoted (\"...\")"),
-                    (CopyPathKind::ForwardSlashes, "Forward slashes (/)"),
-                    (CopyPathKind::Parent, "Containing folder"),
-                ] {
-                    if fm::menu_item_glyph(sub_ui, pack, IconGlyph::ActionPath, label, style, tint)
-                        .clicked()
-                    {
-                        intent.copy_path = Some((path.clone(), kind));
-                        sub_ui.close_menu();
-                    }
+                if menu_row(menu_ui, true, pack, fm::MenuAction::Reveal, style, tint).clicked() {
+                    intent.reveal = Some(path.clone());
+                    menu_ui.close_menu();
                 }
-            },
-        );
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Reveal, style, tint).clicked() {
-            intent.reveal = Some(path.clone());
-            menu_ui.close_menu();
-        }
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Terminal, style, tint).clicked() {
-            let dir_target = if is_dir {
-                path.clone()
-            } else {
-                path.parent().unwrap_or(&path).to_path_buf()
-            };
-            intent.terminal_here = Some(dir_target);
-            menu_ui.close_menu();
-        }
-        if cfg!(windows)
-            && menu_row(menu_ui, true, pack, fm::MenuAction::Shortcut, style, tint).clicked()
-        {
-            intent.shortcut = Some(path.clone());
-            menu_ui.close_menu();
-        }
-
-        // -- Custom user entries (Phase 4 menu customization) --
-        {
-            let wanted = if is_dir {
-                crate::core::config::CustomMenuScope::Folders
-            } else {
-                crate::core::config::CustomMenuScope::Files
-            };
-            let cfg = crate::core::MossambiConfig::load();
-            let customs: Vec<_> = cfg
-                .context_menu_items
-                .iter()
-                .filter(|c| {
-                    c.show_in == wanted || c.show_in == crate::core::config::CustomMenuScope::All
-                })
-                .collect();
-            if !customs.is_empty() {
-                menu_ui.separator();
-                for entry in customs {
-                    if fm::menu_item_custom(menu_ui, &entry.label).clicked() {
-                        intent.custom_item = Some((entry.clone(), Some(path.clone())));
-                        menu_ui.close_menu();
-                    }
+                if menu_row(menu_ui, true, pack, fm::MenuAction::Terminal, style, tint).clicked() {
+                    let dir_target = if is_dir {
+                        path.clone()
+                    } else {
+                        path.parent().unwrap_or(&path).to_path_buf()
+                    };
+                    intent.terminal_here = Some(dir_target);
+                    menu_ui.close_menu();
                 }
-            }
-        }
-
-        // -- Clipboard group --
-        menu_ui.separator();
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Cut, style, tint).clicked() {
-            intent.cut = Some(targets.to_vec());
-            menu_ui.close_menu();
-        }
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Copy, style, tint).clicked() {
-            intent.copy = Some(targets.to_vec());
-            menu_ui.close_menu();
-        }
-
-        // -- Tags submenu (Finder-style coloured tag assignment) --
-        menu_ui.separator();
-        {
-            // Current tags of the clicked item drive the checkbox state.
-            let current_tags = crate::core::tags::read_tags_cache(&path);
-            let custom_tags = crate::core::MossambiConfig::load().custom_tags;
-            fm::submenu(
-                menu_ui,
-                fm::MenuAction::Tags.label(style),
-                pack,
-                style,
-                tint,
-                fm::MenuAction::Tags,
-                |sub_ui| {
-                    sub_ui.set_min_width(190.0);
-                    for tag_name in crate::core::tags::available_tags_in(&custom_tags) {
-                        let is_tagged = current_tags
-                            .iter()
-                            .any(|t| t.eq_ignore_ascii_case(&tag_name));
-                        let label = if is_tagged {
-                            format!("Remove {tag_name}")
-                        } else {
-                            format!("Add {tag_name}")
-                        };
-                        if fm::menu_item_tag_dot(
-                            sub_ui,
-                            crate::core::tags::tag_color(&tag_name),
-                            &label,
-                            None,
-                        )
+                if cfg!(windows)
+                    && menu_row(menu_ui, true, pack, fm::MenuAction::Shortcut, style, tint)
                         .clicked()
-                        {
-                            if is_tagged {
-                                intent.clear_tag = Some((targets.to_vec(), tag_name.clone()));
-                            } else {
-                                intent.set_tag = Some((targets.to_vec(), tag_name.clone()));
+                {
+                    intent.shortcut = Some(path.clone());
+                    menu_ui.close_menu();
+                }
+
+                // -- Custom user entries (Phase 4 menu customization) --
+                {
+                    let wanted = if is_dir {
+                        crate::core::config::CustomMenuScope::Folders
+                    } else {
+                        crate::core::config::CustomMenuScope::Files
+                    };
+                    let cfg = crate::core::MossambiConfig::load();
+                    let customs: Vec<_> = cfg
+                        .context_menu_items
+                        .iter()
+                        .filter(|c| {
+                            c.show_in == wanted
+                                || c.show_in == crate::core::config::CustomMenuScope::All
+                        })
+                        .collect();
+                    if !customs.is_empty() {
+                        menu_ui.separator();
+                        for entry in customs {
+                            if fm::menu_item_custom(menu_ui, &entry.label).clicked() {
+                                intent.custom_item = Some((entry.clone(), Some(path.clone())));
+                                menu_ui.close_menu();
                             }
-                            sub_ui.close_menu();
                         }
                     }
-                    if fm::menu_item_labeled(
-                        sub_ui,
+                }
+
+                // -- Clipboard group --
+                menu_ui.separator();
+                if menu_row(menu_ui, true, pack, fm::MenuAction::Cut, style, tint).clicked() {
+                    intent.cut = Some(targets.to_vec());
+                    menu_ui.close_menu();
+                }
+                if menu_row(menu_ui, true, pack, fm::MenuAction::Copy, style, tint).clicked() {
+                    intent.copy = Some(targets.to_vec());
+                    menu_ui.close_menu();
+                }
+
+                // -- Tags submenu (Finder-style coloured tag assignment) --
+                menu_ui.separator();
+                {
+                    // Current tags of the clicked item drive the checkbox state.
+                    let current_tags = crate::core::tags::read_tags_cache(&path);
+                    let custom_tags = crate::core::MossambiConfig::load().custom_tags;
+                    fm::submenu(
+                        menu_ui,
+                        fm::MenuAction::Tags.label(style),
                         pack,
+                        style,
+                        tint,
                         fm::MenuAction::Tags,
-                        "New Tag...",
+                        |sub_ui| {
+                            sub_ui.set_min_width(190.0);
+                            for tag_name in crate::core::tags::available_tags_in(&custom_tags) {
+                                let is_tagged = current_tags
+                                    .iter()
+                                    .any(|t| t.eq_ignore_ascii_case(&tag_name));
+                                let label = if is_tagged {
+                                    format!("Remove {tag_name}")
+                                } else {
+                                    format!("Add {tag_name}")
+                                };
+                                if fm::menu_item_tag_dot(
+                                    sub_ui,
+                                    crate::core::tags::tag_color(&tag_name),
+                                    &label,
+                                    None,
+                                )
+                                .clicked()
+                                {
+                                    if is_tagged {
+                                        intent.clear_tag =
+                                            Some((targets.to_vec(), tag_name.clone()));
+                                    } else {
+                                        intent.set_tag = Some((targets.to_vec(), tag_name.clone()));
+                                    }
+                                    sub_ui.close_menu();
+                                }
+                            }
+                            if fm::menu_item_labeled(
+                                sub_ui,
+                                pack,
+                                fm::MenuAction::Tags,
+                                "New Tag...",
+                                style,
+                                tint,
+                            )
+                            .clicked()
+                            {
+                                intent.new_tag = true;
+                                sub_ui.close_menu();
+                            }
+                        },
+                    );
+                }
+
+                // -- Pin to Sidebar (folders only) --
+                if is_dir {
+                    let is_pinned = {
+                        let cfg = crate::core::MossambiConfig::load();
+                        crate::core::pin_contains(&cfg.pinned_custom, &path)
+                    };
+                    let label = if is_pinned {
+                        "Unpin from Sidebar"
+                    } else {
+                        fm::MenuAction::PinSidebar.label(style)
+                    };
+                    if fm::menu_item_labeled(
+                        menu_ui,
+                        pack,
+                        fm::MenuAction::PinSidebar,
+                        label,
                         style,
                         tint,
                     )
                     .clicked()
                     {
-                        intent.new_tag = true;
-                        sub_ui.close_menu();
+                        intent.pin_sidebar = Some((path.clone(), !is_pinned));
+                        menu_ui.close_menu();
                     }
-                },
-            );
-        }
+                }
 
-        // -- Pin to Sidebar (folders only) --
-        if is_dir {
-            let is_pinned = {
-                let cfg = crate::core::MossambiConfig::load();
-                crate::core::pin_contains(&cfg.pinned_custom, &path)
-            };
-            let label = if is_pinned {
-                "Unpin from Sidebar"
-            } else {
-                fm::MenuAction::PinSidebar.label(style)
-            };
-            if fm::menu_item_labeled(
-                menu_ui,
-                pack,
-                fm::MenuAction::PinSidebar,
-                label,
-                style,
-                tint,
-            )
-            .clicked()
-            {
-                intent.pin_sidebar = Some((path.clone(), !is_pinned));
-                menu_ui.close_menu();
-            }
-        }
+                // -- Danger group --
+                menu_ui.separator();
+                if multi {
+                    if menu_ui
+                        .button(format!(
+                            "Batch Rename ({})...",
+                            pluralize_items(targets.len())
+                        ))
+                        .clicked()
+                    {
+                        intent.batch_rename = Some(targets.to_vec());
+                        menu_ui.close_menu();
+                    }
+                } else if menu_row(menu_ui, true, pack, fm::MenuAction::Rename, style, tint)
+                    .clicked()
+                {
+                    if let Some(name) = path.file_name() {
+                        intent.rename = Some((path.clone(), name.to_string_lossy().to_string()));
+                    }
+                    menu_ui.close_menu();
+                }
+                if menu_row(menu_ui, true, pack, fm::MenuAction::Delete, style, tint).clicked() {
+                    intent.deleted = Some(targets.to_vec());
+                    menu_ui.close_menu();
+                }
+                if crate::gui::context_menu::win_defender_available()
+                    && menu_row(menu_ui, true, pack, fm::MenuAction::Defender, style, tint)
+                        .clicked()
+                {
+                    intent.defender = Some(path.clone());
+                    menu_ui.close_menu();
+                }
 
-        // -- Danger group --
-        menu_ui.separator();
-        if multi {
-            if menu_ui
-                .button(format!(
-                    "Batch Rename ({})...",
-                    pluralize_items(targets.len())
-                ))
+                menu_ui.separator();
+                if menu_row(
+                    menu_ui,
+                    !multi,
+                    pack,
+                    fm::MenuAction::Properties,
+                    style,
+                    tint,
+                )
                 .clicked()
-            {
-                intent.batch_rename = Some(targets.to_vec());
-                menu_ui.close_menu();
-            }
-        } else if menu_row(menu_ui, true, pack, fm::MenuAction::Rename, style, tint).clicked() {
-            if let Some(name) = path.file_name() {
-                intent.rename = Some((path.clone(), name.to_string_lossy().to_string()));
-            }
-            menu_ui.close_menu();
-        }
-        if menu_row(menu_ui, true, pack, fm::MenuAction::Delete, style, tint).clicked() {
-            intent.deleted = Some(targets.to_vec());
-            menu_ui.close_menu();
-        }
-        if crate::gui::context_menu::win_defender_available()
-            && menu_row(menu_ui, true, pack, fm::MenuAction::Defender, style, tint).clicked()
-        {
-            intent.defender = Some(path.clone());
-            menu_ui.close_menu();
-        }
+                {
+                    intent.properties = Some(item.clone());
+                    menu_ui.close_menu();
+                }
 
-        menu_ui.separator();
-        if menu_row(
-            menu_ui,
-            !multi,
-            pack,
-            fm::MenuAction::Properties,
-            style,
-            tint,
-        )
-        .clicked()
-        {
-            intent.properties = Some(item.clone());
-            menu_ui.close_menu();
-        }
+                let shift_held = menu_ui.input(|i| i.modifiers.shift);
+                let session_id = crate::platform::ensure_shell_menu_requested(
+                    menu_ui.ctx(),
+                    targets,
+                    false,
+                    shift_held,
+                    0,
+                );
+                crate::platform::render_shell_menu_section(
+                    menu_ui,
+                    session_id,
+                    &mut intent.invoke_shell_cmd,
+                );
 
-        let shift_held = menu_ui.input(|i| i.modifiers.shift);
-        let session_id = crate::platform::ensure_shell_menu_requested(
-            menu_ui.ctx(),
-            targets,
-            false,
-            shift_held,
-            0,
-        );
-        crate::platform::render_shell_menu_section(
-            menu_ui,
-            session_id,
-            &mut intent.invoke_shell_cmd,
-        );
-
-        intent
+                intent
+            })
+            .inner
     }
 
     /// Delicate Apple HIG selection checkbox with authentic vector checkmark path.
