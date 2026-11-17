@@ -3702,14 +3702,11 @@ impl ExplorerView {
                     .font(egui::TextStyle::Monospace),
             );
             if text_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                let trimmed = self.path_edit_buffer.trim();
-                if trimmed.eq_ignore_ascii_case("home:") || trimmed.eq_ignore_ascii_case("home") {
+                let expanded = crate::core::platform_paths::expand_path_str(&self.path_edit_buffer);
+                if crate::core::platform_paths::is_dashboard_location(&expanded) {
                     self.navigate_to_home();
-                } else {
-                    let new_p = PathBuf::from(&self.path_edit_buffer);
-                    if new_p.exists() {
-                        self.navigate_to(new_p);
-                    }
+                } else if expanded.exists() {
+                    self.navigate_to(expanded);
                 }
                 self.is_editing_path = false;
             }

@@ -991,7 +991,7 @@ impl StudioView {
                             ui,
                             &palette,
                             pack,
-                            IconGlyph::ActionHamburger,
+                            IconGlyph::ActionSidebarToggle,
                             if is_collapsed { muted_rgb } else { text_rgb },
                             "Toggle Sidebar (Ctrl+B)",
                             !is_collapsed,
@@ -1242,30 +1242,24 @@ impl StudioView {
                                             if text_resp.lost_focus()
                                                 && ui.input(|i| i.key_pressed(egui::Key::Enter))
                                             {
-                                                let trimmed = self.explorer_view.path_edit_buffer.trim();
-                                                if trimmed.eq_ignore_ascii_case("home:") || trimmed.eq_ignore_ascii_case("home") {
+                                                let expanded = crate::core::platform_paths::expand_path_str(
+                                                    &self.explorer_view.path_edit_buffer,
+                                                );
+                                                if crate::core::platform_paths::is_dashboard_location(&expanded) {
                                                     nav_target = Some(crate::core::platform_paths::dashboard_location());
-                                                } else {
-                                                    let new_p = PathBuf::from(
-                                                        &self.explorer_view.path_edit_buffer,
-                                                    );
-                                                    if new_p.exists() {
-                                                        nav_target = Some(new_p);
-                                                    }
+                                                } else if expanded.exists() {
+                                                    nav_target = Some(expanded);
                                                 }
                                                 self.explorer_view.is_editing_path = false;
                                             }
                                             if ui.small_button("Go").clicked() {
-                                                let trimmed = self.explorer_view.path_edit_buffer.trim();
-                                                if trimmed.eq_ignore_ascii_case("home:") || trimmed.eq_ignore_ascii_case("home") {
+                                                let expanded = crate::core::platform_paths::expand_path_str(
+                                                    &self.explorer_view.path_edit_buffer,
+                                                );
+                                                if crate::core::platform_paths::is_dashboard_location(&expanded) {
                                                     nav_target = Some(crate::core::platform_paths::dashboard_location());
-                                                } else {
-                                                    let new_p = PathBuf::from(
-                                                        &self.explorer_view.path_edit_buffer,
-                                                    );
-                                                    if new_p.exists() {
-                                                        nav_target = Some(new_p);
-                                                    }
+                                                } else if expanded.exists() {
+                                                    nav_target = Some(expanded);
                                                 }
                                                 self.explorer_view.is_editing_path = false;
                                             }
@@ -1572,7 +1566,7 @@ impl StudioView {
                                 );
                             }
 
-                            // Hamburger menu button (Nautilus / GNOME header bar)
+                            // Main menu button (Nautilus / GNOME header bar)
                             if chrome_spec.toolbar.contains(&ToolbarItem::Hamburger) {
                                 ui.add_space(4.0);
                                 let (h_click, h_resp) =
@@ -1580,9 +1574,9 @@ impl StudioView {
                                         ui,
                                         &palette,
                                         pack,
-                                        IconGlyph::ActionHamburger,
+                                        IconGlyph::ActionMenu,
                                         text_rgb,
-                                        "Menu",
+                                        "Main Menu",
                                         false,
                                     );
                                 let popup_id = ui.make_persistent_id("gnome_hamburger_menu_popover");

@@ -29,7 +29,7 @@ use windows::Win32::System::Com::CoTaskMemFree;
 #[cfg(windows)]
 use windows::Win32::UI::Shell::{
     FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Music, FOLDERID_Pictures,
-    FOLDERID_Videos, SHGetKnownFolderPath, KF_FLAG_DEFAULT,
+    FOLDERID_Profile, FOLDERID_Videos, SHGetKnownFolderPath, KF_FLAG_DEFAULT,
 };
 
 #[cfg(windows)]
@@ -43,11 +43,76 @@ fn get_known_folder(rfid: &GUID) -> Option<PathBuf> {
 }
 
 pub fn home_dir() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(p) = get_known_folder(&FOLDERID_Profile) {
+        if p.exists() {
+            return p;
+        }
+    }
     std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Expands environment variables (%USERPROFILE%, %APPDATA%, %TEMP%, etc. on Windows)
+/// and Unix tilde (`~` / `~/`) into a fully resolved PathBuf.
+pub fn expand_path_str(raw: &str) -> PathBuf {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return PathBuf::new();
+    }
+
+    // Special virtual dashboard location
+    if is_dashboard_location(Path::new(trimmed)) || trimmed.eq_ignore_ascii_case("home:") {
+        return dashboard_location();
+    }
+
+    // 1. Tilde expansion
+    let with_tilde = if trimmed == "~" {
+        home_dir().to_string_lossy().to_string()
+    } else if let Some(rest) = trimmed
+        .strip_prefix("~/")
+        .or_else(|| trimmed.strip_prefix("~\\"))
+    {
+        home_dir().join(rest).to_string_lossy().to_string()
+    } else {
+        trimmed.to_string()
+    };
+
+    // 2. Environment variable expansion (%VAR% on Windows, $VAR on Unix)
+    let mut out = String::with_capacity(with_tilde.len());
+    let mut rest = with_tilde.as_str();
+
+    while let Some(i) = rest.find('%') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        match after.find('%') {
+            Some(j) => {
+                let var_name = &after[..j];
+                if var_name.eq_ignore_ascii_case("USERPROFILE") {
+                    out.push_str(&home_dir().to_string_lossy());
+                } else if let Ok(val) = std::env::var(var_name) {
+                    out.push_str(&val);
+                } else if let Ok(val) = std::env::var(var_name.to_uppercase()) {
+                    out.push_str(&val);
+                } else {
+                    out.push('%');
+                    out.push_str(var_name);
+                    out.push('%');
+                }
+                rest = &after[j + 1..];
+            }
+            None => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+
+    PathBuf::from(out)
 }
 
 /// Home directory as an `Option` for call sites that must distinguish a

@@ -100,7 +100,7 @@ pub use pantone::{
 pub use pins::{
     add as pin_add, contains as pin_contains, move_item as pin_move_item, remove as pin_remove,
 };
-pub use platform_paths::config_dir;
+pub use platform_paths::{config_dir, expand_path_str};
 pub use registry::{
     DynamicWheelSector, FileCategory, FormatInfo, FormatNature, FormatSpecification,
     UniversalRegistry,

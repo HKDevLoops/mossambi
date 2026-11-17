@@ -221,6 +221,10 @@ pub enum IconGlyph {
     ActionMoon,
     ActionPlay,
     ActionHamburger,
+    ActionSidebarToggle,
+    ActionNewWindow,
+    ActionMenu,
+    ActionSliders,
 }
 
 impl IconGlyph {
@@ -1323,18 +1327,28 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
         }
 
         IconGlyph::Drive | IconGlyph::DriveSystem => {
-            let body = st.front;
-            let line = st.back;
+            let is_sys = glyph == IconGlyph::DriveSystem;
+            // A proper 3D-perspective hard drive: angled top face, body, and platter slot
+            let top_col = if is_sys { "#5B8DEF" } else { st.front };
+            let body_col = if is_sys { "#3D6AD4" } else { st.back };
+            let detail_col = if pack == IconPack::Hyprland { "#9DB8CC" } else { "#FFFFFF" };
+            let outline_attr = match st.outline {
+                Some(c) => format!("stroke='{}' stroke-width='2'", c),
+                None => String::new(),
+            };
             format!(
-                "{head}<rect x='12' y='34' width='76' height='34' rx='6' fill='{b}' {o}/>\
-                 <rect x='12' y='60' width='76' height='8' rx='2' fill='{l}' opacity='0.55'/>\
-                 <circle cx='76' cy='58' r='4' fill='#FFFFFF' opacity='0.9'/>\
-                 <path d='M30 44 L58 44 M30 52 L52 52' stroke='{d}' stroke-width='3' stroke-linecap='round' opacity='0.65'/></svg>",
+                "{head}\
+                 <path d='M12 44 L50 30 L88 44 L88 62 Q88 68 50 74 Q12 68 12 62 Z' fill='{body}' {o}/>\
+                 <path d='M12 44 Q12 50 50 56 Q88 50 88 44 Q88 38 50 44 Q12 38 12 44 Z' fill='{top}' opacity='0.95'/>\
+                 <ellipse cx='50' cy='44' rx='28' ry='6' fill='none' stroke='{d}' stroke-width='2' opacity='0.3'/>\
+                 <ellipse cx='50' cy='44' rx='10' ry='2.5' fill='{d}' opacity='0.4'/>\
+                 <circle cx='74' cy='58' r='3.5' fill='{d}' opacity='0.8'/>\
+                 <rect x='26' y='62' width='20' height='2.4' rx='1.2' fill='{d}' opacity='0.3'/></svg>",
                 head = head,
-                b = body,
-                l = line,
-                o = match st.outline { Some(c) => format!("stroke='{}' stroke-width='2'", c), None => String::new() },
-                d = if pack == IconPack::Hyprland { "#9DB8CC" } else { "#FFFFFF" }
+                body = body_col,
+                top = top_col,
+                o = outline_attr,
+                d = detail_col,
             )
         }
 
@@ -1390,25 +1404,46 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
         | IconGlyph::PageSlide | IconGlyph::PagePdf | IconGlyph::PageImage | IconGlyph::PageVideo
         | IconGlyph::PageAudio | IconGlyph::PageCode | IconGlyph::PageConfig
         | IconGlyph::PageArchive | IconGlyph::PageExe | IconGlyph::PageLibrary => {
+            // Type-specific accent color for the bottom badge stripe
+            let type_color = match glyph {
+                IconGlyph::PageText | IconGlyph::PageDoc => "#3B82F6",
+                IconGlyph::PageSheet => "#22C55E",
+                IconGlyph::PageSlide => "#F59E0B",
+                IconGlyph::PagePdf => "#EF4444",
+                IconGlyph::PageImage => "#A855F7",
+                IconGlyph::PageVideo => "#EC4899",
+                IconGlyph::PageAudio => "#F97316",
+                IconGlyph::PageCode => "#06B6D4",
+                IconGlyph::PageConfig => "#6B7280",
+                IconGlyph::PageArchive => "#D97706",
+                IconGlyph::PageExe => "#10B981",
+                IconGlyph::PageLibrary => "#8B5CF6",
+                _ => &accent,
+            };
             let em = page_emblem(glyph, &st, &accent).unwrap_or_else(|| {
                 format!(
                     "<rect x='34' y='46' width='32' height='2.8' rx='1.4' fill='{l}' opacity='0.7'/> \
                      <rect x='34' y='53' width='32' height='2.8' rx='1.4' fill='{l}' opacity='0.7'/> \
                      <rect x='34' y='60' width='20' height='2.8' rx='1.4' fill='{a}'/>",
                     l = st.line,
-                    a = accent
+                    a = accent,
                 )
             });
+            // Type badge stripe at bottom of page for visual file-type color coding
+            let badge = format!(
+                "<rect x='24' y='78' width='52' height='8' rx='3' fill='{tc}' opacity='0.85'/>",
+                tc = type_color,
+            );
             format!(
                 "{head}<path d='M24 14 L62 14 L76 28 L76 82 Q76 86 72 86 L28 86 Q24 86 24 82 Z' fill='{p}' stroke='{e}' stroke-width='2'/>\
                  <path d='M62 14 L62 28 L76 28 Z' fill='{f}'/>\
-                 <path d='M62 28 L76 28 L76 42 Z' fill='#000' opacity='0.0'/>\
-                 {e2}</svg>",
+                 {e2}{badge}</svg>",
                 head = head,
                 p = st.page,
                 e = st.page_edge,
                 f = st.fold,
-                e2 = em
+                e2 = em,
+                badge = badge,
             )
         }
 
@@ -1675,6 +1710,41 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
         IconGlyph::ActionPlay => format!(
             "{head}<circle cx='50' cy='50' r='34' fill='none' stroke='{a}' stroke-width='6'/>\
              <path d='M42 34 L68 50 L42 66 Z' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionSidebarToggle => format!(
+            "{head}<rect x='18' y='20' width='64' height='60' rx='7' fill='none' stroke='{a}' stroke-width='6'/>\
+             <rect x='22' y='24' width='18' height='52' rx='3' fill='{a}' opacity='0.45'/>\
+             <line x1='42' y1='20' x2='42' y2='80' stroke='{a}' stroke-width='6'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionNewWindow => format!(
+            "{head}<rect x='18' y='28' width='54' height='48' rx='6' fill='none' stroke='{a}' stroke-width='6'/>\
+             <path d='M36 18 L76 18 Q82 18 82 24 L82 62' fill='none' stroke='{a}' stroke-width='6' stroke-linecap='round'/>\
+             <line x1='45' y1='44' x2='45' y2='60' stroke='{a}' stroke-width='6' stroke-linecap='round'/>\
+             <line x1='37' y1='52' x2='53' y2='52' stroke='{a}' stroke-width='6' stroke-linecap='round'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionMenu => format!(
+            "{head}<line x1='20' y1='30' x2='80' y2='30' stroke='{a}' stroke-width='6' stroke-linecap='round'/>\
+             <circle cx='62' cy='30' r='6' fill='{a}'/>\
+             <line x1='20' y1='50' x2='80' y2='50' stroke='{a}' stroke-width='6' stroke-linecap='round'/>\
+             <circle cx='38' cy='50' r='6' fill='{a}'/>\
+             <line x1='20' y1='70' x2='80' y2='70' stroke='{a}' stroke-width='6' stroke-linecap='round'/>\
+             <circle cx='56' cy='70' r='6' fill='{a}'/></svg>",
+            head = head,
+            a = accent
+        ),
+        IconGlyph::ActionSliders => format!(
+            "{head}<line x1='18' y1='28' x2='82' y2='28' stroke='{a}' stroke-width='6' stroke-linecap='round'/>\
+             <circle cx='36' cy='28' r='7' fill='{a}'/>\
+             <line x1='18' y1='50' x2='82' y2='50' stroke='{a}' stroke-width='6' stroke-linecap='round'/>\
+             <circle cx='64' cy='50' r='7' fill='{a}'/>\
+             <line x1='18' y1='72' x2='82' y2='72' stroke='{a}' stroke-width='6' stroke-linecap='round'/>\
+             <circle cx='46' cy='72' r='7' fill='{a}'/></svg>",
             head = head,
             a = accent
         ),

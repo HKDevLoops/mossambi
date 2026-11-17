@@ -132,7 +132,7 @@ impl ToolbarItem {
             Self::ViewSwitcher => IconGlyph::ActionView,
             Self::Search => IconGlyph::Search,
             Self::Settings => IconGlyph::Gear,
-            Self::NewWindow => IconGlyph::ActionNewFolder,
+            Self::NewWindow => IconGlyph::ActionNewWindow,
             Self::Cut => IconGlyph::ActionCut,
             Self::Copy => IconGlyph::ActionCopy,
             Self::Paste => IconGlyph::ActionPaste,
@@ -140,7 +140,7 @@ impl ToolbarItem {
             Self::Share => IconGlyph::ActionShortcut,
             Self::Delete => IconGlyph::ActionDelete,
             Self::Sort => IconGlyph::ActionSort,
-            Self::Hamburger => IconGlyph::ActionHamburger,
+            Self::Hamburger => IconGlyph::ActionMenu,
             Self::Group => IconGlyph::ActionFilter,
             Self::Tags => IconGlyph::ActionPin,
         }
