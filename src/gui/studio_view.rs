@@ -195,6 +195,11 @@ pub struct StudioView {
     pub nav_anim_up: Option<std::time::Instant>,
     pub nav_anim_refresh: Option<std::time::Instant>,
     pub nav_anim_newfolder: Option<std::time::Instant>,
+
+    /// Cached Mossambi brand-logo texture for the top-left header. Built once
+    /// from the bundled PNG via the `image` crate (egui's `include_image!`
+    /// bytes loader fails to decode here and renders a red error texture).
+    pub brand_logo_tex: Option<egui::TextureHandle>,
 }
 
 impl Default for StudioView {
@@ -237,6 +242,7 @@ impl Default for StudioView {
             inspection_busy: false,
             bench_busy: false,
             sibling_menu_cache: std::collections::HashMap::new(),
+            brand_logo_tex: None,
         }
     }
 }
@@ -548,13 +554,30 @@ impl StudioView {
                         ui.add_space(6.0);
                     }
 
-                    // Brand: the real Mossambi logo (replaces the placeholder shield).
-                    ui.add(
-                        egui::Image::new(egui::include_image!(
-                            "../../assets/icons/mossambi-32x32.png"
-                        ))
-                        .fit_to_exact_size(Vec2::splat(20.0)),
-                    );
+                    // Brand: the real Mossambi logo (green fruit), replacing the
+                    // placeholder shield. Decoded once from the bundled PNG via
+                    // the `image` crate: egui's `include_image!` bytes loader
+                    // rendered a red error texture on this build.
+                    if self.brand_logo_tex.is_none() {
+                        if let Ok(img) =
+                            image::load_from_memory(&include_bytes!("../../assets/icons/mossambi-32x32.png")[..])
+                        {
+                            let rgba = img.to_rgba8();
+                            let (w, h) = rgba.dimensions();
+                            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                                [w as usize, h as usize],
+                                rgba.as_raw(),
+                            );
+                            self.brand_logo_tex = Some(ctx.load_texture(
+                                "mossambi_brand_logo",
+                                color_image,
+                                egui::TextureOptions::LINEAR,
+                            ));
+                        }
+                    }
+                    if let Some(tex) = &self.brand_logo_tex {
+                        ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::splat(20.0)));
+                    }
 
                     if chrome_spec.tab_position != TabPosition::None {
                         // Tabs
