@@ -445,12 +445,20 @@ fn column_time(item: &FileItem, col: DetailColumn) -> Option<std::time::SystemTi
 }
 
 /// True when the item passes the given column filter value.
-pub fn matches_column_filter(
+///
+/// `effective_size` is the byte count actually shown in the Size column:
+/// `size_bytes` for files, the fresh recursive total for directories. Passing
+/// it in keeps this pure (unit-testable) while letting the explorer filter on
+/// the same value the user sees instead of a directory's tiny metadata length.
+pub fn matches_column_filter_sized(
     item: &FileItem,
     col: DetailColumn,
     value: &ColumnFilterValue,
+    effective_size: Option<u64>,
 ) -> bool {
     match value {
+        ColumnFilterValue::SizeMin(min) => effective_size.is_some_and(|s| s >= *min),
+        ColumnFilterValue::SizeMax(max) => effective_size.is_some_and(|s| s <= *max),
         ColumnFilterValue::Text(q) => {
             let q = q.trim();
             if q.is_empty() {
@@ -465,8 +473,6 @@ pub fn matches_column_filter(
             TriState::Yes => column_bool(item, col),
             TriState::No => !column_bool(item, col),
         },
-        ColumnFilterValue::SizeMin(min) => !item.is_dir && item.size_bytes >= *min,
-        ColumnFilterValue::SizeMax(max) => !item.is_dir && item.size_bytes <= *max,
         ColumnFilterValue::Date(bucket) => {
             if *bucket == DateBucket::Any {
                 return true;
@@ -479,6 +485,22 @@ pub fn matches_column_filter(
             date_in_bucket(dt.date_naive(), today, *bucket)
         }
     }
+}
+
+/// Size bounds are files-only here (kept for callers without the size cache);
+/// the explorer uses [`matches_column_filter_sized`] so folders sort/filter by
+/// their displayed recursive total.
+pub fn matches_column_filter(
+    item: &FileItem,
+    col: DetailColumn,
+    value: &ColumnFilterValue,
+) -> bool {
+    let size = if item.is_dir {
+        None
+    } else {
+        Some(item.size_bytes)
+    };
+    matches_column_filter_sized(item, col, value, size)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1944,7 +1966,9 @@ impl ExplorerView {
                 self.column_filters
                     .iter()
                     .all(|(id, value)| match DetailColumn::from_id(*id) {
-                        Some(col) => matches_column_filter(e, col, value),
+                        Some(col) => {
+                            matches_column_filter_sized(e, col, value, Some(self.effective_size(e)))
+                        }
                         None => true,
                     })
             })
@@ -1986,7 +2010,7 @@ impl ExplorerView {
                     .as_deref()
                     .unwrap_or("")
                     .cmp(b_lower.as_deref().unwrap_or("")),
-                SortColumn::Size => a.size_bytes.cmp(&b.size_bytes),
+                SortColumn::Size => self.effective_size(a).cmp(&self.effective_size(b)),
                 SortColumn::Extension => a.extension.cmp(&b.extension),
                 SortColumn::Date => cmp_opt_last(&a.modified, &b.modified),
                 SortColumn::DateCreated => cmp_opt_last(&a.created, &b.created),
@@ -10207,6 +10231,20 @@ impl ExplorerView {
         }
     }
 
+    /// Byte count used for Size sorting and size filters. Files use their own
+    /// length; directories use the fresh recursive total from the size cache
+    /// (falling back to metadata length until it arrives). This makes the sort
+    /// order and size filters agree with the size actually shown in the column.
+    fn effective_size(&self, item: &FileItem) -> u64 {
+        if !item.is_dir {
+            return item.size_bytes;
+        }
+        match self.dir_sizes.get(&item.path) {
+            Some((mtime, total)) if item.modified == *mtime => *total,
+            _ => item.size_bytes,
+        }
+    }
+
     fn render_status_bar(&mut self, ui: &mut Ui, palette: &ThemePalette) {
         let bar_h = 26.0_f32;
 
@@ -13331,7 +13369,20 @@ impl ExplorerView {
         } else {
             item.name.clone()
         };
-        fm::menu_header(menu_ui, &header, tint);
+        let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
+        let (hdr_glyph, _) = crate::core::icon_packs::IconGlyph::resolve_with_path(
+            Some(&item.path),
+            &item.name,
+            &item.extension,
+            item.is_dir,
+            icon_spec.is_image,
+            icon_spec.is_media,
+            icon_spec.is_archive,
+            icon_spec.is_document,
+            icon_spec.is_code,
+            icon_spec.color_rgb,
+        );
+        fm::menu_header_with_icon(menu_ui, pack, hdr_glyph, &header, tint);
         menu_ui.separator();
 
         // -- Open group --

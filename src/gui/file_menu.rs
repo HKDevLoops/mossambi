@@ -689,6 +689,31 @@ pub(crate) fn elide_to_width(
     }
 }
 
+/// Header line with the clicked item's icon + name for the right-click menu.
+/// Mirrors [`menu_header`] but leads with a 16px vector icon from the active pack.
+pub fn menu_header_with_icon(
+    ui: &mut Ui,
+    pack: IconPack,
+    glyph: IconGlyph,
+    name: &str,
+    tint: Color32,
+) {
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+        crate::core::icon_packs::paint_icon(ui, pack, glyph, rect, rgb(tint));
+        ui.add_space(2.0);
+        let font = eframe::egui::FontId::proportional(13.5);
+        let label = elide_to_width(ui, name, ui.available_width() - 12.0, font);
+        ui.label(
+            eframe::egui::RichText::new(label)
+                .strong()
+                .size(13.5)
+                .color(tint),
+        );
+    });
+    ui.add_space(1.0);
+}
+
 /// Bold header line for the selected item's name (Apple principle: the only
 /// labeled part of a menu is the context header - groups are separated by
 /// hairlines, not captions).
