@@ -371,8 +371,12 @@ pub fn menu_item_tag_dot(
         None
     };
     if let Some(v) = state {
-        ui.painter()
-            .rect_filled(rect.expand(v.expansion), v.rounding, v.weak_bg_fill);
+        crate::gui::squircle::squircle_filled(
+            ui.painter(),
+            rect.expand(v.expansion),
+            v.rounding,
+            v.weak_bg_fill,
+        );
     }
     ui.painter().circle_filled(
         Pos2::new(rect.left() + 16.0, rect.center().y),
@@ -453,8 +457,12 @@ fn menu_row_styled(
         None
     };
     if let Some(v) = state {
-        ui.painter()
-            .rect_filled(rect.expand(v.expansion), v.rounding, v.weak_bg_fill);
+        crate::gui::squircle::squircle_filled(
+            ui.painter(),
+            rect.expand(v.expansion),
+            v.rounding,
+            v.weak_bg_fill,
+        );
     }
     if let Some((pack, glyph, tint)) = icon {
         let r = Rect::from_center_size(

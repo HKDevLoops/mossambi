@@ -1061,9 +1061,14 @@ pub fn render_sidebar_row(
     };
 
     if bg_color != Color32::TRANSPARENT {
-        painter.rect_filled(rect, rounding, bg_color);
+        crate::gui::squircle::squircle_filled(&painter, rect, rounding, bg_color);
         if style == crate::core::SidebarStyle::Thunar && spec.selected {
-            painter.rect_stroke(rect, rounding, Stroke::new(1.0_f32, palette.accent));
+            crate::gui::squircle::squircle_stroke(
+                &painter,
+                rect,
+                rounding,
+                Stroke::new(1.0_f32, palette.accent),
+            );
         }
     }
 
@@ -1071,7 +1076,12 @@ pub fn render_sidebar_row(
         .dnd_hover_payload::<crate::gui::explorer_view::FileDragPayload>()
         .is_some();
     if is_drop_hovered {
-        painter.rect_stroke(rect, rounding, Stroke::new(1.5_f32, palette.accent));
+        crate::gui::squircle::squircle_stroke(
+            &painter,
+            rect,
+            rounding,
+            Stroke::new(1.5_f32, palette.accent),
+        );
     }
     let dropped = row_resp
         .dnd_release_payload::<crate::gui::explorer_view::FileDragPayload>()
