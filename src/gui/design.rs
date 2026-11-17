@@ -194,7 +194,7 @@ pub fn paint_pill_ring(
         sw: rounding.sw + grow,
         se: rounding.se + grow,
     };
-    painter.rect_stroke(rect.expand(grow), rounding, ring.stroke);
+    crate::gui::squircle::squircle_stroke(painter, rect.expand(grow), rounding, ring.stroke);
 }
 
 // ---------------------------------------------------------------------------

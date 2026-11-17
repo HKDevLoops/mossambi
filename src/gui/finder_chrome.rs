@@ -493,8 +493,14 @@ pub fn render_styled_segmented_view_switcher(
     } else {
         Color32::from_rgba_unmultiplied(0, 0, 0, 10)
     };
-    painter.rect_filled(container_rect, Rounding::same(container_radius), bg_col);
-    painter.rect_stroke(
+    crate::gui::squircle::squircle_filled(
+        &painter,
+        container_rect,
+        Rounding::same(container_radius),
+        bg_col,
+    );
+    crate::gui::squircle::squircle_stroke(
+        &painter,
         container_rect,
         Rounding::same(container_radius),
         Stroke::new(tokens.border_width, palette.border),
@@ -535,10 +541,16 @@ pub fn render_styled_segmented_view_switcher(
 
         if is_active {
             let active_rect = seg_rect.shrink2(Vec2::new(2.0, 2.0));
-            painter.rect_filled(active_rect, Rounding::same(active_radius), palette.accent);
+            crate::gui::squircle::squircle_filled(
+                &painter,
+                active_rect,
+                Rounding::same(active_radius),
+                palette.accent,
+            );
         } else if resp.hovered() {
             let hover_rect = seg_rect.shrink2(Vec2::new(2.0, 2.0));
-            painter.rect_filled(
+            crate::gui::squircle::squircle_filled(
+                &painter,
                 hover_rect,
                 Rounding::same(active_radius),
                 Color32::from_rgba_unmultiplied(

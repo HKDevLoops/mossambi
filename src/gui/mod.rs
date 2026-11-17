@@ -17,6 +17,7 @@ pub mod macos_theme;
 pub mod popover;
 pub mod preferences_view;
 pub mod quick_settings;
+pub mod squircle;
 pub mod studio_app;
 pub mod studio_view;
 pub mod tray;
