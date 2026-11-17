@@ -745,7 +745,7 @@ pub fn render_segmented_switch(
 }
 
 /// Glass modes: computes panel fills respecting surface readability floors
-/// (Content/Menu/Card >= 0.88, Sidebar >= 0.72, Chrome >= 0.60) and ensures
+/// (Content/Menu/Card >= 0.88, Sidebar >= 0.50, Chrome >= 0.40) and ensures
 /// WCAG contrast >= 4.5:1 for primary text against window_bg over light and dark backdrops.
 fn glassify(mut p: ThemePalette, effect: crate::core::GlassEffect, opacity: f32) -> ThemePalette {
     use crate::core::{choose_readable_text_color, glass_fill, Surface};

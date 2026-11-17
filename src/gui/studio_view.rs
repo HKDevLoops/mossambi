@@ -548,8 +548,9 @@ impl StudioView {
         }
 
         // 1. Unified Top Panel (Windows 11 Fluent Tabs + Navigation Toolbar)
+        // Use the chrome surface so the DWM acrylic backdrop shows through.
         let top_frame = egui::Frame::none()
-            .fill(palette.sidebar_bg)
+            .fill(palette.window_bg)
             .inner_margin(egui::Margin::symmetric(10.0, 4.0));
 
         let is_max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));

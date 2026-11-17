@@ -38,8 +38,8 @@ impl Surface {
     pub fn alpha_floor(&self) -> f32 {
         match self {
             Surface::Content | Surface::Menu | Surface::Card | Surface::Donut => 0.88,
-            Surface::Sidebar => 0.72,
-            Surface::Chrome => 0.60,
+            Surface::Sidebar => 0.50,
+            Surface::Chrome => 0.40,
         }
     }
 }
@@ -103,8 +103,8 @@ pub fn choose_backdrop(mode: GlassEffect, os_build: u32) -> Backdrop {
 /// For `GlassEffect::Opaque`, returns fully opaque (alpha = 255).
 /// For glass modes, alpha is guaranteed to be >= surface floor:
 /// - Content, Menu, Card, Donut >= 0.88
-/// - Sidebar >= 0.72
-/// - Chrome >= 0.60
+/// - Sidebar >= 0.50
+/// - Chrome >= 0.40
 ///
 /// The user intensity (`base.a() / 255`) maps monotonically onto
 /// `[floor, 1.0]`: a higher configured opacity always yields a more opaque
@@ -373,7 +373,7 @@ mod tests {
         let a_mid = fill_mid.a() as f32 / 255.0;
         let a_high = fill_high.a() as f32 / 255.0;
 
-        assert!(a_low >= 0.72);
+        assert!(a_low >= Surface::Sidebar.alpha_floor() - 0.005);
         assert!(a_mid >= a_low);
         assert!(a_high >= a_mid);
         assert!(a_high <= 1.0);

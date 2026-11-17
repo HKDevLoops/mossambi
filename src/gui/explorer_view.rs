@@ -13215,6 +13215,9 @@ impl ExplorerView {
             .auto_shrink([true, true])
             .show(menu_ui, |menu_ui| {
                 menu_ui.set_min_width(240.0);
+                // Menu rows allocate `available_width()`; cap it so the menu stays
+                // compact instead of stretching across the whole window.
+                menu_ui.set_max_width(300.0);
                 let mut intent = CanvasMenuIntents::default();
                 fm::menu_header(menu_ui, "Explorer", tint);
                 menu_ui.separator();
@@ -13476,6 +13479,9 @@ impl ExplorerView {
             .auto_shrink([true, true])
             .show(menu_ui, |menu_ui| {
                 menu_ui.set_min_width(240.0);
+                // Menu rows allocate `available_width()`; cap it so the menu stays
+                // compact instead of stretching across the whole window.
+                menu_ui.set_max_width(300.0);
                 let mut intent = ItemMenuIntents::default();
                 let is_dir = item.is_dir;
                 let path: PathBuf = item.path.clone();
