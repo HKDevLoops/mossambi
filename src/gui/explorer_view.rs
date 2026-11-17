@@ -3624,7 +3624,9 @@ impl ExplorerView {
                         egui::TextEdit::singleline(&mut self.search_query)
                             .id(egui::Id::new("mossambi_global_search_input"))
                             .hint_text("Filter files (/)...")
-                            .desired_width(box_w),
+                            .desired_width((box_w - 20.0).max(40.0))
+                            .min_size(egui::vec2(0.0, 20.0))
+                            .margin(egui::Margin::symmetric(10.0, 6.0)),
                     );
                     if self.focus_search_requested {
                         search_resp.request_focus();
@@ -3659,7 +3661,9 @@ impl ExplorerView {
                         egui::TextEdit::singleline(&mut self.search_query)
                             .id(egui::Id::new("mossambi_global_search_input"))
                             .hint_text("Filter files (/)...")
-                            .desired_width(box_w),
+                            .desired_width((box_w - 20.0).max(40.0))
+                            .min_size(egui::vec2(0.0, 20.0))
+                            .margin(egui::Margin::symmetric(10.0, 6.0)),
                     );
                     if self.focus_search_requested {
                         search_resp.request_focus();

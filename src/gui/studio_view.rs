@@ -265,11 +265,35 @@ impl StudioView {
     /// explorer view, so the main file manager keeps its full canvas.
     fn render_tool_view_header(&mut self, ui: &mut Ui, palette: &ThemePalette, title: &str) {
         ui.horizontal(|ui| {
+            // Apple-style back affordance: a crisp vector chevron (not the
+            // ASCII "<") next to the label, on a squircle with a hairline
+            // border instead of a heavy boxed button.
+            let pack = crate::core::icon_packs::IconPack::from_config_id(
+                &MossambiConfig::load().icon_pack,
+            );
+            let accent = [palette.accent.r(), palette.accent.g(), palette.accent.b()];
+            let back_tex = crate::core::icon_packs::icon_texture(
+                ui.ctx(),
+                pack,
+                IconGlyph::ActionBack,
+                15.0,
+                accent,
+            );
+            let label = egui::RichText::new("Back")
+                .color(palette.accent)
+                .size(type_scale::BODY);
+            let back_btn = match back_tex {
+                Some(t) => egui::Button::image_and_text(
+                    egui::load::SizedTexture::new(t.id(), Vec2::splat(15.0)),
+                    label,
+                ),
+                None => egui::Button::new(label),
+            };
             let done = ui.add(
-                egui::Button::new(egui::RichText::new("< Back").color(palette.accent))
+                back_btn
                     .fill(palette.card_bg)
-                    .stroke(Stroke::new(1.0_f32, palette.border))
-                    .rounding(Rounding::same(6.0)),
+                    .stroke(Stroke::new(0.5_f32, palette.border))
+                    .rounding(Rounding::same(radius::MD)),
             );
             if done.clicked() {
                 self.current_tab = if self.previous_tab != self.current_tab
