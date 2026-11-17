@@ -266,9 +266,15 @@ pub fn toolbar_animated_icon_button_resp(
     let is_pressed = resp.is_pointer_button_down_on();
 
     if active {
-        painter.rect_filled(rect, Rounding::same(radius::MD), palette.card_hover);
+        crate::gui::squircle::squircle_filled(
+            &painter,
+            rect,
+            Rounding::same(radius::MD),
+            palette.card_hover,
+        );
     } else if resp.hovered() {
-        painter.rect_filled(
+        crate::gui::squircle::squircle_filled(
+            &painter,
             rect,
             Rounding::same(radius::MD),
             Color32::from_rgba_unmultiplied(
@@ -278,7 +284,8 @@ pub fn toolbar_animated_icon_button_resp(
                 28,
             ),
         );
-        painter.rect_stroke(
+        crate::gui::squircle::squircle_stroke(
+            &painter,
             rect,
             Rounding::same(radius::MD),
             Stroke::new(1.0_f32, palette.border),
