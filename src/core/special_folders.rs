@@ -260,8 +260,12 @@ pub fn lookup_path(path: &Path) -> Option<SpecialFolder> {
         return Some(sf);
     }
 
-    // 2. Special handling for Recycle Bin on any drive (e.g. C:\$Recycle.Bin)
-    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+    // 2. Special handling for Recycle Bin on any drive (e.g. C:\$Recycle.Bin or ~/.local/share/Trash)
+    if let Some(name) = path
+        .to_string_lossy()
+        .split(['\\', '/'])
+        .rfind(|s| !s.is_empty())
+    {
         let lower = name.to_lowercase();
         if lower == "$recycle.bin" || lower == "recycle.bin" || lower == "trash" {
             return Some(SpecialFolder::RecycleBin);

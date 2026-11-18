@@ -14106,17 +14106,17 @@ impl ExplorerView {
 /// Tab / window title for a folder: its name, or the drive label for a
 /// root such as `C:\` (which has no file name and used to show "Folder").
 fn folder_title(dir: &Path) -> String {
-    match dir.file_name().and_then(|n| n.to_str()) {
+    let s = dir.to_string_lossy();
+    let trimmed = s.trim_end_matches(['\\', '/']);
+    if trimmed.is_empty() {
+        return s.into_owned();
+    }
+    if trimmed.len() == 2 && trimmed.ends_with(':') {
+        return trimmed.to_string();
+    }
+    match trimmed.split(['\\', '/']).rfind(|p| !p.is_empty()) {
         Some(name) => name.to_string(),
-        None => {
-            let s = dir.to_string_lossy();
-            let trimmed = s.trim_end_matches(['\\', '/']);
-            if trimmed.is_empty() {
-                s.into_owned()
-            } else {
-                trimmed.to_string()
-            }
-        }
+        None => trimmed.to_string(),
     }
 }
 

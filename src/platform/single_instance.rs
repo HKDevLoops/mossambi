@@ -8,8 +8,11 @@
 
 use crate::platform::args::LaunchIntent;
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(windows)]
+use std::sync::Arc;
+use std::sync::{Mutex, OnceLock};
 
 /// Default named pipe path for single-instance IPC on Windows.
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\mossambi_single_instance_ipc";

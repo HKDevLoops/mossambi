@@ -3,7 +3,9 @@
 //! Provides hardware-accelerated Windows Desktop Window Manager (DWM) Acrylic and Mica blur,
 //! immersive dark mode synchronization, and frame margin extension for transparent windows.
 
-use crate::core::{choose_backdrop, Backdrop, GlassEffect};
+use crate::core::GlassEffect;
+#[cfg(target_os = "windows")]
+use crate::core::{choose_backdrop, Backdrop};
 
 /// True when the OS can blur behind the window (Windows 10 1809+).
 pub fn backdrop_supported() -> bool {

@@ -4,7 +4,9 @@
 //! Defender scan...) so Mossambi's right-click flyouts match what Explorer shows.
 //! No external crates required - only Win32 via windows-sys.
 
-use crate::core::config::{CustomMenuItem, CustomMenuKind};
+use crate::core::config::CustomMenuItem;
+#[cfg(target_os = "windows")]
+use crate::core::config::CustomMenuKind;
 use std::path::Path;
 
 /// Whether the Defender scan verb can execute (Windows only).
@@ -513,6 +515,7 @@ pub fn play_file(path: &Path) -> bool {
 /// Substitute `%p`/`%1` in a template with the quoted target path. The
 /// substitution is an empty string when the entry is invoked from the
 /// background menu (no target path).
+#[cfg(target_os = "windows")]
 fn substitute_target(template: &str, path: Option<&Path>) -> String {
     let quoted = path
         .map(|p| format!("\"{}\"", p.to_string_lossy()))

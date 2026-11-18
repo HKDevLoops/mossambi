@@ -69,6 +69,7 @@ static SYSTEM: LazyLock<Mutex<ShellIconSystem>> = LazyLock::new(|| {
     })
 });
 
+#[cfg(target_os = "windows")]
 static SHELL_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 /// Drains completed background icon extractions and uploads them into egui textures.

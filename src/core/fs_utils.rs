@@ -379,15 +379,16 @@ pub fn resolve_recycle_bin_target() -> PathBuf {
     }
     #[cfg(target_os = "macos")]
     {
-        home_dir().join(".Trash")
+        crate::core::platform_paths::home_dir().join(".Trash")
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        let trash = home_dir().join(".local/share/Trash/files");
+        let home = crate::core::platform_paths::home_dir();
+        let trash = home.join(".local/share/Trash/files");
         if trash.exists() {
             trash
         } else {
-            home_dir().join(".local/share/Trash")
+            home.join(".local/share/Trash")
         }
     }
 }

@@ -188,7 +188,7 @@ impl ThemeStyle {
     pub fn colors_with_glass(
         &self,
         effect: crate::core::GlassEffect,
-        opacity: f32,
+        _opacity: f32,
     ) -> ThemePalette {
         let pt = self.to_pantone();
         let (bg_r, bg_g, bg_b) = pt.bg.to_rgb();
@@ -211,8 +211,6 @@ impl ThemeStyle {
         let (ta_r, ta_g, ta_b) = pt.tag_archive.to_rgb();
         let (td_r, td_g, td_b) = pt.tag_document.to_rgb();
         let (ti_r, ti_g, ti_b) = pt.tag_image.to_rgb();
-
-        let clamped_opacity = opacity.clamp(0.30, 1.00);
 
         match effect {
             crate::core::GlassEffect::Opaque => {
@@ -290,6 +288,7 @@ impl ThemeStyle {
             | crate::core::GlassEffect::Mica => {
                 #[cfg(target_os = "windows")]
                 {
+                    let clamped_opacity = _opacity.clamp(0.30, 1.00);
                     let opaque =
                         self.colors_with_glass(crate::core::GlassEffect::Opaque, clamped_opacity);
                     glassify(opaque, effect, clamped_opacity)
@@ -747,6 +746,7 @@ pub fn render_segmented_switch(
 /// Glass modes: computes panel fills respecting surface readability floors
 /// (Content/Menu/Card >= 0.88, Sidebar >= 0.50, Chrome >= 0.40) and ensures
 /// WCAG contrast >= 4.5:1 for primary text against window_bg over light and dark backdrops.
+#[cfg(target_os = "windows")]
 fn glassify(mut p: ThemePalette, effect: crate::core::GlassEffect, opacity: f32) -> ThemePalette {
     use crate::core::{choose_readable_text_color, glass_fill, Surface};
 
