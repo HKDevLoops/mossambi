@@ -155,6 +155,18 @@ impl MossambiApp {
         let mut should_close = false;
         let mut focus_seen = self.studio_view.explorer_view.native_menu_focus_seen;
 
+        let menu_w = 280.0_f32;
+        let menu_h = 420.0_f32;
+        let mut anchor = req.anchor();
+        if let Some(mon_sz) = ctx.input(|i| i.viewport().monitor_size) {
+            if anchor.x + menu_w > mon_sz.x {
+                anchor.x = (mon_sz.x - menu_w - 10.0).max(0.0);
+            }
+            if anchor.y + menu_h > mon_sz.y {
+                anchor.y = (mon_sz.y - menu_h - 10.0).max(0.0);
+            }
+        }
+
         let outcome = ctx.show_viewport_immediate(
             egui::viewport::ViewportId::from_hash_of("mossambi_native_context_menu"),
             egui::ViewportBuilder::default()
@@ -163,8 +175,8 @@ impl MossambiApp {
                 .with_transparent(true)
                 .with_always_on_top()
                 .with_taskbar(false)
-                .with_position(req.anchor())
-                .with_inner_size([280.0, 420.0]),
+                .with_position(anchor)
+                .with_inner_size([menu_w, menu_h]),
             |vctx, class| -> Option<NativeMenuIntents> {
                 // Non-desktop backends cannot create native viewports; there
                 // is no menu to render, so leave any in-app fallback intact.
@@ -897,7 +909,12 @@ impl eframe::App for MossambiApp {
         ) = ctx.input(|i| {
             let ctrl = i.modifiers.ctrl || i.modifiers.command;
             let shift = i.modifiers.shift;
-            let scroll = if ctrl { i.raw_scroll_delta.y } else { 0.0 };
+            let scroll_raw = if i.raw_scroll_delta.y.abs() > 0.0 {
+                i.raw_scroll_delta.y
+            } else {
+                i.smooth_scroll_delta.y
+            };
+            let scroll = if ctrl { scroll_raw } else { 0.0 };
             let num0 = i.key_pressed(egui::Key::Num0);
             let zoom_in_key = i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals);
             let zoom_out_key = i.key_pressed(egui::Key::Minus);
@@ -929,12 +946,21 @@ impl eframe::App for MossambiApp {
         if switch_to_grid {
             self.studio_view.explorer_view.view_mode = crate::core::ViewMode::Grid;
             self.config.view_mode = crate::core::ViewMode::Grid;
+            self.config.default_explorer_layout = 2;
+            self.explorer_pref_mirror = Some(ExplorerPrefMirror::from_config(&self.config));
+            let _ = self.config.save();
         } else if switch_to_details {
             self.studio_view.explorer_view.view_mode = crate::core::ViewMode::Details;
             self.config.view_mode = crate::core::ViewMode::Details;
+            self.config.default_explorer_layout = 0;
+            self.explorer_pref_mirror = Some(ExplorerPrefMirror::from_config(&self.config));
+            let _ = self.config.save();
         } else if switch_to_columns {
             self.studio_view.explorer_view.view_mode = crate::core::ViewMode::Columns;
             self.config.view_mode = crate::core::ViewMode::Columns;
+            self.config.default_explorer_layout = 3;
+            self.explorer_pref_mirror = Some(ExplorerPrefMirror::from_config(&self.config));
+            let _ = self.config.save();
         }
 
         if explorer_reset {
@@ -942,17 +968,35 @@ impl eframe::App for MossambiApp {
             let mode = self.studio_view.explorer_view.view_mode;
             let level = self.studio_view.explorer_view.active_mode_zoom();
             self.config.set_zoom_for_mode(mode, level);
+            self.explorer_pref_mirror = Some(ExplorerPrefMirror::from_config(&self.config));
+            let _ = self.config.save();
             log::debug!("explorer zoom reset to default level 2 for {:?}", mode);
         } else if explorer_zoom_in || explorer_scroll > 0.0 {
             self.studio_view.explorer_view.zoom_step_active_mode(1);
             let mode = self.studio_view.explorer_view.view_mode;
             let level = self.studio_view.explorer_view.active_mode_zoom();
+            self.config.view_mode = mode;
+            self.config.default_explorer_layout = match mode {
+                crate::core::ViewMode::Grid => 2,
+                crate::core::ViewMode::Columns => 3,
+                crate::core::ViewMode::Details => 0,
+            };
             self.config.set_zoom_for_mode(mode, level);
+            self.explorer_pref_mirror = Some(ExplorerPrefMirror::from_config(&self.config));
+            let _ = self.config.save();
         } else if explorer_zoom_out || explorer_scroll < 0.0 {
             self.studio_view.explorer_view.zoom_step_active_mode(-1);
             let mode = self.studio_view.explorer_view.view_mode;
             let level = self.studio_view.explorer_view.active_mode_zoom();
+            self.config.view_mode = mode;
+            self.config.default_explorer_layout = match mode {
+                crate::core::ViewMode::Grid => 2,
+                crate::core::ViewMode::Columns => 3,
+                crate::core::ViewMode::Details => 0,
+            };
             self.config.set_zoom_for_mode(mode, level);
+            self.explorer_pref_mirror = Some(ExplorerPrefMirror::from_config(&self.config));
+            let _ = self.config.save();
         } else if ui_zoom_reset {
             self.ui_zoom = 1.0;
             self.last_applied_theme = None;

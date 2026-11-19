@@ -1306,7 +1306,7 @@ impl ExplorerView {
         let current = self.active_mode_zoom();
 
         // Custom transition: Details <-> Grid
-        if step > 0 && current == 4 && self.view_mode == ViewMode::Details {
+        if step > 0 && current >= 4 && self.view_mode == ViewMode::Details {
             self.view_mode = ViewMode::Grid;
             self.set_active_mode_zoom(0);
             return;
@@ -6811,7 +6811,9 @@ impl ExplorerView {
 
         ui.spacing_mut().item_spacing = Vec2::new(0.0, row_spacing);
 
+        let ctrl_held = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
         egui::ScrollArea::vertical()
+            .enable_scrolling(!ctrl_held)
             .auto_shrink([false; 2])
             .show_rows(ui, row_height, total_items, |ui, row_range| {
                 // Canvas interact registered FIRST so rows (registered after it) stay
@@ -8160,7 +8162,7 @@ impl ExplorerView {
         let total_items = self.cached_display_indices.len();
         let grid_p = self.grid_transition_spring.value;
         if grid_p < 0.999 {
-            ui.set_opacity((0.35 + 0.65 * grid_p).clamp(0.0, 1.0));
+            ui.set_opacity((0.85 + 0.15 * grid_p).clamp(0.85, 1.0));
         }
 
         let mut nav_into_dir: Option<PathBuf> = None;
@@ -8227,7 +8229,9 @@ impl ExplorerView {
         let col_stride = tile_w + reflow.gap;
         let row_stride = tile_h + reflow.gap;
 
+        let ctrl_held = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
         egui::ScrollArea::vertical()
+            .enable_scrolling(!ctrl_held)
             .auto_shrink([false; 2])
             .show_rows(ui, row_stride, total_rows, |ui, row_range| {
                 ui.spacing_mut().item_spacing = Vec2::new(reflow.gap, reflow.gap);
@@ -8586,7 +8590,7 @@ impl ExplorerView {
                                     palette.text_primary.r(),
                                     palette.text_primary.g(),
                                     palette.text_primary.b(),
-                                    130,
+                                    200,
                                 )
                             } else {
                                 palette.text_primary
@@ -8607,7 +8611,7 @@ impl ExplorerView {
                             job.halign = egui::Align::Center;
                             let galley = ui.fonts(|f| f.layout_job(job));
                             let name_h = galley.size().y;
-                            let name_x = rect.center().x;
+                            let name_x = rect.center().x - galley.size().x * 0.5;
                             let name_y =
                                 (rect.bottom() - size_font - 10.0 - name_h).max(zone_bottom + 2.0);
                             ui.painter_at(rect).galley(

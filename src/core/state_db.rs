@@ -10,8 +10,10 @@
 //! - Linux: $XDG_DATA_HOME/mossambi/mossambi_state.db
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static DB_CONNECTION: OnceLock<Mutex<rusqlite::Connection>> = OnceLock::new();
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CustomPresetRecord {
@@ -68,74 +70,74 @@ fn restrict_state_db_permissions(path: &Path) {
     }
 }
 
-static DB_LOCK: Mutex<()> = Mutex::new(());
+/// Open or retrieve the persistent SQLite state database connection.
+pub fn open_connection() -> Result<std::sync::MutexGuard<'static, rusqlite::Connection>, String> {
+    let conn_mutex = DB_CONNECTION.get_or_init(|| {
+        let path = db_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
 
-/// Open a connection to the SQLite state database, ensuring tables exist.
-pub fn open_connection() -> Result<rusqlite::Connection, String> {
-    let _guard = DB_LOCK.lock().map_err(|e| e.to_string())?;
-    let path = db_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
+        let conn = rusqlite::Connection::open(&path).expect("Failed to open DB");
+        restrict_state_db_permissions(&path);
 
-    let conn = rusqlite::Connection::open(&path).map_err(|e| format!("Failed to open DB: {e}"))?;
-    // Apply user-only permissions after the file exists (CFG-01).
-    restrict_state_db_permissions(&path);
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA busy_timeout = 5000;
+             PRAGMA synchronous = NORMAL;
 
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         PRAGMA busy_timeout = 5000;
-         PRAGMA synchronous = NORMAL;
+             CREATE TABLE IF NOT EXISTS file_tags (
+                 path TEXT PRIMARY KEY,
+                 tags TEXT NOT NULL,
+                 updated_at INTEGER NOT NULL
+             );
 
-         CREATE TABLE IF NOT EXISTS file_tags (
-             path TEXT PRIMARY KEY,
-             tags TEXT NOT NULL,
-             updated_at INTEGER NOT NULL
-         );
+             CREATE TABLE IF NOT EXISTS action_journal (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 action_kind TEXT NOT NULL,
+                 payload_json TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
 
-         CREATE TABLE IF NOT EXISTS action_journal (
-             id INTEGER PRIMARY KEY AUTOINCREMENT,
-             action_kind TEXT NOT NULL,
-             payload_json TEXT NOT NULL,
-             created_at INTEGER NOT NULL
-         );
+             CREATE TABLE IF NOT EXISTS keystroke_log (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 context TEXT NOT NULL,
+                 key TEXT NOT NULL,
+                 modifiers TEXT NOT NULL,
+                 timestamp INTEGER NOT NULL
+             );
 
-         CREATE TABLE IF NOT EXISTS keystroke_log (
-             id INTEGER PRIMARY KEY AUTOINCREMENT,
-             context TEXT NOT NULL,
-             key TEXT NOT NULL,
-             modifiers TEXT NOT NULL,
-             timestamp INTEGER NOT NULL
-         );
+             CREATE TABLE IF NOT EXISTS custom_presets (
+                 name TEXT PRIMARY KEY,
+                 category TEXT NOT NULL,
+                 target_format TEXT NOT NULL,
+                 width_px INTEGER NOT NULL,
+                 height_px INTEGER NOT NULL,
+                 dpi INTEGER NOT NULL,
+                 min_bytes INTEGER NOT NULL,
+                 max_bytes INTEGER NOT NULL,
+                 normalize_white_balance INTEGER NOT NULL,
+                 background_r INTEGER NOT NULL,
+                 background_g INTEGER NOT NULL,
+                 background_b INTEGER NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
 
-         CREATE TABLE IF NOT EXISTS custom_presets (
-             name TEXT PRIMARY KEY,
-             category TEXT NOT NULL,
-             target_format TEXT NOT NULL,
-             width_px INTEGER NOT NULL,
-             height_px INTEGER NOT NULL,
-             dpi INTEGER NOT NULL,
-             min_bytes INTEGER NOT NULL,
-             max_bytes INTEGER NOT NULL,
-             normalize_white_balance INTEGER NOT NULL,
-             background_r INTEGER NOT NULL,
-             background_g INTEGER NOT NULL,
-             background_b INTEGER NOT NULL,
-             created_at INTEGER NOT NULL
-         );
+             CREATE TABLE IF NOT EXISTS custom_commands (
+                 id TEXT PRIMARY KEY,
+                 title TEXT NOT NULL,
+                 script_lang TEXT NOT NULL,
+                 script_body TEXT NOT NULL,
+                 shortcut TEXT,
+                 created_at INTEGER NOT NULL
+             );",
+        )
+        .expect("DB schema init failed");
 
-         CREATE TABLE IF NOT EXISTS custom_commands (
-             id TEXT PRIMARY KEY,
-             title TEXT NOT NULL,
-             script_lang TEXT NOT NULL,
-             script_body TEXT NOT NULL,
-             shortcut TEXT,
-             created_at INTEGER NOT NULL
-         );",
-    )
-    .map_err(|e| format!("DB schema init failed: {e}"))?;
+        Mutex::new(conn)
+    });
 
-    Ok(conn)
+    conn_mutex.lock().map_err(|e| e.to_string())
 }
 
 // ============================================================================

@@ -67,7 +67,7 @@ impl IconPack {
 
     pub fn label(&self) -> &'static str {
         match self {
-            Self::MacosFinder => "macOS Finder (Sonoma)",
+            Self::MacosFinder => "macOS Finder (Golden Gate)",
             Self::Windows11 => "Windows 11",
             Self::Windows10 => "Windows 10",
             Self::Windows8 => "Windows 8",
@@ -360,6 +360,7 @@ impl IconGlyph {
             };
         }
         let ext = extension.to_ascii_uppercase();
+        let name_lower = name.to_lowercase();
 
         let glyph = if ext == "PDF" {
             IconGlyph::PagePdf
@@ -369,29 +370,78 @@ impl IconGlyph {
             IconGlyph::PageSheet
         } else if ext == "PPT" || ext == "PPTX" || ext == "ODP" {
             IconGlyph::PageSlide
-        } else if is_image {
+        } else if is_image
+            || matches!(
+                ext.as_str(),
+                "PNG" | "JPG" | "JPEG" | "WEBP" | "AVIF" | "GIF" | "SVG" | "ICO" | "BMP"
+            )
+        {
             IconGlyph::PageImage
         } else if is_media && matches!(ext.as_str(), "MP4" | "MKV" | "MOV" | "AVI" | "WEBM" | "M4V")
+            || name_lower.ends_with(".mov")
+            || name_lower.ends_with(".mp4")
         {
             IconGlyph::PageVideo
-        } else if is_media {
+        } else if is_media || matches!(ext.as_str(), "MP3" | "WAV" | "FLAC" | "AAC" | "OGG" | "M4A")
+        {
             IconGlyph::PageAudio
-        } else if is_archive {
+        } else if is_archive
+            || name_lower.contains(".bak")
+            || name_lower.contains(".backup")
+            || matches!(
+                ext.as_str(),
+                "ZIP" | "7Z" | "TAR" | "GZ" | "XZ" | "BZ2" | "RAR"
+            )
+        {
             IconGlyph::PageArchive
         } else if matches!(ext.as_str(), "EXE" | "MSI" | "APP" | "BIN" | "APK") {
             IconGlyph::PageExe
         } else if matches!(ext.as_str(), "DLL" | "SO" | "DYLIB" | "LIB" | "PYD" | "OCX") {
             IconGlyph::PageLibrary
         } else if is_code
-            && matches!(
+            && (matches!(
                 ext.as_str(),
-                "JSON" | "TOML" | "YAML" | "YML" | "XML" | "INI"
-            )
+                "JSON"
+                    | "TOML"
+                    | "YAML"
+                    | "YML"
+                    | "XML"
+                    | "INI"
+                    | "CONF"
+                    | "CFG"
+                    | "ENV"
+                    | "PROPERTIES"
+            ) || name_lower.contains(".json.")
+                || name_lower.ends_with(".lock"))
         {
             IconGlyph::PageConfig
-        } else if is_code {
+        } else if is_code
+            || name_lower.ends_with(".nu")
+            || matches!(
+                ext.as_str(),
+                "RS" | "PY"
+                    | "JS"
+                    | "TS"
+                    | "C"
+                    | "CPP"
+                    | "H"
+                    | "HPP"
+                    | "GO"
+                    | "SWIFT"
+                    | "KT"
+                    | "JAVA"
+                    | "SH"
+                    | "BASH"
+                    | "PS1"
+                    | "NU"
+            )
+        {
             IconGlyph::PageCode
-        } else if is_document || matches!(ext.as_str(), "TXT" | "LOG" | "MD" | "MARKDOWN" | "CFG") {
+        } else if is_document
+            || matches!(ext.as_str(), "TXT" | "LOG" | "MD" | "MARKDOWN" | "TEXT")
+            || name_lower.ends_with(".log")
+            || name_lower.ends_with("log")
+        {
             IconGlyph::PageText
         } else {
             IconGlyph::PageDefault
@@ -1052,21 +1102,31 @@ fn folder_shapes(st: &PackStyle) -> String {
             glass = glass_layers(8.0, 30.0, 84.0, 52.0)
         ),
         // Classic Finder / Win7 / XP style: distinct tab on top-left
-        TabStyle::Tab => format!(
-            "{defs} \
-             <rect x='8' y='12' width='44' height='16' rx='{tr}' fill='{tab}'{out_x}/> \
-             <rect x='8' y='22' width='84' height='60' rx='{r}' fill='{back}'{out}/> \
-             <rect x='8' y='34' width='84' height='48' rx='{r}' fill='url(#ggfront)'{out}/> \
-             {glass}",
-            defs = defs,
-            tr = (r * 0.7).max(3.0),
-            tab = tab,
-            out_x = out,
-            r = r,
-            back = back,
-            out = out,
-            glass = glass_layers(8.0, 34.0, 84.0, 48.0)
-        ),
+        TabStyle::Tab => {
+            let peek = if st.back == "#4B9AF4" {
+                "<path d='M22 20 L56 20 L66 30 L66 38 L22 38 Z' fill='#FFFFFF' opacity='0.96'/> \
+                 <rect x='26' y='24' width='22' height='2' rx='1' fill='#94A3B8' opacity='0.6'/>"
+            } else {
+                ""
+            };
+            format!(
+                "{defs} \
+                 <rect x='8' y='12' width='44' height='16' rx='{tr}' fill='{tab}'{out_x}/> \
+                 <rect x='8' y='22' width='84' height='60' rx='{r}' fill='{back}'{out}/> \
+                 {peek} \
+                 <rect x='8' y='34' width='84' height='48' rx='{r}' fill='url(#ggfront)'{out}/> \
+                 {glass}",
+                defs = defs,
+                tr = (r * 0.7).max(3.0),
+                tab = tab,
+                out_x = out,
+                r = r,
+                back = back,
+                out = out,
+                peek = peek,
+                glass = glass_layers(8.0, 34.0, 84.0, 48.0)
+            )
+        }
         // GNOME / Adwaita / Hyprland: detached short notch
         TabStyle::Notch => format!(
             "{defs} \
@@ -1154,24 +1214,23 @@ fn page_emblem(glyph: IconGlyph, st: &PackStyle, accent: &str) -> Option<String>
             let teeth: String = (0..8)
                 .map(|i| {
                     let ang = i as f32 * std::f32::consts::FRAC_PI_4;
-                    let (x1, y1) = (50.0 + 12.0 * ang.cos(), 55.5 + 12.0 * ang.sin());
-                    let (x2, y2) = (50.0 + 17.0 * ang.cos(), 55.5 + 17.0 * ang.sin());
+                    let (x1, y1) = (50.0 + 11.0 * ang.cos(), 55.5 + 11.0 * ang.sin());
+                    let (x2, y2) = (50.0 + 16.5 * ang.cos(), 55.5 + 16.5 * ang.sin());
                     format!(
-                        "<path d='M{x1:.1} {y1:.1} L{x2:.1} {y2:.1}' stroke='{l}' stroke-width='4.4' stroke-linecap='round'/>",
+                        "<path d='M{x1:.1} {y1:.1} L{x2:.1} {y2:.1}' stroke='{a}' stroke-width='4.4' stroke-linecap='round'/>",
                         x1 = x1,
                         y1 = y1,
                         x2 = x2,
                         y2 = y2,
-                        l = ln
+                        a = a
                     )
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
             format!(
-                "{teeth} <circle cx='50' cy='55.5' r='9.5' fill='none' stroke='{l}' stroke-width='3.4'/> \
-                 <circle cx='50' cy='55.5' r='3' fill='{a}'/>",
+                "{teeth} <circle cx='50' cy='55.5' r='9.5' fill='none' stroke='{a}' stroke-width='3.4'/> \
+                 <circle cx='50' cy='55.5' r='3.5' fill='{a}'/>",
                 teeth = teeth,
-                l = ln,
                 a = a
             )
         }
@@ -1201,8 +1260,10 @@ fn page_emblem(glyph: IconGlyph, st: &PackStyle, accent: &str) -> Option<String>
             a = a
         ),
         _ => format!(
-            "<rect x='34' y='46' width='32' height='2.9' rx='1.45' fill='{l}' opacity='0.7'/> \
-             <rect x='34' y='55' width='32' height='2.9' rx='1.45' fill='{l}' opacity='0.7'/>",
+            "<rect x='32' y='44' width='36' height='3.2' rx='1.6' fill='{a}' opacity='0.75'/> \
+             <rect x='32' y='52' width='36' height='3.0' rx='1.5' fill='{l}' opacity='0.65'/> \
+             <rect x='32' y='60' width='22' height='3.0' rx='1.5' fill='{l}' opacity='0.5'/>",
+            a = a,
             l = ln
         ),
     })
@@ -1422,7 +1483,7 @@ pub fn svg_for(pack: IconPack, glyph: IconGlyph, accent_rgb: [u8; 3]) -> String 
                 IconGlyph::PageVideo => "#EC4899",
                 IconGlyph::PageAudio => "#F97316",
                 IconGlyph::PageCode => "#06B6D4",
-                IconGlyph::PageConfig => "#6B7280",
+                IconGlyph::PageConfig => "#F59E0B",
                 IconGlyph::PageArchive => "#D97706",
                 IconGlyph::PageExe => "#10B981",
                 IconGlyph::PageLibrary => "#8B5CF6",

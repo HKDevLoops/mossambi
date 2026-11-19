@@ -137,6 +137,94 @@ pub fn resolve_file_icon(name: &str, extension: &str, is_dir: bool) -> FileIconS
     }
 
     let ext = extension.to_ascii_uppercase();
+    let name_lower = name.to_lowercase();
+
+    // Smart compound extension & filename heuristics
+    if name_lower.ends_with(".nu") || ext == "NU" {
+        return FileIconSpec {
+            glyph: "⌨",
+            color_rgb: [56, 189, 248], // Sky Blue (Nushell)
+            category: "Nushell Script",
+            is_image: false,
+            is_media: false,
+            is_archive: false,
+            is_document: false,
+            is_code: true,
+        };
+    }
+
+    if name_lower.contains(".json.bak") || name_lower.contains(".json.") || ext == "JSON" {
+        return FileIconSpec {
+            glyph: "⚙",
+            color_rgb: [245, 158, 11], // Luminous Amber (JSON / Schema)
+            category: "Config / Schema",
+            is_image: false,
+            is_media: false,
+            is_archive: false,
+            is_document: false,
+            is_code: true,
+        };
+    }
+
+    if name_lower.ends_with(".lock")
+        || name_lower.contains("-lock.json")
+        || name_lower == "cargo.lock"
+    {
+        return FileIconSpec {
+            glyph: "🔒",
+            color_rgb: [234, 88, 12], // Deep Orange (Lockfile)
+            category: "Package Lockfile",
+            is_image: false,
+            is_media: false,
+            is_archive: false,
+            is_document: false,
+            is_code: true,
+        };
+    }
+
+    if name_lower.ends_with(".log") || name_lower.ends_with("log") || ext == "LOG" {
+        return FileIconSpec {
+            glyph: "📄",
+            color_rgb: [14, 165, 233], // Crisp Cyan (Log Output)
+            category: "Log File",
+            is_image: false,
+            is_media: false,
+            is_archive: false,
+            is_document: true,
+            is_code: false,
+        };
+    }
+
+    if name_lower.contains(".bak")
+        || name_lower.contains(".backup")
+        || name_lower.ends_with(".old")
+        || name_lower.ends_with(".orig")
+    {
+        return FileIconSpec {
+            glyph: "📦",
+            color_rgb: [168, 85, 247], // Amethyst / Purple (Backup)
+            category: "Backup File",
+            is_image: false,
+            is_media: false,
+            is_archive: true,
+            is_document: false,
+            is_code: false,
+        };
+    }
+
+    if name_lower.starts_with(".env") || name_lower.ends_with(".env") {
+        return FileIconSpec {
+            glyph: "⚙",
+            color_rgb: [234, 179, 8], // Gold (Environment Settings)
+            category: "Environment Config",
+            is_image: false,
+            is_media: false,
+            is_archive: false,
+            is_document: false,
+            is_code: true,
+        };
+    }
+
     match ext.as_str() {
         // --- Raster & Vector Images ---
         "PNG" => FileIconSpec {

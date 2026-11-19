@@ -588,6 +588,7 @@ impl StudioView {
 
                     // Window Controls (Placement logic based on spec)
                     if chrome_spec.window_controls == WindowControlsPosition::LeftTraffic {
+                        ui.add_space(8.0);
                         crate::gui::finder_chrome::render_traffic_lights(
                             ui,
                             &palette,
@@ -595,18 +596,12 @@ impl StudioView {
                             || do_minimize = true,
                             || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
                         );
+                        ui.add_space(8.0);
+                    } else if let Some(tex) = &self.brand_logo_tex {
+                        // In Windows/GNOME caption button layout, show logo on the left
                         ui.add_space(6.0);
-                    }
-
-                    // Logo on right
-                    if let Some(tex) = &self.brand_logo_tex {
-                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                             ui.image((tex.id(), Vec2::new(20.0, 20.0)));
-                         });
-                    }
-
-                    if let Some(tex) = &self.brand_logo_tex {
                         ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::splat(20.0)));
+                        ui.add_space(6.0);
                     }
 
                     if chrome_spec.tab_position != TabPosition::None {
@@ -879,16 +874,25 @@ impl StudioView {
                         if chrome_spec.window_controls == WindowControlsPosition::RightCaption {
                             110.0_f32
                         } else {
-                            20.0_f32
+                            38.0_f32
                         };
                     let drag_w = (ui.available_width() - right_reserve).max(20.0);
                     let (_drag_rect, drag_resp) =
                         ui.allocate_exact_size(Vec2::new(drag_w, 26.0), Sense::click_and_drag());
                     if drag_resp.drag_started() {
-                        ctx.send_viewport_cmd(ViewportCommand::BeginMoveDrag);
+                        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
                     }
                     if drag_resp.double_clicked() {
                         ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max));
+                    }
+
+                    // In macOS Finder style, place brand logo on the far right of the header
+                    if chrome_spec.window_controls == WindowControlsPosition::LeftTraffic {
+                        if let Some(tex) = &self.brand_logo_tex {
+                            ui.add_space(6.0);
+                            ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::splat(20.0)));
+                            ui.add_space(8.0);
+                        }
                     }
 
                     // Right caption buttons (Windows / GNOME style)

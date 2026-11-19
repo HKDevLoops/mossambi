@@ -85,7 +85,7 @@ pub fn render_traffic_lights(
             on_min();
         }
 
-        // Zoom (green, plus glyph)
+        // Zoom (green, modern macOS opposing diagonal expand arrows)
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
         let painter = ui.painter_at(rect);
         painter.circle_filled(rect.center(), d / 2.0, TL_MAX);
@@ -95,21 +95,7 @@ pub fn render_traffic_lights(
             Stroke::new(0.5_f32, Color32::from_black_alpha(40)),
         );
         if resp.hovered() {
-            let stroke = Stroke::new(1.1_f32, Color32::from_black_alpha(170));
-            painter.line_segment(
-                [
-                    rect.center() - Vec2::new(d * 0.22, 0.0),
-                    rect.center() + Vec2::new(d * 0.22, 0.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    rect.center() - Vec2::new(0.0, d * 0.22),
-                    rect.center() + Vec2::new(0.0, d * 0.22),
-                ],
-                stroke,
-            );
+            draw_zoom_glyph(&painter, rect.center(), d);
         }
         if resp.clicked() {
             on_zoom();
@@ -212,6 +198,56 @@ fn draw_x_glyph(painter: &egui::Painter, center: egui::Pos2, size: f32) {
         [center + Vec2::new(-h.x, h.y), center + Vec2::new(h.x, -h.y)],
         stroke,
     );
+}
+
+/// Draws official modern macOS Sequoia opposing diagonal triangles for Zoom/Maximize.
+fn draw_zoom_glyph(painter: &egui::Painter, center: egui::Pos2, size: f32) {
+    let col = Color32::from_black_alpha(180);
+    let s = (size * 0.28).clamp(2.5, 4.5);
+    let mut mesh = egui::Mesh::default();
+    // Top-left outward triangle
+    let p1 = center + Vec2::new(-s, -s);
+    let p2 = center + Vec2::new(-s, 0.0);
+    let p3 = center + Vec2::new(0.0, -s);
+    let i = mesh.vertices.len() as u32;
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: p1,
+        uv: egui::pos2(0.0, 0.0),
+        color: col,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: p2,
+        uv: egui::pos2(0.0, 0.0),
+        color: col,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: p3,
+        uv: egui::pos2(0.0, 0.0),
+        color: col,
+    });
+    mesh.add_triangle(i, i + 1, i + 2);
+    // Bottom-right outward triangle
+    let p4 = center + Vec2::new(s, s);
+    let p5 = center + Vec2::new(s, 0.0);
+    let p6 = center + Vec2::new(0.0, s);
+    let j = mesh.vertices.len() as u32;
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: p4,
+        uv: egui::pos2(0.0, 0.0),
+        color: col,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: p5,
+        uv: egui::pos2(0.0, 0.0),
+        color: col,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: p6,
+        uv: egui::pos2(0.0, 0.0),
+        color: col,
+    });
+    mesh.add_triangle(j, j + 1, j + 2);
+    painter.add(egui::Shape::Mesh(mesh));
 }
 
 /// Paints the thin Finder-style chevron-right separator drawn between
