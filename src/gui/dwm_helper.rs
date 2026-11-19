@@ -215,35 +215,7 @@ mod win32_dwm {
                 };
                 let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
 
-                // 2. Strip native Windows titlebar caption and system menu styles so Windows
-                // DWM never renders redundant native titlebar buttons in frameless mode.
-                const WS_CAPTION_MASK: isize = 0x00C00000;
-                const WS_SYSMENU_MASK: isize = 0x00080000;
-                const WS_MINIMIZEBOX_MASK: isize = 0x00020000;
-                const WS_MAXIMIZEBOX_MASK: isize = 0x00010000;
-                let cur_style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-                let clean_style = cur_style
-                    & !(WS_CAPTION_MASK
-                        | WS_SYSMENU_MASK
-                        | WS_MINIMIZEBOX_MASK
-                        | WS_MAXIMIZEBOX_MASK);
-                if clean_style != cur_style {
-                    SetWindowLongPtrW(hwnd, GWL_STYLE, clean_style);
-                    use windows_sys::Win32::UI::WindowsAndMessaging::{
-                        SetWindowPos, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-                    };
-                    let _ = SetWindowPos(
-                        hwnd,
-                        std::ptr::null_mut(),
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
-                    );
-                }
-
-                // 3. Synchronize Immersive Dark Mode with active theme
+                // 2. Synchronize Immersive Dark Mode with active theme
                 let dark_val: i32 = if dark_mode { 1 } else { 0 };
                 let _ = DwmSetWindowAttribute(
                     hwnd,
@@ -252,7 +224,7 @@ mod win32_dwm {
                     4,
                 );
 
-                // 4. Remove WS_EX_LAYERED whole-window alpha path entirely
+                // 3. Remove WS_EX_LAYERED whole-window alpha path entirely
                 let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
                 if ex & (WS_EX_LAYERED as isize) != 0 {
                     SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & !(WS_EX_LAYERED as isize));

@@ -6,7 +6,7 @@ use serde_json::json;
 use std::path::Path;
 
 use crate::codec::{verify_conversion_fidelity, BenchmarkEngine, FileQualityChecker};
-use crate::core::{get_system_arch_info, UniversalRegistry, THEMES};
+use crate::core::{get_system_arch_info, UniversalRegistry};
 use crate::hwaccel::detect_hardware_capabilities;
 
 pub fn handle_info(file: &Path, as_json: bool) -> Result<()> {
@@ -230,16 +230,20 @@ pub fn handle_catalogue(query: &str, as_json: bool) -> Result<()> {
 
 pub fn handle_themes(as_json: bool) -> Result<()> {
     if as_json {
-        let all = crate::core::all_pantone_themes();
-        println!("{}", serde_json::to_string_pretty(all)?);
+        let all = crate::core::all_26_pantone_themes();
+        println!("{}", serde_json::to_string_pretty(&all)?);
     } else {
-        println!("13 NAMED THEMES (11 DARK & 1 LIGHT)");
-        println!("Catalog order; each color records its source provenance.\n");
+        println!("26 NAMED PANTONE THEMES (13 DARK & 13 EYE-CARE LIGHT)");
+        println!("Catalog order; each color records its certified Pantone code and hex.\n");
 
-        println!("11 DARK THEMES:");
+        let all_26 = crate::core::all_26_pantone_themes();
+        let dark_themes: Vec<_> = all_26.iter().filter(|t| t.is_dark).collect();
+        let light_themes: Vec<_> = all_26.iter().filter(|t| !t.is_dark).collect();
+
+        println!("13 CERTIFIED DARK THEMES:");
         println!("--------------------------------------------------------------");
-        for (idx, theme) in THEMES.iter().take(12).enumerate() {
-            println!("  {:2}. {:<24} [ID: {:<16}]", idx + 1, theme.name, theme.id);
+        for (idx, theme) in dark_themes.iter().enumerate() {
+            println!("  {:2}. {:<24} [ID: {:<22}]", idx + 1, theme.name, theme.id);
             println!(
                 "      BG:      {:<18} ({:<24}) [{}]",
                 theme.bg.name, theme.bg.code, theme.bg.hex
@@ -255,10 +259,10 @@ pub fn handle_themes(as_json: bool) -> Result<()> {
             println!();
         }
 
-        println!("1 LIGHT THEME:");
+        println!("13 EYE-CARE LIGHT THEMES:");
         println!("--------------------------------------------------------------");
-        for (idx, theme) in THEMES.iter().skip(12).enumerate() {
-            println!("  {:2}. {:<24} [ID: {:<16}]", idx + 1, theme.name, theme.id);
+        for (idx, theme) in light_themes.iter().enumerate() {
+            println!("  {:2}. {:<24} [ID: {:<22}]", idx + 1, theme.name, theme.id);
             println!(
                 "      BG:      {:<18} ({:<24}) [{}]",
                 theme.bg.name, theme.bg.code, theme.bg.hex
@@ -274,7 +278,7 @@ pub fn handle_themes(as_json: bool) -> Result<()> {
             println!();
         }
         println!("Tip: Switch themes in CLI using 'mossambi config set theme <id_or_name>'");
-        println!("     or press [t] in TUI / select from Preferences tab in Desktop Studio.\n");
+        println!("     or press [t] (cycle) / [T] (toggle set) in TUI, or in Desktop Studio.\n");
     }
     Ok(())
 }

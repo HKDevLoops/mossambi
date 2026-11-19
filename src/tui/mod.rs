@@ -14,11 +14,16 @@
 //!   archive packing run in background worker threads with generation counters and 30s watchdog timers.
 //!   Zero UI hitching, freezing, or lockups under rapid user tampering.
 
-use crate::archive::{pack_archive, ArchiveType};
+use crate::archive::{extract_archive_safe, pack_archive, ArchiveType};
 use crate::codec::{
     transcode_file, transcode_to_all_formats, BenchmarkEngine, BenchmarkReport, FileQualityChecker,
     FileQualityReport, LosslessMode,
 };
+use crate::core::action_journal::{record_copy, record_move, undo_last};
+use crate::core::fs_utils::{
+    copy_entry_recursive, delete_to_recycle_bin, move_entry, resolve_unique_paste_path,
+};
+use crate::core::tags::{available_tags, clear_tag, get_tags, set_tag};
 use crate::core::{
     fuzzy_match, get_system_arch_info, get_system_drives, resolve_file_icon, sort_file_items,
     spawn_async_dir_scan, AsyncWorkerPool, DriveInfo, FileItem, MossambiConfig, ScanBatch,
@@ -213,6 +218,17 @@ pub struct AppState {
     pub selected_shade_idx: usize,
     pub should_quit: bool,
 
+    // Help & Cheatsheet Modal
+    pub show_help_modal: bool,
+
+    // File Tag Modal
+    pub show_tag_modal: bool,
+    pub available_tags: Vec<String>,
+    pub selected_tag_idx: usize,
+
+    // File System Clipboard (paths, is_cut)
+    pub fs_clipboard: Option<(Vec<PathBuf>, bool)>,
+
     // Quality & Benchmarks
     pub quality_report: Option<FileQualityReport>,
     pub bench_report: Option<BenchmarkReport>,
@@ -311,6 +327,12 @@ impl AppState {
             ],
             selected_shade_idx: 0,
             should_quit: false,
+
+            show_help_modal: false,
+            show_tag_modal: false,
+            available_tags: available_tags(),
+            selected_tag_idx: 0,
+            fs_clipboard: None,
 
             quality_report: None,
             bench_report: None,
@@ -497,14 +519,38 @@ impl AppState {
                         "🎬 Audio/Video Media: {}\nSize: {}\nCodec: Stream Remuxable\nLocation: {}",
                         item.name, item.formatted_size(), path.display()
                     ));
-                } else {
+                } else if matches!(
+                    ext.as_str(),
+                    "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "zst"
+                ) {
                     self.preview_content = Some(format!(
-                        "📦 File: {}\nSize: {}\nType: {}\nPath: {}",
+                        "📦 Archive Suite: {}\nSize: {}\nExtension: .{}\nPath: {}\n\nPress [x] to safely unpack archive (Zip-Slip protected)\nPress [c] to transcode\nPress [m] to edit tags",
                         item.name,
                         item.formatted_size(),
                         ext,
                         path.display()
                     ));
+                } else {
+                    self.preview_content = Some(format!(
+                        "📦 File: {}\nSize: {}\nType: {}\nPath: {}\n\nPress [m] to edit tags\nPress [c] to transcode",
+                        item.name,
+                        item.formatted_size(),
+                        ext,
+                        path.display()
+                    ));
+                }
+
+                // Append any assigned tags
+                let tags = get_tags(&path);
+                if !tags.is_empty() {
+                    let tag_badges = tags
+                        .iter()
+                        .map(|t| format!("#{}", t))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if let Some(ref mut content) = self.preview_content {
+                        content.push_str(&format!("\n🏷️ Tags: {}", tag_badges));
+                    }
                 }
             }
             self.preview_path = Some(path);
@@ -745,8 +791,292 @@ impl AppState {
         }
     }
 
+    /// Safely unpacks the selected archive(s) into current directory with Zip-Slip protection
+    pub fn execute_archive_unpack(&mut self) {
+        let targets: Vec<PathBuf> = if !self.selected_paths.is_empty() {
+            self.selected_paths
+                .iter()
+                .filter(|p| {
+                    let ext = p
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    matches!(
+                        ext.as_str(),
+                        "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "zst"
+                    )
+                })
+                .cloned()
+                .collect()
+        } else if let Some(item) = self.selected_item() {
+            if !item.is_dir {
+                vec![item.path.clone()]
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        if targets.is_empty() {
+            self.status_message =
+                "Please select an archive file (.zip, .tar, .gz, .xz, .zst, .bz2) first.".into();
+            self.status_is_error = true;
+            return;
+        }
+
+        let total = targets.len();
+        let dest_dir = self.current_dir.clone();
+        self.active_task_name = Some(format!("Extracting {} archive(s)", total));
+        self.active_task_progress = 0.1;
+        self.status_message = format!("📦 Safely extracting {} archive(s)...", total);
+        self.status_is_error = false;
+
+        self.worker_pool
+            .spawn_task("ArchiveExtract", move |_cancel, tx, task_id| {
+                for (idx, archive_path) in targets.iter().enumerate() {
+                    if _cancel.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let stem = archive_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("extracted");
+                    let target_dir = dest_dir.join(stem);
+                    let _ = fs::create_dir_all(&target_dir);
+
+                    match extract_archive_safe(archive_path, &target_dir) {
+                        Ok(_) => {
+                            let frac = (idx + 1) as f32 / total as f32;
+                            let _ = tx.send(TaskUpdate::Progress {
+                                id: task_id,
+                                fraction: frac,
+                                status: format!("Extracted {}/{} archives", idx + 1, total),
+                                item: None,
+                            });
+                        }
+                        Err(e) => {
+                            let _ = tx.send(TaskUpdate::Failed {
+                                id: task_id,
+                                error: format!(
+                                    "Archive extraction error on {}: {}",
+                                    archive_path.display(),
+                                    e
+                                ),
+                            });
+                            return;
+                        }
+                    }
+                }
+                let _ = tx.send(TaskUpdate::Completed {
+                    id: task_id,
+                    output: Some(dest_dir),
+                    message: format!(
+                        "✓ Safely unpacked {} archive(s) with Zip-Slip protection",
+                        total
+                    ),
+                });
+            });
+    }
+
+    /// Copies selected items to the TUI clipboard
+    pub fn copy_selection_to_clipboard(&mut self) {
+        let targets: Vec<PathBuf> = if !self.selected_paths.is_empty() {
+            self.selected_paths.iter().cloned().collect()
+        } else if let Some(item) = self.selected_item() {
+            vec![item.path.clone()]
+        } else {
+            Vec::new()
+        };
+
+        if targets.is_empty() {
+            self.status_message = "No items selected to copy.".into();
+            self.status_is_error = true;
+            return;
+        }
+
+        let count = targets.len();
+        self.fs_clipboard = Some((targets, false));
+        self.status_message = format!(
+            "📋 Copied {} item(s) to clipboard. Press [p] to paste.",
+            count
+        );
+        self.status_is_error = false;
+    }
+
+    /// Cuts selected items to the TUI clipboard
+    pub fn cut_selection_to_clipboard(&mut self) {
+        let targets: Vec<PathBuf> = if !self.selected_paths.is_empty() {
+            self.selected_paths.iter().cloned().collect()
+        } else if let Some(item) = self.selected_item() {
+            vec![item.path.clone()]
+        } else {
+            Vec::new()
+        };
+
+        if targets.is_empty() {
+            self.status_message = "No items selected to cut.".into();
+            self.status_is_error = true;
+            return;
+        }
+
+        let count = targets.len();
+        self.fs_clipboard = Some((targets, true));
+        self.status_message = format!("✂️ Cut {} item(s) to clipboard. Press [p] to paste.", count);
+        self.status_is_error = false;
+    }
+
+    /// Pastes items from the TUI clipboard into the current directory
+    pub fn paste_from_clipboard(&mut self) {
+        if let Some((paths, is_cut)) = self.fs_clipboard.take() {
+            let mut count = 0;
+            let dest_dir = self.current_dir.clone();
+            for src in &paths {
+                if !src.exists() {
+                    continue;
+                }
+                let leaf = match src.file_name() {
+                    Some(name) => name,
+                    None => continue,
+                };
+                let candidate = dest_dir.join(leaf);
+                let dest = resolve_unique_paste_path(&candidate);
+                if is_cut {
+                    if let Ok(()) = move_entry(src, &dest) {
+                        record_move(src.clone(), dest.clone());
+                        count += 1;
+                    }
+                } else {
+                    if let Ok(_) = copy_entry_recursive(src, &dest) {
+                        record_copy(src.clone(), dest.clone());
+                        count += 1;
+                    }
+                }
+            }
+            if !is_cut {
+                self.fs_clipboard = Some((paths, false));
+            }
+            self.status_message = format!("✓ Pasted {} item(s) into {}", count, dest_dir.display());
+            self.status_is_error = false;
+            self.trigger_async_scan(dest_dir);
+        } else {
+            self.status_message =
+                "Clipboard is empty. Press [y] to copy or [X] to cut first.".into();
+            self.status_is_error = true;
+        }
+    }
+
+    /// Deletes selected items to the native recycle bin
+    pub fn delete_selected_to_recycle_bin(&mut self) {
+        let targets: Vec<PathBuf> = if !self.selected_paths.is_empty() {
+            self.selected_paths.iter().cloned().collect()
+        } else if let Some(item) = self.selected_item() {
+            vec![item.path.clone()]
+        } else {
+            Vec::new()
+        };
+
+        if targets.is_empty() {
+            self.status_message = "No items selected to delete.".into();
+            self.status_is_error = true;
+            return;
+        }
+
+        let count = targets.len();
+        match delete_to_recycle_bin(&targets) {
+            Ok(()) => {
+                self.selected_paths.clear();
+                self.status_message = format!(
+                    "🗑️ Moved {} item(s) to Recycle Bin. Press [u] to undo.",
+                    count
+                );
+                self.status_is_error = false;
+                self.trigger_async_scan(self.current_dir.clone());
+            }
+            Err(e) => {
+                self.status_message = format!("Failed to delete: {}", e);
+                self.status_is_error = true;
+            }
+        }
+    }
+
+    /// Executes undo of the last journaled action
+    pub fn execute_undo(&mut self) {
+        match undo_last() {
+            Ok(msg) => {
+                self.status_message = format!("↩️ Undo: {}", msg);
+                self.status_is_error = false;
+                self.trigger_async_scan(self.current_dir.clone());
+            }
+            Err(e) => {
+                self.status_message = format!("Undo failed: {}", e);
+                self.status_is_error = true;
+            }
+        }
+    }
+
+    /// Opens the tag modal for the selected file
+    pub fn toggle_tag_modal(&mut self) {
+        if let Some(item) = self.selected_item() {
+            if !item.is_dir {
+                self.available_tags = available_tags();
+                self.selected_tag_idx = 0;
+                self.show_tag_modal = true;
+            } else {
+                self.status_message =
+                    "Tagging directories is not supported. Select a file first.".into();
+                self.status_is_error = true;
+            }
+        }
+    }
+
+    /// Toggles the currently highlighted tag in the tag modal for the selected file
+    pub fn toggle_selected_tag(&mut self) {
+        if let Some(item) = self.selected_item().cloned() {
+            if let Some(tag_name) = self.available_tags.get(self.selected_tag_idx).cloned() {
+                let cur_tags = get_tags(&item.path);
+                let has_tag = cur_tags.iter().any(|t| t.eq_ignore_ascii_case(&tag_name));
+                if has_tag {
+                    if let Ok(()) = clear_tag(&item.path, &tag_name) {
+                        self.status_message =
+                            format!("Removed tag #{} from {}", tag_name, item.name);
+                        self.status_is_error = false;
+                    }
+                } else {
+                    if let Ok(()) = set_tag(&item.path, &tag_name) {
+                        self.status_message = format!("Added tag #{} to {}", tag_name, item.name);
+                        self.status_is_error = false;
+                    }
+                }
+                self.update_preview();
+            }
+        }
+    }
+
+    /// Resolves the active Pantone theme taking dark/light appearance into account (26 themes)
+    pub fn resolve_active_theme(&self) -> &'static crate::core::pantone::PantoneTheme {
+        let base = self.config.theme_mode.to_pantone_theme();
+        let idx = crate::core::pantone::THEMES
+            .iter()
+            .position(|t| t.id == base.id)
+            .unwrap_or(0);
+        let alt = &crate::core::pantone::THEMES_ALT[idx];
+        let want_dark = match self.config.appearance {
+            crate::core::Appearance::ThemeDefault => base.is_dark,
+            crate::core::Appearance::Light => false,
+            crate::core::Appearance::Dark => true,
+            crate::core::Appearance::System => base.is_dark,
+        };
+        if want_dark == base.is_dark {
+            base
+        } else {
+            alt
+        }
+    }
+
     pub fn current_theme_palette(&self) -> TuiThemePalette {
-        let pt = self.config.theme_mode.to_pantone_theme();
+        let pt = self.resolve_active_theme();
         let (bg_r, bg_g, bg_b) = pt.bg.to_rgb();
         let (surf_r, surf_g, surf_b) = pt.surface.to_rgb();
         let (bord_r, bord_g, bord_b) = pt.border.to_rgb();
@@ -903,7 +1233,42 @@ fn handle_key_event(state: &mut AppState, key: crossterm::event::KeyEvent) {
 
     let code = key.code;
 
-    // 1. Drive Modal Active
+    // 1. Help Modal Active
+    if state.show_help_modal {
+        match code {
+            KeyCode::Esc | KeyCode::Char('?') | KeyCode::F(1) | KeyCode::Char('q') => {
+                state.show_help_modal = false;
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // 2. Tag Modal Active
+    if state.show_tag_modal {
+        match code {
+            KeyCode::Esc | KeyCode::Char('m') | KeyCode::Char('M') | KeyCode::Char('q') => {
+                state.show_tag_modal = false;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if state.selected_tag_idx > 0 {
+                    state.selected_tag_idx -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if state.selected_tag_idx + 1 < state.available_tags.len() {
+                    state.selected_tag_idx += 1;
+                }
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                state.toggle_selected_tag();
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // 3. Drive Modal Active
     if state.show_drive_modal {
         match code {
             KeyCode::Esc => state.show_drive_modal = false,
@@ -923,7 +1288,7 @@ fn handle_key_event(state: &mut AppState, key: crossterm::event::KeyEvent) {
         return;
     }
 
-    // 2. Search Mode Active
+    // 4. Search Mode Active
     if state.search_mode {
         match code {
             KeyCode::Esc | KeyCode::Enter => state.search_mode = false,
@@ -942,9 +1307,19 @@ fn handle_key_event(state: &mut AppState, key: crossterm::event::KeyEvent) {
         return;
     }
 
-    // 3. Normal Mode
+    // 5. Normal Mode
     match code {
         KeyCode::Char('q') | KeyCode::Esc => state.should_quit = true,
+
+        // Help & Cheatsheet Modal [?] / [F1]
+        KeyCode::Char('?') | KeyCode::F(1) => {
+            state.show_help_modal = true;
+        }
+
+        // Tag Modal [m] / [M]
+        KeyCode::Char('m') | KeyCode::Char('M') => {
+            state.toggle_tag_modal();
+        }
 
         // Layout Toggle [F6]
         KeyCode::F(6) => {
@@ -1027,29 +1402,41 @@ fn handle_key_event(state: &mut AppState, key: crossterm::event::KeyEvent) {
         KeyCode::Char('t') => {
             state.config.theme_mode = state.config.theme_mode.next();
             let _ = state.config.save();
+            let active = state.resolve_active_theme();
             state.status_message = format!(
                 "🎨 Pantone: {} ({})",
-                state.config.theme_mode.name(),
-                if state.config.theme_mode.is_dark() {
+                active.name,
+                if active.is_dark {
                     "Dark"
                 } else {
-                    "Light"
+                    "Eye-Care Light"
                 }
             );
         }
 
-        // Theme Set Toggle [T] (Shift+T)
+        // Theme Set Toggle [T] (Shift+T: 13 Dark <-> 13 Eye-Care Light)
         KeyCode::Char('T') => {
-            state.config.theme_mode = state.config.theme_mode.toggle_dark_light();
-            let _ = state.config.save();
-            state.status_message = format!(
-                "🎨 Toggled Set: {} ({})",
-                state.config.theme_mode.name(),
-                if state.config.theme_mode.is_dark() {
-                    "11 Dark Themes"
-                } else {
-                    "1 Light Theme"
+            state.config.appearance = match state.config.appearance {
+                crate::core::Appearance::Dark => crate::core::Appearance::Light,
+                crate::core::Appearance::Light => crate::core::Appearance::Dark,
+                _ => {
+                    if state.resolve_active_theme().is_dark {
+                        crate::core::Appearance::Light
+                    } else {
+                        crate::core::Appearance::Dark
+                    }
                 }
+            };
+            let _ = state.config.save();
+            let active = state.resolve_active_theme();
+            state.status_message = format!(
+                "🎨 Appearance Set: {} ({})",
+                if active.is_dark {
+                    "13 Certified Dark Themes"
+                } else {
+                    "13 Eye-Care Light Themes"
+                },
+                active.name
             );
         }
 
@@ -1111,8 +1498,46 @@ fn handle_key_event(state: &mut AppState, key: crossterm::event::KeyEvent) {
         KeyCode::Char('e') => {
             state.execute_exam_optimization();
         }
-        KeyCode::Char('p') => {
-            state.execute_archive_pack();
+        KeyCode::Char('p') | KeyCode::Char('P') => {
+            if state.current_tab == AppTab::Archive {
+                state.execute_archive_pack();
+            } else {
+                state.paste_from_clipboard();
+            }
+        }
+        // Safe Archive Extraction [x] / Cut Selection if non-archive
+        KeyCode::Char('x') => {
+            let is_archive = state
+                .selected_item()
+                .map(|it| {
+                    let ext = it.extension.to_lowercase();
+                    matches!(
+                        ext.as_str(),
+                        "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "zst"
+                    )
+                })
+                .unwrap_or(false);
+            if is_archive {
+                state.execute_archive_unpack();
+            } else {
+                state.cut_selection_to_clipboard();
+            }
+        }
+        // Dedicated Cut [X]
+        KeyCode::Char('X') => {
+            state.cut_selection_to_clipboard();
+        }
+        // Copy Selection [y]
+        KeyCode::Char('y') => {
+            state.copy_selection_to_clipboard();
+        }
+        // Delete to Native Recycle Bin [Delete]
+        KeyCode::Delete => {
+            state.delete_selected_to_recycle_bin();
+        }
+        // Undo Last Journaled Action [u]
+        KeyCode::Char('u') => {
+            state.execute_undo();
         }
         KeyCode::Char('r') => {
             state.trigger_async_scan(state.current_dir.clone());
@@ -1207,6 +1632,16 @@ fn draw_ui(f: &mut Frame, state: &AppState, spinner: &str) {
     // 4. Drive Switcher Modal Overlay
     if state.show_drive_modal {
         draw_drive_modal(f, state, palette);
+    }
+
+    // 5. File Tag Modal Overlay
+    if state.show_tag_modal {
+        draw_tag_modal(f, state, palette);
+    }
+
+    // 6. Help & Cheatsheet Modal Overlay
+    if state.show_help_modal {
+        draw_help_modal(f, state, palette);
     }
 }
 
@@ -1622,15 +2057,28 @@ fn draw_footer(
         Style::default().fg(palette.accent)
     };
 
-    let footer = Paragraph::new(status_text)
-        .style(style)
-        .block(
-            Block::default()
-                .title(" [Enter] Open | [Backspace] Up | [d] Drives | [F6] Layout | [t/T] Theme | [g] Glass | [Space] Select | [c] Convert ")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(palette.border)),
-        );
+    let clipboard_hint = if let Some((ref paths, is_cut)) = state.fs_clipboard {
+        format!(
+            " | {} {} item(s)",
+            if is_cut { "✂️ Cut" } else { "📋 Copied" },
+            paths.len()
+        )
+    } else {
+        String::new()
+    };
+
+    let footer_title = format!(
+        " [Enter] Open | [?] Help | [y] Copy | [p] Paste | [x] Extract | [m] Tag | [t/T] Theme | [g] Glass | [d] Drives | [u] Undo{} ",
+        clipboard_hint
+    );
+
+    let footer = Paragraph::new(status_text).style(style).block(
+        Block::default()
+            .title(footer_title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(palette.border)),
+    );
     f.render_widget(footer, area);
 }
 
@@ -1667,6 +2115,370 @@ fn draw_drive_modal(f: &mut Frame, state: &AppState, palette: TuiThemePalette) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(palette.gold)),
+    );
+    f.render_widget(list, area);
+}
+
+fn draw_help_modal(f: &mut Frame, _state: &AppState, palette: TuiThemePalette) {
+    let area = centered_rect(72, 72, f.area());
+    f.render_widget(Clear, area);
+
+    let help_lines = vec![
+        Line::from(vec![Span::styled(
+            " Mossambi TUI Keyboard & Mouse Navigation Cheatsheet",
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                " [Navigation]       ",
+                Style::default()
+                    .fg(palette.gold)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "j / k / Up / Down    ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Navigate files / rows / menu items",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "h / Backspace        ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Navigate up to parent directory",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "l / Enter            ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Enter directory / activate item",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "d / D                ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Drive switcher modal (C:, D:, Z:, /)",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "F6                   ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Cycle layout: 3-Col Miller <-> Full-Screen <-> Dual-Pane",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                " [Selection]        ",
+                Style::default()
+                    .fg(palette.gold)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Space / v            ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Toggle checkmark [x] on active item",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "a                    ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Select all / Deselect all in directory",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                " [Actions]          ",
+                Style::default()
+                    .fg(palette.gold)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "c                    ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Transcode selection to target format",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "x                    ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Safely unpack archive (Zip-Slip protected) / Cut",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "y / X                ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Copy / Cut selection to clipboard",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "p / P                ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Paste clipboard items into current directory",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "Delete               ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Move selection to native Recycle Bin",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "u                    ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Undo last journaled action (move/copy/trash)",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "m                    ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Open interactive file tag management modal",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                " [Appearance]       ",
+                Style::default()
+                    .fg(palette.gold)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "t                    ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Cycle sequentially across 13 Pantone theme families",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "T                    ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Toggle Appearance: 13 Certified Dark <-> 13 Eye-Care Light",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "g                    ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Toggle Terminal Glass / Background Transparency",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                " [Search & Help]    ",
+                Style::default()
+                    .fg(palette.gold)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "/                    ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Live fuzzy search filter (Esc to clear)",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "? / F1               ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Toggle this help & cheatsheet modal",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
+                "q / Esc              ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Close modal / Quit application",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+    ];
+
+    let p = Paragraph::new(help_lines).block(
+        Block::default()
+            .title(" ⌨️ Keyboard & Mouse Help ([Esc] or [?] to close) ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(palette.gold)),
+    );
+    f.render_widget(p, area);
+}
+
+fn draw_tag_modal(f: &mut Frame, state: &AppState, palette: TuiThemePalette) {
+    let area = centered_rect(54, 50, f.area());
+    f.render_widget(Clear, area);
+
+    let sel_path = state.selected_item().map(|it| it.path.clone());
+    let active_tags = sel_path.as_ref().map(|p| get_tags(p)).unwrap_or_default();
+    let file_name = sel_path
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or("File");
+
+    let items: Vec<ListItem> = state
+        .available_tags
+        .iter()
+        .enumerate()
+        .map(|(i, tag)| {
+            let is_sel = i == state.selected_tag_idx;
+            let is_applied = active_tags.iter().any(|t| t.eq_ignore_ascii_case(tag));
+            let check_mark = if is_applied { "[x] " } else { "[ ] " };
+
+            let style = if is_sel {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_applied {
+                Style::default()
+                    .fg(palette.gold)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(palette.text_primary)
+            };
+
+            ListItem::new(format!("  {}#{} ", check_mark, tag)).style(style)
+        })
+        .collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .title(format!(
+                " 🏷️ Tags for: {} ([Space/Enter] Toggle, [Esc] Done) ",
+                file_name
+            ))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(palette.accent)),
     );
     f.render_widget(list, area);
 }
@@ -1741,16 +2553,32 @@ fn draw_hardware_tab(f: &mut Frame, area: Rect, palette: TuiThemePalette) {
 }
 
 fn draw_settings_tab(f: &mut Frame, state: &AppState, area: Rect, palette: TuiThemePalette) {
-    let pt = state.config.theme_mode.to_pantone_theme();
+    let pt = state.resolve_active_theme();
     let p = Paragraph::new(format!(
-        "⚙️ Appearance & Persistent Settings\n\n🎨 Active Theme: {} ({})\n   • Background: {} ({}, {})\n   • Surface:    {} ({}, {})\n   • Accent:     {} ({}, {})\n   • Highlight:  {} ({}, {})\n\n💡 Hotkeys:\n   • [t] Cycle sequentially across all 13 named themes\n   • [T] Switch between the 11 Dark Themes and 1 Light Theme\n   • [g] Toggle Terminal Glass / Transparency (Current: {})\n\nCitrus Shade: {}\nZero-Loss Enforcement: {}\nGesture Wakeup: {}\n\nPress [Enter] to toggle zero-loss.",
+        "⚙️ Appearance & Persistent Settings\n\n🎨 Active Theme: {} ({})\n   • Background: {} ({}, {})\n   • Surface:    {} ({}, {})\n   • Accent:     {} ({}, {})\n   • Highlight:  {} ({}, {})\n\n💡 Hotkeys:\n   • [t] Cycle sequentially across all 13 Pantone theme families\n   • [T] Switch between the 13 Certified Dark Themes and 13 Eye-Care Light Themes\n   • [g] Toggle Terminal Glass / Transparency (Current: {})\n\nCitrus Shade: {}\nZero-Loss Enforcement: {}\nGesture Wakeup: {}\n\nPress [Enter] to toggle zero-loss.",
         pt.name,
-        if pt.is_dark { "Certified Dark Theme" } else { "Certified Light Theme" },
-        pt.bg.name, pt.bg.code, pt.bg.hex,
-        pt.surface.name, pt.surface.code, pt.surface.hex,
-        pt.accent.name, pt.accent.code, pt.accent.hex,
-        pt.highlight.name, pt.highlight.code, pt.highlight.hex,
-        if state.config.tui_transparent_bg { "Transparent Blur" } else { "Solid Canvas" },
+        if pt.is_dark {
+            "Certified Dark Theme"
+        } else {
+            "Eye-Care Light Theme"
+        },
+        pt.bg.name,
+        pt.bg.code,
+        pt.bg.hex,
+        pt.surface.name,
+        pt.surface.code,
+        pt.surface.hex,
+        pt.accent.name,
+        pt.accent.code,
+        pt.accent.hex,
+        pt.highlight.name,
+        pt.highlight.code,
+        pt.highlight.hex,
+        if state.config.tui_transparent_bg {
+            "Transparent Blur"
+        } else {
+            "Solid Canvas"
+        },
         state.config.citrus_shade,
         state.config.enforce_zero_loss,
         state.config.enable_gesture_wakeup

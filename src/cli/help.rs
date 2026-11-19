@@ -39,7 +39,7 @@ pub fn print_welcome_banner() {
     println!("  {cyan}mossambi widget{reset}                # Summon Sweet Lime desktop floating radial widget");
     println!("  {cyan}mossambi tui [DIR]{reset}             # Launch Yazi-grade interactive Terminal File Explorer");
     println!();
-    println!("{bold}CLI Fast-Path Conversion:{reset}");
+    println!("{bold}CLI Fast-Path Conversion & Tools:{reset}");
     println!("  {cyan}mossambi <file> [format]{reset}       # Instant conversion (e.g. mossambi sound.wav flac)");
     println!("  {cyan}mossambi <file> --all{reset}          # Transcode to ALL domain formats in parallel");
     println!("  {cyan}mossambi <photo> --exam <p>{reset}    # Indian Exam Optimizer (upsc-photo, ssc-photo, etc.)");
@@ -58,10 +58,31 @@ pub fn print_welcome_banner() {
     println!(
         "  {cyan}mossambi catalogue [query]{reset}     # Search 200+ format registry catalogue"
     );
-    println!("  {cyan}mossambi themes{reset}                # List named eye-safe themes");
-    println!("  {cyan}mossambi fs <copy|move|rename|delete>{reset} # Filesystem operations");
-    println!("  {cyan}mossambi tags <list|add|remove|find>{reset}  # File tagging engine");
-    println!("  {cyan}mossambi queue <add|list|run>{reset}   # Conversion queue control");
+    println!("  {cyan}mossambi themes{reset}                # List 26 Pantone themes (13 Dark & 13 Eye-Care Light)");
+    println!("  {cyan}mossambi fs <copy|move|rename|trash>{reset} # Filesystem operations with undo journal");
+    println!("  {cyan}mossambi tags <list|add|remove|find>{reset} # File tagging engine (NTFS ADS & SQLite)");
+    println!("  {cyan}mossambi queue <add|list|run|clear>{reset}  # Conversion queue control");
+    println!(
+        "  {cyan}mossambi preview <file>{reset}        # Rich text/metadata inspection preview"
+    );
+    println!(
+        "  {cyan}mossambi crop <file>{reset}           # Image region cropping and aspect presets"
+    );
+    println!(
+        "  {cyan}mossambi route <from> <to>{reset}     # Dijkstra conversion route between formats"
+    );
+    println!(
+        "  {cyan}mossambi search <query>{reset}        # Fast fuzzy recursive filename search"
+    );
+    println!(
+        "  {cyan}mossambi batch-rename <files>{reset}  # Pattern-based batch rename with dry-run"
+    );
+    println!("  {cyan}mossambi undo{reset}                  # Revert last journaled filesystem operation");
+    println!("  {cyan}mossambi open-with list <file>{reset} # Inspect and launch registered application handlers");
+    println!(
+        "  {cyan}mossambi scripts list{reset}          # Script automation engine (Rhai & Lua)"
+    );
+    println!("  {cyan}mossambi settings <get|set|list>{reset} # Generic configuration editor");
     println!("  {cyan}mossambi daemon{reset}                # Resident mouse gesture service (Win+Shift+C / Win+Ctrl+C)");
     println!("  {cyan}mossambi help-manual{reset}           # Exhaustive table help and manual");
     println!("\nRun '{cyan}mossambi --help{reset}' for all command flags and options.\n");
@@ -97,13 +118,22 @@ pub fn print_table_help() {
     println!("|  --verify <SRC> <TGT>    |  Mathematical zero-loss verification         |  --verify a b         |");
     println!("|  --catalogue [QUERY]     |  Search 200+ format registry catalogue       |  --catalogue pdf      |");
     println!("|  --hw                    |  GPU/NPU & SIMD hardware diagnostics         |  mossambi --hw        |");
-    println!("|  --themes                |  List all named Pantone themes              |  mossambi --themes    |");
+    println!("|  --themes                |  List 26 Pantone themes (13 Dark & 13 Light) |  mossambi --themes    |");
     println!("|  --daemon <ACTION>       |  Manage background resident daemon          |  --daemon status      |");
-    println!("|  fs <ACTION>             |  copy / move / rename / delete-to-trash     |  mossambi fs copy ... |");
+    println!("|  fs <ACTION>             |  copy / move / rename / trash                |  mossambi fs copy ... |");
     println!("|  tags <ACTION>           |  list / add / remove / find                 |  mossambi tags find X |");
-    println!("|  queue <ACTION>          |  add / list / run conversion queue          |  mossambi queue run   |");
+    println!("|  queue <ACTION>          |  add / list / run / clear                   |  mossambi queue run   |");
+    println!("|  preview <FILE>          |  Text and metadata preview of file           |  mossambi preview f   |");
+    println!("|  crop <FILE>             |  Crop image with normalized rect / aspect    |  mossambi crop in.png |");
+    println!("|  route <FROM> <TO>       |  Dijkstra format conversion pathway          |  mossambi route a b   |");
+    println!("|  search <QUERY>          |  Fuzzy recursive filename search             |  mossambi search doc  |");
+    println!("|  batch-rename <FILES...> |  Pattern batch rename (%N sequence support)  |  batch-rename *.jpg   |");
+    println!("|  undo                    |  Undo last journaled action (move/copy/trash)|  mossambi undo        |");
+    println!("|  open-with list <FILE>   |  Inspect registered system handlers          |  open-with list f.pdf |");
+    println!("|  scripts list            |  List custom Rhai / Lua user automation hooks|  mossambi scripts list|");
     println!("|  completions <SHELL>     |  Generate bash/zsh/fish/powershell/elvish   |  completions bash     |");
     println!("|  config <get|set|list>   |  View or edit persistent configuration       |  config get theme     |");
+    println!("|  settings <get|set|list> |  Generic setting inspection and modification |  settings list        |");
     println!("+--------------------------+----------------------------------------------+-----------------------+");
     println!("\nRun 'mossambi --help' for clap-generated help covering every command and flag.\n");
 }

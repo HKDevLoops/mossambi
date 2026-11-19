@@ -98,8 +98,8 @@ pub use look_spec::{
 pub use lru::LruCache;
 pub use mouse_nav::MouseNavListener;
 pub use pantone::{
-    all_pantone_themes, get_pantone_theme, CitrusShade, PantoneColor, PantonePalette, PantoneTheme,
-    THEMES,
+    all_26_pantone_themes, all_pantone_themes, get_pantone_theme, CitrusShade, PantoneColor,
+    PantonePalette, PantoneTheme, THEMES,
 };
 pub use pins::{
     add as pin_add, contains as pin_contains, move_item as pin_move_item, remove as pin_remove,

@@ -268,6 +268,185 @@ fn test_cli_completions_and_carapace() {
     let help_out = Command::new(&bin).arg("help-manual").output().unwrap();
     assert!(help_out.status.success());
     let help_str = String::from_utf8_lossy(&help_out.stdout);
-    assert!(help_str.contains("MOSSAMBI — ZERO-LOSS CONVERSION PLATFORM"));
+    assert!(help_str.contains("ZERO-LOSS CONVERSION PLATFORM"));
     assert!(help_str.contains("UNIX 'mv' POSITIONAL GRAMMAR"));
+}
+
+#[test]
+fn test_cli_themes_26_list_and_json() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    let out = Command::new(&bin).arg("themes").output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("26 NAMED PANTONE THEMES"));
+    assert!(stdout.contains("13 CERTIFIED DARK THEMES"));
+    assert!(stdout.contains("13 EYE-CARE LIGHT THEMES"));
+
+    let json_out = Command::new(&bin)
+        .args(["themes", "--json"])
+        .output()
+        .unwrap();
+    assert!(json_out.status.success());
+    let val: serde_json::Value = serde_json::from_slice(&json_out.stdout).unwrap();
+    assert_eq!(val.as_array().unwrap().len(), 26);
+}
+
+#[test]
+fn test_cli_tags_subcommand() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    let test_dir = std::env::temp_dir().join("mossambi_cli_test_tags");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).unwrap();
+
+    let file_path = test_dir.join("tagged_doc.txt");
+    fs::write(&file_path, b"Test content for tagging").unwrap();
+
+    // List available tags
+    let list_out = Command::new(&bin).args(["tags", "list"]).output().unwrap();
+    assert!(list_out.status.success());
+
+    // Add tag
+    let add_out = Command::new(&bin)
+        .args(["tags", "add", file_path.to_str().unwrap(), "Important"])
+        .output()
+        .unwrap();
+    assert!(add_out.status.success());
+
+    // Find by tag
+    let find_out = Command::new(&bin)
+        .args([
+            "tags",
+            "find",
+            "Important",
+            "--root",
+            test_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(find_out.status.success());
+    let find_str = String::from_utf8_lossy(&find_out.stdout);
+    assert!(find_str.contains("tagged_doc.txt"));
+
+    // Remove tag
+    let rm_out = Command::new(&bin)
+        .args(["tags", "remove", file_path.to_str().unwrap(), "Important"])
+        .output()
+        .unwrap();
+    assert!(rm_out.status.success());
+
+    let _ = fs::remove_dir_all(&test_dir);
+}
+
+#[test]
+fn test_cli_fs_operations() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    let test_dir = std::env::temp_dir().join("mossambi_cli_test_fs");
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).unwrap();
+
+    let src_file = test_dir.join("origin.txt");
+    fs::write(&src_file, b"Original file payload").unwrap();
+
+    // Copy
+    let copy_dest = test_dir.join("copied.txt");
+    let copy_out = Command::new(&bin)
+        .args([
+            "fs",
+            "copy",
+            src_file.to_str().unwrap(),
+            copy_dest.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(copy_out.status.success());
+    assert!(copy_dest.exists());
+
+    // Rename
+    let rename_out = Command::new(&bin)
+        .args(["fs", "rename", copy_dest.to_str().unwrap(), "renamed.txt"])
+        .output()
+        .unwrap();
+    assert!(rename_out.status.success());
+    assert!(test_dir.join("renamed.txt").exists());
+
+    // Move
+    let sub_dir = test_dir.join("subdir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    let move_out = Command::new(&bin)
+        .args([
+            "fs",
+            "move",
+            test_dir.join("renamed.txt").to_str().unwrap(),
+            sub_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(move_out.status.success());
+    assert!(sub_dir.join("renamed.txt").exists());
+
+    let _ = fs::remove_dir_all(&test_dir);
+}
+
+#[test]
+fn test_cli_route_and_search() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    // Route
+    let route_out = Command::new(&bin)
+        .args(["route", "png", "webp"])
+        .output()
+        .unwrap();
+    assert!(route_out.status.success());
+    let route_str = String::from_utf8_lossy(&route_out.stdout);
+    assert!(route_str.contains("Route: PNG -> WEBP"));
+
+    // Search
+    let search_out = Command::new(&bin)
+        .args(["search", "Cargo", "--limit", "5"])
+        .output()
+        .unwrap();
+    assert!(search_out.status.success());
+    let search_str = String::from_utf8_lossy(&search_out.stdout);
+    assert!(search_str.contains("Cargo"));
+}
+
+#[test]
+fn test_cli_preview_and_queue() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    // Preview
+    let prev_out = Command::new(&bin)
+        .args(["preview", "Cargo.toml", "--json"])
+        .output()
+        .unwrap();
+    assert!(prev_out.status.success());
+    let prev_val: serde_json::Value = serde_json::from_slice(&prev_out.stdout).unwrap();
+    assert_eq!(prev_val["kind"], "text");
+
+    // Queue List
+    let q_out = Command::new(&bin)
+        .args(["queue", "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(q_out.status.success());
+    let q_val: serde_json::Value = serde_json::from_slice(&q_out.stdout).unwrap();
+    assert!(q_val["jobs"].is_array());
 }

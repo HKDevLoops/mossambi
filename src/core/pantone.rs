@@ -891,15 +891,20 @@ pub static THEMES_ALT: [PantoneTheme; 13] = [
     },
 ];
 
-/// Returns all 13 named themes (11 Dark, 1 Light) in catalog order
+/// Returns all 13 named catalog base themes in catalog order
 pub fn all_pantone_themes() -> &'static [PantoneTheme] {
     &THEMES
 }
 
-/// Resolves a PantoneTheme by its identifier or human-readable name
+/// Returns all 26 named themes (13 Dark + 13 Eye-Care Light counterparts)
+pub fn all_26_pantone_themes() -> Vec<&'static PantoneTheme> {
+    THEMES.iter().chain(THEMES_ALT.iter()).collect()
+}
+
+/// Resolves a PantoneTheme by its identifier or human-readable name across all 26 themes
 pub fn get_pantone_theme(id_or_name: &str) -> &'static PantoneTheme {
     let query = id_or_name.to_lowercase().replace([' ', '-', '_'], "");
-    for theme in all_pantone_themes() {
+    for theme in THEMES.iter().chain(THEMES_ALT.iter()) {
         let tid = theme.id.to_lowercase().replace([' ', '-', '_'], "");
         let tname = theme.name.to_lowercase().replace([' ', '-', '_'], "");
         if tid == query || tname == query {
@@ -908,7 +913,7 @@ pub fn get_pantone_theme(id_or_name: &str) -> &'static PantoneTheme {
     }
     // Backwards compatibility fallbacks
     if query.contains("light") || query.contains("aqua") || query.contains("white") {
-        &THEMES[12] // Mossambi Punch - the one light theme
+        &THEMES[12] // Mossambi Punch - the catalog light theme
     } else {
         &THEMES[11] // Rangalipi - the default dark theme
     }
