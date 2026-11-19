@@ -567,22 +567,7 @@ impl StudioView {
                     ui.spacing_mut().item_spacing =
                         Vec2::new(chrome_spec.spacing.toolbar_item_spacing, 0.0);
 
-                    // Left traffic lights (Finder style)
-                    if chrome_spec.window_controls == WindowControlsPosition::LeftTraffic {
-                        crate::gui::finder_chrome::render_traffic_lights(
-                            ui,
-                            &palette,
-                            || ctx.send_viewport_cmd(ViewportCommand::Close),
-                            || do_minimize = true,
-                            || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
-                        );
-                        ui.add_space(6.0);
-                    }
-
-                    // Brand: the real Mossambi logo (green fruit), replacing the
-                    // placeholder shield. Decoded once from the bundled PNG via
-                    // the `image` crate: egui's `include_image!` bytes loader
-                    // rendered a red error texture on this build.
+                    // Brand: the real Mossambi logo (green fruit)
                     if self.brand_logo_tex.is_none() {
                         if let Ok(img) =
                             image::load_from_memory(&include_bytes!("../../assets/icons/mossambi-32x32.png")[..])
@@ -600,6 +585,26 @@ impl StudioView {
                             ));
                         }
                     }
+
+                    // Window Controls (Placement logic based on spec)
+                    if chrome_spec.window_controls == WindowControlsPosition::LeftTraffic {
+                        crate::gui::finder_chrome::render_traffic_lights(
+                            ui,
+                            &palette,
+                            || ctx.send_viewport_cmd(ViewportCommand::Close),
+                            || do_minimize = true,
+                            || ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max)),
+                        );
+                        ui.add_space(6.0);
+                    }
+
+                    // Logo on right
+                    if let Some(tex) = &self.brand_logo_tex {
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                             ui.image((tex.id(), Vec2::new(20.0, 20.0)));
+                         });
+                    }
+
                     if let Some(tex) = &self.brand_logo_tex {
                         ui.add(egui::Image::new(tex).fit_to_exact_size(Vec2::splat(20.0)));
                     }
@@ -880,7 +885,7 @@ impl StudioView {
                     let (_drag_rect, drag_resp) =
                         ui.allocate_exact_size(Vec2::new(drag_w, 26.0), Sense::click_and_drag());
                     if drag_resp.drag_started() {
-                        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                        ctx.send_viewport_cmd(ViewportCommand::BeginMoveDrag);
                     }
                     if drag_resp.double_clicked() {
                         ctx.send_viewport_cmd(ViewportCommand::Maximized(!is_max));
