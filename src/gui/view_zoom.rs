@@ -107,9 +107,9 @@ impl GridZoomMetrics {
             },
             _ => Self {
                 step: 4,
-                icon_size: 240.0,
-                min_tile_width: 272.0,
-                font_size: 16.0,
+                icon_size: 300.0,
+                min_tile_width: 332.0,
+                font_size: 18.0,
             },
         }
     }

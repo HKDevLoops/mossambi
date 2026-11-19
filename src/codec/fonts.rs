@@ -11,6 +11,10 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
 
+/// Hard cap for the declared or decompressed size of a single SFNT table.
+/// Prevents a crafted WOFF `origLen` from reserving ~4 GB and stops zlib bombs.
+pub const MAX_TABLE_BYTES: usize = 64 * 1024 * 1024;
+
 /// SFNT Table Directory Entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SfntTableEntry {
@@ -248,11 +252,22 @@ impl SfntFont {
                 bytes[offset + 19],
             ]);
 
+            // Reject a declared table size larger than the cap before any
+            // allocation (PAR-01), and bound the zlib output with take() so a
+            // crafted stream cannot exhaust the heap (PAR-02).
+            if orig_len > MAX_TABLE_BYTES {
+                bail!("WOFF table declared size exceeds limit");
+            }
             let data = if comp_len < orig_len {
                 if t_offset + comp_len <= bytes.len() {
-                    let mut decoder = ZlibDecoder::new(&bytes[t_offset..t_offset + comp_len]);
+                    let decoder = ZlibDecoder::new(&bytes[t_offset..t_offset + comp_len]);
                     let mut decompressed = Vec::with_capacity(orig_len);
-                    decoder.read_to_end(&mut decompressed)?;
+                    let written = decoder
+                        .take(MAX_TABLE_BYTES as u64)
+                        .read_to_end(&mut decompressed)?;
+                    if written != orig_len {
+                        bail!("WOFF table decompressed size does not match declared size");
+                    }
                     decompressed
                 } else {
                     Vec::new()
@@ -351,6 +366,21 @@ mod tests {
         assert_eq!(parsed.tables.len(), 2);
         assert_eq!(parsed.tables[0].tag, *b"head");
         assert_eq!(parsed.tables[0].data, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn test_woff_oversized_table_is_rejected() {
+        // A crafted WOFF declares orig_len = u32::MAX. The parser must bail
+        // on the size cap before reserving ~4 GB (PAR-01/PAR-02).
+        let mut bytes = vec![0u8; 44 + 20];
+        bytes[0..4].copy_from_slice(b"wOFF");
+        bytes[12..14].copy_from_slice(&1u16.to_be_bytes()); // num_tables = 1
+        let t = 44usize;
+        bytes[t..t + 4].copy_from_slice(b"cmap");
+        bytes[t + 8..t + 12].copy_from_slice(&0u32.to_be_bytes()); // comp_len
+        bytes[t + 12..t + 16].copy_from_slice(&u32::MAX.to_be_bytes()); // orig_len
+        assert!(SfntFont::from_woff(&bytes).is_err());
+        assert_eq!(MAX_TABLE_BYTES, 64 * 1024 * 1024);
     }
 
     #[test]

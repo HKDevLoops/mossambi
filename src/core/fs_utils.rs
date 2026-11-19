@@ -229,6 +229,111 @@ impl FileItem {
         }
     }
 
+    /// Fast constructor creating a FileItem directly from a standard library `DirEntry`.
+    ///
+    /// On Windows:
+    /// Leverages `entry.metadata()` which in the standard library extracts metadata directly
+    /// from the `WIN32_FIND_DATAW` struct already retrieved by `FindFirstFileExW` / `FindNextFileW`.
+    /// This achieves ZERO additional system calls (0 stats, 0 queries).
+    ///
+    /// On Unix / macOS:
+    /// Uses `entry.file_type()` (retrieved from `dirent.d_type` if supported) and at most 1
+    /// `symlink_metadata` (`lstat`) call via `entry.metadata()`, completely avoiding the 3-4
+    /// redundant syscalls of `FileItem::from_path`.
+    pub fn from_dir_entry(entry: &std::fs::DirEntry) -> Self {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        let metadata = entry.metadata().ok();
+        let file_type = entry.file_type().ok();
+
+        let is_symlink = file_type
+            .as_ref()
+            .map(|ft| ft.is_symlink())
+            .or_else(|| metadata.as_ref().map(|m| m.is_symlink()))
+            .unwrap_or(false);
+
+        // If the entry is a symlink, resolve target and query whether target is a directory.
+        // For non-symlinks (99.99% of entries), avoid any extra syscalls.
+        let (is_dir, symlink_target) = if is_symlink {
+            let target = std::fs::read_link(&path).ok();
+            let target_is_dir = path.is_dir();
+            (target_is_dir, target)
+        } else {
+            let dir = file_type
+                .as_ref()
+                .map(|ft| ft.is_dir())
+                .or_else(|| metadata.as_ref().map(|m| m.is_dir()))
+                .unwrap_or(false);
+            (dir, None)
+        };
+
+        let size_bytes = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+        let modified = metadata.as_ref().and_then(|m| m.modified().ok());
+        let created = metadata.as_ref().and_then(|m| m.created().ok());
+
+        let extension = if is_dir {
+            String::new()
+        } else {
+            Path::new(&name)
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_uppercase())
+                .unwrap_or_default()
+        };
+
+        #[cfg(target_os = "windows")]
+        let is_hidden = name.starts_with('.') || {
+            use std::os::windows::fs::MetadataExt;
+            metadata
+                .as_ref()
+                .map(|m| m.file_attributes() & 0x2 != 0)
+                .unwrap_or(false)
+        };
+        #[cfg(not(target_os = "windows"))]
+        let is_hidden = name.starts_with('.');
+
+        #[cfg(unix)]
+        let permissions_mode = {
+            use std::os::unix::fs::PermissionsExt;
+            metadata
+                .as_ref()
+                .map(|m| m.permissions().mode())
+                .unwrap_or(0o644)
+        };
+        #[cfg(not(unix))]
+        let permissions_mode = {
+            let readonly = metadata
+                .as_ref()
+                .map(|m| m.permissions().readonly())
+                .unwrap_or(false);
+            if is_dir {
+                if readonly {
+                    0o555
+                } else {
+                    0o755
+                }
+            } else if readonly {
+                0o444
+            } else {
+                0o644
+            }
+        };
+
+        Self {
+            path,
+            name,
+            is_dir,
+            size_bytes,
+            modified,
+            created,
+            extension,
+            is_hidden,
+            is_symlink,
+            symlink_target,
+            permissions_mode,
+        }
+    }
+
     pub fn formatted_permissions(&self) -> String {
         let mode = self.permissions_mode;
         let file_type = if self.is_symlink {
@@ -596,6 +701,8 @@ pub fn dir_size_cache_path() -> PathBuf {
         .join("dir_sizes.json")
 }
 
+pub const DIR_SIZE_CACHE_CAPACITY: usize = 10_000;
+
 /// Loads the folder-size disk cache. A missing or corrupt file loads
 /// empty and is rewritten on the next flush.
 pub fn load_dir_size_cache_from(path: &Path) -> HashMap<PathBuf, (Option<SystemTime>, u64)> {
@@ -608,7 +715,7 @@ pub fn load_dir_size_cache_from(path: &Path) -> HashMap<PathBuf, (Option<SystemT
     else {
         return out;
     };
-    for (path, pair) in raw {
+    for (path, pair) in raw.into_iter().take(DIR_SIZE_CACHE_CAPACITY) {
         let mtime = if pair[0] == 0 {
             None
         } else {
@@ -628,15 +735,160 @@ pub fn save_dir_size_cache_to(
         std::fs::create_dir_all(parent)?;
     }
     let mut raw = std::collections::BTreeMap::new();
-    for (path, (mtime, total)) in map {
+    for (path, (mtime, total)) in map.iter().take(DIR_SIZE_CACHE_CAPACITY) {
         let secs = mtime
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
         raw.insert(path.to_string_lossy().into_owned(), [secs, *total]);
     }
-    let data = serde_json::to_string_pretty(&raw).unwrap_or_default();
-    std::fs::write(path, data)
+    let data = serde_json::to_string(&raw).unwrap_or_default();
+    let tmp_path = path.with_extension("tmp");
+    std::fs::write(&tmp_path, data)?;
+    if std::fs::rename(&tmp_path, path).is_err() {
+        let _ = std::fs::remove_file(path);
+        std::fs::rename(&tmp_path, path)?;
+    }
+    Ok(())
+}
+
+/// Zero-allocation, natural case-insensitive filename comparator.
+///
+/// Compares filenames using:
+/// 1. Natural numeric ordering (e.g. "file2.txt" < "file10.txt")
+/// 2. Case-insensitive character comparison without heap allocations
+/// 3. Deterministic tie-breaking (fewer leading zeros first, then case-sensitive fallback)
+pub fn compare_file_names(a: &str, b: &str) -> std::cmp::Ordering {
+    let mut bytes_a = a.as_bytes();
+    let mut bytes_b = b.as_bytes();
+    let mut pending_zero_tie_breaker = std::cmp::Ordering::Equal;
+    let mut case_tie_breaker = std::cmp::Ordering::Equal;
+
+    while !bytes_a.is_empty() && !bytes_b.is_empty() {
+        let is_digit_a = bytes_a[0].is_ascii_digit();
+        let is_digit_b = bytes_b[0].is_ascii_digit();
+
+        if is_digit_a && is_digit_b {
+            // Find continuous digit runs in both slices
+            let len_a = bytes_a
+                .iter()
+                .position(|b| !b.is_ascii_digit())
+                .unwrap_or(bytes_a.len());
+            let len_b = bytes_b
+                .iter()
+                .position(|b| !b.is_ascii_digit())
+                .unwrap_or(bytes_b.len());
+
+            let digits_a = &bytes_a[..len_a];
+            let digits_b = &bytes_b[..len_b];
+
+            // Count leading zeros
+            let non_zero_a = digits_a
+                .iter()
+                .position(|b| *b != b'0')
+                .unwrap_or(digits_a.len());
+            let non_zero_b = digits_b
+                .iter()
+                .position(|b| *b != b'0')
+                .unwrap_or(digits_b.len());
+
+            let sig_a = &digits_a[non_zero_a..];
+            let sig_b = &digits_b[non_zero_b..];
+
+            // Compare numerical values by significant digit length first
+            if sig_a.len() != sig_b.len() {
+                return sig_a.len().cmp(&sig_b.len());
+            }
+
+            // If same length, lexicographical comparison of digits equals numerical comparison
+            let num_cmp = sig_a.cmp(sig_b);
+            if num_cmp != std::cmp::Ordering::Equal {
+                return num_cmp;
+            }
+
+            // Numerically equal (e.g. "01" vs "1"): record leading zeros as secondary tie breaker
+            if pending_zero_tie_breaker == std::cmp::Ordering::Equal {
+                pending_zero_tie_breaker = non_zero_a.cmp(&non_zero_b);
+            }
+
+            bytes_a = &bytes_a[len_a..];
+            bytes_b = &bytes_b[len_b..];
+        } else {
+            // At least one is non-digit. Compare next character / byte.
+            if bytes_a[0].is_ascii() && bytes_b[0].is_ascii() {
+                let ca = bytes_a[0];
+                let cb = bytes_b[0];
+                let low_a = ca.to_ascii_lowercase();
+                let low_b = cb.to_ascii_lowercase();
+
+                if low_a != low_b {
+                    return low_a.cmp(&low_b);
+                }
+
+                if ca != cb && case_tie_breaker == std::cmp::Ordering::Equal {
+                    case_tie_breaker = ca.cmp(&cb);
+                }
+
+                bytes_a = &bytes_a[1..];
+                bytes_b = &bytes_b[1..];
+            } else {
+                // Non-ASCII UTF-8 character boundary
+                let ch_a = std::str::from_utf8(bytes_a)
+                    .ok()
+                    .and_then(|s| s.chars().next());
+                let ch_b = std::str::from_utf8(bytes_b)
+                    .ok()
+                    .and_then(|s| s.chars().next());
+                match (ch_a, ch_b) {
+                    (Some(ca), Some(cb)) => {
+                        let low_a = ca.to_lowercase();
+                        let low_b = cb.to_lowercase();
+                        let cmp = low_a.cmp(low_b);
+                        if cmp != std::cmp::Ordering::Equal {
+                            return cmp;
+                        }
+                        if ca != cb && case_tie_breaker == std::cmp::Ordering::Equal {
+                            case_tie_breaker = ca.cmp(&cb);
+                        }
+                        bytes_a = &bytes_a[ca.len_utf8()..];
+                        bytes_b = &bytes_b[cb.len_utf8()..];
+                    }
+                    _ => {
+                        // Malformed UTF-8 fallback
+                        let cmp = bytes_a[0].cmp(&bytes_b[0]);
+                        if cmp != std::cmp::Ordering::Equal {
+                            return cmp;
+                        }
+                        bytes_a = &bytes_a[1..];
+                        bytes_b = &bytes_b[1..];
+                    }
+                }
+            }
+        }
+    }
+
+    // Shorter string comes first
+    if !bytes_a.is_empty() || !bytes_b.is_empty() {
+        return bytes_a.len().cmp(&bytes_b.len());
+    }
+
+    // Tie breakers
+    if pending_zero_tie_breaker != std::cmp::Ordering::Equal {
+        return pending_zero_tie_breaker;
+    }
+
+    case_tie_breaker
+}
+
+/// Sorts a slice of `FileItem`s in place with zero heap allocations:
+/// 1. Directories first (`is_dir == true` before `is_dir == false`).
+/// 2. Natural case-insensitive order using `compare_file_names`.
+pub fn sort_file_items(items: &mut [FileItem]) {
+    items.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| compare_file_names(&a.name, &b.name))
+    });
 }
 
 /// Batch of scanned directory entries tagged with generation counter
@@ -679,23 +931,15 @@ pub fn spawn_async_dir_scan(
                 if current_gen.load(Ordering::Relaxed) != gen {
                     return;
                 }
-                let p = entry.path();
-                if is_protected_os_file(&p) {
+                let item = FileItem::from_dir_entry(&entry);
+                if is_protected_os_file(&item.path) {
                     continue;
                 }
-                all_items.push(FileItem::from_path(p));
+                all_items.push(item);
             }
 
-            // Sort: folders first, then files alphabetically (case-insensitive)
-            all_items.sort_by(|a, b| {
-                if a.is_dir && !b.is_dir {
-                    std::cmp::Ordering::Less
-                } else if !a.is_dir && b.is_dir {
-                    std::cmp::Ordering::Greater
-                } else {
-                    a.name.to_lowercase().cmp(&b.name.to_lowercase())
-                }
-            });
+            // Zero-allocation natural sort (folders first, then natural names)
+            sort_file_items(&mut all_items);
 
             // Send completed batch if still current
             if current_gen.load(Ordering::Relaxed) == gen {
@@ -710,7 +954,7 @@ pub fn spawn_async_dir_scan(
         .ok();
 }
 
-/// Synchronous directory reader returning sorted FileItem vector (directories first, then case-insensitive names)
+/// Synchronous directory reader returning sorted FileItem vector (directories first, then natural case-insensitive names)
 pub fn list_directory_sync(dir: &Path) -> Vec<FileItem> {
     let Ok(read_dir) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -718,22 +962,14 @@ pub fn list_directory_sync(dir: &Path) -> Vec<FileItem> {
 
     let mut items = Vec::new();
     for entry in read_dir.flatten() {
-        let p = entry.path();
-        if is_protected_os_file(&p) {
+        let item = FileItem::from_dir_entry(&entry);
+        if is_protected_os_file(&item.path) {
             continue;
         }
-        items.push(FileItem::from_path(p));
+        items.push(item);
     }
 
-    items.sort_by(|a, b| {
-        if a.is_dir && !b.is_dir {
-            std::cmp::Ordering::Less
-        } else if !a.is_dir && b.is_dir {
-            std::cmp::Ordering::Greater
-        } else {
-            a.name.to_lowercase().cmp(&b.name.to_lowercase())
-        }
-    });
+    sort_file_items(&mut items);
 
     items
 }

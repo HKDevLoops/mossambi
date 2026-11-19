@@ -9,9 +9,37 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{LazyLock, Mutex};
 
+/// Key used to coalesce shell icon textures in the LRU cache.
+///
+/// Regular files are coalesced by lowercase extension (e.g. all `.txt` files share one icon),
+/// while executables, shortcuts, icons, directories, and extensionless files are keyed by path.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ShellIconKey {
+    Path(PathBuf, bool),
+    Extension(String, bool),
+}
+
+/// Computes the deduplicating cache key for a given path and size.
+pub fn compute_shell_icon_key(path: &Path, is_dir: bool, large: bool) -> ShellIconKey {
+    if is_dir {
+        return ShellIconKey::Path(path.to_path_buf(), large);
+    }
+    if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+        let lower = ext.to_ascii_lowercase();
+        match lower.as_str() {
+            "exe" | "dll" | "com" | "scr" | "cpl" | "msi" | "bat" | "cmd" | "lnk" | "url"
+            | "ico" | "cur" | "ani" => ShellIconKey::Path(path.to_path_buf(), large),
+            _ => ShellIconKey::Extension(lower, large),
+        }
+    } else {
+        ShellIconKey::Path(path.to_path_buf(), large)
+    }
+}
+
 /// Icon request submitted by the UI thread to the background worker.
 #[derive(Debug, Clone)]
 pub struct ShellIconRequest {
+    pub key: ShellIconKey,
     pub path: PathBuf,
     pub is_dir: bool,
     pub large: bool,
@@ -19,9 +47,7 @@ pub struct ShellIconRequest {
 
 /// Icon response delivered by the background worker to the UI thread.
 pub struct ShellIconResponse {
-    pub path: PathBuf,
-    pub is_dir: bool,
-    pub large: bool,
+    pub key: ShellIconKey,
     pub image: Option<ColorImage>,
 }
 
@@ -29,8 +55,8 @@ pub struct ShellIconResponse {
 struct ShellIconSystem {
     req_tx: Sender<ShellIconRequest>,
     resp_rx: Receiver<ShellIconResponse>,
-    textures: HashMap<(PathBuf, bool), Option<TextureHandle>>,
-    pending: HashMap<(PathBuf, bool), bool>,
+    textures: crate::core::lru::LruCache<ShellIconKey, Option<TextureHandle>>,
+    pending: HashMap<ShellIconKey, bool>,
 }
 
 static SYSTEM: LazyLock<Mutex<ShellIconSystem>> = LazyLock::new(|| {
@@ -52,9 +78,7 @@ static SYSTEM: LazyLock<Mutex<ShellIconSystem>> = LazyLock::new(|| {
             while let Ok(req) = req_rx.recv() {
                 let img = extract_native_shell_icon(&req.path, req.is_dir, req.large);
                 let _ = resp_tx.send(ShellIconResponse {
-                    path: req.path,
-                    is_dir: req.is_dir,
-                    large: req.large,
+                    key: req.key,
                     image: img,
                 });
             }
@@ -64,7 +88,7 @@ static SYSTEM: LazyLock<Mutex<ShellIconSystem>> = LazyLock::new(|| {
     Mutex::new(ShellIconSystem {
         req_tx,
         resp_rx,
-        textures: HashMap::new(),
+        textures: crate::core::lru::LruCache::new(256),
         pending: HashMap::new(),
     })
 });
@@ -77,21 +101,23 @@ pub fn update_shell_icons(ctx: &Context) {
     if let Ok(mut sys) = SYSTEM.lock() {
         let mut got_any = false;
         while let Ok(resp) = sys.resp_rx.try_recv() {
-            let key = (resp.path.clone(), resp.large);
-            sys.pending.remove(&key);
+            sys.pending.remove(&resp.key);
 
             let handle = resp.image.map(|img| {
-                let name = format!(
-                    "sh_icon_{}_{}",
-                    resp.path
-                        .to_string_lossy()
-                        .replace(['\\', '/', ':', ' '], "_"),
-                    if resp.large { "lg" } else { "sm" }
-                );
+                let name = match &resp.key {
+                    ShellIconKey::Extension(ext, large) => {
+                        format!("sh_icon_ext_{}_{}", ext, if *large { "lg" } else { "sm" })
+                    }
+                    ShellIconKey::Path(path, large) => format!(
+                        "sh_icon_{}_{}",
+                        path.to_string_lossy().replace(['\\', '/', ':', ' '], "_"),
+                        if *large { "lg" } else { "sm" }
+                    ),
+                };
                 ctx.load_texture(name, img, TextureOptions::LINEAR)
             });
 
-            sys.textures.insert(key, handle);
+            sys.textures.insert(resp.key, handle);
             got_any = true;
         }
 
@@ -109,6 +135,16 @@ pub fn clear_shell_icon_cache() {
     }
 }
 
+/// Returns the number of cached shell icon textures currently loaded.
+pub fn cached_shell_icon_count() -> usize {
+    SYSTEM.lock().map(|s| s.textures.len()).unwrap_or(0)
+}
+
+/// Returns the maximum capacity of the shell icon texture cache.
+pub fn shell_icon_cache_capacity() -> usize {
+    SYSTEM.lock().map(|s| s.textures.capacity()).unwrap_or(256)
+}
+
 /// Retrieves a cached Windows shell icon texture, or schedules background extraction.
 pub fn get_or_request_shell_icon(
     ctx: &Context,
@@ -120,15 +156,16 @@ pub fn get_or_request_shell_icon(
     update_shell_icons(ctx);
 
     if let Ok(mut sys) = SYSTEM.lock() {
-        let key = (path.to_path_buf(), large);
+        let key = compute_shell_icon_key(path, is_dir, large);
         if let Some(tex_opt) = sys.textures.get(&key) {
             return tex_opt.clone();
         }
 
-        // Avoid spamming requests for the same path
+        // Avoid spamming requests for the same key
         if !sys.pending.contains_key(&key) {
             sys.pending.insert(key.clone(), true);
             let _ = sys.req_tx.send(ShellIconRequest {
+                key,
                 path: path.to_path_buf(),
                 is_dir,
                 large,

@@ -1106,7 +1106,10 @@ pub struct MossambiConfig {
     #[serde(default = "default_show_hidden")]
     pub show_hidden_files: bool,
     #[serde(default = "default_explorer_layout")]
-    pub default_explorer_layout: u8, // 0 = Miller 3-Column, 1 = Full-Screen, 2 = Dual-Pane
+    pub default_explorer_layout: u8, // legacy layout id: 0 = Details, 2 = Grid, 3 = Columns
+    /// File explorer view mode: Details, Grid, Columns.
+    #[serde(default)]
+    pub view_mode: ViewMode,
     #[serde(default = "default_calculate_checksums")]
     pub calculate_checksums: bool,
     #[serde(default = "default_tui_transparent")]
@@ -1390,6 +1393,16 @@ pub fn migrate_prefs(cfg: &mut MossambiConfig) -> bool {
         cfg.prefs_version = 1;
         changed = true;
     }
+    if cfg.prefs_version < 2 {
+        let migrated_mode = match cfg.default_explorer_layout {
+            2 => ViewMode::Grid,
+            3 => ViewMode::Columns,
+            _ => ViewMode::Details,
+        };
+        cfg.view_mode = migrated_mode;
+        cfg.prefs_version = 2;
+        changed = true;
+    }
     let clamped_size = crate::core::donut_config::clamp_donut_diameter(cfg.donut.appearance.size);
     if (cfg.donut.appearance.size - clamped_size).abs() > 0.001 {
         cfg.donut.appearance.size = clamped_size;
@@ -1439,7 +1452,7 @@ impl Default for MossambiConfig {
             output_mode: OutputMode::Sibling,
             custom_output_dir: None,
             always_on_top: false,
-            prefs_version: 1,
+            prefs_version: 2,
             play_sound: true,
             launch_at_login: false,
             wheel_size: 440,
@@ -1453,6 +1466,7 @@ impl Default for MossambiConfig {
             deep_drag_detection_only: true,
             show_hidden_files: false,
             default_explorer_layout: 0,
+            view_mode: ViewMode::Details,
             calculate_checksums: true,
             tui_transparent_bg: true,
             icon_pack: "macos".to_string(),
@@ -1565,6 +1579,7 @@ impl MossambiConfig {
             LookPreset::Finder => {
                 self.sidebar_style = SidebarStyle::Finder;
                 self.explorer_style = ExplorerStyle::MacOS;
+                self.view_mode = ViewMode::Columns;
                 self.default_explorer_layout = 3; // Miller columns
                 self.row_density = RowDensity::Default; // 28px
                 self.icon_pack = "macos".to_string();
@@ -1575,6 +1590,7 @@ impl MossambiConfig {
             LookPreset::WindowsExplorer => {
                 self.sidebar_style = SidebarStyle::Windows;
                 self.explorer_style = ExplorerStyle::Windows;
+                self.view_mode = ViewMode::Details;
                 self.default_explorer_layout = 0; // Details
                 self.row_density = RowDensity::Standard; // 32px
                 self.icon_pack = "win11".to_string();
@@ -1585,6 +1601,7 @@ impl MossambiConfig {
             LookPreset::Nautilus => {
                 self.sidebar_style = SidebarStyle::Nautilus;
                 self.explorer_style = ExplorerStyle::Nautilus;
+                self.view_mode = ViewMode::Grid;
                 self.default_explorer_layout = 2; // Grid
                 self.row_density = RowDensity::Spacious; // 36px
                 self.icon_pack = "adwaita".to_string();
@@ -1595,6 +1612,7 @@ impl MossambiConfig {
             LookPreset::Thunar => {
                 self.sidebar_style = SidebarStyle::Thunar;
                 self.explorer_style = ExplorerStyle::Thunar;
+                self.view_mode = ViewMode::Details;
                 self.default_explorer_layout = 0; // Details
                 self.row_density = RowDensity::Compact; // 24px
                 self.icon_pack = "cinnamon".to_string();
@@ -1641,7 +1659,19 @@ static CONFIG_CACHE: std::sync::OnceLock<std::sync::Mutex<Option<CachedConfig>>>
     std::sync::OnceLock::new();
 
 impl MossambiConfig {
+    /// Canonical configuration file path under `platform_paths::config_dir()`.
     pub fn config_path() -> PathBuf {
+        crate::core::platform_paths::config_dir().join("config.json")
+    }
+
+    /// Legacy fallback path under `~/.mossambi/config.json`.
+    pub fn legacy_config_path() -> PathBuf {
+        let p = crate::core::platform_paths::home_dir()
+            .join(".mossambi")
+            .join("config.json");
+        if p.exists() {
+            return p;
+        }
         let home = std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
             .unwrap_or_else(|_| ".".to_string());
@@ -1654,6 +1684,7 @@ impl MossambiConfig {
 
     pub fn load() -> Self {
         let path = Self::config_path();
+        let legacy_path = Self::legacy_config_path();
         let stamp = Self::file_stamp(&path);
 
         let cache = CONFIG_CACHE.get_or_init(|| std::sync::Mutex::new(None));
@@ -1665,12 +1696,20 @@ impl MossambiConfig {
             }
         }
 
-        // NOTE: load() is side-effect free. A missing config simply starts
-        // from defaults in memory; the first user-initiated `save()`
-        // materialises the file. Writing defaults from inside load() used to
-        // race with the per-frame GUI load and clobber freshly written prefs.
-        let cfg = if stamp.is_some() {
-            match fs::read_to_string(&path) {
+        // NOTE: load() is side-effect free on fresh installs. A missing config
+        // simply starts from defaults in memory; the first user-initiated `save()`
+        // materialises the file. If a legacy config exists at ~/.mossambi/config.json,
+        // it is seamlessly read and saved to the canonical path.
+        let (read_path, is_legacy) = if stamp.is_some() {
+            (path.clone(), false)
+        } else if legacy_path.exists() {
+            (legacy_path.clone(), true)
+        } else {
+            (path.clone(), false)
+        };
+
+        let cfg = if stamp.is_some() || is_legacy {
+            match fs::read_to_string(&read_path) {
                 Ok(content) => match serde_json::from_str::<MossambiConfig>(&content) {
                     Ok(mut parsed) => {
                         // Validation clamp: 0 stays "auto", values above the
@@ -1684,8 +1723,21 @@ impl MossambiConfig {
                                 parsed.worker_threads
                             );
                         }
-                        if migrate_prefs(&mut parsed) {
-                            let _ = parsed.save();
+                        let migrated = migrate_prefs(&mut parsed);
+                        if is_legacy || migrated {
+                            if let Err(e) = parsed.save() {
+                                log::warn!(
+                                    "Failed to persist migrated config to {}: {}",
+                                    path.display(),
+                                    e
+                                );
+                            } else if is_legacy {
+                                log::info!(
+                                    "Successfully migrated legacy config from {} to {}",
+                                    read_path.display(),
+                                    path.display()
+                                );
+                            }
                         }
                         parsed
                     }
@@ -1697,17 +1749,17 @@ impl MossambiConfig {
                             .duration_since(std::time::UNIX_EPOCH)
                             .map(|d| d.as_secs())
                             .unwrap_or(0);
-                        let backup = path.with_extension(format!("json.backup-{}", ts));
-                        match fs::copy(&path, &backup) {
+                        let backup = read_path.with_extension(format!("json.backup-{}", ts));
+                        match fs::copy(&read_path, &backup) {
                             Ok(_) => log::warn!(
                                 "Corrupt config at {} ({}); backed up to {} and loaded defaults",
-                                path.display(),
+                                read_path.display(),
                                 parse_err,
                                 backup.display()
                             ),
                             Err(copy_err) => log::warn!(
                                 "Corrupt config at {} ({}); backup to {} failed ({}), loaded defaults",
-                                path.display(),
+                                read_path.display(),
                                 parse_err,
                                 backup.display(),
                                 copy_err
@@ -1719,7 +1771,7 @@ impl MossambiConfig {
                 Err(read_err) => {
                     log::warn!(
                         "Config file unreadable at {} ({}); loaded defaults",
-                        path.display(),
+                        read_path.display(),
                         read_err
                     );
                     Self::default()
@@ -1730,7 +1782,8 @@ impl MossambiConfig {
         };
 
         if let Ok(mut guard) = cache.lock() {
-            *guard = Some((path, stamp, cfg.clone()));
+            let final_stamp = Self::file_stamp(&path);
+            *guard = Some((path, final_stamp, cfg.clone()));
         }
         cfg
     }
@@ -1883,6 +1936,7 @@ mod tests {
         cfg.apply_look_preset(LookPreset::Finder);
         assert_eq!(cfg.sidebar_style, SidebarStyle::Finder);
         assert_eq!(cfg.explorer_style, ExplorerStyle::MacOS);
+        assert_eq!(cfg.view_mode, ViewMode::Columns);
         assert_eq!(cfg.default_explorer_layout, 3);
         assert_eq!(cfg.row_density, RowDensity::Default);
         assert_eq!(cfg.icon_pack, "macos");
@@ -1892,6 +1946,7 @@ mod tests {
         cfg.apply_look_preset(LookPreset::WindowsExplorer);
         assert_eq!(cfg.sidebar_style, SidebarStyle::Windows);
         assert_eq!(cfg.explorer_style, ExplorerStyle::Windows);
+        assert_eq!(cfg.view_mode, ViewMode::Details);
         assert_eq!(cfg.default_explorer_layout, 0);
         assert_eq!(cfg.row_density, RowDensity::Standard);
         assert_eq!(cfg.icon_pack, "win11");
@@ -1901,6 +1956,7 @@ mod tests {
         cfg.apply_look_preset(LookPreset::Nautilus);
         assert_eq!(cfg.sidebar_style, SidebarStyle::Nautilus);
         assert_eq!(cfg.explorer_style, ExplorerStyle::Nautilus);
+        assert_eq!(cfg.view_mode, ViewMode::Grid);
         assert_eq!(cfg.default_explorer_layout, 2);
         assert_eq!(cfg.row_density, RowDensity::Spacious);
         assert_eq!(cfg.icon_pack, "adwaita");
@@ -1910,6 +1966,7 @@ mod tests {
         cfg.apply_look_preset(LookPreset::Thunar);
         assert_eq!(cfg.sidebar_style, SidebarStyle::Thunar);
         assert_eq!(cfg.explorer_style, ExplorerStyle::Thunar);
+        assert_eq!(cfg.view_mode, ViewMode::Details);
         assert_eq!(cfg.default_explorer_layout, 0);
         assert_eq!(cfg.row_density, RowDensity::Compact);
         assert_eq!(cfg.icon_pack, "cinnamon");
@@ -1961,17 +2018,27 @@ mod tests {
     #[test]
     fn test_prefs_version_and_migration() {
         let mut cfg = MossambiConfig::default();
-        assert_eq!(cfg.prefs_version, 1);
+        assert_eq!(cfg.prefs_version, 2);
+        assert_eq!(cfg.view_mode, ViewMode::Details);
         assert!(!cfg.always_on_top);
 
-        // Version 0 migration forces always_on_top false and sets version 1
+        // Version 0 migration forces always_on_top false, migrates layout, and sets version 2
         cfg.prefs_version = 0;
         cfg.always_on_top = true;
+        cfg.default_explorer_layout = 3;
         assert!(migrate_prefs(&mut cfg));
-        assert_eq!(cfg.prefs_version, 1);
+        assert_eq!(cfg.prefs_version, 2);
+        assert_eq!(cfg.view_mode, ViewMode::Columns);
         assert!(!cfg.always_on_top);
 
-        // Version 1 already migrated, returns false
+        // Version 1 migration migrates default_explorer_layout = 2 into ViewMode::Grid
+        cfg.prefs_version = 1;
+        cfg.default_explorer_layout = 2;
+        assert!(migrate_prefs(&mut cfg));
+        assert_eq!(cfg.prefs_version, 2);
+        assert_eq!(cfg.view_mode, ViewMode::Grid);
+
+        // Version 2 already migrated, returns false
         assert!(!migrate_prefs(&mut cfg));
     }
 }

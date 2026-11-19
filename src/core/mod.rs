@@ -25,11 +25,13 @@ pub mod icon_packs;
 pub mod linux_clipboard_files;
 pub mod linux_dna;
 pub mod look_spec;
+pub mod lru;
 pub mod mouse_nav;
 #[cfg(target_os = "windows")]
 pub mod ole_drag_out;
 pub mod ole_drop_target;
 pub mod pantone;
+pub mod path_safety;
 pub mod pins;
 pub mod platform_paths;
 pub mod preview;
@@ -74,10 +76,11 @@ pub use drop_action::{
 pub use fields_config::{FieldItemSpec, FieldsConfig};
 pub use file_icons::{resolve_file_icon, FileIconSpec};
 pub use fs_utils::{
-    copy_entry_recursive, format_file_size, get_system_drives, is_library_folder_name,
-    is_protected_os_file, list_directory_sync, move_entry, parse_breadcrumbs, pluralize_items,
-    remove_entry_recursive, resolve_recycle_bin_target, resolve_unique_paste_path,
-    spawn_async_dir_scan, BreadcrumbSegment, DriveInfo, FileItem, ScanBatch,
+    compare_file_names, copy_entry_recursive, format_file_size, get_system_drives,
+    is_library_folder_name, is_protected_os_file, list_directory_sync, move_entry,
+    parse_breadcrumbs, pluralize_items, remove_entry_recursive, resolve_recycle_bin_target,
+    resolve_unique_paste_path, sort_file_items, spawn_async_dir_scan, BreadcrumbSegment, DriveInfo,
+    FileItem, ScanBatch,
 };
 pub use fuzzy::{fuzzy_match, sort_by_fuzzy_match};
 pub use gesture::{GestureKind, GesturePoint, KinematicGestureTracker};
@@ -92,6 +95,7 @@ pub use look_spec::{
     AddressBarStyle, ChromeSpec, DetailsPanePosition, SearchPosition, SidebarHeaderStyle,
     SidebarSpec, SpacingTokens, TabPosition, TitleBarStyle, ToolbarItem, WindowControlsPosition,
 };
+pub use lru::LruCache;
 pub use mouse_nav::MouseNavListener;
 pub use pantone::{
     all_pantone_themes, get_pantone_theme, CitrusShade, PantoneColor, PantonePalette, PantoneTheme,
@@ -104,6 +108,11 @@ pub use platform_paths::{config_dir, expand_path_str};
 pub use registry::{
     DynamicWheelSector, FileCategory, FormatInfo, FormatNature, FormatSpecification,
     UniversalRegistry,
+};
+pub use shell_icons::{
+    cached_shell_icon_count, clear_shell_icon_cache, compute_shell_icon_key,
+    get_or_request_shell_icon, shell_icon_cache_capacity, update_shell_icons, ShellIconKey,
+    ShellIconRequest, ShellIconResponse,
 };
 pub use special_folders::SpecialFolder;
 pub use tabs::{close_target, CloseAction};

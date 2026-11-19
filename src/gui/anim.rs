@@ -182,34 +182,100 @@ pub fn advance_with_settings(
     advance(spring, target, style, dt)
 }
 
+/// Maximum number of springs allowed in the animation registry before eviction.
+pub const MAX_SPRINGS: usize = 512;
+
+#[derive(Debug, Clone, Copy)]
+struct SpringEntry {
+    spring: Spring,
+    last_accessed: u64,
+}
+
 /// A registry of independent animated scalars keyed by a stable id.
 ///
 /// Used for per-row / per-tile hover fades (checkbox reveal, icon lift) where
 /// each item needs its own spring but the total number of live items is small.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct AnimRegistry {
-    springs: std::collections::HashMap<u64, Spring>,
+    springs: std::collections::HashMap<u64, SpringEntry>,
+    access_clock: u64,
 }
 
 impl AnimRegistry {
+    pub const MAX_SPRINGS: usize = MAX_SPRINGS;
+
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Ensure capacity is strictly capped at MAX_SPRINGS.
+    /// If full, settled-at-zero springs are pruned first;
+    /// if still at capacity, the oldest inactive entries are evicted.
+    fn ensure_capacity(&mut self) {
+        if self.springs.len() >= MAX_SPRINGS {
+            self.springs
+                .retain(|_, e| !(e.spring.target == 0.0 && e.spring.at_rest()));
+        }
+        while self.springs.len() >= MAX_SPRINGS {
+            if let Some((&oldest_id, _)) = self.springs.iter().min_by_key(|(_, e)| e.last_accessed)
+            {
+                self.springs.remove(&oldest_id);
+            } else {
+                break;
+            }
+        }
+    }
+
     /// Get (creating if needed) the spring for `id`.
     pub fn spring(&mut self, id: u64) -> &mut Spring {
-        self.springs.entry(id).or_default()
+        self.access_clock = self.access_clock.wrapping_add(1);
+        let clock = self.access_clock;
+        if !self.springs.contains_key(&id) {
+            self.ensure_capacity();
+            self.springs.insert(
+                id,
+                SpringEntry {
+                    spring: Spring::default(),
+                    last_accessed: clock,
+                },
+            );
+        }
+        let entry = self.springs.get_mut(&id).unwrap();
+        entry.last_accessed = clock;
+        &mut entry.spring
     }
 
     /// Drive the spring for `id` toward `target` and return the eased value.
     pub fn drive(&mut self, id: u64, target: f32, style: AnimStyle, dt: f32) -> f32 {
-        let spring = self.springs.entry(id).or_default();
+        let spring = self.spring(id);
         advance(spring, target, style, dt)
     }
 
-    /// Drop springs that have settled at their target, keeping the map small.
+    /// Drop springs that have settled at zero, keeping active hovers (target 1.0) preserved.
+    /// Also enforces the MAX_SPRINGS capacity bound.
     pub fn prune(&mut self) {
-        self.springs.retain(|_, s| !s.at_rest());
+        self.springs
+            .retain(|_, e| !(e.spring.target == 0.0 && e.spring.at_rest()));
+        while self.springs.len() > MAX_SPRINGS {
+            if let Some((&oldest_id, _)) = self.springs.iter().min_by_key(|(_, e)| e.last_accessed)
+            {
+                self.springs.remove(&oldest_id);
+            } else {
+                break;
+            }
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.springs.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.springs.is_empty()
+    }
+
+    pub fn capacity(&self) -> usize {
+        MAX_SPRINGS
     }
 
     pub fn clear(&mut self) {

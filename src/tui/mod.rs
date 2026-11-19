@@ -20,8 +20,9 @@ use crate::codec::{
     FileQualityReport, LosslessMode,
 };
 use crate::core::{
-    fuzzy_match, get_system_arch_info, get_system_drives, resolve_file_icon, spawn_async_dir_scan,
-    AsyncWorkerPool, DriveInfo, FileItem, MossambiConfig, ScanBatch, TaskUpdate,
+    fuzzy_match, get_system_arch_info, get_system_drives, resolve_file_icon, sort_file_items,
+    spawn_async_dir_scan, AsyncWorkerPool, DriveInfo, FileItem, MossambiConfig, ScanBatch,
+    TaskUpdate,
 };
 use crate::exam::{optimize_exam_media, ExamConstraint};
 use crate::hwaccel::detect_hardware_capabilities;
@@ -337,18 +338,13 @@ impl AppState {
             let mut parent_items = Vec::new();
             if let Ok(rd) = fs::read_dir(&parent_dir) {
                 for e in rd.flatten() {
-                    parent_items.push(FileItem::from_path(e.path()));
+                    let item = FileItem::from_dir_entry(&e);
+                    if !crate::core::is_protected_os_file(&item.path) {
+                        parent_items.push(item);
+                    }
                 }
             }
-            parent_items.sort_by(|a, b| {
-                if a.is_dir && !b.is_dir {
-                    std::cmp::Ordering::Less
-                } else if !a.is_dir && b.is_dir {
-                    std::cmp::Ordering::Greater
-                } else {
-                    a.name.to_lowercase().cmp(&b.name.to_lowercase())
-                }
-            });
+            sort_file_items(&mut parent_items);
             self.parent_entries = parent_items;
         } else {
             self.parent_entries.clear();

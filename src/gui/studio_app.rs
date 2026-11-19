@@ -375,14 +375,17 @@ impl MossambiApp {
                 "grid" | "icons" => {
                     app.studio_view.explorer_view.view_mode =
                         crate::gui::explorer_view::ViewMode::Grid;
+                    app.config.view_mode = crate::core::ViewMode::Grid;
                 }
                 "list" | "details" => {
                     app.studio_view.explorer_view.view_mode =
                         crate::gui::explorer_view::ViewMode::Details;
+                    app.config.view_mode = crate::core::ViewMode::Details;
                 }
                 "columns" | "miller" => {
                     app.studio_view.explorer_view.view_mode =
                         crate::gui::explorer_view::ViewMode::Columns;
+                    app.config.view_mode = crate::core::ViewMode::Columns;
                 }
                 _ => {}
             }
@@ -925,10 +928,13 @@ impl eframe::App for MossambiApp {
 
         if switch_to_grid {
             self.studio_view.explorer_view.view_mode = crate::core::ViewMode::Grid;
+            self.config.view_mode = crate::core::ViewMode::Grid;
         } else if switch_to_details {
             self.studio_view.explorer_view.view_mode = crate::core::ViewMode::Details;
+            self.config.view_mode = crate::core::ViewMode::Details;
         } else if switch_to_columns {
             self.studio_view.explorer_view.view_mode = crate::core::ViewMode::Columns;
+            self.config.view_mode = crate::core::ViewMode::Columns;
         }
 
         if explorer_reset {
@@ -1083,7 +1089,14 @@ impl eframe::App for MossambiApp {
             .unwrap_or(f64::MIN);
         if now_t - last_t >= 1.0 {
             ctx.data_mut(|d| d.insert_temp(reload_id, now_t));
-            self.config = crate::core::MossambiConfig::load();
+            let reloaded = crate::core::MossambiConfig::load();
+            let new_theme = crate::gui::macos_theme::ThemeStyle::from(reloaded.theme_mode);
+            if self.theme != new_theme {
+                self.theme = new_theme;
+                self.last_applied_theme = None;
+                ctx.request_repaint();
+            }
+            self.config = reloaded;
         }
         // Config -> explorer for the prefs both sides can change. Before,
         // only the reverse direction existed and ran every frame, so the
@@ -1318,11 +1331,12 @@ impl eframe::App for MossambiApp {
                 }
                 AppControlEvent::ChangeTheme(new_theme) => {
                     self.theme = new_theme;
-                    let mut cfg = crate::core::MossambiConfig::load();
-                    cfg.theme_mode = new_theme.into();
-                    if let Err(e) = cfg.save() {
+                    self.config.theme_mode = new_theme.into();
+                    self.last_applied_theme = None;
+                    if let Err(e) = self.config.save() {
                         log::warn!("Could not persist theme change: {e}");
                     }
+                    ctx.request_repaint();
                 }
                 AppControlEvent::ChangeExamPreset(preset_name) => {
                     self.quick_settings.exam_mode_enabled = true;
@@ -1344,9 +1358,8 @@ impl eframe::App for MossambiApp {
                     );
                 }
                 AppControlEvent::ToggleAutostart(enabled) => {
-                    let mut cfg = crate::core::MossambiConfig::load();
-                    cfg.launch_at_login = enabled;
-                    if let Err(e) = cfg.save() {
+                    self.config.launch_at_login = enabled;
+                    if let Err(e) = self.config.save() {
                         log::warn!("Could not persist autostart change: {e}");
                     }
                 }
@@ -2015,6 +2028,7 @@ impl MossambiApp {
             return;
         }
         let ev = &mut self.studio_view.explorer_view;
+        ev.view_mode = from_cfg.view_mode;
         ev.icon_pack = crate::core::icon_packs::IconPack::from_config_id(&from_cfg.icon_pack);
         ev.explorer_zoom = from_cfg.explorer_zoom;
         ev.list_zoom = from_cfg.list_zoom;
@@ -2040,6 +2054,23 @@ impl MossambiApp {
             return;
         };
         let mut dirty = false;
+        if now.view_mode != prev.view_mode {
+            self.config.view_mode = now.view_mode;
+            self.config.default_explorer_layout = match now.view_mode {
+                crate::core::ViewMode::Grid => 2,
+                crate::core::ViewMode::Columns => 3,
+                crate::core::ViewMode::Details => 0,
+            };
+            dirty = true;
+        }
+        if now.row_density != prev.row_density {
+            self.config.row_density = now.row_density;
+            dirty = true;
+        }
+        if now.calculate_checksums != prev.calculate_checksums {
+            self.config.calculate_checksums = now.calculate_checksums;
+            dirty = true;
+        }
         if now.icon_pack != prev.icon_pack {
             self.config.icon_pack = now.icon_pack.clone();
             dirty = true;
@@ -2081,9 +2112,11 @@ impl MossambiApp {
         self.explorer_pref_mirror = Some(now);
         if dirty {
             log::debug!(
-                "explorer prefs changed - saving config (zoom={}, pack={})",
+                "explorer prefs changed - saving config (zoom={}, pack={}, view_mode={:?}, row_density={:?})",
                 self.config.explorer_zoom,
-                self.config.icon_pack
+                self.config.icon_pack,
+                self.config.view_mode,
+                self.config.row_density
             );
             if let Err(e) = self.config.save() {
                 log::warn!("Could not persist explorer prefs: {e}");
@@ -2096,6 +2129,7 @@ impl MossambiApp {
 /// explorer view.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExplorerPrefMirror {
+    view_mode: crate::core::ViewMode,
     icon_pack: String,
     explorer_zoom: u8,
     list_zoom: u8,
@@ -2112,6 +2146,7 @@ pub struct ExplorerPrefMirror {
 impl ExplorerPrefMirror {
     fn from_explorer(e: &crate::gui::explorer_view::ExplorerView) -> Self {
         Self {
+            view_mode: e.view_mode,
             icon_pack: e.icon_pack.id().to_string(),
             explorer_zoom: e.explorer_zoom,
             list_zoom: e.list_zoom,
@@ -2128,6 +2163,7 @@ impl ExplorerPrefMirror {
 
     fn from_config(c: &crate::core::MossambiConfig) -> Self {
         Self {
+            view_mode: c.view_mode,
             icon_pack: c.icon_pack.clone(),
             explorer_zoom: c.explorer_zoom,
             list_zoom: c.list_zoom,

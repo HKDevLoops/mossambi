@@ -7,6 +7,10 @@ use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+use crate::core::path_safety::{
+    self, validate_component, verify_no_symlink_components, ExtractBudget, ExtractLimits,
+};
+
 pub const MAX_ARCHIVE_ENTRIES: usize = 20_000;
 pub const MAX_UNCOMPRESSED_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4 GB safety ceiling
 
@@ -82,7 +86,7 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
                 );
             }
 
-            let mut total_bytes = 0u64;
+            let mut budget = ExtractBudget::new(ExtractLimits::default());
 
             for i in 0..archive.len() {
                 let mut entry = archive.by_index(i)?;
@@ -91,7 +95,20 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
                     .context("Zip-Slip traversal attack detected in ZIP archive")?
                     .to_owned();
 
+                // AR-06: validate every path component for reserved names,
+                // trailing dot/space, NUL bytes and overlong names.
+                for comp in enclosed.components() {
+                    if let std::path::Component::Normal(seg) = comp {
+                        let s = seg.to_string_lossy();
+                        validate_component(&s).map_err(|e| {
+                            anyhow::anyhow!("Unsafe archive entry name {:?}: {}", enclosed, e)
+                        })?;
+                    }
+                }
+
                 let out_path = canonical_dest.join(&enclosed);
+
+                budget.count_entry().map_err(|e| anyhow::anyhow!("{}", e))?;
 
                 if entry.is_dir() {
                     fs::create_dir_all(&out_path)?;
@@ -99,14 +116,41 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
                     if let Some(p) = out_path.parent() {
                         fs::create_dir_all(p)?;
                     }
-                    total_bytes += entry.size();
-                    if total_bytes > MAX_UNCOMPRESSED_BYTES {
-                        bail!("Archive exceeds safe uncompressed size limit (Zip Bomb protection)");
+
+                    // AR-04: verify no symlink components under the
+                    // destination before writing.
+                    verify_no_symlink_components(&canonical_dest, &out_path)
+                        .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+                    // AR-04: use create_new to refuse writing through
+                    // pre-existing symlinks (TOCTOU protection).
+                    // If the file already exists (e.g. duplicate entry),
+                    // remove it first so create_new succeeds.
+                    if out_path.exists() {
+                        // Only remove regular files, never follow symlinks.
+                        if path_safety::is_symlink(&out_path) {
+                            bail!("Refusing to overwrite symlink at {:?}", out_path);
+                        }
+                        fs::remove_file(&out_path)?;
                     }
-                    let outfile = File::create(&out_path)?;
+                    let outfile = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&out_path)?;
                     let mut buf_out = BufWriter::with_capacity(256 * 1024, outfile);
-                    io::copy(&mut entry, &mut buf_out)?;
+
+                    // AR-01: cap the read at the remaining budget so a
+                    // stream that expands past its declared size is stopped.
+                    let remaining = budget.remaining_bytes();
+                    let mut limited = entry.by_ref().take(remaining + 1);
+                    let copied = io::copy(&mut limited, &mut buf_out)?;
                     buf_out.flush()?;
+
+                    // AR-01: accumulate ACTUAL bytes written, not
+                    // attacker-declared entry.size().
+                    budget
+                        .count_bytes(copied)
+                        .map_err(|e| anyhow::anyhow!("{}", e))?;
                 }
             }
         }
@@ -182,15 +226,12 @@ pub fn extract_archive_safe(archive_path: &Path, destination_dir: &Path) -> Resu
 /// entry limit caps, and decompression bomb ceiling enforcement.
 fn unpack_tar_safe<R: Read>(reader: R, canonical_dest: &Path) -> Result<()> {
     let mut archive = tar::Archive::new(reader);
-    let mut total_bytes = 0u64;
-    let mut entry_count = 0usize;
+    let mut budget = ExtractBudget::new(ExtractLimits::default());
 
     for entry_res in archive.entries()? {
         let mut entry = entry_res?;
-        entry_count += 1;
-        if entry_count > MAX_ARCHIVE_ENTRIES {
-            bail!("Archive exceeds safe entry limit ({})", MAX_ARCHIVE_ENTRIES);
-        }
+
+        budget.count_entry().map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // 1. Path Sanitization & Zip-Slip Protection
         let path = entry.path()?;
@@ -207,6 +248,13 @@ fn unpack_tar_safe<R: Read>(reader: R, canonical_dest: &Path) -> Result<()> {
                         "Absolute path traversal attack detected in tar archive: {:?}",
                         path
                     );
+                }
+                std::path::Component::Normal(seg) => {
+                    // AR-06: reject reserved Windows names, trailing
+                    // dot/space, NUL bytes and overlong components.
+                    let s = seg.to_string_lossy();
+                    validate_component(&s)
+                        .map_err(|e| anyhow::anyhow!("Unsafe tar entry name {:?}: {}", path, e))?;
                 }
                 _ => {}
             }
@@ -229,6 +277,9 @@ fn unpack_tar_safe<R: Read>(reader: R, canonical_dest: &Path) -> Result<()> {
                     );
                 }
             }
+            // AR-04: do not create symlinks at all -- skip the entry.
+            // Creating symlinks from untrusted archives is a TOCTOU vector.
+            continue;
         }
 
         if entry_type.is_dir() {
@@ -238,22 +289,35 @@ fn unpack_tar_safe<R: Read>(reader: R, canonical_dest: &Path) -> Result<()> {
                 fs::create_dir_all(parent)?;
             }
 
-            let entry_size = entry.size();
-            total_bytes += entry_size;
-            if total_bytes > MAX_UNCOMPRESSED_BYTES {
-                bail!("Archive exceeds safe uncompressed size limit (Tar Bomb protection)");
-            }
+            // AR-04: verify no symlink components under the destination.
+            verify_no_symlink_components(canonical_dest, &out_path)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-            let outfile = File::create(&out_path)?;
+            // AR-04: use create_new to prevent writing through
+            // pre-existing symlinks (TOCTOU protection).
+            if out_path.exists() {
+                if path_safety::is_symlink(&out_path) {
+                    bail!("Refusing to overwrite symlink at {:?}", out_path);
+                }
+                fs::remove_file(&out_path)?;
+            }
+            let outfile = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&out_path)?;
             let mut buf_out = BufWriter::with_capacity(256 * 1024, outfile);
-            let mut limited = io::Read::by_ref(&mut entry)
-                .take(MAX_UNCOMPRESSED_BYTES.saturating_sub(total_bytes) + entry_size + 1);
+
+            // AR-01: cap the read at the remaining budget so decompression
+            // bombs are caught on ACTUAL bytes, not declared sizes.
+            let remaining = budget.remaining_bytes();
+            let mut limited = io::Read::by_ref(&mut entry).take(remaining + 1);
             let copied = io::copy(&mut limited, &mut buf_out)?;
             buf_out.flush()?;
 
-            if copied > entry_size && copied > MAX_UNCOMPRESSED_BYTES {
-                bail!("Archive entry decompressed payload exceeds declared size limit");
-            }
+            // AR-01: accumulate ACTUAL bytes written.
+            budget
+                .count_bytes(copied)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
         }
     }
 

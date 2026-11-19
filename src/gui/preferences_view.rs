@@ -2815,6 +2815,7 @@ impl PreferencesView {
             let lay = self.cfg.default_explorer_layout as usize;
             let lay_lbl = layouts.get(lay).copied().unwrap_or("Details").to_string();
             let lay_mut = &mut self.cfg.default_explorer_layout;
+            let vm_mut = &mut self.cfg.view_mode;
             setting_row(
                 ui,
                 palette,
@@ -2826,6 +2827,11 @@ impl PreferencesView {
                         let active = *lay_mut as usize == i;
                         if design::segmented_pill(ui, palette, active, name).clicked() {
                             *lay_mut = i as u8;
+                            *vm_mut = match i {
+                                2 => crate::core::ViewMode::Grid,
+                                3 => crate::core::ViewMode::Columns,
+                                _ => crate::core::ViewMode::Details,
+                            };
                             *dirty = true;
                         }
                     }

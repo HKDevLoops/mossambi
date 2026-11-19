@@ -301,15 +301,32 @@ mod imp {
         // cItems: u32
         // fgd: [FILEDESCRIPTORW; cItems]
         // FILEDESCRIPTORW has cFileName at offset 76 (260 WCHARs)
-        let count = *(ptr as *const u32);
+        // The count and every offset come from the drop source and are untrusted:
+        // bound all reads to the actual size of the locked global buffer.
+        let total = windows::Win32::System::Memory::GlobalSize(hglobal);
+        if total < 4 {
+            let _ = GlobalUnlock(hglobal);
+            return Vec::new();
+        }
+        let bytes = std::slice::from_raw_parts(ptr as *const u8, total);
+        let count = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
         let mut names = Vec::new();
-        let descriptor_size = 592; // sizeof(FILEDESCRIPTORW) in 64-bit
-        let name_offset = 76; // offset of cFileName in FILEDESCRIPTORW
+        let descriptor_size = 592usize; // sizeof(FILEDESCRIPTORW) in 64-bit
+        let name_offset = 76usize; // offset of cFileName in FILEDESCRIPTORW
+        let max_chars = 260usize;
         for i in 0..count.min(64) {
-            let offset = 4 + (i as usize) * descriptor_size + name_offset;
-            let name_ptr = (ptr as *const u8).add(offset) as *const u16;
+            let offset = 4usize + i * descriptor_size + name_offset;
+            if offset >= total {
+                break;
+            }
+            // cFileName is an array of WCHAR; never scan past the locked buffer.
+            let max_units = ((total - offset) / 2).min(max_chars);
+            if max_units == 0 {
+                continue;
+            }
+            let name_ptr = bytes.as_ptr().add(offset) as *const u16;
             let mut len = 0;
-            while *name_ptr.add(len) != 0 && len < 260 {
+            while len < max_units && *name_ptr.add(len) != 0 {
                 len += 1;
             }
             if len > 0 {
@@ -367,23 +384,41 @@ mod imp {
         if ptr.is_null() {
             return Vec::new();
         }
+        // pFiles and every wide-string scan come from the drop source and are
+        // untrusted: bound all reads to the actual size of the locked buffer.
+        let total = windows::Win32::System::Memory::GlobalSize(hglobal);
+        let header_size = std::mem::size_of::<DROPFILES>();
+        if total < header_size {
+            let _ = GlobalUnlock(hglobal);
+            return Vec::new();
+        }
         let df = &*(ptr as *const DROPFILES);
+        let files_offset = df.pFiles as usize;
+        // The file list must start inside the buffer, after the DROPFILES header.
+        if files_offset < header_size || files_offset >= total {
+            let _ = GlobalUnlock(hglobal);
+            return Vec::new();
+        }
+        let bytes = std::slice::from_raw_parts(ptr as *const u8, total);
+        // WCHAR is 2 bytes; align the start so the raw u16 reads stay aligned.
+        let mut pos = files_offset + (files_offset & 1);
         let mut paths = Vec::new();
-        let wide_ptr = (ptr as *const u8).add(df.pFiles as usize) as *const u16;
-        let mut offset = 0;
-        loop {
-            let current_str_ptr = wide_ptr.add(offset);
-            if *current_str_ptr == 0 {
-                break;
-            }
+        while pos + 2 <= total {
+            let max_units = (total - pos) / 2;
+            let wide_ptr = bytes.as_ptr().add(pos) as *const u16;
             let mut len = 0;
-            while *current_str_ptr.add(len) != 0 {
+            while len < max_units && *wide_ptr.add(len) != 0 {
                 len += 1;
             }
-            let slice = std::slice::from_raw_parts(current_str_ptr, len);
-            let s = String::from_utf16_lossy(slice);
-            paths.push(PathBuf::from(s));
-            offset += len + 1;
+            // No terminator within the buffer means a malformed drop: stop.
+            if len == max_units {
+                break;
+            }
+            if len > 0 {
+                let slice = std::slice::from_raw_parts(wide_ptr, len);
+                paths.push(PathBuf::from(String::from_utf16_lossy(slice)));
+            }
+            pos += (len + 1) * 2;
         }
         let _ = GlobalUnlock(hglobal);
         paths

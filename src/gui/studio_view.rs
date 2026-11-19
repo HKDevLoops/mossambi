@@ -4791,11 +4791,7 @@ impl StudioView {
             run_ctx,
         );
         std::mem::swap(&mut self.prefs_view.cfg, config);
-        self.explorer_view.view_mode = match config.default_explorer_layout {
-            2 => crate::gui::explorer_view::ViewMode::Grid,
-            3 => crate::gui::explorer_view::ViewMode::Columns,
-            _ => crate::gui::explorer_view::ViewMode::Details,
-        };
+        self.explorer_view.view_mode = config.view_mode;
         self.explorer_view.row_density = config.row_density;
         self.explorer_view.calculate_checksums = config.calculate_checksums;
     }

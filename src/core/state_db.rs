@@ -48,6 +48,26 @@ pub fn db_path() -> PathBuf {
     crate::core::platform_paths::app_data_dir().join("mossambi_state.db")
 }
 
+/// Restrict the state database (and its parent directory) to the current user
+/// so other local accounts cannot read keystroke logs, script bodies or tags.
+/// On Windows the file lives in the per-user LOCALAPPDATA tree (already
+/// user-only by default); on Unix enforce 0600 for the file and 0700 for the
+/// parent directory regardless of the process umask (CFG-01).
+fn restrict_state_db_permissions(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+        }
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
 static DB_LOCK: Mutex<()> = Mutex::new(());
 
 /// Open a connection to the SQLite state database, ensuring tables exist.
@@ -59,6 +79,8 @@ pub fn open_connection() -> Result<rusqlite::Connection, String> {
     }
 
     let conn = rusqlite::Connection::open(&path).map_err(|e| format!("Failed to open DB: {e}"))?;
+    // Apply user-only permissions after the file exists (CFG-01).
+    restrict_state_db_permissions(&path);
 
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -320,8 +342,9 @@ pub fn load_presets() -> Vec<CustomPresetRecord> {
         let width_px: u32 = row.get(3)?;
         let height_px: u32 = row.get(4)?;
         let dpi: u32 = row.get(5)?;
-        let min_bytes: u64 = row.get(6)?;
-        let max_bytes: u64 = row.get(7)?;
+        // rusqlite 0.41 dropped FromSql for u64; the columns are INTEGER (i64).
+        let min_bytes: u64 = row.get::<_, i64>(6)? as u64;
+        let max_bytes: u64 = row.get::<_, i64>(7)? as u64;
         let norm_int: i32 = row.get(8)?;
         let br: u8 = row.get(9)?;
         let bg: u8 = row.get(10)?;

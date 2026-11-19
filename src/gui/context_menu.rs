@@ -814,11 +814,14 @@ pub fn create_shortcut(target: &Path) -> bool {
         use std::os::windows::process::CommandExt;
         let shortcut = target.with_extension("lnk");
         // Use PowerShell hidden window for a simple, reliable shortcut creation
+        // Escape single quotes in every value interpolated into the PowerShell
+        // single-quoted strings: NTFS paths may legally contain a quote, and an
+        // unescaped one would break out and run arbitrary PowerShell (CI-01).
         let cmd = format!(
             "$ws=New-Object -ComObject WScript.Shell;$s=$ws.CreateShortcut('{}');$s.TargetPath='{}';$s.WorkingDirectory='{}';$s.Save()",
-            shortcut.to_string_lossy(),
-            target.to_string_lossy(),
-            target.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
+            shortcut.to_string_lossy().replace('\'', "''"),
+            target.to_string_lossy().replace('\'', "''"),
+            target.parent().map(|p| p.to_string_lossy().replace('\'', "''")).unwrap_or_default(),
         );
         std::process::Command::new("powershell")
             .arg("-NoProfile")

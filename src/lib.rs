@@ -2,6 +2,7 @@
 //! Archive Suite, and Indian Exam Form Tuner.
 
 pub mod archive;
+pub mod cli;
 pub mod codec;
 pub mod core;
 pub mod daemon;
