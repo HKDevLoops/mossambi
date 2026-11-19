@@ -661,7 +661,8 @@ pub struct DirSizeResult {
 pub fn compute_dir_size(root: &Path, max_depth: usize, max_entries: usize) -> u64 {
     let mut total = 0u64;
     let mut visited = 0usize;
-    let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0usize)];
+    let mut stack: Vec<(PathBuf, usize)> = Vec::with_capacity(1024);
+    stack.push((root.to_path_buf(), 0usize));
     while let Some((dir, depth)) = stack.pop() {
         let Ok(read) = std::fs::read_dir(&dir) else {
             continue;
