@@ -450,3 +450,89 @@ fn test_cli_preview_and_queue() {
     let q_val: serde_json::Value = serde_json::from_slice(&q_out.stdout).unwrap();
     assert!(q_val["jobs"].is_array());
 }
+
+#[test]
+fn test_cli_completions_carapace_and_shells() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    // Carapace YAML
+    let yaml_out = Command::new(&bin)
+        .args(["completions", "--carapace"])
+        .output()
+        .unwrap();
+    assert!(yaml_out.status.success());
+    let yaml_str = String::from_utf8_lossy(&yaml_out.stdout);
+    assert!(yaml_str.contains("name: mossambi"));
+    assert!(yaml_str.contains("convert"));
+    assert!(yaml_str.contains("upload-ready"));
+    assert!(yaml_str.contains("batch-rename"));
+
+    // PowerShell
+    let pwsh_out = Command::new(&bin)
+        .args(["completions", "powershell"])
+        .output()
+        .unwrap();
+    assert!(pwsh_out.status.success());
+    let pwsh_str = String::from_utf8_lossy(&pwsh_out.stdout);
+    assert!(pwsh_str.contains("Register-ArgumentCompleter"));
+    assert!(pwsh_str.contains("mossambi"));
+
+    // Bash
+    let bash_out = Command::new(&bin)
+        .args(["completions", "bash"])
+        .output()
+        .unwrap();
+    assert!(bash_out.status.success());
+    let bash_str = String::from_utf8_lossy(&bash_out.stdout);
+    assert!(bash_str.contains("_mossambi"));
+
+    // Fish
+    let fish_out = Command::new(&bin)
+        .args(["completions", "fish"])
+        .output()
+        .unwrap();
+    assert!(fish_out.status.success());
+    let fish_str = String::from_utf8_lossy(&fish_out.stdout);
+    assert!(fish_str.contains("complete -c mossambi"));
+
+    // Auto-detect shell when no shell argument is specified
+    let auto_out = Command::new(&bin).args(["completions"]).output().unwrap();
+    assert!(auto_out.status.success());
+    assert!(!auto_out.stdout.is_empty());
+}
+
+#[test]
+fn test_cli_carapace_dynamic_bridge() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    // Exam preset completions
+    let exam_out = Command::new(&bin)
+        .args(["_carapace", "pwsh", "upload-ready", "--preset"])
+        .output()
+        .unwrap();
+    assert!(exam_out.status.success());
+    let exam_val: serde_json::Value = serde_json::from_slice(&exam_out.stdout).unwrap();
+    assert!(exam_val.is_array());
+    let exam_arr = exam_val.as_array().unwrap();
+    assert!(exam_arr.iter().any(|item| item["value"] == "upsc-photo"));
+
+    // Theme completions
+    let theme_out = Command::new(&bin)
+        .args(["_carapace", "pwsh", "config", "set", "theme"])
+        .output()
+        .unwrap();
+    assert!(theme_out.status.success());
+    let theme_val: serde_json::Value = serde_json::from_slice(&theme_out.stdout).unwrap();
+    assert!(theme_val.is_array());
+    let theme_arr = theme_val.as_array().unwrap();
+    assert!(theme_arr.iter().any(|item| item["value"] == "gruvbox"));
+    assert!(theme_arr
+        .iter()
+        .any(|item| item["value"] == "mossambi_punch"));
+}

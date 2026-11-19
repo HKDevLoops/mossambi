@@ -312,11 +312,14 @@ pub enum Commands {
 
     /// Generate a shell auto-completion script or export a Carapace YAML spec.
     Completions {
-        /// Target shell: bash, zsh, fish, powershell, elvish.
+        /// Target shell: bash, zsh, fish, powershell, elvish. (Auto-detected if omitted)
         shell: Option<String>,
         /// Export Carapace specification (YAML).
         #[arg(long = "carapace")]
         carapace: bool,
+        /// Install completion script automatically to the active shell's profile/config.
+        #[arg(long = "install")]
+        install: bool,
     },
 
     /// Dynamic context-aware Carapace bridge providing format recommendations.
@@ -794,9 +797,11 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             Commands::Config { action, key, value } => {
                 config_cli::handle_config(&action, key.as_deref(), value.as_deref(), json)
             }
-            Commands::Completions { shell, carapace } => {
-                config_cli::handle_completions(shell.as_deref(), carapace)
-            }
+            Commands::Completions {
+                shell,
+                carapace,
+                install,
+            } => config_cli::handle_completions(shell.as_deref(), carapace, install),
             Commands::Carapace { shell, args } => {
                 config_cli::handle_carapace(shell.as_deref(), &args)
             }
@@ -979,8 +984,21 @@ mod tests {
         let cli = parse(&["completions", "powershell"]);
         assert!(matches!(
             cli.command,
-            Some(Commands::Completions { ref shell, carapace: false })
-                if shell.as_deref() == Some("powershell")
+            Some(Commands::Completions {
+                ref shell,
+                carapace: false,
+                install: false,
+            }) if shell.as_deref() == Some("powershell")
+        ));
+
+        let cli_install = parse(&["completions", "--install"]);
+        assert!(matches!(
+            cli_install.command,
+            Some(Commands::Completions {
+                shell: None,
+                carapace: false,
+                install: true,
+            })
         ));
     }
 
