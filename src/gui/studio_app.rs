@@ -139,110 +139,6 @@ impl Default for MossambiApp {
 }
 
 impl MossambiApp {
-    /// Stage 2: renders a pending right-click menu in its own native OS window
-    /// so it can extend beyond the application frame and is never clipped.
-    /// egui draws ordinary context menus as `Area`s bounded by `screen_rect`;
-    /// an immediate viewport escapes that bound. Menu content uses the same
-    /// builders as the in-app menus, and the resulting intents are queued for
-    /// ExplorerView to apply on the next frame.
-    fn render_native_context_menu(&mut self, ctx: &egui::Context) {
-        use crate::gui::explorer_view::{ExplorerView, NativeMenuIntents, NativeMenuRequest};
-
-        let Some(req) = self.studio_view.explorer_view.pending_native_menu.clone() else {
-            return;
-        };
-
-        let mut should_close = false;
-        let mut focus_seen = self.studio_view.explorer_view.native_menu_focus_seen;
-
-        let menu_w = 280.0_f32;
-        let menu_h = 420.0_f32;
-        let mut anchor = req.anchor();
-        if let Some(mon_sz) = ctx.input(|i| i.viewport().monitor_size) {
-            if anchor.x + menu_w > mon_sz.x {
-                anchor.x = (mon_sz.x - menu_w - 10.0).max(0.0);
-            }
-            if anchor.y + menu_h > mon_sz.y {
-                anchor.y = (mon_sz.y - menu_h - 10.0).max(0.0);
-            }
-        }
-
-        let outcome = ctx.show_viewport_immediate(
-            egui::viewport::ViewportId::from_hash_of("mossambi_native_context_menu"),
-            egui::ViewportBuilder::default()
-                .with_decorations(false)
-                .with_resizable(false)
-                .with_transparent(true)
-                .with_always_on_top()
-                .with_taskbar(false)
-                .with_position(anchor)
-                .with_inner_size([menu_w, menu_h]),
-            |vctx, class| -> Option<NativeMenuIntents> {
-                // Non-desktop backends cannot create native viewports; there
-                // is no menu to render, so leave any in-app fallback intact.
-                if class == egui::viewport::ViewportClass::Embedded {
-                    return None;
-                }
-                let focused = vctx.input(|i| i.viewport().focused.unwrap_or(false));
-                if focused {
-                    focus_seen = true;
-                } else if focus_seen {
-                    should_close = true;
-                }
-                if vctx
-                    .input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape))
-                {
-                    should_close = true;
-                }
-                let built = egui::CentralPanel::default().show(vctx, |ui| match &req {
-                    NativeMenuRequest::Canvas {
-                        pack,
-                        style,
-                        tint,
-                        has_clipboard,
-                        has_entries,
-                        sort,
-                        sort_desc,
-                        view,
-                        dir,
-                        ..
-                    } => NativeMenuIntents::Canvas(ExplorerView::run_canvas_context_menu(
-                        ui,
-                        *pack,
-                        *style,
-                        *tint,
-                        *has_clipboard,
-                        *has_entries,
-                        *sort,
-                        *sort_desc,
-                        *view,
-                        dir.as_path(),
-                    )),
-                    NativeMenuRequest::Item {
-                        pack,
-                        style,
-                        tint,
-                        item,
-                        targets,
-                        ..
-                    } => NativeMenuIntents::Item(ExplorerView::run_item_context_menu(
-                        ui, *pack, *style, *tint, item, targets,
-                    )),
-                });
-                Some(built.inner)
-            },
-        );
-
-        self.studio_view.explorer_view.native_menu_focus_seen = focus_seen;
-        if let Some(outcome) = outcome {
-            self.studio_view.explorer_view.deferred_native_intents = Some(outcome);
-        }
-        if should_close {
-            self.studio_view.explorer_view.pending_native_menu = None;
-            self.studio_view.explorer_view.native_menu_focus_seen = false;
-        }
-    }
-
     /// Toasts the outcome of a finished conversion batch (notification
     /// spec: gate = enabled AND (unfocused OR the job took > 10 s)).
     fn toast_batch_outcome(&mut self, ctx: &egui::Context, failed_hint: bool, fallback_body: &str) {
@@ -1546,10 +1442,6 @@ impl eframe::App for MossambiApp {
             |paths, t| convert_batch = Some((paths, t)),
             |p| open_target_folder = Some(p.to_path_buf()),
         );
-
-        // Stage 2: render any pending right-click menu in its own native OS
-        // window so it can escape the application frame and is never clipped.
-        self.render_native_context_menu(ctx);
 
         self.quick_settings = qs;
 

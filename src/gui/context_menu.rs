@@ -90,10 +90,7 @@ pub fn open_with_choose(path: &Path) -> bool {
         );
         // rundll32 OpenAs_RunDLL is only a fallback: if it spawned but the
         // dialog never appeared, report failure.
-        if (res as usize) > 32 {
-            return true;
-        }
-        false
+        (res as usize) > 32
     }
     #[cfg(target_os = "macos")]
     {

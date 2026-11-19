@@ -2,6 +2,7 @@
 //! Format registry, Pantone color palette, sibling output path logic, and persistent configuration.
 
 pub mod action_journal;
+pub mod artcraft;
 pub mod async_worker;
 pub mod config;
 pub mod conversion_history;
@@ -34,6 +35,7 @@ pub mod pantone;
 pub mod path_safety;
 pub mod pins;
 pub mod platform_paths;
+pub mod presets;
 pub mod preview;
 pub mod qos;
 pub mod registry;
@@ -53,6 +55,11 @@ pub mod window_level;
 pub use action_journal::{
     record_copy, record_create_dir, record_move, record_rename, record_tag_set, stage_delete,
     undo_last,
+};
+pub use artcraft::{
+    deckcraft_convert, designcraft_export, is_deckcraft_readable, is_designcraft_readable,
+    is_vectorcraft_readable, is_vectorcraft_writable, vectorcraft_convert, ArtcraftApp,
+    ArtcraftDiscovery,
 };
 pub use async_worker::{AsyncWorkerPool, ItemOutcome, TaskUpdate};
 pub use config::{
@@ -105,6 +112,11 @@ pub use pins::{
     add as pin_add, contains as pin_contains, move_item as pin_move_item, remove as pin_remove,
 };
 pub use platform_paths::{config_dir, expand_path_str};
+pub use presets::{
+    delete_custom_preset, export_preset_to_file, find_matching_presets, find_preset_by_id,
+    get_builtin_presets, import_preset_from_file, list_all_presets, save_custom_preset,
+    PresetDefinition, PresetOptions,
+};
 pub use registry::{
     DynamicWheelSector, FileCategory, FormatInfo, FormatNature, FormatSpecification,
     UniversalRegistry,

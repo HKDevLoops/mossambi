@@ -8,6 +8,7 @@
 //! Pure ASCII by contract.
 
 pub mod archive;
+pub mod artcraft_cli;
 pub mod batch_rename;
 pub mod config_cli;
 pub mod convert;
@@ -18,6 +19,7 @@ pub mod inspect;
 pub mod launch;
 pub mod open_with;
 pub mod output;
+pub mod presets_cli;
 pub mod preview;
 pub mod queue_cli;
 pub mod route;
@@ -469,6 +471,20 @@ pub enum Commands {
         #[command(subcommand)]
         action: SettingsCommand,
     },
+
+    /// Manage conversion presets (list, export, import, delete).
+    Presets {
+        /// Preset action to perform.
+        #[command(subcommand)]
+        action: presets_cli::PresetsCommand,
+    },
+
+    /// Query or test installed ArtCraft application engines (VectorCraft, DeckCraft, DesignCraft).
+    Artcraft {
+        /// ArtCraft action to perform.
+        #[command(subcommand)]
+        action: artcraft_cli::ArtcraftCommand,
+    },
 }
 
 /// Filesystem mutation command group.
@@ -862,6 +878,14 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             ),
             Commands::Undo => undo::handle_undo(json),
             Commands::Settings { action } => settings::handle_settings(action, json),
+            Commands::Presets { action } => {
+                let code = presets_cli::execute(action)?;
+                std::process::exit(code as i32);
+            }
+            Commands::Artcraft { action } => {
+                let code = artcraft_cli::execute(action)?;
+                std::process::exit(code as i32);
+            }
         };
     }
 

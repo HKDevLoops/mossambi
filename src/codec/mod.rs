@@ -15,6 +15,7 @@ pub mod pdf_image;
 pub mod pdf_tables;
 pub mod pdf_vector;
 pub mod remux;
+pub mod sniffer;
 pub mod subtitles;
 
 pub use bench::{BenchmarkEngine, BenchmarkReport, ComparisonBaseline};
@@ -37,6 +38,7 @@ pub use pdf_vector::{
 pub use remux::{
     calculate_sha256, verify_conversion_fidelity, MathematicalQualityReport, MathematicalRemuxType,
 };
+pub use sniffer::{sniff_file, sniff_magic, SniffedFormat};
 pub use subtitles::transcode_subtitles;
 
 use crate::archive::{pack_archive, unpack_archive, ArchiveType};
@@ -466,6 +468,23 @@ pub fn transcode_single_step(
 ) -> Result<()> {
     let (category, in_ext) = UniversalRegistry::classify_file(input);
     let target_upper = target_format.to_ascii_uppercase();
+
+    // 1. High-Fidelity ArtCraft Pro Engine Dispatch (VectorCraft, DeckCraft, DesignCraft)
+    if (in_ext == "AFDESIGN" || in_ext == "CDR" || in_ext == "AI" || in_ext == "VECTORCRAFT")
+        && crate::core::artcraft::is_vectorcraft_writable(&target_upper)
+    {
+        if let Ok(()) = crate::core::artcraft::vectorcraft_convert(input, output, None, None) {
+            return Ok(());
+        }
+    } else if in_ext == "IDML" && (target_upper == "PDF" || target_upper == "EPUB") {
+        if let Ok(()) = crate::core::artcraft::designcraft_export(input, output) {
+            return Ok(());
+        }
+    } else if in_ext == "DECKCRAFT" && (target_upper == "PDF" || target_upper == "PNG") {
+        if let Ok(()) = crate::core::artcraft::deckcraft_convert(input, output) {
+            return Ok(());
+        }
+    }
 
     match category {
         FileCategory::Image => {

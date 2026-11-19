@@ -131,10 +131,10 @@ fn test_tier1_f01_view_mode_all_contains_three_canonical_modes() {
 #[test]
 fn test_tier1_f02_explorer_view_mode_toggle() {
     let mut explorer = ExplorerView::default();
-    assert_eq!(explorer.view_mode, ViewMode::Grid);
-
-    explorer.view_mode = ViewMode::Details;
     assert_eq!(explorer.view_mode, ViewMode::Details);
+
+    explorer.view_mode = ViewMode::Grid;
+    assert_eq!(explorer.view_mode, ViewMode::Grid);
 
     explorer.view_mode = ViewMode::Columns;
     assert_eq!(explorer.view_mode, ViewMode::Columns);

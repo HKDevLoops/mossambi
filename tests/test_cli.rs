@@ -536,3 +536,65 @@ fn test_cli_carapace_dynamic_bridge() {
         .iter()
         .any(|item| item["value"] == "mossambi_punch"));
 }
+
+#[test]
+fn test_cli_presets_and_artcraft() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    // Presets list
+    let presets_out = Command::new(&bin)
+        .args(["presets", "list"])
+        .output()
+        .unwrap();
+    assert!(presets_out.status.success());
+    let presets_str = String::from_utf8_lossy(&presets_out.stdout);
+    assert!(presets_str.contains("web-ultra-webp"));
+    assert!(presets_str.contains("upsc-photo"));
+
+    // ArtCraft status
+    let artcraft_out = Command::new(&bin)
+        .args(["artcraft", "status"])
+        .output()
+        .unwrap();
+    assert!(artcraft_out.status.success());
+    let artcraft_str = String::from_utf8_lossy(&artcraft_out.stdout);
+    assert!(artcraft_str.contains("ArtCraft Ecosystem Detection Status"));
+}
+
+#[test]
+fn test_cli_presets_export_import_roundtrip() {
+    let bin = get_bin_path();
+    if !bin.exists() {
+        return;
+    }
+
+    let temp_dir = std::env::temp_dir().join("mossambi_test_preset_export");
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let export_path = temp_dir.join("exported_preset.json");
+
+    // Export builtin preset
+    let exp_out = Command::new(&bin)
+        .args([
+            "presets",
+            "export",
+            "web-ultra-webp",
+            "--output",
+            export_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(exp_out.status.success());
+    assert!(export_path.exists());
+
+    // Verify valid JSON content
+    let content = fs::read_to_string(&export_path).unwrap();
+    assert!(content.contains("web-ultra-webp"));
+    assert!(content.contains("mossambi-preset.v1.json"));
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}

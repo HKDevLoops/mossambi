@@ -48,13 +48,14 @@ pub enum WidgetResult {
 
 pub struct MossambiWidgetApp {
     pub geometry: RadialWidgetGeometry,
-    pub sectors: Vec<&'static str>,
+    pub sectors: Vec<String>,
     pub face: DonutFace,
     pub flip_start: Option<Instant>,
     pub last_wheel_flip: Instant,
     pub hovered_carpel: Option<usize>,
     pub current_file: Option<PathBuf>,
     pub current_category: FileCategory,
+    pub tweak_dialog: crate::gui::tweak_dialog::TweakDialogState,
 
     // Filee Group Fan-out & Animation Springs
     pub expanded_group: Option<usize>,
@@ -101,7 +102,11 @@ impl Default for MossambiWidgetApp {
         let cfg = crate::core::MossambiConfig::load();
         let size = crate::widget::clamp_donut_diameter(cfg.donut.appearance.size);
         // Default petals matching Image reference.png: JPG, WEBP, HEIC, TIFF, AVIF, BMP, PDF, DOCX
-        let default_sectors = vec!["JPG", "WEBP", "HEIC", "TIFF", "AVIF", "BMP", "PDF", "DOCX"];
+        let default_sectors: Vec<String> =
+            vec!["JPG", "WEBP", "HEIC", "TIFF", "AVIF", "BMP", "PDF", "DOCX"]
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect();
 
         Self {
             geometry: RadialWidgetGeometry::new(Pos2::new(240.0, 240.0), size),
@@ -112,6 +117,7 @@ impl Default for MossambiWidgetApp {
             hovered_carpel: None,
             current_file: None,
             current_category: FileCategory::Image,
+            tweak_dialog: crate::gui::tweak_dialog::TweakDialogState::default(),
 
             expanded_group: None,
             hovered_sub_petal: None,
@@ -148,6 +154,10 @@ impl Default for MossambiWidgetApp {
 
 impl MossambiWidgetApp {
     pub fn trigger_wedge(&mut self, petal_idx: usize) {
+        self.trigger_wedge_with_alt(petal_idx, false);
+    }
+
+    pub fn trigger_wedge_with_alt(&mut self, petal_idx: usize, alt_held: bool) {
         match self.face {
             DonutFace::PrimaryFormats => {
                 let fmt_opt = self
@@ -163,11 +173,22 @@ impl MossambiWidgetApp {
                             self.expanded_group = Some(petal_idx);
                             self.hovered_sub_petal = Some(0);
                         }
+                    } else if alt_held && self.current_file.is_some() {
+                        let path = self.current_file.as_ref().unwrap().clone();
+                        self.tweak_dialog =
+                            crate::gui::tweak_dialog::TweakDialogState::open_for_file(&path, &fmt);
                     } else if self.current_file.is_some() {
                         self.start_conversion(&fmt);
                     } else if let Some(path) = rfd::FileDialog::new().pick_file() {
-                        self.select_file(path);
-                        self.start_conversion(&fmt);
+                        self.select_file(path.clone());
+                        if alt_held {
+                            self.tweak_dialog =
+                                crate::gui::tweak_dialog::TweakDialogState::open_for_file(
+                                    &path, &fmt,
+                                );
+                        } else {
+                            self.start_conversion(&fmt);
+                        }
                     }
                 }
             }
@@ -267,10 +288,10 @@ impl MossambiWidgetApp {
         self.flip_start = Some(Instant::now());
     }
 
-    pub fn active_sectors(&self) -> &[&str] {
+    pub fn active_sectors(&self) -> Vec<&str> {
         match self.face {
-            DonutFace::PrimaryFormats => &self.sectors,
-            DonutFace::StudioTools => &STUDIO_TOOL_SECTORS,
+            DonutFace::PrimaryFormats => self.sectors.iter().map(|s| s.as_str()).collect(),
+            DonutFace::StudioTools => STUDIO_TOOL_SECTORS.to_vec(),
         }
     }
 
@@ -282,22 +303,30 @@ impl MossambiWidgetApp {
             .donut
             .find_profile_for_extension_filtered(&ext, Some(&cfg.fields))
         {
-            let front_names: Vec<&'static str> = prof
-                .front_slices
-                .iter()
-                .map(|s| Box::leak(s.name.clone().into_boxed_str()) as &'static str)
-                .collect();
+            let front_names: Vec<String> =
+                prof.front_slices.iter().map(|s| s.name.clone()).collect();
             if !front_names.is_empty() {
                 self.sectors = front_names;
                 self.current_file = Some(path);
                 return;
             }
         }
-        self.sectors = UniversalRegistry::get_widget_sectors_for_category(cat);
+        self.sectors = UniversalRegistry::get_sectors_for_file(&path)
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
         self.current_file = Some(path);
     }
 
     pub fn start_conversion(&mut self, target_format: &str) {
+        self.start_conversion_with_options(target_format, None);
+    }
+
+    pub fn start_conversion_with_options(
+        &mut self,
+        target_format: &str,
+        options: Option<crate::core::presets::PresetOptions>,
+    ) {
         if self.is_converting {
             log::warn!(
                 "Widget conversion already in progress; ignoring request for {}",
@@ -322,7 +351,17 @@ impl MossambiWidgetApp {
                 let res = if cancel.load(Ordering::Relaxed) {
                     WidgetResult::Failure("cancelled before it could start".to_string())
                 } else {
-                    match transcode_file(&input, &target, LosslessMode::StrictBitExact, None) {
+                    let mode = if let Some(ref opts) = options {
+                        if opts.lossless == Some(false) {
+                            LosslessMode::PerceptualHighFidelity
+                        } else {
+                            LosslessMode::StrictBitExact
+                        }
+                    } else {
+                        LosslessMode::StrictBitExact
+                    };
+
+                    match transcode_file(&input, &target, mode, None) {
                         Ok(out) => WidgetResult::Success(vec![out]),
                         Err(e) => WidgetResult::Failure(e.to_string()),
                     }
@@ -609,12 +648,28 @@ impl eframe::App for MossambiWidgetApp {
                         self.select_file(path.clone());
                         let drop_pos = i.pointer.hover_pos().unwrap_or(self.geometry.center);
                         if let Some(carpel_idx) = self.geometry.hit_test_petal(drop_pos) {
-                            if let Some(target) = self.sectors.get(carpel_idx).copied() {
-                                self.start_conversion(target);
+                            let target = self.sectors.get(carpel_idx).cloned();
+                            if let Some(target) = target {
+                                if i.modifiers.alt {
+                                    self.tweak_dialog =
+                                        crate::gui::tweak_dialog::TweakDialogState::open_for_file(
+                                            path, &target,
+                                        );
+                                } else {
+                                    self.start_conversion(&target);
+                                }
                             }
                         } else if self.geometry.hit_test_hub(drop_pos) {
-                            if let Some(first_fmt) = self.sectors.first().copied() {
-                                self.start_conversion(first_fmt);
+                            let first_fmt = self.sectors.first().cloned();
+                            if let Some(first_fmt) = first_fmt {
+                                if i.modifiers.alt {
+                                    self.tweak_dialog =
+                                        crate::gui::tweak_dialog::TweakDialogState::open_for_file(
+                                            path, &first_fmt,
+                                        );
+                                } else {
+                                    self.start_conversion(&first_fmt);
+                                }
                             }
                         }
                     }
@@ -964,7 +1019,8 @@ impl eframe::App for MossambiWidgetApp {
                                 close_requested = true;
                             }
                         } else if let Some(petal_idx) = self.hovered_carpel {
-                            self.trigger_wedge(petal_idx);
+                            let alt_held = ctx.input(|i| i.modifiers.alt);
+                            self.trigger_wedge_with_alt(petal_idx, alt_held);
                         }
                     }
                 }
@@ -1036,7 +1092,7 @@ impl eframe::App for MossambiWidgetApp {
 
                 self.geometry.render_with_full_details(
                     &painter,
-                    active_sectors,
+                    &active_sectors,
                     current_state,
                     self.hovered_carpel,
                     Some(&dynamic_hint),
@@ -1184,6 +1240,11 @@ impl eframe::App for MossambiWidgetApp {
                     }
                 }
             });
+
+        if let Some(opts) = self.tweak_dialog.render(ctx) {
+            let target = self.tweak_dialog.target_format.clone();
+            self.start_conversion_with_options(&target, Some(opts));
+        }
     }
 }
 

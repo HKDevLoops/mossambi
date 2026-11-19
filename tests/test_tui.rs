@@ -136,3 +136,29 @@ fn test_tui_tag_modal_workflow() {
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn test_tui_preset_modal_workflow() {
+    let mut state = AppState::new();
+    assert!(!state.show_preset_modal);
+    assert_eq!(state.preset_modal_index, 0);
+
+    // Open preset modal
+    state.show_preset_modal = true;
+    assert!(state.show_preset_modal);
+
+    // Verify presets exist in registry
+    let presets = mossambi::core::presets::list_all_presets(None);
+    assert!(!presets.is_empty());
+    assert!(presets.iter().any(|p| p.id == "web-ultra-webp"));
+
+    // Navigate down
+    if presets.len() > 1 {
+        state.preset_modal_index = 1;
+        assert_eq!(state.preset_modal_index, 1);
+    }
+
+    // Dismiss
+    state.show_preset_modal = false;
+    assert!(!state.show_preset_modal);
+}

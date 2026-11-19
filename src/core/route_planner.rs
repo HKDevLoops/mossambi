@@ -200,7 +200,10 @@ impl RoutePlanner {
         let mut p = Self::new();
 
         // 1. Direct Image Transcodes (Cost: 5 for lossless, 8 for lossy)
-        let raster_imgs = ["PNG", "WEBP", "JPG", "JPEG", "BMP", "TIFF", "AVIF", "ICO"];
+        let raster_imgs = [
+            "PNG", "WEBP", "JPG", "JPEG", "BMP", "TIFF", "AVIF", "ICO", "QOI", "TGA", "PPM",
+            "ICNS", "CUR", "PSD", "PSB", "DDS", "PCX",
+        ];
         for &a in &raster_imgs {
             for &b in &raster_imgs {
                 if a != b {
@@ -209,9 +212,27 @@ impl RoutePlanner {
             }
         }
 
-        // Vector Image to Raster & PDF (Cost: 4)
+        // Specialized raster decoders to standard image representations
+        p.add_edge("XCF", "PNG", 5, "GIMP multi-layer composite flatten");
+        p.add_edge("PDN", "PNG", 5, "Paint.NET layer composite flatten");
+        p.add_edge("VTF", "PNG", 5, "Valve Source texture mipmap decode");
+        p.add_edge("ANI", "PNG", 4, "Animated cursor first frame extraction");
+        p.add_edge("ANI", "GIF", 6, "Animated cursor multi-frame sequence");
+        p.add_edge("FITS", "PNG", 5, "FITS astronomy linear stretch to PNG");
+        p.add_edge("FITS", "TIFF", 4, "16-bit scientific FITS preserve");
+        p.add_edge("DCM", "PNG", 5, "DICOM medical grayscale slice render");
+        p.add_edge("DCM", "TIFF", 4, "16-bit medical DICOM preserve");
+        p.add_edge("JXR", "PNG", 5, "Windows HDR JPEG XR transcode");
+        p.add_edge("KRA", "PNG", 4, "Krita merged image archive extraction");
+
+        // Vector Graphics to Raster & PDF (Cost: 4)
         p.add_edge("SVG", "PNG", 4, "Pure-Rust resvg rasterization");
         p.add_edge("SVG", "PDF", 4, "Vector geometry preservation via lopdf");
+        p.add_edge("SVG", "DXF", 5, "Vector path to CAD polyline translation");
+        p.add_edge("SVG", "EPS", 5, "PostScript vector path encapsulation");
+        p.add_edge("EPS", "SVG", 5, "Encapsulated PostScript vector parse");
+        p.add_edge("EPS", "PDF", 4, "PostScript level 3 vector transcode");
+        p.add_edge("PS", "PDF", 4, "PostScript interpreter to PDF");
 
         // Camera RAW to DNG / TIFF / PNG (Cost: 6)
         let raws = ["CR2", "CR3", "NEF", "ARW", "ORF", "RW2", "RAF", "DNG"];
@@ -221,15 +242,33 @@ impl RoutePlanner {
             p.add_edge(r, "PNG", 6, "16-bit RGB rasterization");
         }
 
-        // 2. Documents & Office
+        // 2. Documents & Publishing
         p.add_edge("DOCX", "PDF", 8, "Native OOXML layout engine to PDF");
         p.add_edge("DOCX", "TXT", 2, "XML paragraph extraction");
         p.add_edge("DOCX", "HTML", 5, "OOXML to clean Semantic HTML5");
         p.add_edge("DOCX", "MD", 4, "OOXML to CommonMark Markdown");
 
+        p.add_edge("ODT", "PDF", 8, "OpenDocument XML layout to PDF");
+        p.add_edge("ODT", "TXT", 2, "OpenDocument text body extraction");
+        p.add_edge("RTF", "PDF", 7, "Rich Text Format layout to PDF");
+        p.add_edge("RTF", "TXT", 2, "Rich Text control-word strip");
+
+        p.add_edge("OFD", "PDF", 6, "Chinese OFD standard fixed layout to PDF");
+        p.add_edge("P7M", "PDF", 3, "PKCS#7 signed envelope extraction");
+        p.add_edge("P7M", "XML", 3, "PKCS#7 e-invoice payload unwrapping");
+
         p.add_edge("MD", "HTML", 2, "Markdown parser to Semantic HTML5");
         p.add_edge("MD", "PDF", 6, "Markdown to Styled Vector PDF");
         p.add_edge("HTML", "PDF", 7, "HTML5 CSS paged media layout");
+
+        // E-Books
+        p.add_edge("EPUB", "PDF", 7, "EPUB paged layout render to PDF");
+        p.add_edge("EPUB", "TXT", 3, "EPUB chapter text extraction");
+        p.add_edge("EPUB", "HTML", 3, "EPUB spine package to single HTML");
+        p.add_edge("MOBI", "EPUB", 5, "Mobipocket palm database to EPUB");
+        p.add_edge("AZW3", "EPUB", 5, "Kindle format 8 to EPUB");
+        p.add_edge("FB2", "EPUB", 4, "FictionBook XML to EPUB");
+        p.add_edge("CBZ", "PDF", 6, "Comic book ZIP archive to paged PDF");
 
         // Korean Hangul HWP / HWPX
         p.add_edge(
@@ -241,10 +280,24 @@ impl RoutePlanner {
         p.add_edge("HWPX", "PDF", 7, "HWPX layout engine to PDF");
         p.add_edge("HWPX", "TXT", 2, "HWPX XML section text extraction");
 
-        // CAD (DXF, DWG)
+        // CAD (DXF, DWG, PLT, DST, GERBER, CANVAS)
         p.add_edge("DWG", "DXF", 5, "Autodesk drawing entity translation");
         p.add_edge("DXF", "SVG", 4, "CAD 2D vector entity export");
         p.add_edge("DXF", "PDF", 5, "CAD scaled technical vector plot");
+        p.add_edge("PLT", "SVG", 4, "HP-GL plotter instructions to SVG vector");
+        p.add_edge("DST", "SVG", 4, "Tajima embroidery stitch paths to SVG");
+        p.add_edge(
+            "GERBER",
+            "SVG",
+            4,
+            "RS-274X PCB copper traces to SVG vector",
+        );
+        p.add_edge("CANVAS", "SVG", 3, "Obsidian visual canvas graph to SVG");
+        p.add_edge("CANVAS", "MD", 2, "Obsidian card text nodes to Markdown");
+
+        // G-Code CNC / 3D Printer Toolpaths
+        p.add_edge("GCODE", "SVG", 4, "G-code extrusion toolpath plot to SVG");
+        p.add_edge("GCODE", "PNG", 5, "G-code layer preview rasterization");
 
         // Spreadsheets
         let sheets = ["XLSX", "XLS", "ODS", "CSV", "TSV"];
@@ -284,7 +337,7 @@ impl RoutePlanner {
             }
         }
 
-        // Data Exchange
+        // Structured Data Exchange
         p.add_edge(
             "JSON",
             "CSV",
@@ -299,6 +352,13 @@ impl RoutePlanner {
             "Pretty JSON to newline-delimited stream",
         );
         p.add_edge("JSONL", "JSON", 2, "Newline-delimited stream to JSON array");
+        p.add_edge("YAML", "JSON", 2, "YAML parser to structured JSON tree");
+        p.add_edge("JSON", "YAML", 2, "JSON tree to formatted YAML document");
+        p.add_edge("TOML", "JSON", 2, "TOML parser to structured JSON tree");
+        p.add_edge("JSON", "TOML", 2, "JSON tree to valid TOML configuration");
+        p.add_edge("PLIST", "JSON", 2, "Apple property list to JSON tree");
+        p.add_edge("HAR", "JSON", 2, "HTTP Archive network log unpack");
+        p.add_edge("HAR", "CSV", 3, "HTTP Archive network requests table");
         p.add_edge("XML", "JSON", 3, "Hierarchical XML tree to structured JSON");
         p.add_edge("JSON", "XML", 3, "Structured JSON to hierarchical XML tree");
         p.add_edge("VCF", "JSON", 3, "vCard contact parsing to JSON schema");
@@ -336,8 +396,10 @@ impl RoutePlanner {
         p.add_edge("PDF", "TXT", 2, "lopdf content stream character extraction");
 
         // Audio Transcode Matrix (Cost: 2 for stream copy, 5 for lossless, 8 for lossy)
-        let audio_lossless = ["FLAC", "WAV", "ALAC", "AIFF"];
-        let audio_lossy = ["MP3", "AAC", "OGG", "OPUS", "M4A"];
+        let audio_lossless = ["FLAC", "WAV", "ALAC", "AIFF", "WV", "TAK", "APE"];
+        let audio_lossy = [
+            "MP3", "AAC", "OGG", "OPUS", "M4A", "WMA", "M4R", "WEBA", "MP2",
+        ];
 
         for &a in &audio_lossless {
             for &b in &audio_lossless {
@@ -353,10 +415,17 @@ impl RoutePlanner {
             for &b in &audio_lossless {
                 p.add_edge(l, b, 5, "Lossy-to-lossless audio decode");
             }
+            for &l2 in &audio_lossy {
+                if l != l2 {
+                    p.add_edge(l, l2, 6, "Perceptual transcode");
+                }
+            }
         }
 
         // Video Transcodes & Audio Extraction
-        let video_fmts = ["MP4", "MKV", "MOV", "WEBM", "AVI"];
+        let video_fmts = [
+            "MP4", "MKV", "MOV", "WEBM", "AVI", "FLV", "TS", "M2TS", "M4V",
+        ];
         for &v1 in &video_fmts {
             for &v2 in &video_fmts {
                 if v1 != v2 {
@@ -367,9 +436,13 @@ impl RoutePlanner {
             p.add_edge(v1, "WAV", 3, "Uncompressed audio demux");
             p.add_edge(v1, "GIF", 9, "Palette-optimized video clip conversion");
         }
+        p.add_edge("H264", "MP4", 3, "Containerize raw H.264 stream to MP4");
+        p.add_edge("H265", "MP4", 3, "Containerize raw HEVC stream to MP4");
 
         // Subtitles
-        let subs = ["SRT", "VTT", "ASS", "SSA", "SUB"];
+        let subs = [
+            "SRT", "VTT", "ASS", "SSA", "SUB", "SMI", "LRC", "TTML", "SCC",
+        ];
         for &s1 in &subs {
             for &s2 in &subs {
                 if s1 != s2 {
@@ -377,6 +450,50 @@ impl RoutePlanner {
                 }
             }
         }
+
+        // ArtCraft Pro High-Fidelity Ecosystem Routes
+        p.add_edge(
+            "AFDESIGN",
+            "SVG",
+            3,
+            "VectorCraft pure-Rust Affinity vector export",
+        );
+        p.add_edge(
+            "AFDESIGN",
+            "PDF",
+            4,
+            "VectorCraft Affinity Designer to Vector PDF",
+        );
+        p.add_edge(
+            "CDR",
+            "SVG",
+            4,
+            "VectorCraft CorelDraw precision vector export",
+        );
+        p.add_edge(
+            "AI",
+            "SVG",
+            3,
+            "VectorCraft Adobe Illustrator precision export",
+        );
+        p.add_edge(
+            "IDML",
+            "PDF",
+            4,
+            "DesignCraft InDesign package layout to PDF/X",
+        );
+        p.add_edge(
+            "PPTX",
+            "PDF",
+            4,
+            "DeckCraft vector presentation render to PDF",
+        );
+        p.add_edge(
+            "PPTX",
+            "PNG",
+            5,
+            "DeckCraft slide high-resolution rasterization",
+        );
 
         p
     }
@@ -425,5 +542,33 @@ mod tests {
         let route = find_conversion_route("PNG", "PNG").expect("Same format route should exist");
         assert_eq!(route.hop_count(), 0);
         assert_eq!(route.total_cost, 0);
+    }
+
+    #[test]
+    fn test_artcraft_afdesign_to_png() {
+        let route = find_conversion_route("AFDESIGN", "PNG")
+            .expect("AFDESIGN to PNG multi-hop route should exist");
+        assert_eq!(route.hop_count(), 2);
+        assert_eq!(route.steps[0].from, "AFDESIGN");
+        assert_eq!(route.steps[0].to, "SVG");
+        assert_eq!(route.steps[1].to, "PNG");
+    }
+
+    #[test]
+    fn test_canvas_to_png() {
+        let route = find_conversion_route("CANVAS", "PNG")
+            .expect("Obsidian Canvas to PNG route should exist");
+        assert_eq!(route.hop_count(), 2);
+        assert_eq!(route.steps[0].from, "CANVAS");
+        assert_eq!(route.steps[0].to, "SVG");
+        assert_eq!(route.steps[1].to, "PNG");
+    }
+
+    #[test]
+    fn test_epub_to_pdf() {
+        let route = find_conversion_route("EPUB", "PDF").expect("EPUB to PDF route should exist");
+        assert_eq!(route.hop_count(), 1);
+        assert_eq!(route.steps[0].from, "EPUB");
+        assert_eq!(route.steps[0].to, "PDF");
     }
 }

@@ -58,6 +58,23 @@ impl HeadlessTestApp {
         });
     }
 
+    /// Dispatches simulated secondary (right-click) pointer events at `pos`.
+    pub fn simulate_secondary_click(&mut self, pos: Pos2) {
+        self.raw_input.events.push(Event::PointerMoved(pos));
+        self.raw_input.events.push(Event::PointerButton {
+            pos,
+            button: PointerButton::Secondary,
+            pressed: true,
+            modifiers: Modifiers::default(),
+        });
+        self.raw_input.events.push(Event::PointerButton {
+            pos,
+            button: PointerButton::Secondary,
+            pressed: false,
+            modifiers: Modifiers::default(),
+        });
+    }
+
     /// Dispatches a simulated keypress event with modifiers.
     pub fn simulate_key(&mut self, key: Key, modifiers: Modifiers) {
         self.raw_input.events.push(Event::Key {

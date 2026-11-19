@@ -221,6 +221,10 @@ pub struct AppState {
     // Help & Cheatsheet Modal
     pub show_help_modal: bool,
 
+    // Preset Browser Modal
+    pub show_preset_modal: bool,
+    pub preset_modal_index: usize,
+
     // File Tag Modal
     pub show_tag_modal: bool,
     pub available_tags: Vec<String>,
@@ -329,6 +333,8 @@ impl AppState {
             should_quit: false,
 
             show_help_modal: false,
+            show_preset_modal: false,
+            preset_modal_index: 0,
             show_tag_modal: false,
             available_tags: available_tags(),
             selected_tag_idx: 0,
@@ -643,6 +649,73 @@ impl AppState {
             });
     }
 
+    /// Triggers non-blocking background transcode using an explicit target format preset.
+    pub fn execute_conversion_with_target(&mut self, target_fmt: &str) {
+        let targets: Vec<PathBuf> = if !self.selected_paths.is_empty() {
+            self.selected_paths.iter().cloned().collect()
+        } else if let Some(item) = self.selected_item() {
+            if item.is_dir {
+                self.trigger_async_scan(item.path.clone());
+                return;
+            }
+            vec![item.path.clone()]
+        } else {
+            return;
+        };
+
+        let target_ext = target_fmt.to_lowercase();
+        self.active_task_name = Some(format!(
+            "Preset Transcoding {} file(s) to {}",
+            targets.len(),
+            target_ext.to_uppercase()
+        ));
+        self.active_task_progress = 0.1;
+        self.status_message = format!(
+            "In Background: Transcoding to {} via Preset...",
+            target_ext.to_uppercase()
+        );
+        self.status_is_error = false;
+
+        let total = targets.len();
+        let target_clone = target_ext.clone();
+        self.worker_pool
+            .spawn_task("PresetTranscode", move |_cancel, tx, task_id| {
+                for (idx, in_file) in targets.iter().enumerate() {
+                    let res = crate::codec::transcode_file(
+                        in_file,
+                        &target_clone,
+                        crate::codec::LosslessMode::StrictBitExact,
+                        None,
+                    );
+                    let frac = (idx + 1) as f32 / total as f32;
+                    let _ = tx.send(TaskUpdate::Progress {
+                        id: task_id,
+                        fraction: frac,
+                        status: format!("Processed {}/{} files", idx + 1, total),
+                        item: None,
+                    });
+
+                    if let Err(e) = res {
+                        let _ = tx.send(TaskUpdate::Failed {
+                            id: task_id,
+                            error: format!("Transcode error on {}: {}", in_file.display(), e),
+                        });
+                        return;
+                    }
+                }
+
+                let _ = tx.send(TaskUpdate::Completed {
+                    id: task_id,
+                    output: None,
+                    message: format!(
+                        "Transcoded {} file(s) to {}",
+                        total,
+                        target_clone.to_uppercase()
+                    ),
+                });
+            });
+    }
+
     /// Triggers non-blocking background exam conformer via worker pool
     pub fn execute_exam_optimization(&mut self) {
         if let Some(item) = self.selected_item().cloned() {
@@ -943,12 +1016,12 @@ impl AppState {
                 let candidate = dest_dir.join(leaf);
                 let dest = resolve_unique_paste_path(&candidate);
                 if is_cut {
-                    if let Ok(()) = move_entry(src, &dest) {
+                    if move_entry(src, &dest).is_ok() {
                         record_move(src.clone(), dest.clone());
                         count += 1;
                     }
                 } else {
-                    if let Ok(_) = copy_entry_recursive(src, &dest) {
+                    if copy_entry_recursive(src, &dest).is_ok() {
                         record_copy(src.clone(), dest.clone());
                         count += 1;
                     }
@@ -1244,6 +1317,37 @@ fn handle_key_event(state: &mut AppState, key: crossterm::event::KeyEvent) {
         return;
     }
 
+    // 1b. Preset Browser Modal Active
+    if state.show_preset_modal {
+        let presets = crate::core::presets::list_all_presets(None);
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('P') => {
+                state.show_preset_modal = false;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if state.preset_modal_index > 0 {
+                    state.preset_modal_index -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if !presets.is_empty() && state.preset_modal_index + 1 < presets.len() {
+                    state.preset_modal_index += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(preset) = presets.get(state.preset_modal_index) {
+                    let target = preset.output_format.clone();
+                    state.show_preset_modal = false;
+                    state.execute_conversion_with_target(&target);
+                } else {
+                    state.show_preset_modal = false;
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // 2. Tag Modal Active
     if state.show_tag_modal {
         match code {
@@ -1498,7 +1602,11 @@ fn handle_key_event(state: &mut AppState, key: crossterm::event::KeyEvent) {
         KeyCode::Char('e') => {
             state.execute_exam_optimization();
         }
-        KeyCode::Char('p') | KeyCode::Char('P') => {
+        KeyCode::Char('P') => {
+            state.show_preset_modal = true;
+            state.preset_modal_index = 0;
+        }
+        KeyCode::Char('p') => {
             if state.current_tab == AppTab::Archive {
                 state.execute_archive_pack();
             } else {
@@ -1642,6 +1750,11 @@ fn draw_ui(f: &mut Frame, state: &AppState, spinner: &str) {
     // 6. Help & Cheatsheet Modal Overlay
     if state.show_help_modal {
         draw_help_modal(f, state, palette);
+    }
+
+    // 7. Preset Browser Modal Overlay
+    if state.show_preset_modal {
+        draw_preset_modal(f, state, palette);
     }
 }
 
@@ -2255,6 +2368,19 @@ fn draw_help_modal(f: &mut Frame, _state: &AppState, palette: TuiThemePalette) {
         Line::from(vec![
             Span::styled("                    ", Style::default()),
             Span::styled(
+                "P                    ",
+                Style::default()
+                    .fg(palette.text_primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Presets Library: 1-click custom conversion profiles",
+                Style::default().fg(palette.text_secondary),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("                    ", Style::default()),
+            Span::styled(
                 "x                    ",
                 Style::default()
                     .fg(palette.text_primary)
@@ -2473,9 +2599,47 @@ fn draw_tag_modal(f: &mut Frame, state: &AppState, palette: TuiThemePalette) {
     let list = List::new(items).block(
         Block::default()
             .title(format!(
-                " 🏷️ Tags for: {} ([Space/Enter] Toggle, [Esc] Done) ",
+                " Tags for: {} ([Space/Enter] Toggle, [Esc] Done) ",
                 file_name
             ))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(palette.accent)),
+    );
+    f.render_widget(list, area);
+}
+
+fn draw_preset_modal(f: &mut Frame, state: &AppState, palette: TuiThemePalette) {
+    let area = centered_rect(65, 60, f.area());
+    f.render_widget(Clear, area);
+
+    let presets = crate::core::presets::list_all_presets(None);
+    let items: Vec<ListItem> = presets
+        .iter()
+        .enumerate()
+        .map(|(i, preset)| {
+            let is_sel = i == state.preset_modal_index;
+            let badge = if preset.is_builtin { "builtin" } else { "user" };
+            let style = if is_sel {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(palette.text_primary)
+            };
+
+            ListItem::new(format!(
+                "  [{}] {:<22} -> {:<6} [{}]",
+                preset.category, preset.name, preset.output_format, badge
+            ))
+            .style(style)
+        })
+        .collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .title(" Presets Library ([Up/Down] Navigate, [Enter] Apply to Selected, [Esc] Close) ")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(palette.accent)),
