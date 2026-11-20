@@ -100,6 +100,116 @@ pub mod win32_impl {
     pub const ID_CMD_FIRST: u32 = 1;
     pub const ID_CMD_LAST: u32 = 0x7FFF;
 
+    /// Scoped RAII guard that temporarily redirects Win32 STD_ERROR_HANDLE and CRT fd 2
+    /// to the NUL device, suppressing noisy error logging from third-party shell extensions
+    /// (e.g. Google Drive, Dropbox, shell IPC clients writing unhandled socket errors to stderr).
+    pub struct StderrSilenceGuard {
+        saved_std_handle: isize,
+        null_handle: isize,
+        saved_fd: i32,
+        null_fd: i32,
+    }
+
+    impl StderrSilenceGuard {
+        pub fn new() -> Self {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn GetStdHandle(nStdHandle: u32) -> isize;
+                fn SetStdHandle(nStdHandle: u32, hHandle: isize) -> i32;
+                fn CreateFileW(
+                    lpFileName: *const u16,
+                    dwDesiredAccess: u32,
+                    dwShareMode: u32,
+                    lpSecurityAttributes: *const std::ffi::c_void,
+                    dwCreationDisposition: u32,
+                    dwFlagsAndAttributes: u32,
+                    hTemplateFile: isize,
+                ) -> isize;
+            }
+
+            extern "C" {
+                fn _open(filename: *const u8, oflag: i32, ...) -> i32;
+                fn _dup(fd: i32) -> i32;
+                fn _dup2(fd1: i32, fd2: i32) -> i32;
+            }
+
+            const STD_ERROR_HANDLE: u32 = 0xFFFF_FFF4;
+            const GENERIC_WRITE: u32 = 0x4000_0000;
+            const FILE_SHARE_READ: u32 = 1;
+            const FILE_SHARE_WRITE: u32 = 2;
+            const OPEN_EXISTING: u32 = 3;
+            const INVALID_HANDLE: isize = -1;
+
+            let (saved_std_handle, null_handle) = unsafe {
+                let saved = GetStdHandle(STD_ERROR_HANDLE);
+                let wide_nul: [u16; 4] = [b'N' as u16, b'U' as u16, b'L' as u16, 0];
+                let null = CreateFileW(
+                    wide_nul.as_ptr(),
+                    GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    std::ptr::null(),
+                    OPEN_EXISTING,
+                    0,
+                    0,
+                );
+                if null != INVALID_HANDLE && null != 0 {
+                    let _ = SetStdHandle(STD_ERROR_HANDLE, null);
+                }
+                (saved, null)
+            };
+
+            let (saved_fd, null_fd) = unsafe {
+                let saved = _dup(2);
+                let null = _open(b"NUL\0".as_ptr(), 0x0001, 0);
+                if saved >= 0 && null >= 0 {
+                    let _ = _dup2(null, 2);
+                }
+                (saved, null)
+            };
+
+            Self {
+                saved_std_handle,
+                null_handle,
+                saved_fd,
+                null_fd,
+            }
+        }
+    }
+
+    impl Drop for StderrSilenceGuard {
+        fn drop(&mut self) {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn SetStdHandle(nStdHandle: u32, hHandle: isize) -> i32;
+                fn CloseHandle(hObject: isize) -> i32;
+            }
+
+            extern "C" {
+                fn _dup2(fd1: i32, fd2: i32) -> i32;
+                fn _close(fd: i32) -> i32;
+            }
+
+            const STD_ERROR_HANDLE: u32 = 0xFFFF_FFF4;
+            const INVALID_HANDLE: isize = -1;
+
+            unsafe {
+                if self.saved_fd >= 0 {
+                    let _ = _dup2(self.saved_fd, 2);
+                    let _ = _close(self.saved_fd);
+                }
+                if self.null_fd >= 0 {
+                    let _ = _close(self.null_fd);
+                }
+                if self.saved_std_handle != INVALID_HANDLE && self.saved_std_handle != 0 {
+                    let _ = SetStdHandle(STD_ERROR_HANDLE, self.saved_std_handle);
+                }
+                if self.null_handle != INVALID_HANDLE && self.null_handle != 0 {
+                    let _ = CloseHandle(self.null_handle);
+                }
+            }
+        }
+    }
+
     /// Extract an egui ColorImage from a Win32 HBITMAP.
     pub fn extract_hbitmap_image(hbmp: HBITMAP) -> Option<ColorImage> {
         if hbmp.is_invalid() || (hbmp.0 as usize) <= 10 {
@@ -397,6 +507,7 @@ pub mod win32_impl {
         is_background: bool,
         shift_held: bool,
     ) -> Result<Vec<ShellMenuItem>, String> {
+        let _silence = StderrSilenceGuard::new();
         unsafe {
             let cm = get_context_menu_com(paths, is_background)?;
             let cm2 = cm.cast::<IContextMenu2>().ok();
@@ -474,6 +585,7 @@ static MANAGER: LazyLock<ShellMenuManager> = LazyLock::new(|| {
                     ShellMenuCommand::Build { req, resp_tx } => {
                         #[cfg(target_os = "windows")]
                         {
+                            let _silence = win32_impl::StderrSilenceGuard::new();
                             unsafe {
                                 use windows::Win32::Foundation::HWND;
                                 use windows::Win32::UI::Shell::{CMF_EXTENDEDVERBS, CMF_NORMAL};
@@ -544,6 +656,7 @@ static MANAGER: LazyLock<ShellMenuManager> = LazyLock::new(|| {
                     ShellMenuCommand::Invoke { session_id, id, pt } => {
                         #[cfg(target_os = "windows")]
                         {
+                            let _silence = win32_impl::StderrSilenceGuard::new();
                             if let Some(session) = &active_session {
                                 if session.session_id == session_id {
                                     unsafe {
