@@ -235,7 +235,9 @@ pub fn stage_delete(paths: &[PathBuf]) -> Result<(), String> {
             dst = trash_root.join(format!("{name}.{idx}"));
             idx += 1;
         }
-        std::fs::rename(p, &dst)
+        // Cross-device safe: rename first, fall back to copy+remove when the
+        // source and staging dir live on different mounts (EXDEV on Linux).
+        crate::core::fs_utils::move_entry(p, &dst)
             .map_err(|e| format!("could not stage {} for deletion: {e}", p.display()))?;
         trashed.push((p.clone(), dst));
     }
