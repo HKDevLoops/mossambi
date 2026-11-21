@@ -4,6 +4,7 @@
 //! temporary .txt file and a temporary directory yields >0 items and finds
 //! standard Windows shell verbs (e.g. "open" or "properties").
 
+#[cfg(target_os = "windows")]
 use std::fs;
 
 #[test]

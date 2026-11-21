@@ -8,6 +8,7 @@
 //! 4. Single-instance IPC round-trip communication
 
 use mossambi::platform::args::{parse_launch_intent, parse_single_arg, LaunchIntent};
+#[cfg(windows)]
 use mossambi::platform::default_handler::{
     is_default_folder_handler_active, set_default_folder_handler_with_root,
 };
