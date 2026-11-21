@@ -22,12 +22,45 @@ concurrency:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
+  verify-ci:
+    name: Verify CI Green For This Commit (beta release gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait for and verify CI workflow success on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "BETA GATE: requiring green CI for commit $SHA before any release."
+          for i in $(seq 1 60); do
+            runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=1")
+            status=$(printf '%s' "$runs" | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("workflow_runs",[]); print(r[0].get("status","pending") if r else "pending")')
+            conclusion=$(printf '%s' "$runs" | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("workflow_runs",[]); print(r[0].get("conclusion","pending") or "pending")')
+            if [ "$conclusion" = "success" ]; then
+              echo "CI green for $SHA - release gate satisfied."
+              exit 0
+            fi
+            if [ "$status" = "completed" ] && [ "$conclusion" != "success" ]; then
+              echo "CI failed for $SHA (conclusion=$conclusion) - release blocked." >&2
+              exit 1
+            fi
+            echo "CI pending ($i/60): status=$status conclusion=$conclusion"
+            sleep 15
+          done
+          echo "Timed out waiting for green CI on $SHA - release blocked." >&2
+          exit 1
+
   build-release:
-    name: Build & Package (${{ matrix.target }})
+    name: Test, Build & Package (${{ matrix.target }})
+    needs: verify-ci
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -63,15 +96,43 @@ jobs:
             libgtk-3-dev \
             libxkbcommon-dev \
             libwayland-dev \
-            pkg-config
+            pkg-config \
+            ffmpeg
+
+      - name: Install macOS Build Dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install ffmpeg || true
+
+      - name: Install Windows Build Dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress --limit-output
 
       - name: Setup Rust Stable Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+          components: clippy, rustfmt
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
+
+      - name: Verify Formatting
+        run: cargo fmt --check
+
+      - name: Verify Clippy (all targets)
+        run: cargo clippy --workspace --all-targets --target ${{ matrix.target }} -- -D warnings
+
+      - name: Run All Workspace Tests
+        run: cargo test --workspace --target ${{ matrix.target }}
+
+      - name: Major-Bug Regression Suite
+        run: cargo test --test test_bug_regressions --target ${{ matrix.target }}
+
+      - name: ASCII Integrity Gate
+        run: cargo test --test gui_ascii_gate --target ${{ matrix.target }}
 
       - name: Build Native Release Binaries
         run: cargo build --release --workspace --target ${{ matrix.target }}
@@ -84,7 +145,7 @@ jobs:
           if (-not $ver -or $ver -eq "") { $ver = "${{ inputs.version }}" }
           $pkgName = "mossambi-$ver-${{ matrix.target }}"
           New-Item -ItemType Directory -Path "dist/$pkgName" -Force | Out-Null
-          
+
           Copy-Item "target/${{ matrix.target }}/release/mossambi.exe" "dist/$pkgName/"
           Copy-Item "README.md" "dist/$pkgName/" -ErrorAction SilentlyContinue
           Copy-Item "LICENSE*" "dist/$pkgName/" -ErrorAction SilentlyContinue
@@ -99,7 +160,7 @@ jobs:
           if [ -z "$VER" ]; then VER="${{ inputs.version }}"; fi
           PKG_NAME="mossambi-$VER-${{ matrix.target }}"
           mkdir -p "dist/$PKG_NAME"
-          
+
           cp "target/${{ matrix.target }}/release/mossambi" "dist/$PKG_NAME/"
           cp README.md "dist/$PKG_NAME/" 2>/dev/null || true
           cp LICENSE* "dist/$PKG_NAME/" 2>/dev/null || true
@@ -114,7 +175,7 @@ jobs:
           if [ -z "$VER" ]; then VER="${{ inputs.version }}"; fi
           PKG_NAME="mossambi-$VER-${{ matrix.target }}"
           mkdir -p "dist/$PKG_NAME"
-          
+
           cp "target/${{ matrix.target }}/release/mossambi" "dist/$PKG_NAME/"
           cp README.md "dist/$PKG_NAME/" 2>/dev/null || true
           cp LICENSE* "dist/$PKG_NAME/" 2>/dev/null || true
@@ -129,10 +190,10 @@ jobs:
           path: dist/*.*
 
   create-github-release:
-    name: Publish GitHub Release
-    needs: build-release
+    name: Publish Beta GitHub Release (per-OS artifacts)
+    needs: [ verify-ci, build-release ]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     if: (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') && !inputs.dry_run
     steps:
       - name: Checkout Codebase
@@ -149,11 +210,19 @@ jobs:
           find release-artifacts -type f -exec cp {} release-dist/ \;
           ls -la release-dist
 
-      - name: Create GitHub Release
+      - name: Create Beta GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: release-dist/*
-          name: Mossambi Release ${{ github.ref_name || inputs.version }}
+          name: Mossambi Beta ${{ github.ref_name || inputs.version }}
+          body: |
+            BETA RELEASE - Mossambi is in beta testing.
+
+            This artifact was published only after the full CI suite and the CD
+            test/build gates passed on every supported OS. Per-OS binaries and
+            their SHA256 checksums are attached below.
+
+            Use at your own risk. Please report issues via the issue tracker.
           draft: false
-          prerelease: false
+          prerelease: true
           generate_release_notes: true

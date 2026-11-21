@@ -20,7 +20,7 @@ jobs:
   lint-and-format:
     name: Quick Linter & Formatting Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
@@ -45,17 +45,20 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Check Formatting (cargo fmt)
+      - name: Check Formatting (cargo fmt --check)
         run: cargo fmt --check
 
       - name: Run Clippy Linter
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Pure ASCII Gate (all authored source)
+        run: cargo test --test gui_ascii_gate
+
   test:
     name: Test on ${{ matrix.os }} (${{ matrix.target }})
     needs: lint-and-format
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -89,6 +92,12 @@ jobs:
         run: |
           brew install ffmpeg || true
 
+      - name: Install Windows Build Dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress --limit-output
+
       - name: Setup Rust Stable Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -97,8 +106,29 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Compile Check (all targets)
+        run: cargo check --workspace --all-targets --target ${{ matrix.target }}
+
       - name: Run All Workspace Tests
         run: cargo test --workspace --target ${{ matrix.target }}
 
+      - name: Major-Bug Regression Suite
+        run: cargo test --test test_bug_regressions --target ${{ matrix.target }}
+
+      - name: End-to-End Tier Suites
+        run: |
+          cargo test --test e2e_tier1_features --target ${{ matrix.target }}
+          cargo test --test e2e_tier2_boundaries --target ${{ matrix.target }}
+          cargo test --test e2e_tier3_combinations --target ${{ matrix.target }}
+          cargo test --test e2e_tier4_scenarios --target ${{ matrix.target }}
+
       - name: Build Optimized Release Binaries
         run: cargo build --release --workspace --target ${{ matrix.target }}
+
+  ci-complete:
+    name: CI Aggregate Gate
+    needs: [ lint-and-format, test ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All CI jobs passed
+        run: echo "CI green for ${{ github.sha }}"
