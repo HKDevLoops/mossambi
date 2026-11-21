@@ -58,6 +58,14 @@ gates clean). See git history for the full matrix; key contracts preserved:
 - **DO NOT run `/gsd-graphify` automatically on intermediate code changes or normal commits.** It wastes tokens and AST extraction cycles. Only run `/gsd-graphify` when the user explicitly requests it or after asking user confirmation prior to milestone sign-off.
 - **DO NOT perform new release packaging or git release tagging automatically.** Always ask the user for confirmation before performing actions like cutting a new release, tagging, or publishing.
 
+## Release Policy (BETA - Mandatory)
+
+- **Mossambi is in BETA TESTING.** It is not production-ready. Treat every release as a beta artifact.
+- **NEVER publish a GitHub Release until BOTH the CI workflow and the CD workflow pass green for the exact commit being released.** The CD workflow's `verify-ci` job enforces this gate; never bypass, skip, edit around, or disable it. A red or missing CI run means no release.
+- **All tests must run in both CI and CD:** workspace tests, the bug-regression suite, E2E tier suites, and the ASCII integrity gate. A release is built per target OS (Windows x86_64, Linux x86_64, macOS aarch64 + x86_64) only after those gates pass.
+- **Publish releases as prerelease/beta** until the beta phase is formally closed by the user. Do not mark a release as a stable/full release.
+- Do not cut releases, tag, or publish manually; only the gated CD workflow triggered by a `v*.*.*` tag may publish, and only after CI + CD are green.
+
 ## ACTIVE USER INSTRUCTIONS - UI OVERHAUL PHASE (est. 2026-11-06)
 
 The user opened the UI overhaul. Target design language: **macOS Finder**, not Windows-style
