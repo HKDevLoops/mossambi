@@ -2252,8 +2252,6 @@ impl PreferencesView {
             let glass_mut = &mut self.cfg.glass_effect;
             setting_row(ui, palette, "Glass effect", "", dirty, |ui, dirty| {
                 for (v, lab) in [
-                    (GlassEffect::FrostedGlass, "Frosted"),
-                    (GlassEffect::LiquidGlass, "Liquid"),
                     (GlassEffect::Acrylic, "Acrylic"),
                     (GlassEffect::Mica, "Mica"),
                     (GlassEffect::Opaque, "Opaque"),
@@ -2277,7 +2275,7 @@ impl PreferencesView {
                 dirty,
                 |ui, dirty| {
                     if ui
-                        .add(egui::Slider::new(op_mut, 0.3..=1.0).show_value(false))
+                        .add(egui::Slider::new(op_mut, 0.15..=1.0).show_value(false))
                         .changed()
                     {
                         *dirty = true;
@@ -4239,8 +4237,6 @@ fn on_off(b: bool) -> &'static str {
 
 fn glass_label(g: GlassEffect) -> &'static str {
     match g {
-        GlassEffect::FrostedGlass => "Frosted Glass",
-        GlassEffect::LiquidGlass => "Liquid Glass",
         GlassEffect::Acrylic => "Acrylic",
         GlassEffect::Mica => "Mica",
         GlassEffect::Opaque => "Opaque",

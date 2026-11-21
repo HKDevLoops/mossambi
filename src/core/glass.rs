@@ -37,9 +37,10 @@ impl Surface {
     /// text and controls remain readable over any wallpaper.
     pub fn alpha_floor(&self) -> f32 {
         match self {
-            Surface::Content | Surface::Menu | Surface::Card | Surface::Donut => 0.88,
-            Surface::Sidebar => 0.50,
-            Surface::Chrome => 0.40,
+            Surface::Content => 0.60,
+            Surface::Menu | Surface::Card | Surface::Donut => 0.36,
+            Surface::Sidebar => 0.20,
+            Surface::Chrome => 0.18,
         }
     }
 }
@@ -64,10 +65,7 @@ pub enum Backdrop {
 /// glass mode and Windows build number.
 ///
 /// - Win11 >= 22621:
-///   - Blur / Acrylic -> DWMSBT_TRANSIENTWINDOW (3)
-///   - Frosted -> DWMSBT_TRANSIENTWINDOW (3) (acrylic blur; TABBEDWINDOW
-///     is Mica Alt, which carries no blur)
-///   - Liquid glass -> DWMSBT_TRANSIENTWINDOW (3) plus egui specular highlights
+///   - Acrylic -> DWMSBT_TRANSIENTWINDOW (3)
 ///   - Mica -> DWMSBT_MAINWINDOW (2)
 ///   - Opaque / Off -> DWMSBT_NONE (1)
 /// - Win10 1809..22621 (builds 17763..22621):
@@ -78,8 +76,6 @@ pub fn choose_backdrop(mode: GlassEffect, os_build: u32) -> Backdrop {
     if os_build >= 22621 {
         match mode {
             GlassEffect::Opaque => Backdrop::DwmSystem(1),
-            GlassEffect::FrostedGlass => Backdrop::DwmSystem(3),
-            GlassEffect::LiquidGlass => Backdrop::DwmSystem(3),
             GlassEffect::Acrylic => Backdrop::DwmSystem(3),
             GlassEffect::Mica => Backdrop::DwmSystem(2),
         }
@@ -98,29 +94,41 @@ pub fn choose_backdrop(mode: GlassEffect, os_build: u32) -> Backdrop {
     }
 }
 
-/// Pure function: computes the surface tint fill color honoring strict readability floors.
+/// Pure function: computes the surface tint fill color honoring readability floors.
 ///
 /// For `GlassEffect::Opaque`, returns fully opaque (alpha = 255).
-/// For glass modes, alpha is guaranteed to be >= surface floor:
-/// - Content, Menu, Card, Donut >= 0.88
-/// - Sidebar >= 0.50
-/// - Chrome >= 0.40
+/// For `GlassEffect::Acrylic`, scales alpha to be truly translucent so the
+/// system desktop wallpaper and underlying windows blur through vibrantly:
+/// - Chrome (window canvas): target alpha ~ 0.35-0.55 (floor 0.18)
+/// - Sidebar: target alpha ~ 0.35-0.55 (floor 0.20)
+/// - Card / Menu / Content: target alpha ~ 0.50-0.70 (floor 0.36)
 ///
-/// The user intensity (`base.a() / 255`) maps monotonically onto
-/// `[floor, 1.0]`: a higher configured opacity always yields a more opaque
-/// fill. `base.a() == 0` falls back to the floor; `base.a() == 255` is
-/// fully opaque (the backdrop blur is completely tinted over).
+/// For `GlassEffect::Mica`, uses subtle native Mica opacity (alpha ~ 0.65-0.85).
 pub fn glass_fill(base: Color32, mode: GlassEffect, surface: Surface, dark: bool) -> Color32 {
     if mode == GlassEffect::Opaque {
         return Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 255);
     }
 
-    let floor = surface.alpha_floor();
-    // Monotonic tint mapping: the configured opacity IS the fill opacity,
-    // clamped into the readability floor. 0 falls back to the floor and
-    // 255 means a fully opaque fill.
-    let user_intensity = base.a() as f32 / 255.0;
-    let alpha_f = user_intensity.clamp(floor, 1.0);
+    let user_intensity = (base.a() as f32 / 255.0).clamp(0.0, 1.0);
+
+    let alpha_f = match mode {
+        GlassEffect::Acrylic => match surface {
+            Surface::Chrome => (user_intensity * 0.42).clamp(surface.alpha_floor(), 0.65),
+            Surface::Sidebar => (user_intensity * 0.48).clamp(surface.alpha_floor(), 0.70),
+            Surface::Content => (user_intensity * 0.65).clamp(surface.alpha_floor(), 0.85),
+            Surface::Card | Surface::Menu | Surface::Donut => {
+                (user_intensity * 0.62).clamp(surface.alpha_floor(), 0.78)
+            }
+        },
+        GlassEffect::Mica => match surface {
+            Surface::Chrome => (user_intensity * 0.70).clamp(surface.alpha_floor().max(0.40), 0.85),
+            Surface::Sidebar => {
+                (user_intensity * 0.75).clamp(surface.alpha_floor().max(0.45), 0.90)
+            }
+            _ => (user_intensity * 0.85).clamp(surface.alpha_floor().max(0.55), 0.95),
+        },
+        GlassEffect::Opaque => 1.0,
+    };
 
     let alpha = (alpha_f * 255.0).round().clamp(0.0, 255.0) as u8;
 
@@ -239,18 +247,6 @@ mod tests {
     #[test]
     fn test_choose_backdrop_win11_22621() {
         assert_eq!(
-            choose_backdrop(GlassEffect::FrostedGlass, 22621),
-            Backdrop::DwmSystem(3)
-        );
-        assert_eq!(
-            choose_backdrop(GlassEffect::FrostedGlass, 22631),
-            Backdrop::DwmSystem(3)
-        );
-        assert_eq!(
-            choose_backdrop(GlassEffect::LiquidGlass, 22621),
-            Backdrop::DwmSystem(3)
-        );
-        assert_eq!(
             choose_backdrop(GlassEffect::Acrylic, 22621),
             Backdrop::DwmSystem(3)
         );
@@ -266,14 +262,6 @@ mod tests {
 
     #[test]
     fn test_choose_backdrop_win10_acrylic() {
-        assert_eq!(
-            choose_backdrop(GlassEffect::FrostedGlass, 17763),
-            Backdrop::Win10Accent(4)
-        );
-        assert_eq!(
-            choose_backdrop(GlassEffect::LiquidGlass, 19041),
-            Backdrop::Win10Accent(4)
-        );
         assert_eq!(
             choose_backdrop(GlassEffect::Acrylic, 19045),
             Backdrop::Win10Accent(4)
@@ -291,11 +279,7 @@ mod tests {
     #[test]
     fn test_choose_backdrop_win10_old() {
         assert_eq!(
-            choose_backdrop(GlassEffect::FrostedGlass, 16299),
-            Backdrop::Win10Accent(3)
-        );
-        assert_eq!(
-            choose_backdrop(GlassEffect::LiquidGlass, 15063),
+            choose_backdrop(GlassEffect::Acrylic, 16299),
             Backdrop::Win10Accent(3)
         );
         assert_eq!(
@@ -306,10 +290,7 @@ mod tests {
 
     #[test]
     fn test_choose_backdrop_unsupported_or_zero() {
-        assert_eq!(
-            choose_backdrop(GlassEffect::FrostedGlass, 0),
-            Backdrop::None
-        );
+        assert_eq!(choose_backdrop(GlassEffect::Acrylic, 0), Backdrop::None);
         assert_eq!(choose_backdrop(GlassEffect::Opaque, 0), Backdrop::None);
     }
 
@@ -365,9 +346,9 @@ mod tests {
         let base_mid = Color32::from_rgba_unmultiplied(30, 30, 30, 128); // ~50% intensity
         let base_high = Color32::from_rgba_unmultiplied(30, 30, 30, 240); // ~94% intensity
 
-        let fill_low = glass_fill(base_low, GlassEffect::FrostedGlass, Surface::Sidebar, true);
-        let fill_mid = glass_fill(base_mid, GlassEffect::FrostedGlass, Surface::Sidebar, true);
-        let fill_high = glass_fill(base_high, GlassEffect::FrostedGlass, Surface::Sidebar, true);
+        let fill_low = glass_fill(base_low, GlassEffect::Acrylic, Surface::Sidebar, true);
+        let fill_mid = glass_fill(base_mid, GlassEffect::Acrylic, Surface::Sidebar, true);
+        let fill_high = glass_fill(base_high, GlassEffect::Acrylic, Surface::Sidebar, true);
 
         let a_low = fill_low.a() as f32 / 255.0;
         let a_mid = fill_mid.a() as f32 / 255.0;
@@ -395,9 +376,8 @@ mod tests {
 
     #[test]
     fn test_wcag_readability_floors_dark_and_light() {
-        // Dark theme background with Content floor >= 0.88
         let dark_base = Color32::from_rgb(26, 28, 32);
-        let dark_tint = glass_fill(dark_base, GlassEffect::FrostedGlass, Surface::Content, true);
+        let dark_tint = glass_fill(dark_base, GlassEffect::Acrylic, Surface::Content, true);
         let dark_text = choose_readable_text_color(dark_tint, true);
         let (cr_b, cr_w) = check_wcag_contrast(dark_text, dark_tint);
         assert!(
@@ -412,14 +392,9 @@ mod tests {
         );
         assert!(is_wcag_readable(dark_text, dark_tint));
 
-        // Light theme background with Content floor >= 0.88
+        // Light theme background
         let light_base = Color32::from_rgb(246, 246, 248);
-        let light_tint = glass_fill(
-            light_base,
-            GlassEffect::FrostedGlass,
-            Surface::Content,
-            false,
-        );
+        let light_tint = glass_fill(light_base, GlassEffect::Acrylic, Surface::Content, false);
         let light_text = choose_readable_text_color(light_tint, false);
         let (l_cr_b, l_cr_w) = check_wcag_contrast(light_text, light_tint);
         assert!(

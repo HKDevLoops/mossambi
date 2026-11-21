@@ -265,11 +265,13 @@ impl Appearance {
 #[serde(rename_all = "snake_case")]
 pub enum GlassEffect {
     #[default]
-    #[serde(alias = "frosted")]
-    FrostedGlass,
-    #[serde(alias = "liquid")]
-    LiquidGlass,
-    #[serde(alias = "acrylic")]
+    #[serde(
+        alias = "acrylic",
+        alias = "frosted_glass",
+        alias = "frosted",
+        alias = "liquid_glass",
+        alias = "liquid"
+    )]
     Acrylic,
     #[serde(alias = "mica")]
     Mica,
@@ -278,19 +280,11 @@ pub enum GlassEffect {
 
 impl GlassEffect {
     pub fn all() -> &'static [GlassEffect] {
-        &[
-            GlassEffect::FrostedGlass,
-            GlassEffect::LiquidGlass,
-            GlassEffect::Acrylic,
-            GlassEffect::Mica,
-            GlassEffect::Opaque,
-        ]
+        &[GlassEffect::Acrylic, GlassEffect::Mica, GlassEffect::Opaque]
     }
 
     pub fn name(&self) -> &'static str {
         match self {
-            Self::FrostedGlass => "Frosted Glass (Sonoma Blur)",
-            Self::LiquidGlass => "Liquid Glass (Sequoia / VisionOS)",
             Self::Acrylic => "Acrylic (Windows Blur)",
             Self::Mica => "Mica (Windows Alt)",
             Self::Opaque => "Opaque (Solid Container)",
@@ -1436,18 +1430,18 @@ fn default_ui_scale() -> f32 {
 }
 
 fn default_window_opacity() -> f32 {
-    0.88
+    0.78
 }
 
 impl Default for MossambiConfig {
     fn default() -> Self {
         Self {
             theme_mode: ThemeMode::Rangalipi,
-            glass_effect: GlassEffect::FrostedGlass,
+            glass_effect: GlassEffect::Acrylic,
             appearance: Appearance::default(),
             shell_context_menu: false,
             ui_scale: default_ui_scale(),
-            window_opacity: 0.92,
+            window_opacity: 0.78,
             citrus_shade: "classicblue".to_string(),
             output_mode: OutputMode::Sibling,
             custom_output_dir: None,

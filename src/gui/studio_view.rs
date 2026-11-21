@@ -1278,16 +1278,60 @@ impl StudioView {
                                 let ribbon_w =
                                     (ui.available_width() - search_area_w - 8.0).max(180.0);
 
-                                let (bc_rect, _) = ui.allocate_exact_size(
-                                    Vec2::new(ribbon_w, 28.0),
-                                    Sense::hover(),
+                                let (bc_rect, bc_resp) = ui.allocate_exact_size(
+                                    Vec2::new(ribbon_w, 29.0),
+                                    Sense::click(),
                                 );
-                                crate::gui::squircle::squircle_filled(ui.painter(),  bc_rect, Rounding::same(6.0), palette.card_bg);
-                                crate::gui::squircle::squircle_stroke(ui.painter(),
+                                let is_editing = self.explorer_view.is_editing_path;
+                                let bg_col = if is_editing {
+                                    palette.card_bg
+                                } else if bc_resp.hovered() {
+                                    Color32::from_rgba_unmultiplied(
+                                        palette.card_bg.r(),
+                                        palette.card_bg.g(),
+                                        palette.card_bg.b(),
+                                        230,
+                                    )
+                                } else {
+                                    Color32::from_rgba_unmultiplied(
+                                        palette.card_bg.r(),
+                                        palette.card_bg.g(),
+                                        palette.card_bg.b(),
+                                        160,
+                                    )
+                                };
+                                crate::gui::squircle::squircle_filled(
+                                    ui.painter(),
                                     bc_rect,
                                     Rounding::same(6.0),
-                                    Stroke::new(1.0_f32, palette.border),
+                                    bg_col,
                                 );
+                                if is_editing {
+                                    crate::gui::squircle::squircle_stroke(
+                                        ui.painter(),
+                                        bc_rect,
+                                        Rounding::same(6.0),
+                                        Stroke::new(1.0_f32, palette.accent),
+                                    );
+                                } else if bc_resp.hovered() {
+                                    crate::gui::squircle::squircle_stroke(
+                                        ui.painter(),
+                                        bc_rect,
+                                        Rounding::same(6.0),
+                                        Stroke::new(
+                                            1.0_f32,
+                                            Color32::from_rgba_unmultiplied(
+                                                palette.border.r(),
+                                                palette.border.g(),
+                                                palette.border.b(),
+                                                100,
+                                            ),
+                                        ),
+                                    );
+                                }
+                                if bc_resp.clicked() && !is_editing {
+                                    toggle_edit = true;
+                                }
 
                                 ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bc_rect), |ui| {
                                     ui.horizontal(|ui| {
@@ -1363,11 +1407,11 @@ impl StudioView {
                                             let num_segs = segments.len();
 
                                             // Deep trail horizontal scroll
-                                            let edit_reserve = 52.0_f32;
+                                            let edit_reserve = 36.0_f32;
                                             let trail_w =
                                                 (ribbon_w - 8.0 - edit_reserve).max(120.0);
                                             ui.allocate_ui_with_layout(
-                                                Vec2::new(trail_w, 28.0),
+                                                Vec2::new(trail_w, 29.0),
                                                 egui::Layout::left_to_right(egui::Align::Center),
                                                 |ui| {
                                                     egui::ScrollArea::horizontal()
@@ -1512,11 +1556,15 @@ impl StudioView {
                                             ui.with_layout(
                                                 egui::Layout::right_to_left(egui::Align::Center),
                                                 |ui| {
-                                                    if ui
-                                                        .small_button("Edit")
-                                                        .on_hover_text("Edit path (Ctrl+L / Alt+D)")
-                                                        .clicked()
-                                                    {
+                                                    if crate::gui::finder_chrome::toolbar_icon_button(
+                                                        ui,
+                                                        &palette,
+                                                        pack,
+                                                        IconGlyph::ActionEdit,
+                                                        text_rgb,
+                                                        "Edit path (Ctrl+L / Alt+D)",
+                                                        false,
+                                                    ) {
                                                         toggle_edit = true;
                                                     }
                                                 },
@@ -1841,16 +1889,7 @@ impl StudioView {
                                         }
                                     }
                                     ToolbarItem::ViewSwitcher => {
-                                        crate::gui::finder_chrome::render_styled_segmented_view_switcher(
-                                            ui,
-                                            &palette,
-                                            &self.explorer_view.design_tokens,
-                                            pack,
-                                            self.explorer_view.view_mode,
-                                            |mode| {
-                                                self.explorer_view.view_mode = mode;
-                                            },
-                                        );
+                                        // Rendered on the right side of the command bar below.
                                     }
                                     _ => {}
                                 }
@@ -1920,6 +1959,26 @@ impl StudioView {
                                     }
                                 },
                             );
+
+                            // Connected Segmented View Switcher placed on the right side of the command bar
+                            if chrome_spec.toolbar.contains(&ToolbarItem::ViewSwitcher) {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.add_space(6.0);
+                                        crate::gui::finder_chrome::render_styled_segmented_view_switcher(
+                                            ui,
+                                            &palette,
+                                            &self.explorer_view.design_tokens,
+                                            pack,
+                                            self.explorer_view.view_mode,
+                                            |mode| {
+                                                self.explorer_view.view_mode = mode;
+                                            },
+                                        );
+                                    },
+                                );
+                            }
                         });
                     }
                 } else {

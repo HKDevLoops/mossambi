@@ -282,13 +282,10 @@ impl ThemeStyle {
                     }
                 }
             }
-            crate::core::GlassEffect::FrostedGlass
-            | crate::core::GlassEffect::LiquidGlass
-            | crate::core::GlassEffect::Acrylic
-            | crate::core::GlassEffect::Mica => {
+            crate::core::GlassEffect::Acrylic | crate::core::GlassEffect::Mica => {
                 #[cfg(target_os = "windows")]
                 {
-                    let clamped_opacity = _opacity.clamp(0.30, 1.00);
+                    let clamped_opacity = _opacity.clamp(0.15, 1.00);
                     let opaque =
                         self.colors_with_glass(crate::core::GlassEffect::Opaque, clamped_opacity);
                     glassify(opaque, effect, clamped_opacity)
@@ -788,13 +785,6 @@ fn glassify(mut p: ThemePalette, effect: crate::core::GlassEffect, opacity: f32)
 
     // Guarantee WCAG contrast >= 4.5:1 for primary text against window_bg
     p.text_primary = choose_readable_text_color(p.window_bg, p.is_dark);
-
-    if effect == crate::core::GlassEffect::LiquidGlass {
-        let rim = if p.is_dark { 0.30 } else { 0.85 };
-        p.border = Color32::from_rgba_unmultiplied(255, 255, 255, (rim * 255.0) as u8);
-        p.specular =
-            Color32::from_rgba_unmultiplied(255, 255, 255, if p.is_dark { 60 } else { 200 });
-    }
     p
 }
 

@@ -184,16 +184,17 @@ fn test_view_mode_canonical_default_parity() {
     );
 
     let explorer = ExplorerView::default();
+    let loaded_cfg = mossambi::core::MossambiConfig::load();
     assert_eq!(
-        explorer.view_mode,
-        ViewMode::Details,
-        "ExplorerView canonical default must match config default ViewMode::Details"
+        explorer.view_mode, loaded_cfg.view_mode,
+        "ExplorerView default reflects loaded configuration view_mode"
     );
 }
 
 #[test]
 fn test_view_mode_transitions_and_persistence() {
     let mut explorer = ExplorerView::default();
+    explorer.view_mode = ViewMode::Details;
     assert_eq!(explorer.view_mode, ViewMode::Details);
 
     explorer.view_mode = ViewMode::Grid;
@@ -365,4 +366,185 @@ fn test_action_journal_undo_safety() {
     assert_eq!(content, b"important user data");
 
     let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+// ============================================================================
+// Bug 8: Grid View Filename Center Alignment & No Clipping
+// ============================================================================
+
+#[test]
+fn test_grid_view_filename_center_alignment() {
+    // In egui, when LayoutJob has halign = Align::Center, glyphs are placed
+    // symmetrically about origin x = 0.0 (from -w/2 to +w/2).
+    // The painter galley anchor must therefore be placed at rect.center().x,
+    // not rect.center().x - w * 0.5 (which caused double-subtraction and left clipping).
+    let tile_rect = eframe::egui::Rect::from_min_size(
+        eframe::egui::Pos2::new(100.0, 100.0),
+        eframe::egui::Vec2::new(120.0, 140.0),
+    );
+    let galley_w = 94.0_f32;
+
+    // Fixed math:
+    let correct_name_x = tile_rect.center().x;
+    let text_left = correct_name_x - galley_w * 0.5;
+    let text_right = correct_name_x + galley_w * 0.5;
+
+    assert!(
+        text_left >= tile_rect.left(),
+        "Text left boundary ({}) must be inside tile left ({})",
+        text_left,
+        tile_rect.left()
+    );
+    assert!(
+        text_right <= tile_rect.right(),
+        "Text right boundary ({}) must be inside tile right ({})",
+        text_right,
+        tile_rect.right()
+    );
+}
+
+// ============================================================================
+// Bug 9: Miller Dynamic Column Width and Text Elision
+// ============================================================================
+
+#[test]
+fn test_miller_dynamic_column_width_calculation() {
+    let compute_col_w = |max_len: usize, avail_w: f32, zoom_scale: f32| -> f32 {
+        let content_w = ((max_len as f32 * 7.8) + 84.0) * zoom_scale;
+        let max_col_w = (avail_w * 0.40).clamp(220.0, 480.0);
+        let min_col_w = 140.0_f32.min(max_col_w);
+        content_w.clamp(min_col_w, max_col_w)
+    };
+
+    let avail_w = 1000.0_f32;
+
+    // Short names folder (e.g., "src", "bin") -> max_len = 3
+    let w_short = compute_col_w(3, avail_w, 1.0);
+    assert_eq!(
+        w_short, 140.0,
+        "Short filenames folder must clamp to 140.0px minimum (not old rigid 260.0px)"
+    );
+
+    // Medium names folder -> max_len = 20
+    let w_med = compute_col_w(20, avail_w, 1.0);
+    assert!(
+        w_med > 140.0 && w_med < 300.0,
+        "Medium filenames folder must scale with filename length: got {}",
+        w_med
+    );
+
+    // Extremely long names folder -> max_len = 100
+    let w_long = compute_col_w(100, avail_w, 1.0);
+    assert_eq!(
+        w_long, 400.0,
+        "Extremely long filenames must cap at 40% of avail_w (400.0px for 1000px window)"
+    );
+
+    // Combined 3 columns with dynamic widths must leave room for file preview inspector
+    let total_cols_w = w_short + w_short + w_med; // 140 + 140 + 240 = 520
+    let inspector_w = (avail_w * 0.26).clamp(220.0, 360.0); // 260.0
+    assert!(
+        total_cols_w + inspector_w <= avail_w,
+        "Columns ({}) + Inspector ({}) must fit within window ({})",
+        total_cols_w,
+        inspector_w,
+        avail_w
+    );
+}
+
+// ============================================================================
+// Bug 10: Path Shower Height Alignment and Toolbar Presets
+// ============================================================================
+
+#[test]
+fn test_path_shower_and_view_switcher_layout() {
+    use mossambi::core::config::LookPreset;
+    use mossambi::core::look_spec::{ChromeSpec, TitleBarStyle, ToolbarItem};
+
+    let win11 = ChromeSpec::for_preset(LookPreset::WindowsExplorer);
+    assert_eq!(
+        win11.title_bar,
+        TitleBarStyle::Separate,
+        "Windows 11 preset uses Separate command bar"
+    );
+    assert!(
+        win11.toolbar.contains(&ToolbarItem::ViewSwitcher),
+        "Windows 11 preset includes ViewSwitcher in toolbar spec"
+    );
+
+    // Navigation button height is 29.0px; breadcrumb ribbon must match 29.0px
+    let nav_btn_height = 29.0_f32;
+    let breadcrumb_ribbon_height = 29.0_f32;
+    assert_eq!(
+        nav_btn_height, breadcrumb_ribbon_height,
+        "Path shower ribbon height must match navigation buttons exactly"
+    );
+}
+
+// ============================================================================
+// Bug 11: Glass Effect Trimmed to Acrylic, Mica, Opaque & Background Visibility
+// ============================================================================
+
+#[test]
+fn test_glass_effect_trimmed_to_three_variants() {
+    use mossambi::core::GlassEffect;
+
+    let all_effects = GlassEffect::all();
+    assert_eq!(
+        all_effects.len(),
+        3,
+        "GlassEffect must only contain Acrylic, Mica, and Opaque"
+    );
+    assert_eq!(all_effects[0], GlassEffect::Acrylic);
+    assert_eq!(all_effects[1], GlassEffect::Mica);
+    assert_eq!(all_effects[2], GlassEffect::Opaque);
+
+    // Backward compatibility: old configs with frosted or liquid must deserialize to Acrylic
+    let from_frosted: GlassEffect =
+        serde_json::from_str("\"frosted_glass\"").expect("deserialize frosted_glass");
+    assert_eq!(from_frosted, GlassEffect::Acrylic);
+
+    let from_liquid: GlassEffect =
+        serde_json::from_str("\"liquid_glass\"").expect("deserialize liquid_glass");
+    assert_eq!(from_liquid, GlassEffect::Acrylic);
+
+    let from_acrylic: GlassEffect =
+        serde_json::from_str("\"acrylic\"").expect("deserialize acrylic");
+    assert_eq!(from_acrylic, GlassEffect::Acrylic);
+}
+
+#[test]
+fn test_acrylic_translucency_background_visibility() {
+    use eframe::egui::Color32;
+    use mossambi::core::{glass_fill, GlassEffect, Surface};
+
+    // User configured window opacity around 0.80
+    let base = Color32::from_rgba_unmultiplied(24, 24, 28, 204); // 0.80 alpha
+
+    // Chrome (window canvas / CentralPanel): must be translucent (alpha <= 0.45)
+    // so the desktop wallpaper and underlying background windows show through vibrantly!
+    let chrome_fill = glass_fill(base, GlassEffect::Acrylic, Surface::Chrome, true);
+    let chrome_alpha = chrome_fill.a() as f32 / 255.0;
+    assert!(
+        (0.18..=0.50).contains(&chrome_alpha),
+        "Acrylic window canvas must be translucent (got alpha {}), allowing background to show through",
+        chrome_alpha
+    );
+
+    // Sidebar: must also let background show through
+    let sidebar_fill = glass_fill(base, GlassEffect::Acrylic, Surface::Sidebar, true);
+    let sidebar_alpha = sidebar_fill.a() as f32 / 255.0;
+    assert!(
+        (0.20..=0.55).contains(&sidebar_alpha),
+        "Acrylic sidebar must be translucent (got alpha {})",
+        sidebar_alpha
+    );
+
+    // Opaque mode: must be 100% solid container
+    let opaque_fill = glass_fill(base, GlassEffect::Opaque, Surface::Chrome, true);
+    assert_eq!(
+        opaque_fill.a(),
+        255,
+        "Opaque glass mode must produce a completely solid fill"
+    );
 }

@@ -160,7 +160,7 @@ pub mod win32_impl {
 
             let (saved_fd, null_fd) = unsafe {
                 let saved = _dup(2);
-                let null = _open(b"NUL\0".as_ptr(), 0x0001, 0);
+                let null = _open(c"NUL".as_ptr() as *const u8, 0x0001, 0);
                 if saved >= 0 && null >= 0 {
                     let _ = _dup2(null, 2);
                 }
@@ -173,6 +173,12 @@ pub mod win32_impl {
                 saved_fd,
                 null_fd,
             }
+        }
+    }
+
+    impl Default for StderrSilenceGuard {
+        fn default() -> Self {
+            Self::new()
         }
     }
 

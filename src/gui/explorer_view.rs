@@ -8627,7 +8627,7 @@ impl ExplorerView {
                             job.halign = egui::Align::Center;
                             let galley = ui.fonts(|f| f.layout_job(job));
                             let name_h = galley.size().y;
-                            let name_x = rect.center().x - galley.size().x * 0.5;
+                            let name_x = rect.center().x;
                             let name_y =
                                 (rect.bottom() - size_font - 10.0 - name_h).max(zone_bottom + 2.0);
                             ui.painter_at(rect).galley(
@@ -9047,9 +9047,6 @@ impl ExplorerView {
                                             item.is_dir,
                                         );
 
-                                        let display_name =
-                                            truncate_middle(&item.name, (col_w / 8.5) as usize);
-
                                         let (row_rect, resp) = ui.allocate_exact_size(
                                             Vec2::new(col_w - 6.0, 30.0),
                                             egui::Sense::click_and_drag(),
@@ -9214,11 +9211,21 @@ impl ExplorerView {
                                             crate::core::tags::read_tags_cache(&item.path);
                                         let col_dots_w = tag_dots_width(&col_tags);
                                         let col_name_x = icon_rect.right() + 6.0 + col_dots_w;
+                                        let right_reserved = if item.is_dir { 24.0 } else { 12.0 };
+                                        let avail_text_w =
+                                            (row_rect.right() - col_name_x - right_reserved).max(20.0);
+                                        let font_id = egui::FontId::proportional(13.5);
+                                        let display_name = crate::gui::file_menu::elide_to_width(
+                                            ui,
+                                            &item.name,
+                                            avail_text_w,
+                                            font_id.clone(),
+                                        );
                                         ui.painter().text(
                                             Pos2::new(col_name_x, row_rect.center().y),
                                             egui::Align2::LEFT_CENTER,
                                             &display_name,
-                                            egui::FontId::proportional(13.5),
+                                            font_id,
                                             name_color,
                                         );
                                         if !col_tags.is_empty() {
@@ -9409,6 +9416,7 @@ impl ExplorerView {
             if let Some(first) = entries.first() {
                 if !first.is_dir && first.path.parent() == Some(self.current_dir.as_path()) {
                     self.column_preview_item = Some(first.clone());
+                    self.needs_miller_scroll_align = true;
                 }
             }
         }
@@ -9458,7 +9466,7 @@ impl ExplorerView {
                         .unwrap_or(false);
                     let avail_w = ui.available_width().max(400.0);
                     let inspector_w = if has_inspector {
-                        (avail_w * 0.28).clamp(280.0, 420.0)
+                        (avail_w * 0.26).clamp(220.0, 360.0)
                     } else {
                         0.0
                     };
@@ -9474,11 +9482,26 @@ impl ExplorerView {
                         } else {
                             zoom_metrics.column_width
                         };
+                    let zoom_scale = (base_col_w / 260.0).clamp(0.7, 1.6);
                     let cur_dir = self.current_dir.clone();
-                    let num_cols = (1 + self.column_stack.len()) as f32;
-                    let cols_avail_w = (avail_w - inspector_w - (num_cols * 2.0)).max(180.0);
-                    let natural_col_w = cols_avail_w / num_cols;
-                    let col_w = natural_col_w.max(base_col_w);
+
+                    let compute_col_w = |items: &[FileItem]| -> f32 {
+                        let max_len = items
+                            .iter()
+                            .map(|it| it.name.chars().count())
+                            .max()
+                            .unwrap_or(8);
+                        // Dynamic minimum column width calculated from maximum filename length:
+                        // Font 13.5pt avg char width is ~7.8px. Non-text overhead (icon, paddings, tag dots, chevron/scrollbar) is ~84px.
+                        let content_w = ((max_len as f32 * 7.8) + 84.0) * zoom_scale;
+                        // Bound column width dynamically with respect to Mossambi window size:
+                        // A column takes at most 40% of available window width (clamped between 220px and 480px).
+                        let max_col_w = (avail_w * 0.40).clamp(220.0, 480.0);
+                        // Minimum column width starts at 140px, scaling up with respect to the maximum file length in the folder.
+                        let min_col_w = 140.0_f32.min(max_col_w);
+                        content_w.clamp(min_col_w, max_col_w)
+                    };
+                    let col_0_w = compute_col_w(&entries);
 
                     // ==========================================
                     // PRIMARY COLUMN (Column 0): Current Directory
@@ -9490,7 +9513,7 @@ impl ExplorerView {
                             cur_dir.as_path(),
                             &entries,
                             ColumnRole::Current,
-                            col_w,
+                            col_0_w,
                             full_h,
                             icon_pack,
                             menu_style,
@@ -9511,13 +9534,14 @@ impl ExplorerView {
                     // ==========================================
                     let stack_clone: Vec<(PathBuf, Vec<FileItem>)> = self.column_stack.clone();
                     for (si, (sub_path, sub_items)) in stack_clone.iter().enumerate() {
+                        let sub_col_w = compute_col_w(sub_items);
                         self.render_miller_column(
                             ui,
                             palette,
                             sub_path,
                             sub_items,
                             ColumnRole::Descendant,
-                            col_w,
+                            sub_col_w,
                             full_h,
                             icon_pack,
                             menu_style,
@@ -9944,11 +9968,14 @@ impl ExplorerView {
                                                         .monospace()
                                                         .color(palette.text_muted),
                                                     );
-                                                    ui.label(
-                                                        egui::RichText::new(*line)
-                                                            .size(10.5)
-                                                            .monospace()
-                                                            .color(palette.text_primary),
+                                                    ui.add(
+                                                        egui::Label::new(
+                                                            egui::RichText::new(*line)
+                                                                .size(10.5)
+                                                                .monospace()
+                                                                .color(palette.text_primary),
+                                                        )
+                                                        .truncate(),
                                                     );
                                                 });
                                             }

@@ -318,7 +318,7 @@ pub fn list_all_presets(category: Option<&str>) -> Vec<PresetDefinition> {
         if let Ok(entries) = fs::read_dir(&custom_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "json") {
+                if path.extension().is_some_and(|e| e == "json") {
                     if let Ok(content) = fs::read_to_string(&path) {
                         if let Ok(custom) = PresetDefinition::from_json(&content) {
                             if !presets.iter().any(|p| p.id == custom.id) {
