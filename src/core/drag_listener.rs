@@ -38,7 +38,7 @@ impl DragGestureListener {
         allow_shake: bool,
         allow_circle: bool,
         sensitivity_px: f32,
-        deep_drag_only: bool,
+        #[allow(dead_code)] deep_drag_only: bool,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let (tx, rx) = channel();
@@ -103,6 +103,7 @@ struct HookContext {
     sender: Sender<DragGestureEvent>,
     shutdown: Arc<AtomicBool>,
     cached_files: Vec<PathBuf>,
+    #[allow(dead_code)]
     deep_drag_only: bool,
 }
 
@@ -116,7 +117,7 @@ fn run_listener_loop(
     allow_shake: bool,
     allow_circle: bool,
     sensitivity_px: f32,
-    deep_drag_only: bool,
+    #[allow(dead_code)] deep_drag_only: bool,
 ) {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -147,7 +148,7 @@ fn run_listener_loop(
     }
 
     let tracker = KinematicGestureTracker::new(allow_shake, allow_circle)
-        .with_sensitivity(sensitivity_px, 450);
+        .with_sensitivity(sensitivity_px, 2600);
 
     {
         let mut guard = GLOBAL_CONTEXT.lock().unwrap_or_else(|e| e.into_inner());
@@ -217,13 +218,14 @@ fn run_listener_loop(
                                     files.push(pp);
                                 }
                             }
-                            if !files.is_empty() || !ctx.deep_drag_only {
-                                maybe_event = Some(DragGestureEvent {
-                                    gesture,
-                                    cursor_pos: (pt.x as f32, pt.y as f32),
-                                    files,
-                                });
-                            }
+                            // Always summon the Donut toolbar when an intentional gesture is completed.
+                            // If file discovery was empty during rapid motion, provide an empty batch
+                            // so the Donut toolbar awakens at cursor position to accept drop.
+                            maybe_event = Some(DragGestureEvent {
+                                gesture,
+                                cursor_pos: (pt.x as f32, pt.y as f32),
+                                files,
+                            });
                             ctx.is_holding_files = false;
                             ctx.tracker.reset();
                         }

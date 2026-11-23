@@ -1318,6 +1318,9 @@ pub struct MossambiConfig {
     /// Applications where gesture wake-up and shortcuts are suppressed
     #[serde(default)]
     pub excluded_apps: Vec<String>,
+    /// User-specified custom paths for external system engines (e.g. "libreoffice" -> "C:\...\soffice.exe")
+    #[serde(default)]
+    pub custom_engine_paths: std::collections::BTreeMap<String, PathBuf>,
 }
 
 fn default_keybinding_profile() -> u8 {
@@ -1562,6 +1565,7 @@ impl Default for MossambiConfig {
             collect_dropped_files_in_list: false,
             close_window_action: default_close_window_action(),
             excluded_apps: Vec::new(),
+            custom_engine_paths: std::collections::BTreeMap::new(),
         }
     }
 }

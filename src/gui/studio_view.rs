@@ -4878,6 +4878,8 @@ impl StudioView {
         self.explorer_view.view_mode = config.view_mode;
         self.explorer_view.row_density = config.row_density;
         self.explorer_view.calculate_checksums = config.calculate_checksums;
+        self.explorer_view.checkbox_mode = config.checkbox_mode;
+        self.explorer_view.menu_style = config.menu_style;
     }
 
     fn render_quality_inspector_tab(

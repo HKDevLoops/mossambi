@@ -1353,7 +1353,9 @@ impl eframe::App for MossambiApp {
         // Appearance (light/dark/system) and opacity change the palette
         // without changing the theme id, so compare the resolved palette too.
         let sig_id = egui::Id::new("mossambi_applied_palette_sig");
-        let pal_now = self.theme.colors();
+        let pal_now = self
+            .theme
+            .colors_with_glass(cfg.glass_effect, cfg.window_opacity);
         let sig = (
             pal_now.window_bg.to_array(),
             pal_now.sidebar_bg.to_array(),
@@ -1368,8 +1370,17 @@ impl eframe::App for MossambiApp {
             || self.last_applied_glass != Some(current_glass)
         {
             ctx.data_mut(|d| d.insert_temp(sig_id, sig));
-            let palette = self.theme.colors();
+            let palette = self
+                .theme
+                .colors_with_glass(cfg.glass_effect, cfg.window_opacity);
             crate::gui::macos_theme::apply_theme_visuals(ctx, &palette);
+            let r = cfg.corner_style.radius_sm();
+            ctx.style_mut(|s| {
+                s.visuals.widgets.noninteractive.rounding = egui::Rounding::same(r);
+                s.visuals.widgets.inactive.rounding = egui::Rounding::same(r);
+                s.visuals.widgets.hovered.rounding = egui::Rounding::same(r + 1.0);
+                s.visuals.widgets.active.rounding = egui::Rounding::same(r + 1.0);
+            });
             crate::gui::dwm_helper::apply_system_backdrop(
                 pal_now.is_dark,
                 current_glass,
@@ -1584,12 +1595,54 @@ impl eframe::App for MossambiApp {
 
         // 3. Handle Drag-and-Drop Files directly into Studio window
         let mut drop_donut_summon: Option<(egui::Pos2, Option<PathBuf>)> = None;
+        let now_ms = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()) as u64;
+
         ctx.input(|i| {
             let ctrl = i.modifiers.ctrl || i.modifiers.command;
             if ctrl && !i.raw.hovered_files.is_empty() && self.in_window_donut.is_none() {
                 if let Some(pos) = i.pointer.hover_pos() {
                     let first_path = i.raw.hovered_files.first().and_then(|f| f.path.clone());
                     drop_donut_summon = Some((pos, first_path));
+                }
+            }
+
+            // Kinematic gesture recognition for in-window drag:
+            // Detect file shake or 2 clockwise circles while dragging a file or holding pointer
+            if let Some(pos) = i.pointer.hover_pos() {
+                let is_dragging_files = !i.raw.hovered_files.is_empty()
+                    || (i.pointer.button_down(egui::PointerButton::Primary)
+                        && !self.studio_view.explorer_view.selected_paths().is_empty());
+
+                if is_dragging_files {
+                    if let Some(_gesture) = self
+                        .studio_view
+                        .explorer_view
+                        .gesture_tracker
+                        .feed(pos.x, pos.y, now_ms)
+                    {
+                        if self.in_window_donut.is_none() {
+                            let path = i
+                                .raw
+                                .hovered_files
+                                .first()
+                                .and_then(|f| f.path.clone())
+                                .or_else(|| {
+                                    self.studio_view
+                                        .explorer_view
+                                        .selected_paths()
+                                        .first()
+                                        .cloned()
+                                });
+                            drop_donut_summon = Some((pos, path));
+                        }
+                    }
+                } else if !i.pointer.button_down(egui::PointerButton::Primary)
+                    && i.raw.hovered_files.is_empty()
+                {
+                    self.studio_view.explorer_view.gesture_tracker.reset();
                 }
             }
 

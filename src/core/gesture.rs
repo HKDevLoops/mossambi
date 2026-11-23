@@ -50,24 +50,27 @@ impl KinematicGestureTracker {
     /// Creates a new gesture tracker with default thresholds
     pub fn new(allow_shake: bool, allow_circle: bool) -> Self {
         Self {
-            points: Vec::with_capacity(64),
-            capacity: 64,
-            window_ms: 450,
-            min_shake_amplitude: 22.0,  // Minimum 22 pixels peak-to-peak
-            min_shake_reversals: 3,     // 3 direction flips (left-right-left)
-            min_circle_angle_rad: 5.23, // ~300 degrees swept arc
-            min_circle_radius: 18.0,    // Minimum 18 px radius
+            points: Vec::with_capacity(256),
+            capacity: 256,
+            window_ms: 2600, // 2.6 seconds sliding window to allow 2 complete circles
+            min_shake_amplitude: 18.0, // Minimum 18 pixels peak-to-peak
+            min_shake_reversals: 3, // 3 direction flips (left-right-left or up-down-up)
+            min_circle_angle_rad: 10.5, // 2 complete loops (~600-720 deg)
+            min_circle_radius: 14.0, // Minimum 14 px radius
             allow_shake,
             allow_circle,
             last_trigger_ms: 0,
-            debounce_ms: 1000, // 1 second cooldown after triggering
+            debounce_ms: 1200, // 1.2 second cooldown after triggering
         }
     }
 
     /// Set sensitivity parameters
     pub fn with_sensitivity(mut self, shake_amp: f32, window_ms: u64) -> Self {
         self.min_shake_amplitude = shake_amp;
-        self.window_ms = window_ms;
+        if window_ms > 0 {
+            // Guarantee at least 2200ms window so 2-circle loop has ample time to complete
+            self.window_ms = window_ms.max(2200);
+        }
         self
     }
 
@@ -79,8 +82,10 @@ impl KinematicGestureTracker {
     /// Feed a new cursor coordinate into the kinematic tracker.
     /// Returns `Some(GestureKind)` if an intentional activation gesture is detected.
     pub fn feed(&mut self, x: f32, y: f32, timestamp_ms: u64) -> Option<GestureKind> {
-        // Enforce trigger debounce cooldown
-        if timestamp_ms.saturating_sub(self.last_trigger_ms) < self.debounce_ms {
+        // Enforce trigger debounce cooldown after a previous trigger
+        if self.last_trigger_ms > 0
+            && timestamp_ms.saturating_sub(self.last_trigger_ms) < self.debounce_ms
+        {
             return None;
         }
 
@@ -98,14 +103,14 @@ impl KinematicGestureTracker {
             return None;
         }
 
-        // Test Shake
+        // Test Shake (Omnidirectional: horizontal or vertical)
         if self.allow_shake && self.detect_shake() {
             self.last_trigger_ms = timestamp_ms;
             self.points.clear();
             return Some(GestureKind::Shake);
         }
 
-        // Test Circle
+        // Test Circle (2 Clockwise or circular revolutions)
         if self.allow_circle && self.detect_circle() {
             self.last_trigger_ms = timestamp_ms;
             self.points.clear();
@@ -115,42 +120,56 @@ impl KinematicGestureTracker {
         None
     }
 
-    /// Detects horizontal back-and-forth shake gesture
+    /// Detects omnidirectional back-and-forth shake gesture (horizontal or vertical)
     fn detect_shake(&self) -> bool {
         if self.points.len() < 4 {
             return false;
         }
 
+        // Check horizontal shake
+        if self.check_axis_shake(|p| p.x) {
+            return true;
+        }
+
+        // Check vertical shake
+        if self.check_axis_shake(|p| p.y) {
+            return true;
+        }
+
+        false
+    }
+
+    fn check_axis_shake(&self, coord: impl Fn(&GesturePoint) -> f32) -> bool {
         let mut reversals = 0usize;
-        let mut last_dx: Option<f32> = None;
-        let mut last_peak_x = self.points[0].x;
+        let mut last_delta: Option<f32> = None;
+        let mut last_peak = coord(&self.points[0]);
         let mut max_extrema_diff = 0.0f32;
 
         for window in self.points.windows(2) {
-            let dx = window[1].x - window[0].x;
-            if dx.abs() < 3.0 {
+            let delta = coord(&window[1]) - coord(&window[0]);
+            if delta.abs() < 2.5 {
                 continue; // Ignore minor sensor micro-jitter
             }
 
-            if let Some(prev) = last_dx {
-                // Direction reversal detected: dx changed sign
-                if (dx > 0.0 && prev < 0.0) || (dx < 0.0 && prev > 0.0) {
-                    let amp = (window[0].x - last_peak_x).abs();
+            if let Some(prev) = last_delta {
+                // Direction reversal detected: delta changed sign
+                if (delta > 0.0 && prev < 0.0) || (delta < 0.0 && prev > 0.0) {
+                    let amp = (coord(&window[0]) - last_peak).abs();
                     if amp >= self.min_shake_amplitude {
                         reversals += 1;
                         if amp > max_extrema_diff {
                             max_extrema_diff = amp;
                         }
                     }
-                    last_peak_x = window[0].x;
+                    last_peak = coord(&window[0]);
                 }
             }
-            last_dx = Some(dx);
+            last_delta = Some(delta);
         }
 
-        // Check if the current motion past the last peak meets amplitude
+        // Check if current motion past last peak meets amplitude
         if let Some(last_pt) = self.points.last() {
-            let final_amp = (last_pt.x - last_peak_x).abs();
+            let final_amp = (coord(last_pt) - last_peak).abs();
             if final_amp >= self.min_shake_amplitude && reversals >= self.min_shake_reversals - 1 {
                 reversals += 1;
             }
@@ -159,9 +178,9 @@ impl KinematicGestureTracker {
         reversals >= self.min_shake_reversals && max_extrema_diff >= self.min_shake_amplitude
     }
 
-    /// Detects citrus arc or circular loop gesture
+    /// Detects circular loop gesture (specifically 2 clockwise loops or complete revolutions)
     fn detect_circle(&self) -> bool {
-        if self.points.len() < 8 {
+        if self.points.len() < 12 {
             return false;
         }
 
@@ -180,7 +199,7 @@ impl KinematicGestureTracker {
         }
         avg_radius /= count;
 
-        if avg_radius < self.min_circle_radius {
+        if avg_radius < self.min_circle_radius || avg_radius > 450.0 {
             return false;
         }
 
@@ -204,7 +223,10 @@ impl KinematicGestureTracker {
             prev_theta = theta;
         }
 
-        total_angle.abs() >= self.min_circle_angle_rad
+        // In screen coordinates (+Y down), clockwise rotation gives positive angular displacement.
+        // Two full loops: total_angle >= 10.5 rad (~600 to 720 degrees).
+        // Also support single sweeping circle or counter-clockwise if threshold allows.
+        total_angle.abs() >= self.min_circle_angle_rad || (total_angle >= 10.0)
     }
 
     /// Get current tracked point count
@@ -245,22 +267,48 @@ mod tests {
     }
 
     #[test]
+    fn test_vertical_shake_gesture_detection() {
+        let mut tracker = KinematicGestureTracker::new(true, false);
+
+        // Simulate rapid vertical back-and-forth shake (up and down)
+        let mut time = 1000u64;
+        let mut detected = None;
+
+        let y_steps = [
+            0.0, 15.0, 30.0, 45.0, // Downward (+45)
+            35.0, 15.0, -5.0, // Upward (-50)
+            10.0, 25.0, 45.0, // Downward (+50)
+            30.0, 10.0, -5.0, // Upward (-50)
+        ];
+
+        for &y in &y_steps {
+            time += 25;
+            if let Some(kind) = tracker.feed(200.0, y, time) {
+                detected = Some(kind);
+                break;
+            }
+        }
+
+        assert_eq!(detected, Some(GestureKind::Shake));
+    }
+
+    #[test]
     fn test_circle_gesture_detection() {
         let mut tracker = KinematicGestureTracker::new(false, true);
 
-        // Simulate smooth circular orbit: R=50 centered at (200, 200)
+        // Simulate 2 smooth clockwise circular orbits: R=50 centered at (200, 200)
         let cx = 200.0f32;
         let cy = 200.0f32;
         let r = 50.0f32;
         let mut time = 1000u64;
         let mut detected = None;
 
-        // 16 points tracing 360 degrees (2*PI)
-        for i in 0..=16 {
+        // 32 points tracing 2 complete clockwise loops (4*PI)
+        for i in 0..=36 {
             let angle = (i as f32 / 16.0) * (2.0 * PI);
             let x = cx + r * angle.cos();
             let y = cy + r * angle.sin();
-            time += 20;
+            time += 25;
 
             if let Some(kind) = tracker.feed(x, y, time) {
                 detected = Some(kind);

@@ -1397,15 +1397,15 @@ impl PreferencesView {
         }
 
         // Tailwind CSS-grade fluid 3-column responsive layout with horizontal scroll safety
-        let (col1_w, col2_w, col3_w) = if avail_w >= 880.0 {
-            let c1 = (avail_w * 0.22).clamp(170.0, 210.0);
-            let c3 = (avail_w * 0.32).clamp(220.0, 300.0);
-            let c2 = (avail_w - c1 - c3 - 36.0).max(300.0);
+        let (col1_w, col2_w, col3_w) = if avail_w >= 920.0 {
+            let c1 = (avail_w * 0.26).clamp(220.0, 260.0);
+            let c3 = (avail_w * 0.34).clamp(240.0, 320.0);
+            let c2 = (avail_w - c1 - c3 - 36.0).max(320.0);
             (c1, c2, c3)
         } else {
-            let c1 = 165.0;
-            let c2 = 310.0;
-            let c3 = (avail_w - c1 - c2 - 36.0).max(210.0);
+            let c1 = 210.0;
+            let c2 = 320.0;
+            let c3 = (avail_w - c1 - c2 - 36.0).max(220.0);
             (c1, c2, c3)
         };
 
@@ -1448,135 +1448,215 @@ impl PreferencesView {
         palette: &ThemePalette,
         dirty: &mut bool,
     ) {
-        ui.allocate_ui_with_layout(Vec2::new(col1_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
-            ui.label(
-                egui::RichText::new("1. Choose a profile")
-                    .size(design::type_scale::TITLE_SM)
-                    .strong()
-                    .color(palette.text_primary),
-            );
-            ui.add_space(design::space::XS);
-
-            ui.add(
-                TextEdit::singleline(&mut self.donut_profile_search)
-                    .hint_text("Search")
-                    .desired_width(col1_w - 12.0),
-            );
-            ui.add_space(design::space::SM);
-
-            let search_q = self.donut_profile_search.trim().to_lowercase();
-            let num_profiles = self.cfg.donut.profiles.len();
-
-            ui.spacing_mut().scroll.bar_width = 4.0;
-            ui.spacing_mut().scroll.bar_inner_margin = 1.0;
-            ui.spacing_mut().scroll.bar_outer_margin = 1.0;
-            ui.spacing_mut().scroll.floating = true;
-            ui.input_mut(|i| {
-                if i.raw_scroll_delta.y != 0.0 {
-                    i.raw_scroll_delta.y = i.raw_scroll_delta.y.signum() * 64.0;
-                }
-            });
-
-            ScrollArea::vertical()
-                .id_salt("donut_profiles_scroll")
-                .max_height(480.0)
-                .show(ui, |ui| {
-                    for i in 0..num_profiles {
-                        let (name, front_len, back_len, is_mixed) = {
-                            let p = &self.cfg.donut.profiles[i];
-                            (p.name.clone(), p.front_slices.len(), p.back_slices.len(), p.is_mixed_selection)
-                        };
-
-                        if !search_q.is_empty() && !name.to_lowercase().contains(&search_q) {
-                            continue;
-                        }
-
-                        let is_selected = self.selected_donut_profile_idx == i;
-                        let card_rect = ui.allocate_space(Vec2::new(col1_w - 14.0, 32.0)).1;
-                        let is_hovered = ui.rect_contains_pointer(card_rect);
-
-                        let bg_color = if is_selected {
-                            palette.card_hover
-                        } else if is_hovered {
-                            Color32::from_rgba_unmultiplied(palette.card_hover.r(), palette.card_hover.g(), palette.card_hover.b(), 70)
-                        } else {
-                            Color32::TRANSPARENT
-                        };
-
-                        crate::gui::squircle::squircle_filled(ui.painter(),  card_rect, Rounding::same(design::radius::SM), bg_color);
-                        if is_selected {
-                            crate::gui::squircle::squircle_stroke(ui.painter(),  card_rect, Rounding::same(design::radius::SM), Stroke::new(1.0_f32, palette.accent));
-                        }
-
-                        let text_color = if is_selected { palette.text_primary } else { palette.text_secondary };
-                        let label_pos = egui::pos2(card_rect.min.x + 8.0, card_rect.center().y - 7.0);
-                        ui.painter().text(
-                            label_pos,
-                            Align2::LEFT_TOP,
-                            &name,
-                            egui::FontId::proportional(design::type_scale::BODY_SM),
-                            text_color,
+        ui.allocate_ui_with_layout(
+            Vec2::new(col1_w, ui.available_height()),
+            Layout::top_down(Align::Min),
+            |ui| {
+                let num_profiles = self.cfg.donut.profiles.len();
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("1. Choose a profile")
+                            .size(design::type_scale::TITLE_SM)
+                            .strong()
+                            .color(palette.text_primary),
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(format!("{} profiles", num_profiles))
+                                .size(design::type_scale::CAPTION)
+                                .color(palette.text_muted),
                         );
+                    });
+                });
+                ui.add_space(design::space::XS);
 
-                        let badge_str = if is_mixed {
-                            format!("M {} . {}", front_len, back_len)
-                        } else if back_len == 0 {
-                            format!("{}", front_len)
-                        } else {
-                            format!("{} . {}", front_len, back_len)
-                        };
-                        let badge_pos = egui::pos2(card_rect.max.x - 8.0, card_rect.center().y - 6.0);
-                        ui.painter().text(
-                            badge_pos,
-                            Align2::RIGHT_TOP,
-                            badge_str,
-                            egui::FontId::proportional(design::type_scale::MICRO),
-                            palette.text_muted,
-                        );
+                ui.add(
+                    TextEdit::singleline(&mut self.donut_profile_search)
+                        .hint_text("Search profiles...")
+                        .desired_width(col1_w - 12.0),
+                );
+                ui.add_space(design::space::SM);
 
-                        if ui.interact(card_rect, ui.id().with(i), Sense::click()).clicked() {
-                            self.selected_donut_profile_idx = i;
-                        }
-                        ui.add_space(2.0);
+                let search_q = self.donut_profile_search.trim().to_lowercase();
+
+                ui.spacing_mut().scroll.bar_width = 8.0;
+                ui.spacing_mut().scroll.bar_inner_margin = 2.0;
+                ui.spacing_mut().scroll.bar_outer_margin = 2.0;
+                ui.spacing_mut().scroll.floating = false;
+                ui.input_mut(|i| {
+                    if i.raw_scroll_delta.y != 0.0 {
+                        i.raw_scroll_delta.y = i.raw_scroll_delta.y.signum() * 64.0;
                     }
                 });
 
-            ui.add_space(design::space::SM);
-            ui.horizontal_wrapped(|ui| {
-                if ui.button("+ New profile").clicked() {
-                    let new_id = format!("custom_{}", self.cfg.donut.profiles.len() + 1);
-                    let new_prof = DonutProfile::new(
-                        &new_id,
-                        "New Profile",
-                        &[".txt"],
-                        &["PNG", "PDF", "WEBP", "JPG"],
-                        &["CROP", "RENAME", "ZIP", "EXPLORE"],
-                    );
-                    self.cfg.donut.profiles.push(new_prof);
-                    self.selected_donut_profile_idx = self.cfg.donut.profiles.len() - 1;
-                    *dirty = true;
-                }
-                if ui.button("Alt+Up").clicked() && self.selected_donut_profile_idx > 0 {
-                    self.cfg.donut.move_profile_up(self.selected_donut_profile_idx);
-                    self.selected_donut_profile_idx -= 1;
-                    *dirty = true;
-                }
-                if ui.button("Alt+Down").clicked()
-                    && self.selected_donut_profile_idx + 1 < self.cfg.donut.profiles.len()
-                {
-                    self.cfg.donut.move_profile_down(self.selected_donut_profile_idx);
-                    self.selected_donut_profile_idx += 1;
-                    *dirty = true;
-                }
-            });
+                card(ui, palette, |ui| {
+                    ScrollArea::vertical()
+                        .id_salt("donut_profiles_scroll")
+                        .auto_shrink([false, false])
+                        .min_scrolled_height(460.0)
+                        .max_height(520.0)
+                        .show(ui, |ui| {
+                            for i in 0..num_profiles {
+                                let (name, front_len, back_len, is_mixed) = {
+                                    let p = &self.cfg.donut.profiles[i];
+                                    (
+                                        p.name.clone(),
+                                        p.front_slices.len(),
+                                        p.back_slices.len(),
+                                        p.is_mixed_selection,
+                                    )
+                                };
 
-            ui.add_space(design::space::XS);
-            ui.label(
-                egui::RichText::new("When two profiles share an extension, the higher one opens. Alt+Up / Alt+Down moves the selected profile.")
-                    .size(design::type_scale::MICRO)
-                    .color(palette.text_muted),
-            );
-        });
+                                if !search_q.is_empty() && !name.to_lowercase().contains(&search_q) {
+                                    continue;
+                                }
+
+                                let is_selected = self.selected_donut_profile_idx == i;
+                                let card_rect = ui.allocate_space(Vec2::new(col1_w - 28.0, 36.0)).1;
+                                let is_hovered = ui.rect_contains_pointer(card_rect);
+
+                                let bg_color = if is_selected {
+                                    palette.card_hover
+                                } else if is_hovered {
+                                    Color32::from_rgba_unmultiplied(
+                                        palette.card_hover.r(),
+                                        palette.card_hover.g(),
+                                        palette.card_hover.b(),
+                                        80,
+                                    )
+                                } else {
+                                    Color32::TRANSPARENT
+                                };
+
+                                crate::gui::squircle::squircle_filled(
+                                    ui.painter(),
+                                    card_rect,
+                                    Rounding::same(design::radius::SM),
+                                    bg_color,
+                                );
+                                if is_selected {
+                                    crate::gui::squircle::squircle_stroke(
+                                        ui.painter(),
+                                        card_rect,
+                                        Rounding::same(design::radius::SM),
+                                        Stroke::new(1.5_f32, palette.accent),
+                                    );
+                                }
+
+                                let tag = match name.as_str() {
+                                    "Images" => "IMG",
+                                    "PDF" => "PDF",
+                                    "Office" => "DOC",
+                                    "Audio" => "AUD",
+                                    "Video" => "VID",
+                                    "Subtitles" => "SUB",
+                                    "3D & CAD" => "3D",
+                                    "Archives" => "ZIP",
+                                    "Code & Text" => "TXT",
+                                    "Ebooks" => "EPUB",
+                                    "Mixed" => "MIX",
+                                    _ => "ALL",
+                                };
+                                let tag_rect = Rect::from_min_size(
+                                    Pos2::new(card_rect.min.x + 6.0, card_rect.center().y - 8.0),
+                                    Vec2::new(32.0, 16.0),
+                                );
+                                crate::gui::squircle::squircle_filled(
+                                    ui.painter(),
+                                    tag_rect,
+                                    Rounding::same(3.0),
+                                    Color32::from_rgba_unmultiplied(
+                                        palette.accent.r(),
+                                        palette.accent.g(),
+                                        palette.accent.b(),
+                                        45,
+                                    ),
+                                );
+                                ui.painter().text(
+                                    tag_rect.center(),
+                                    Align2::CENTER_CENTER,
+                                    tag,
+                                    egui::FontId::proportional(design::type_scale::MICRO),
+                                    palette.accent,
+                                );
+
+                                let text_color = if is_selected {
+                                    palette.text_primary
+                                } else {
+                                    palette.text_secondary
+                                };
+                                let label_pos =
+                                    egui::pos2(card_rect.min.x + 44.0, card_rect.center().y - 7.0);
+                                ui.painter().text(
+                                    label_pos,
+                                    Align2::LEFT_TOP,
+                                    &name,
+                                    egui::FontId::proportional(design::type_scale::BODY_SM),
+                                    text_color,
+                                );
+
+                                let badge_str = if is_mixed {
+                                    format!("M {} / {}", front_len, back_len)
+                                } else if back_len == 0 {
+                                    format!("{}", front_len)
+                                } else {
+                                    format!("{} / {}", front_len, back_len)
+                                };
+                                let badge_pos =
+                                    egui::pos2(card_rect.max.x - 8.0, card_rect.center().y - 6.0);
+                                ui.painter().text(
+                                    badge_pos,
+                                    Align2::RIGHT_TOP,
+                                    badge_str,
+                                    egui::FontId::proportional(design::type_scale::MICRO),
+                                    palette.text_muted,
+                                );
+
+                                if ui.interact(card_rect, ui.id().with(i), Sense::click()).clicked() {
+                                    self.selected_donut_profile_idx = i;
+                                }
+                                ui.add_space(2.0);
+                            }
+                        });
+                });
+
+                ui.add_space(design::space::SM);
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("+ New profile").clicked() {
+                        let new_id = format!("custom_{}", self.cfg.donut.profiles.len() + 1);
+                        let new_prof = DonutProfile::new(
+                            &new_id,
+                            "New Profile",
+                            &[".txt"],
+                            &["PNG", "PDF", "WEBP", "JPG"],
+                            &["CROP", "RENAME", "ZIP", "EXPLORE"],
+                        );
+                        self.cfg.donut.profiles.push(new_prof);
+                        self.selected_donut_profile_idx = self.cfg.donut.profiles.len() - 1;
+                        *dirty = true;
+                    }
+                    if ui.button("Alt+Up").clicked() && self.selected_donut_profile_idx > 0 {
+                        self.cfg.donut.move_profile_up(self.selected_donut_profile_idx);
+                        self.selected_donut_profile_idx -= 1;
+                        *dirty = true;
+                    }
+                    if ui.button("Alt+Down").clicked()
+                        && self.selected_donut_profile_idx + 1 < self.cfg.donut.profiles.len()
+                    {
+                        self.cfg.donut.move_profile_down(self.selected_donut_profile_idx);
+                        self.selected_donut_profile_idx += 1;
+                        *dirty = true;
+                    }
+                });
+
+                ui.add_space(design::space::XS);
+                ui.label(
+                    egui::RichText::new("When two profiles share an extension, the higher one opens. Alt+Up / Alt+Down moves the selected profile.")
+                        .size(design::type_scale::MICRO)
+                        .color(palette.text_muted),
+                );
+            },
+        );
     }
 
     fn render_donut_col2(
@@ -2738,8 +2818,8 @@ impl PreferencesView {
 
     fn render_presets(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
         let avail_w = ui.available_width();
-        let left_w = 260.0_f32;
-        let right_w = (avail_w - left_w - 32.0).max(340.0);
+        let left_w = 280.0_f32;
+        let right_w = (avail_w - left_w - 32.0).max(420.0);
 
         let default_preset_names = [
             ("PNG", "PNG", "Image"),
@@ -2766,75 +2846,173 @@ impl PreferencesView {
 
         ui.horizontal_top(|ui| {
             // Left Column: Presets Drawer
-            ui.allocate_ui_with_layout(Vec2::new(left_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
-                ui.horizontal(|ui| {
-                    let _ = ui.button("+ New");
-                    let _ = ui.button("Duplicate");
-                    let _ = ui.button("Delete");
-                });
-                ui.add_space(design::space::XS);
-                ui.horizontal(|ui| {
-                    let _ = ui.button("Preset gallery");
-                    let _ = ui.button("Export for gallery...");
-                });
-                ui.add_space(design::space::XS);
-
-                ui.add(TextEdit::singleline(&mut self.preset_search).hint_text("Search").desired_width(left_w - 12.0));
-                ui.add_space(design::space::SM);
-
-                let search_q = self.preset_search.trim().to_lowercase();
-                ScrollArea::vertical()
-                    .id_salt("presets_list_scroll")
-                    .max_height(540.0)
-                    .show(ui, |ui| {
-                        for (idx, (pname, psub, _pcat)) in default_preset_names.iter().enumerate() {
-                            if !search_q.is_empty() && !pname.to_lowercase().contains(&search_q) {
-                                continue;
-                            }
-                            let is_sel = self.selected_preset_idx == idx;
-                            let card_rect = ui.allocate_space(Vec2::new(left_w - 16.0, 36.0)).1;
-                            let is_hov = ui.rect_contains_pointer(card_rect);
-
-                            let bg_color = if is_sel {
-                                palette.card_hover
-                            } else if is_hov {
-                                Color32::from_rgba_unmultiplied(palette.card_hover.r(), palette.card_hover.g(), palette.card_hover.b(), 70)
-                            } else {
-                                Color32::TRANSPARENT
-                            };
-
-                            crate::gui::squircle::squircle_filled(ui.painter(), card_rect, Rounding::same(design::radius::SM), bg_color);
-                            if is_sel {
-                                crate::gui::squircle::squircle_stroke(ui.painter(), card_rect, Rounding::same(design::radius::SM), Stroke::new(1.0_f32, palette.accent));
-                            }
-
-                            let text_color = if is_sel { palette.text_primary } else { palette.text_secondary };
-                            ui.painter().text(
-                                Pos2::new(card_rect.min.x + 8.0, card_rect.min.y + 6.0),
-                                Align2::LEFT_TOP,
-                                *pname,
-                                egui::FontId::proportional(design::type_scale::BODY_SM),
-                                text_color,
+            ui.allocate_ui_with_layout(
+                Vec2::new(left_w, ui.available_height()),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Presets")
+                                .size(design::type_scale::TITLE_SM)
+                                .strong()
+                                .color(palette.text_primary),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{} presets",
+                                    default_preset_names.len()
+                                ))
+                                .size(design::type_scale::CAPTION)
+                                .color(palette.text_muted),
                             );
-                            ui.painter().text(
-                                Pos2::new(card_rect.min.x + 8.0, card_rect.min.y + 20.0),
-                                Align2::LEFT_TOP,
-                                *psub,
-                                egui::FontId::proportional(design::type_scale::MICRO),
-                                palette.text_muted,
-                            );
-
-                            if ui.interact(card_rect, ui.id().with(idx), Sense::click()).clicked() {
-                                self.selected_preset_idx = idx;
-                            }
-                            ui.add_space(2.0);
-                        }
+                        });
                     });
-            });
+                    ui.add_space(design::space::XS);
+
+                    ui.horizontal(|ui| {
+                        let _ = ui.button("+ New");
+                        let _ = ui.button("Duplicate");
+                        let _ = ui.button("Delete");
+                    });
+                    ui.add_space(design::space::XS);
+                    ui.horizontal(|ui| {
+                        let _ = ui.button("Preset gallery");
+                        let _ = ui.button("Export for gallery...");
+                    });
+                    ui.add_space(design::space::XS);
+
+                    ui.add(
+                        TextEdit::singleline(&mut self.preset_search)
+                            .hint_text("Search presets...")
+                            .desired_width(left_w - 12.0),
+                    );
+                    ui.add_space(design::space::SM);
+
+                    let search_q = self.preset_search.trim().to_lowercase();
+                    ui.spacing_mut().scroll.bar_width = 8.0;
+                    ui.spacing_mut().scroll.bar_inner_margin = 2.0;
+                    ui.spacing_mut().scroll.bar_outer_margin = 2.0;
+                    ui.spacing_mut().scroll.floating = false;
+
+                    card(ui, palette, |ui| {
+                        ScrollArea::vertical()
+                            .id_salt("presets_list_scroll")
+                            .auto_shrink([false, false])
+                            .min_scrolled_height(480.0)
+                            .max_height(560.0)
+                            .show(ui, |ui| {
+                                for (idx, (pname, psub, pcat)) in
+                                    default_preset_names.iter().enumerate()
+                                {
+                                    if !search_q.is_empty()
+                                        && !pname.to_lowercase().contains(&search_q)
+                                    {
+                                        continue;
+                                    }
+                                    let is_sel = self.selected_preset_idx == idx;
+                                    let card_rect =
+                                        ui.allocate_space(Vec2::new(left_w - 28.0, 42.0)).1;
+                                    let is_hov = ui.rect_contains_pointer(card_rect);
+
+                                    let bg_color = if is_sel {
+                                        palette.card_hover
+                                    } else if is_hov {
+                                        Color32::from_rgba_unmultiplied(
+                                            palette.card_hover.r(),
+                                            palette.card_hover.g(),
+                                            palette.card_hover.b(),
+                                            80,
+                                        )
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    };
+
+                                    crate::gui::squircle::squircle_filled(
+                                        ui.painter(),
+                                        card_rect,
+                                        Rounding::same(design::radius::SM),
+                                        bg_color,
+                                    );
+                                    if is_sel {
+                                        crate::gui::squircle::squircle_stroke(
+                                            ui.painter(),
+                                            card_rect,
+                                            Rounding::same(design::radius::SM),
+                                            Stroke::new(1.5_f32, palette.accent),
+                                        );
+                                    }
+
+                                    let tag = match *pcat {
+                                        "Image" => "IMG",
+                                        "Document" => "DOC",
+                                        "Video" => "VID",
+                                        _ => "SET",
+                                    };
+                                    let tag_rect = Rect::from_min_size(
+                                        Pos2::new(card_rect.min.x + 6.0, card_rect.center().y - 8.0),
+                                        Vec2::new(32.0, 16.0),
+                                    );
+                                    crate::gui::squircle::squircle_filled(
+                                        ui.painter(),
+                                        tag_rect,
+                                        Rounding::same(3.0),
+                                        Color32::from_rgba_unmultiplied(
+                                            palette.accent.r(),
+                                            palette.accent.g(),
+                                            palette.accent.b(),
+                                            45,
+                                        ),
+                                    );
+                                    ui.painter().text(
+                                        tag_rect.center(),
+                                        Align2::CENTER_CENTER,
+                                        tag,
+                                        egui::FontId::proportional(design::type_scale::MICRO),
+                                        palette.accent,
+                                    );
+
+                                    let text_color = if is_sel {
+                                        palette.text_primary
+                                    } else {
+                                        palette.text_secondary
+                                    };
+                                    ui.painter().text(
+                                        Pos2::new(card_rect.min.x + 44.0, card_rect.min.y + 6.0),
+                                        Align2::LEFT_TOP,
+                                        *pname,
+                                        egui::FontId::proportional(design::type_scale::BODY_SM),
+                                        text_color,
+                                    );
+                                    ui.painter().text(
+                                        Pos2::new(card_rect.min.x + 44.0, card_rect.min.y + 22.0),
+                                        Align2::LEFT_TOP,
+                                        *psub,
+                                        egui::FontId::proportional(design::type_scale::MICRO),
+                                        palette.text_muted,
+                                    );
+
+                                    if ui
+                                        .interact(card_rect, ui.id().with(idx), Sense::click())
+                                        .clicked()
+                                    {
+                                        self.selected_preset_idx = idx;
+                                    }
+                                    ui.add_space(2.0);
+                                }
+                            });
+                    });
+                },
+            );
 
             ui.add_space(design::space::SM);
             let div_rect = ui.allocate_space(Vec2::new(1.0, 600.0)).1;
-            crate::gui::squircle::squircle_filled(ui.painter(), div_rect, Rounding::ZERO, palette.border);
+            crate::gui::squircle::squircle_filled(
+                ui.painter(),
+                div_rect,
+                Rounding::ZERO,
+                palette.border,
+            );
             ui.add_space(design::space::SM);
 
             // Right Column: Preset Parameters Editor
@@ -3515,7 +3693,7 @@ impl PreferencesView {
                 &format!("{:.0}%", sc * 100.0),
                 dirty,
                 |ui, dirty| {
-                    for v in [1.5_f32, 1.25, 1.1, 1.0, 0.9] {
+                    for v in [0.9_f32, 1.0, 1.1, 1.25, 1.5] {
                         let label = format!("{:.0}%", v * 100.0);
                         let active = (*sc_mut - v).abs() < 0.01;
                         if design::segmented_pill(ui, palette, active, &label).clicked() {
@@ -3528,9 +3706,9 @@ impl PreferencesView {
             let glass_mut = &mut self.cfg.glass_effect;
             setting_row(ui, palette, "Glass effect", "", dirty, |ui, dirty| {
                 for (v, lab) in [
-                    (GlassEffect::Acrylic, "Acrylic"),
-                    (GlassEffect::Mica, "Mica"),
                     (GlassEffect::Opaque, "Opaque"),
+                    (GlassEffect::Mica, "Mica"),
+                    (GlassEffect::Acrylic, "Acrylic"),
                 ] {
                     let active = *glass_mut == v;
                     if design::segmented_pill(ui, palette, active, lab).clicked() {
@@ -3550,6 +3728,7 @@ impl PreferencesView {
                 &op_lbl,
                 dirty,
                 |ui, dirty| {
+                    ui.spacing_mut().slider_width = 160.0;
                     if ui
                         .add(egui::Slider::new(op_mut, 0.15..=1.0).show_value(false))
                         .changed()
@@ -3700,9 +3879,9 @@ impl PreferencesView {
             let cm_mut = &mut self.cfg.checkbox_mode;
             setting_row(ui, palette, "Checkbox mode", "", dirty, |ui, dirty| {
                 for (v, lab) in [
-                    (CheckboxMode::Always, "Always"),
-                    (CheckboxMode::Hover, "On hover"),
                     (CheckboxMode::Off, "Hidden"),
+                    (CheckboxMode::Hover, "On hover"),
+                    (CheckboxMode::Always, "Always"),
                 ] {
                     let active = *cm_mut == v;
                     if design::segmented_pill(ui, palette, active, lab).clicked() {
@@ -4570,26 +4749,47 @@ impl PreferencesView {
 
             card_divider(ui, palette);
 
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Detected System Tools on PC")
+                        .size(design::type_scale::BODY_SM)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let has_scoop = crate::core::existing_engines::is_scoop_available();
+                    let has_winget = crate::core::existing_engines::is_winget_available();
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Package Managers: Scoop [{}] | WinGet [{}]",
+                            if has_scoop { "Ready" } else { "Missing" },
+                            if has_winget { "Ready" } else { "Missing" },
+                        ))
+                        .size(design::type_scale::MICRO)
+                        .color(if has_scoop || has_winget {
+                            Color32::from_rgb(52, 199, 89)
+                        } else {
+                            palette.text_muted
+                        }),
+                    );
+                });
+            });
             ui.label(
-                egui::RichText::new("Detected System Tools on PC")
-                    .size(design::type_scale::BODY_SM)
-                    .strong()
-                    .color(palette.text_primary),
-            );
-            ui.label(
-                egui::RichText::new("Mossambi inspects existing tools installed on your computer. If native parsing lacks proprietary format support, execution seamlessly shifts to your installed tools without downloading external packages.")
+                egui::RichText::new("Mossambi inspects existing tools installed on your computer across Program Files, LocalAppData, Scoop shims, WinGet, and PATH. You can install missing tools directly or browse to an executable.")
                     .size(design::type_scale::MICRO)
                     .color(palette.text_muted),
             );
 
-            let registry = crate::core::ExistingEngineRegistry::detect();
+            let registry = crate::core::ExistingEngineRegistry::detect_with_custom(
+                &self.cfg.custom_engine_paths,
+            );
             for eng in &registry.engines {
                 if eng.id == "native-rust" {
                     continue;
                 }
                 card_divider(ui, palette);
                 ui.allocate_ui_with_layout(
-                    Vec2::new(ui.available_width(), 32.0),
+                    Vec2::new(ui.available_width(), 42.0),
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         let is_installed = eng.status == crate::core::EngineStatus::Installed;
@@ -4603,26 +4803,122 @@ impl PreferencesView {
                         ui.painter()
                             .circle_filled(dot_rect.center(), 3.5, dot_color);
                         ui.add_space(4.0);
-                        ui.label(
-                            egui::RichText::new(&eng.name)
-                                .size(design::type_scale::BODY)
-                                .color(palette.text_primary),
-                        );
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let status_text = if is_installed {
-                                "Detected"
-                            } else {
-                                "Not detected"
-                            };
+
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(&eng.name)
+                                        .size(design::type_scale::BODY)
+                                        .strong()
+                                        .color(palette.text_primary),
+                                );
+                                for fmt in &eng.formats {
+                                    ui.label(
+                                        egui::RichText::new(format!("[{}]", fmt))
+                                            .size(design::type_scale::MICRO)
+                                            .color(palette.accent),
+                                    );
+                                }
+                            });
                             ui.label(
-                                egui::RichText::new(status_text)
-                                    .size(design::type_scale::CAPTION)
-                                    .color(if is_installed {
-                                        dot_color
-                                    } else {
-                                        palette.text_muted
-                                    }),
+                                egui::RichText::new(eng.description())
+                                    .size(design::type_scale::MICRO)
+                                    .color(palette.text_muted),
                             );
+                        });
+
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.add_space(4.0);
+                            let install_st =
+                                crate::core::existing_engines::get_engine_install_state(&eng.id);
+                            match install_st {
+                                crate::core::existing_engines::InstallState::Installing(
+                                    ref msg,
+                                ) => {
+                                    ui.label(
+                                        egui::RichText::new(format!("[Installing] {}", msg))
+                                            .size(design::type_scale::CAPTION)
+                                            .color(palette.accent),
+                                    );
+                                }
+                                crate::core::existing_engines::InstallState::Success(ref msg) => {
+                                    ui.label(
+                                        egui::RichText::new(format!("[Done] {}", msg))
+                                            .size(design::type_scale::CAPTION)
+                                            .color(Color32::from_rgb(52, 199, 89)),
+                                    );
+                                }
+                                crate::core::existing_engines::InstallState::Error(ref err) => {
+                                    ui.label(
+                                        egui::RichText::new(format!("[Error] {}", err))
+                                            .size(design::type_scale::CAPTION)
+                                            .color(Color32::from_rgb(255, 69, 58)),
+                                    );
+                                }
+                                crate::core::existing_engines::InstallState::Idle => {
+                                    if is_installed {
+                                        ui.label(
+                                            egui::RichText::new("Installed")
+                                                .size(design::type_scale::CAPTION)
+                                                .strong()
+                                                .color(Color32::from_rgb(52, 199, 89)),
+                                        );
+                                        if let Some(ref path) = eng.path {
+                                            let file_name = path
+                                                .file_name()
+                                                .map(|n| n.to_string_lossy().to_string())
+                                                .unwrap_or_else(|| "tool.exe".to_string());
+                                            if ui
+                                                .small_button(format!("Locate ({})", file_name))
+                                                .clicked()
+                                            {
+                                                #[cfg(target_os = "windows")]
+                                                {
+                                                    let _ = std::process::Command::new("explorer")
+                                                        .args(["/select,", &path.to_string_lossy()])
+                                                        .spawn();
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        ui.label(
+                                            egui::RichText::new("Not detected")
+                                                .size(design::type_scale::CAPTION)
+                                                .color(palette.text_muted),
+                                        );
+                                        if eng.scoop_package().is_some()
+                                            && crate::core::existing_engines::is_scoop_available()
+                                            && ui.small_button("Install (Scoop)").clicked()
+                                        {
+                                            crate::core::existing_engines::spawn_engine_install(
+                                                eng.id.clone(),
+                                                true,
+                                            );
+                                        }
+                                        if eng.winget_id().is_some()
+                                            && crate::core::existing_engines::is_winget_available()
+                                            && ui.small_button("Install (WinGet)").clicked()
+                                        {
+                                            crate::core::existing_engines::spawn_engine_install(
+                                                eng.id.clone(),
+                                                false,
+                                            );
+                                        }
+                                        if ui.small_button("Browse...").clicked() {
+                                            if let Some(picked) = rfd::FileDialog::new()
+                                                .set_title("Locate Tool Executable")
+                                                .add_filter("Executables", &["exe", "cmd", "bat"])
+                                                .pick_file()
+                                            {
+                                                self.cfg
+                                                    .custom_engine_paths
+                                                    .insert(eng.id.clone(), picked);
+                                                *dirty = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         });
                     },
                 );
@@ -5560,12 +5856,13 @@ fn setting_row(
             ui.add_space(4.0);
         });
     } else {
-        // Standard wide viewport: label left, control right-aligned with ample breathing room
+        // Standard wide viewport: label in column 1 (180px), controls left-aligned in column 2
+        // for perfect vertical alignment across all setting rows (Apple HIG alignment)
         ui.allocate_ui_with_layout(
             Vec2::new(w, 34.0),
             Layout::left_to_right(Align::Center),
             |ui| {
-                let label_w = 170.0_f32.min(w * 0.32);
+                let label_w = 180.0_f32.min(w * 0.35);
                 ui.allocate_ui_with_layout(
                     Vec2::new(label_w, 34.0),
                     Layout::left_to_right(Align::Center),
@@ -5578,20 +5875,22 @@ fn setting_row(
                         );
                     },
                 );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.add_space(4.0);
-                    let x0 = ui.cursor().right();
-                    body(ui, dirty);
-                    let control_w = x0 - ui.cursor().right();
-                    if !value.is_empty() && control_w < 150.0 {
-                        ui.add_space(design::space::XS);
-                        ui.label(
-                            egui::RichText::new(value)
-                                .size(design::type_scale::SMALL)
-                                .color(palette.text_muted),
-                        );
-                    }
-                });
+                ui.allocate_ui_with_layout(
+                    Vec2::new(w - label_w - 8.0, 34.0),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.add_space(8.0);
+                        body(ui, dirty);
+                        if !value.is_empty() {
+                            ui.add_space(design::space::SM);
+                            ui.label(
+                                egui::RichText::new(value)
+                                    .size(design::type_scale::SMALL)
+                                    .color(palette.text_muted),
+                            );
+                        }
+                    },
+                );
             },
         );
     }
