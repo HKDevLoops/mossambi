@@ -745,7 +745,11 @@ impl PreferencesView {
             Rounding::same(14.0),
             Stroke::new(
                 if is_hovered { 1.5_f32 } else { 1.0_f32 },
-                if is_hovered { palette.accent } else { palette.border },
+                if is_hovered {
+                    palette.accent
+                } else {
+                    palette.border
+                },
             ),
         );
 
@@ -2484,7 +2488,10 @@ impl PreferencesView {
                 ("palette", "Command palette"),
                 ("new_tab", "New tab"),
                 ("close_tab", "Close tab"),
-            ].iter().enumerate() {
+            ]
+            .iter()
+            .enumerate()
+            {
                 if idx > 0 {
                     card_divider(ui, palette);
                 }
@@ -3014,11 +3021,13 @@ impl PreferencesView {
                     .clicked()
                 {
                     if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-                        self.cfg.watch_folders.push(crate::core::config::WatchFolderConfig {
-                            path: folder,
-                            target_format: "PNG".to_string(),
-                            enabled: true,
-                        });
+                        self.cfg
+                            .watch_folders
+                            .push(crate::core::config::WatchFolderConfig {
+                                path: folder,
+                                target_format: "PNG".to_string(),
+                                enabled: true,
+                            });
                         *dirty = true;
                     }
                 }
@@ -3096,9 +3105,12 @@ impl PreferencesView {
                                             .color(palette.text_primary),
                                     );
                                     ui.label(
-                                        egui::RichText::new(format!("Converts to: {}", wf.target_format))
-                                            .size(design::type_scale::MICRO)
-                                            .color(palette.text_muted),
+                                        egui::RichText::new(format!(
+                                            "Converts to: {}",
+                                            wf.target_format
+                                        ))
+                                        .size(design::type_scale::MICRO)
+                                        .color(palette.text_muted),
                                     );
                                 },
                             );
@@ -3121,7 +3133,8 @@ impl PreferencesView {
 
                                 // Apple HIG Pill Toggle Switch (38x22 px)
                                 let track_size = Vec2::new(38.0, 22.0);
-                                let (rect, resp) = ui.allocate_exact_size(track_size, Sense::click());
+                                let (rect, resp) =
+                                    ui.allocate_exact_size(track_size, Sense::click());
                                 if resp.clicked() {
                                     wf.enabled = !wf.enabled;
                                     *dirty = true;
@@ -3146,8 +3159,11 @@ impl PreferencesView {
                                     rect.min.x + 11.0
                                 };
                                 let thumb_center = egui::pos2(thumb_x, rect.center().y);
-                                ui.painter()
-                                    .circle_filled(thumb_center, 8.5, Color32::from_rgb(255, 255, 255));
+                                ui.painter().circle_filled(
+                                    thumb_center,
+                                    8.5,
+                                    Color32::from_rgb(255, 255, 255),
+                                );
 
                                 egui::ComboBox::from_id_salt(format!("wf_fmt_{}", idx))
                                     .selected_text(&wf.target_format)
@@ -4582,8 +4598,10 @@ impl PreferencesView {
                         } else {
                             palette.text_muted
                         };
-                        let (dot_rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
-                        ui.painter().circle_filled(dot_rect.center(), 3.5, dot_color);
+                        let (dot_rect, _) =
+                            ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+                        ui.painter()
+                            .circle_filled(dot_rect.center(), 3.5, dot_color);
                         ui.add_space(4.0);
                         ui.label(
                             egui::RichText::new(&eng.name)
@@ -5235,7 +5253,11 @@ impl PreferencesView {
                                 "{} cores, {} threads ({})",
                                 topo.physical_cores,
                                 topo.total_logical_cores,
-                                if topo.is_hybrid { "Modern Hybrid" } else { "Classic Multicore" }
+                                if topo.is_hybrid {
+                                    "Modern Hybrid"
+                                } else {
+                                    "Classic Multicore"
+                                }
                             ))
                             .size(design::type_scale::BODY_SM)
                             .color(palette.text_secondary),
@@ -5354,9 +5376,11 @@ impl PreferencesView {
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
-                            egui::RichText::new("255 Formats Native Rust + DirectML Hardware Acceleration")
-                                .size(design::type_scale::BODY_SM)
-                                .color(palette.text_secondary),
+                            egui::RichText::new(
+                                "255 Formats Native Rust + DirectML Hardware Acceleration",
+                            )
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_secondary),
                         );
                     });
                 },
@@ -5418,7 +5442,8 @@ fn card_divider(ui: &mut Ui, palette: &ThemePalette) {
     } else {
         Color32::from_rgba_unmultiplied(0, 0, 0, 12)
     };
-    ui.painter().rect_filled(rect, Rounding::ZERO, divider_color);
+    ui.painter()
+        .rect_filled(rect, Rounding::ZERO, divider_color);
     ui.add_space(design::space::XS);
 }
 
@@ -5494,11 +5519,7 @@ fn toggle_row(
                 ui.label(
                     egui::RichText::new(text)
                         .size(design::type_scale::BODY_SM)
-                        .color(if *val {
-                            on_green
-                        } else {
-                            palette.text_muted
-                        }),
+                        .color(if *val { on_green } else { palette.text_muted }),
                 );
             });
         },

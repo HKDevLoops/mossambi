@@ -707,7 +707,9 @@ impl MossambiApp {
                                 if let Some(idx) = wedge_idx {
                                     let active_list = match state.face {
                                         crate::widget::DonutFace::PrimaryFormats => &state.sectors,
-                                        crate::widget::DonutFace::StudioTools => &state.back_sectors,
+                                        crate::widget::DonutFace::StudioTools => {
+                                            &state.back_sectors
+                                        }
                                     };
                                     if let Some(target) = active_list.get(idx) {
                                         if let Some(ref f) = state.current_file {
