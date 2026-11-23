@@ -45,10 +45,17 @@ pub struct HwCapabilities {
 
 /// Detects GPU hardware encoders, NPU neural accelerators, and CPU SIMD topology.
 pub fn detect_hardware_capabilities() -> HwCapabilities {
-    let mut vendor = GpuVendor::None;
-    let mut h264_encoder = "libx264";
-    let mut hevc_encoder = "libx265";
-    let mut ffmpeg_hwaccel_flag = "auto";
+    #[cfg(target_os = "macos")]
+    let (vendor, h264_encoder, hevc_encoder, ffmpeg_hwaccel_flag) = (
+        GpuVendor::Apple,
+        "h264_videotoolbox",
+        "hevc_videotoolbox",
+        "videotoolbox",
+    );
+
+    #[cfg(not(target_os = "macos"))]
+    let (mut vendor, mut h264_encoder, mut hevc_encoder, mut ffmpeg_hwaccel_flag) =
+        (GpuVendor::None, "libx264", "libx265", "auto");
 
     // Architecture SIMD detection
     let supports_neon = cfg!(target_arch = "aarch64") || cfg!(target_arch = "arm");
@@ -146,14 +153,7 @@ pub fn detect_hardware_capabilities() -> HwCapabilities {
         }
     }
 
-    // macOS detection
-    #[cfg(target_os = "macos")]
-    {
-        vendor = GpuVendor::Apple;
-        h264_encoder = "h264_videotoolbox";
-        hevc_encoder = "hevc_videotoolbox";
-        ffmpeg_hwaccel_flag = "videotoolbox";
-    }
+    // macOS detection handled at initialization
 
     HwCapabilities {
         vendor,
@@ -203,7 +203,7 @@ fn detect_npu_engine() -> (NpuEngine, &'static str, bool) {
         );
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(not(target_os = "macos"), target_arch = "aarch64"))]
     {
         return (
             NpuEngine::CpuSimdVector,
@@ -212,7 +212,7 @@ fn detect_npu_engine() -> (NpuEngine, &'static str, bool) {
         );
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(not(target_os = "macos"), target_arch = "x86_64"))]
     {
         return (
             NpuEngine::CpuSimdVector,
