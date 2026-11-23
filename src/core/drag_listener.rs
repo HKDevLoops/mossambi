@@ -97,14 +97,20 @@ fn current_timestamp_ms() -> u64 {
 // WINDOWS WIN32 IMPLEMENTATION
 // ==============================================================================
 #[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+struct RawGestureTrigger {
+    gesture: GestureKind,
+    cursor_pos: (f32, f32),
+    pt_x: i32,
+    pt_y: i32,
+}
+
+#[cfg(target_os = "windows")]
 struct HookContext {
     tracker: KinematicGestureTracker,
     is_holding_files: bool,
-    sender: Sender<DragGestureEvent>,
+    trigger_sender: Sender<RawGestureTrigger>,
     shutdown: Arc<AtomicBool>,
-    cached_files: Vec<PathBuf>,
-    #[allow(dead_code)]
-    deep_drag_only: bool,
 }
 
 #[cfg(target_os = "windows")]
@@ -117,7 +123,7 @@ fn run_listener_loop(
     allow_shake: bool,
     allow_circle: bool,
     sensitivity_px: f32,
-    #[allow(dead_code)] deep_drag_only: bool,
+    _deep_drag_only: bool,
 ) {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -147,6 +153,8 @@ fn run_listener_loop(
         }
     }
 
+    let (trigger_tx, trigger_rx) = channel::<RawGestureTrigger>();
+
     let tracker = KinematicGestureTracker::new(allow_shake, allow_circle)
         .with_sensitivity(sensitivity_px, 2600);
 
@@ -155,10 +163,8 @@ fn run_listener_loop(
         *guard = Some(HookContext {
             tracker,
             is_holding_files: false,
-            sender: tx,
+            trigger_sender: trigger_tx,
             shutdown: Arc::clone(&shutdown),
-            cached_files: Vec::new(),
-            deep_drag_only,
         });
     }
 
@@ -177,7 +183,12 @@ fn run_listener_loop(
         let info = *(l_param as *const MSLLHOOKSTRUCT);
         let pt = info.pt;
 
-        let mut maybe_event: Option<DragGestureEvent> = None;
+        // Check hardware left button state directly to prevent missed mouse-down events
+        let lbutton_down = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_LBUTTON as i32,
+        ) as u16
+            & 0x8000)
+            != 0;
 
         if let Ok(mut guard) = GLOBAL_CONTEXT.try_lock() {
             if let Some(ctx) = guard.as_mut() {
@@ -185,56 +196,28 @@ fn run_listener_loop(
                     return CallNextHookEx(null_mut(), n_code, w_param, l_param);
                 }
 
-                match msg {
-                    WM_LBUTTONDOWN => {
-                        // Fast reset on mouse press - do not block hook with COM/UIA probes
-                        ctx.tracker.reset();
-                        ctx.is_holding_files = true;
-                        ctx.cached_files.clear();
-                    }
-                    WM_LBUTTONUP => {
-                        // User dropped or released button - reset drag state immediately
+                if msg == WM_LBUTTONDOWN {
+                    ctx.tracker.reset();
+                    ctx.is_holding_files = true;
+                } else if msg == WM_LBUTTONUP || !lbutton_down {
+                    ctx.is_holding_files = false;
+                    ctx.tracker.reset();
+                } else if msg == WM_MOUSEMOVE && (ctx.is_holding_files || lbutton_down) {
+                    ctx.is_holding_files = true;
+                    let now_ms = current_timestamp_ms();
+                    if let Some(gesture) = ctx.tracker.feed(pt.x as f32, pt.y as f32, now_ms) {
+                        // ULTRA-LIGHTWEIGHT: Dispatch raw trigger to worker thread immediately.
+                        // Zero COM or UIAutomation queries inside this hook procedure prevents
+                        // Windows LowLevelHooksTimeout from silently unhooking low_level_mouse_proc.
+                        let _ = ctx.trigger_sender.send(RawGestureTrigger {
+                            gesture,
+                            cursor_pos: (pt.x as f32, pt.y as f32),
+                            pt_x: pt.x,
+                            pt_y: pt.y,
+                        });
                         ctx.is_holding_files = false;
                         ctx.tracker.reset();
-                        ctx.cached_files.clear();
                     }
-                    WM_MOUSEMOVE if ctx.is_holding_files => {
-                        // ULTRA-LIGHTWEIGHT FAST PATH:
-                        // Only active when user is dragging mouse with button pressed!
-                        let now_ms = current_timestamp_ms();
-                        if let Some(gesture) = ctx.tracker.feed(pt.x as f32, pt.y as f32, now_ms) {
-                            // File probe ONLY executes when an intentional kinematic gesture
-                            // (shake / circle) has actually been recognized!
-                            let mut files = extract_clipboard_files();
-                            if files.is_empty() {
-                                files = query_active_explorer_files(pt);
-                            }
-                            if files.is_empty() {
-                                if let Some(pp) =
-                                    crate::gui::active_file::get_active_file_under_cursor(
-                                        pt.x, pt.y,
-                                    )
-                                {
-                                    files.push(pp);
-                                }
-                            }
-                            // Always summon the Donut toolbar when an intentional gesture is completed.
-                            // If file discovery was empty during rapid motion, provide an empty batch
-                            // so the Donut toolbar awakens at cursor position to accept drop.
-                            maybe_event = Some(DragGestureEvent {
-                                gesture,
-                                cursor_pos: (pt.x as f32, pt.y as f32),
-                                files,
-                            });
-                            ctx.is_holding_files = false;
-                            ctx.tracker.reset();
-                        }
-                    }
-                    _ => {}
-                }
-
-                if let Some(evt) = maybe_event {
-                    let _ = ctx.sender.send(evt);
                 }
             }
         }
@@ -261,7 +244,7 @@ fn run_listener_loop(
             let _ = MsgWaitForMultipleObjectsEx(
                 0,
                 std::ptr::null(),
-                100,
+                30,
                 QS_ALLINPUT,
                 MWMO_INPUTAVAILABLE,
             );
@@ -271,6 +254,32 @@ fn run_listener_loop(
                 }
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
+            }
+
+            // Drain triggers from the low-level hook and perform file discovery safely outside the hook!
+            while let Ok(trigger) = trigger_rx.try_recv() {
+                let mut files = extract_clipboard_files();
+                if files.is_empty() {
+                    let point = windows_sys::Win32::Foundation::POINT {
+                        x: trigger.pt_x,
+                        y: trigger.pt_y,
+                    };
+                    files = query_active_explorer_files(point);
+                }
+                if files.is_empty() {
+                    if let Some(pp) = crate::gui::active_file::get_active_file_under_cursor(
+                        trigger.pt_x,
+                        trigger.pt_y,
+                    ) {
+                        files.push(pp);
+                    }
+                }
+
+                let _ = tx.send(DragGestureEvent {
+                    gesture: trigger.gesture,
+                    cursor_pos: trigger.cursor_pos,
+                    files,
+                });
             }
         }
     }

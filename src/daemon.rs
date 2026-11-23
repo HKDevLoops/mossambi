@@ -546,7 +546,7 @@ fn spawn_widget_at(x: i32, y: i32) {
     spawn_widget_at_with_files(x, y, &[], false);
 }
 
-fn spawn_widget_at_with_files(x: i32, y: i32, files: &[std::path::PathBuf], active_drag: bool) {
+pub fn spawn_widget_at_with_files(x: i32, y: i32, files: &[std::path::PathBuf], active_drag: bool) {
     #[cfg(target_os = "windows")]
     {
         use std::ptr::null_mut;

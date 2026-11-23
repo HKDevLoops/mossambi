@@ -1612,11 +1612,11 @@ impl eframe::App for MossambiApp {
             // Kinematic gesture recognition for in-window drag:
             // Detect file shake or 2 clockwise circles while dragging a file or holding pointer
             if let Some(pos) = i.pointer.hover_pos() {
-                let is_dragging_files = !i.raw.hovered_files.is_empty()
-                    || (i.pointer.button_down(egui::PointerButton::Primary)
-                        && !self.studio_view.explorer_view.selected_paths().is_empty());
+                let is_dragging = !i.raw.hovered_files.is_empty()
+                    || i.pointer.button_down(egui::PointerButton::Primary)
+                    || i.pointer.is_decidedly_dragging();
 
-                if is_dragging_files {
+                if is_dragging {
                     if let Some(_gesture) = self
                         .studio_view
                         .explorer_view
@@ -1635,7 +1635,8 @@ impl eframe::App for MossambiApp {
                                         .selected_paths()
                                         .first()
                                         .cloned()
-                                });
+                                })
+                                .or_else(|| self.current_file.clone());
                             drop_donut_summon = Some((pos, path));
                         }
                     }
@@ -1726,6 +1727,7 @@ impl eframe::App for MossambiApp {
 
         if let Some((pos, path)) = drop_donut_summon {
             self.open_in_window_donut(Some(pos), path);
+            ctx.request_repaint();
         }
 
         // 4. Render Desktop Studio Application Layout

@@ -252,7 +252,7 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
     let cfg = crate::core::MossambiConfig::load();
     let allow_shake = cfg.gesture_type == "shake" || cfg.gesture_type == "both";
     let allow_circle = cfg.gesture_type == "circle" || cfg.gesture_type == "both";
-    let mut drag_listener = if is_master_tray && cfg.enable_gesture_wakeup {
+    let mut drag_listener = if cfg.enable_gesture_wakeup {
         Some(crate::core::DragGestureListener::start(
             allow_shake,
             allow_circle,
@@ -281,6 +281,12 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                     if msg.wParam == HOTKEY_WIDGET_ID as usize {
                         let active_file =
                             crate::gui::active_file::get_active_file_under_cursor(pt.x, pt.y);
+                        let files_slice = if let Some(ref f) = active_file {
+                            vec![f.clone()]
+                        } else {
+                            Vec::new()
+                        };
+                        crate::daemon::spawn_widget_at_with_files(pt.x, pt.y, &files_slice, false);
                         let _ = sender.send(AppControlEvent::SummonWidget {
                             cursor_x: pt.x as f32,
                             cursor_y: pt.y as f32,
@@ -494,6 +500,20 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                 let active_file = evt.files.first().cloned().or_else(|| {
                     get_active_file_under_cursor(evt.cursor_pos.0 as i32, evt.cursor_pos.1 as i32)
                 });
+                let files_slice = if let Some(ref f) = active_file {
+                    vec![f.clone()]
+                } else {
+                    evt.files.clone()
+                };
+                // Immediately summon or reposition the Radial Widget at cursor location!
+                // Directly activating from the background tray loop guarantees zero delay
+                // and works even when the main Mossambi Studio window is unfocused or idle.
+                crate::daemon::spawn_widget_at_with_files(
+                    evt.cursor_pos.0 as i32,
+                    evt.cursor_pos.1 as i32,
+                    &files_slice,
+                    true,
+                );
                 let _ = sender.send(AppControlEvent::SummonWidget {
                     cursor_x: evt.cursor_pos.0,
                     cursor_y: evt.cursor_pos.1,
