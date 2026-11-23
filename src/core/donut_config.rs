@@ -1,7 +1,9 @@
 //! Donut Toolbar Profiles and Appearance Configuration
 //!
-//! Models the 19 domain profiles, custom extension bindings, front/back slice configurations,
+//! Models the 20 domain profiles, custom extension bindings, front/back slice configurations,
 //! and donut appearance metrics matching the macOS/Filee visual architecture.
+//!
+//! Pure 7-bit ASCII.
 
 use serde::{Deserialize, Serialize};
 
@@ -78,6 +80,103 @@ impl DonutSlicePreset {
             is_action: true,
         }
     }
+
+    /// Factory method mapping preset IDs to typed slice definitions.
+    pub fn from_id(id: &str) -> Self {
+        match id {
+            "to-png" => Self::format("PNG"),
+            "to-jpg" => Self::format("JPG"),
+            "to-webp" => Self::format("WEBP"),
+            "to-gif" => Self::format("GIF"),
+            "to-pdf" => Self::format("PDF"),
+            "merge-pdf" => Self::action("Merge PDF", "Merge PDF", "Merge selected files into one PDF"),
+            "trace-svg" => Self::action("Trace SVG", "Trace SVG", "Vector contour tracing to SVG"),
+            "tool-crop" => Self::action("Crop", "Crop", "Interactive crop canvas"),
+            "rotate" => Self::action("Rotate", "Rotate", "Rotate image in 90 degree increments"),
+            "remove-background" => Self::action("Cut out", "Cut out", "Remove background with AI or color mask"),
+            "merge-images" => Self::action("Merge images", "Merge images", "Combine pictures horizontally or vertically"),
+            "compress-image" => Self::action("Compress image", "Compress image", "Lossy or lossless size reduction"),
+            "half-size" => Self::action("Half size", "Half size", "Scale image to 50% width and height"),
+            "tool-image-edit" => Self::action("Edit pictures", "Edit pictures", "Adjust brightness, contrast and tone"),
+            "zip-all" => Self::action("One ZIP", "One ZIP", "Compress items into one archive"),
+            "to-docx" => Self::format("DOCX"),
+            "to-xlsx" => Self::format("XLSX"),
+            "pdf-slides" => Self::action("PDF Slides", "Slides", "Extract PDF pages to slide presentations"),
+            "to-txt" => Self::format("TXT"),
+            "to-hwpx" => Self::format("HWPX"),
+            "to-hwp" => Self::format("HWP"),
+            "pdf-edit" => Self::action("PDF Edit", "Edit", "Lossless page rearrangement and annotations"),
+            "pdf-split" => Self::action("PDF Split", "Split", "Separate PDF into individual page files"),
+            "compress-pdf" => Self::action("Compress PDF", "Compress PDF", "Downscale PDF images and compress streams"),
+            "remove-metadata" => Self::action("Remove Meta", "Strip Meta", "Strip EXIF and tracking metadata"),
+            "to-tiff" => Self::format("TIFF"),
+            "to-html" => Self::format("HTML"),
+            "translate" => Self::action("Translate", "Translate", "Document language translation"),
+            "to-md" => Self::format("MD"),
+            "pdf-long-image" => Self::action("Long Image", "Long Image", "Stack pages into one vertical strip"),
+            "to-csv" => Self::format("CSV"),
+            "tool-sheet-studio" => Self::action("Sheet Studio", "Studio", "Advanced tabular dataset editor"),
+            "to-vcf" => Self::format("VCF"),
+            "to-ics" => Self::format("ICS"),
+            "to-pptx" => Self::format("PPTX"),
+            "to-odp" => Self::format("ODP"),
+            "to-odt" => Self::format("ODT"),
+            "to-epub" => Self::format("EPUB"),
+            "to-azw3" => Self::format("AZW3"),
+            "to-kepub" => Self::format("KEPUB"),
+            "to-mp4" => Self::format("MP4"),
+            "mp4-720" => Self::action("MP4 720p", "720p", "Export H.264 video at 720p resolution"),
+            "to-mov" => Self::format("MOV"),
+            "to-mp3" => Self::format("MP3"),
+            "caption-video" => Self::action("Captions", "Captions", "Transcribe audio to subtitles"),
+            "tool-clip" => Self::action("Clip", "Clip", "Trim start and end timestamps"),
+            "crop-video" => Self::action("Crop Video", "Crop Video", "Crop video aspect ratio"),
+            "compress-video" => Self::action("Compress Video", "Compress Video", "CRF-based video size reduction"),
+            "merge-videos" => Self::action("Merge Videos", "Merge Videos", "Concatenate video streams losslessly"),
+            "mp4-av1" => Self::action("MP4 AV1", "AV1", "Encode ultra-efficient AV1 video"),
+            "extract-frames-png" => Self::action("Extract Frames", "Frames", "Extract all video frames to PNGs"),
+            "mp3-128" => Self::action("MP3 128k", "128k", "Encode MP3 at 128 kbps"),
+            "to-m4a" => Self::format("M4A"),
+            "to-wav" => Self::format("WAV"),
+            "compress-audio" => Self::action("Compress Audio", "Compress Audio", "Audio bitrate optimization"),
+            "merge-audio" => Self::action("Merge Audio", "Merge Audio", "Join sound tracks into one"),
+            "to-alac" => Self::format("ALAC"),
+            "to-srt" => Self::format("SRT"),
+            "to-vtt" => Self::format("VTT"),
+            "to-svg" => Self::format("SVG"),
+            "to-ico" => Self::format("ICO"),
+            "to-icns" => Self::format("ICNS"),
+            "to-dxf" => Self::format("DXF"),
+            "to-dwg" => Self::format("DWG"),
+            "extract" => Self::action("Extract", "Extract", "Extract archive contents"),
+            "to-zip" => Self::format("ZIP"),
+            "to-7z" => Self::format("7Z"),
+            "to-iso" => Self::format("ISO"),
+            "to-woff2" => Self::format("WOFF2"),
+            "to-woff" => Self::format("WOFF"),
+            "to-ttf" => Self::format("TTF"),
+            "to-otf" => Self::format("OTF"),
+            "to-json" => Self::format("JSON"),
+            "to-yaml" => Self::format("YAML"),
+            "to-xml" => Self::format("XML"),
+            "to-ods" => Self::format("ODS"),
+            "to-glb" => Self::format("GLB"),
+            "to-stl" => Self::format("STL"),
+            "to-obj" => Self::format("OBJ"),
+            "to-3mf" => Self::format("3MF"),
+            "to-geojson" => Self::format("GeoJSON"),
+            "to-shp" => Self::format("SHP"),
+            "to-kml" => Self::format("KML"),
+            "to-gpx" => Self::format("GPX"),
+            _ => {
+                if let Some(fmt) = id.strip_prefix("to-") {
+                    Self::format(&fmt.to_ascii_uppercase())
+                } else {
+                    Self::action(id, id, id)
+                }
+            }
+        }
+    }
 }
 
 /// Profile specifying the active slices and extension rules for a domain.
@@ -100,13 +199,10 @@ impl DonutProfile {
             name: name.to_string(),
             is_mixed_selection: id == "mixed",
             extensions: exts.iter().map(|s| s.to_string()).collect(),
-            front_slices: front.iter().map(|f| DonutSlicePreset::format(f)).collect(),
-            back_slices: back
-                .iter()
-                .map(|b| DonutSlicePreset::action(b, b, b))
-                .collect(),
-            max_front_slices: 8,
-            max_back_slices: 8,
+            front_slices: front.iter().map(|f| DonutSlicePreset::from_id(f)).collect(),
+            back_slices: back.iter().map(|b| DonutSlicePreset::from_id(b)).collect(),
+            max_front_slices: 12,
+            max_back_slices: 12,
         }
     }
 
@@ -115,6 +211,19 @@ impl DonutProfile {
         self.extensions
             .iter()
             .any(|e| e.trim_start_matches('.').to_ascii_lowercase() == clean)
+    }
+
+    pub fn contains_extension(&self, ext: &str) -> bool {
+        self.matches_extension(ext)
+    }
+
+    /// Formats the front and back item count badge string (e.g. "7-8" or "4").
+    pub fn count_badge(&self) -> String {
+        if self.back_slices.is_empty() {
+            format!("{}", self.front_slices.len())
+        } else {
+            format!("{}-{}", self.front_slices.len(), self.back_slices.len())
+        }
     }
 }
 
@@ -132,7 +241,7 @@ pub fn default_back_tools() -> Vec<DonutSlicePreset> {
     ]
 }
 
-/// Complete Donut configuration encompassing all 19 domain profiles and appearance.
+/// Complete Donut configuration encompassing all 20 domain profiles and appearance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DonutConfig {
     pub profiles: Vec<DonutProfile>,
@@ -142,14 +251,12 @@ pub struct DonutConfig {
 
 impl Default for DonutConfig {
     fn default() -> Self {
-        let back = default_back_tools();
-
         let profiles = vec![
-            DonutProfile {
-                id: "images".to_string(),
-                name: "Images".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![
+            // 1. Images (7 Front, 8 Back)
+            DonutProfile::new(
+                "images",
+                "Images",
+                &[
                     ".png", ".jpg", ".jpeg", ".jpe", ".jfif", ".webp", ".tiff", ".tif", ".bmp",
                     ".dib", ".gif", ".ico", ".avif", ".heic", ".heif", ".hif", ".jxl", ".jp2",
                     ".j2k", ".jpf", ".jpx", ".psd", ".psb", ".tga", ".icb", ".vda", ".vst", ".ppm",
@@ -160,416 +267,213 @@ impl Default for DonutConfig {
                     ".cr2", ".cr3", ".crw", ".nef", ".nrw", ".arw", ".srf", ".sr2", ".orf", ".rw2",
                     ".raf", ".pef", ".dcr", ".kdc", ".erf", ".mos", ".mrw", ".x3f", ".3fr", ".fff",
                     ".iiq", ".mef", ".rwl", ".srw", ".raw",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("PNG"),
-                    DonutSlicePreset::format("JPG"),
-                    DonutSlicePreset::format("WEBP"),
-                    DonutSlicePreset::format("GIF"),
-                    DonutSlicePreset::format("PDF"),
-                    DonutSlicePreset::action(
-                        "Trace SVG",
-                        "Trace SVG",
-                        "Vector contour tracing to SVG",
-                    ),
                 ],
-                back_slices: back.clone(),
-                max_front_slices: 6,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "pdf".to_string(),
-                name: "PDF".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![".pdf", ".ai"].into_iter().map(String::from).collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("PNG"),
-                    DonutSlicePreset::format("JPG"),
-                    DonutSlicePreset::format("DOCX"),
-                    DonutSlicePreset::format("TXT"),
-                    DonutSlicePreset::format("PPTX"),
-                    DonutSlicePreset::format("XLSX"),
-                    DonutSlicePreset::action("Compress", "Compress", "Downscale PDF images"),
+                &["to-png", "to-jpg", "to-webp", "to-gif", "to-pdf", "merge-pdf", "trace-svg"],
+                &["tool-crop", "rotate", "remove-background", "merge-images", "compress-image", "half-size", "tool-image-edit", "zip-all"],
+            ),
+
+            // 2. PDF (8 Front, 8 Back)
+            DonutProfile::new(
+                "pdf",
+                "PDF",
+                &[".pdf", ".ai"],
+                &["to-png", "to-jpg", "to-docx", "to-xlsx", "pdf-slides", "to-txt", "to-hwpx", "to-hwp"],
+                &["pdf-edit", "pdf-split", "merge-pdf", "compress-pdf", "remove-metadata", "to-tiff", "to-html", "zip-all"],
+            ),
+
+            // 3. Documents (Office) (7 Front, 4 Back)
+            DonutProfile::new(
+                "office",
+                "Documents",
+                &[
+                    ".docx", ".doc", ".dotx", ".dotm", ".docm", ".odt", ".rtf", ".wps", ".wpd",
+                    ".pages", ".oxps", ".xps",
                 ],
-                back_slices: back.clone(),
-                max_front_slices: 7,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "documents".to_string(),
-                name: "Documents".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![
-                    ".docx", ".doc", ".odt", ".rtf", ".wps", ".wpd", ".pages", ".oxps", ".xps",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("PDF"),
-                    DonutSlicePreset::format("DOCX"),
-                    DonutSlicePreset::format("ODT"),
-                    DonutSlicePreset::format("TXT"),
-                    DonutSlicePreset::format("HTML"),
-                    DonutSlicePreset::format("MD"),
-                    DonutSlicePreset::format("EPUB"),
+                &["to-pdf", "to-hwpx", "to-hwp", "to-docx", "to-txt", "to-png", "merge-pdf"],
+                &["translate", "to-md", "pdf-long-image", "zip-all"],
+            ),
+
+            // 4. Spreadsheets (6 Front, 5 Back)
+            DonutProfile::new(
+                "spreadsheets",
+                "Spreadsheets",
+                &[
+                    ".xlsx", ".xls", ".xltx", ".xlsm", ".xlsb", ".ods", ".ots", ".csv", ".tsv",
+                    ".numbers",
                 ],
-                back_slices: back.clone(),
-                max_front_slices: 7,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "spreadsheets".to_string(),
-                name: "Spreadsheets".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![
-                    ".xlsx", ".xls", ".ods", ".csv", ".tsv", ".numbers", ".xlsm", ".xlsb",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("CSV"),
-                    DonutSlicePreset::format("XLSX"),
-                    DonutSlicePreset::format("ODS"),
-                    DonutSlicePreset::format("PDF"),
-                    DonutSlicePreset::format("HTML"),
-                    DonutSlicePreset::format("JSON"),
+                &["to-pdf", "to-xlsx", "to-csv", "to-hwpx", "to-hwp", "merge-pdf"],
+                &["tool-sheet-studio", "to-docx", "to-vcf", "to-ics", "zip-all"],
+            ),
+
+            // 5. Presentations (7 Front, 4 Back)
+            DonutProfile::new(
+                "presentations",
+                "Presentations",
+                &[".pptx", ".ppt", ".potx", ".potm", ".pptm", ".ppsx", ".pps", ".odp", ".otp", ".key"],
+                &["to-pdf", "to-png", "to-jpg", "to-pptx", "to-hwpx", "to-hwp", "merge-pdf"],
+                &["to-odp", "pdf-long-image", "to-docx", "zip-all"],
+            ),
+
+            // 6. HWP / HWPX (7 Front, 4 Back)
+            DonutProfile::new(
+                "hwp",
+                "HWP / HWPX",
+                &[".hwp", ".hwpx"],
+                &["to-pdf", "to-docx", "to-hwpx", "to-hwp", "to-png", "to-txt", "merge-pdf"],
+                &["to-html", "to-odt", "pdf-long-image", "zip-all"],
+            ),
+
+            // 7. Text & Markdown (6 Front, 5 Back)
+            DonutProfile::new(
+                "text",
+                "Text & Markdown",
+                &[
+                    ".md", ".markdown", ".txt", ".rst", ".adoc", ".asciidoc", ".tex", ".latex",
+                    ".typ", ".typst", ".org", ".wiki", ".ipynb", ".log", ".bat", ".cmd", ".sh",
+                    ".bash", ".ps1", ".py", ".rb", ".js", ".ts", ".rs", ".c", ".cpp", ".h",
+                    ".hpp", ".cs", ".go", ".java", ".lua", ".sql", ".html", ".htm", ".css",
                 ],
-                back_slices: back.clone(),
-                max_front_slices: 6,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "presentations".to_string(),
-                name: "Presentations".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![".pptx", ".ppt", ".odp", ".key", ".ppsx", ".pps"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("PDF"),
-                    DonutSlicePreset::format("PPTX"),
-                    DonutSlicePreset::format("ODP"),
-                    DonutSlicePreset::format("PNG"),
-                    DonutSlicePreset::format("JPG"),
-                    DonutSlicePreset::format("HTML"),
-                    DonutSlicePreset::format("TXT"),
+                &["to-pdf", "to-hwpx", "to-hwp", "to-docx", "to-html", "to-txt"],
+                &["translate", "to-md", "to-odt", "merge-pdf", "zip-all"],
+            ),
+
+            // 8. E-books (6 Front, 3 Back)
+            DonutProfile::new(
+                "ebooks",
+                "E-books",
+                &[
+                    ".epub", ".mobi", ".azw", ".azw3", ".kepub", ".fb2", ".cbz", ".cbr", ".cb7",
+                    ".cbt", ".cbc", ".lit", ".lrf", ".chm", ".pdb", ".pml", ".rb", ".snb", ".tcr",
+                    ".oeb", ".azw4",
                 ],
-                back_slices: back.clone(),
-                max_front_slices: 7,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "hwp".to_string(),
-                name: "HWP / HWPX".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![".hwp", ".hwpx"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("HWPX"),
-                    DonutSlicePreset::format("PDF"),
-                    DonutSlicePreset::format("DOCX"),
-                    DonutSlicePreset::format("MD"),
-                    DonutSlicePreset::format("HTML"),
-                    DonutSlicePreset::format("TXT"),
-                    DonutSlicePreset::format("PNG"),
+                &["to-pdf", "to-epub", "to-docx", "to-txt", "to-azw3", "to-kepub"],
+                &["translate", "to-md", "zip-all"],
+            ),
+
+            // 9. Video (6 Front, 8 Back)
+            DonutProfile::new(
+                "video",
+                "Video",
+                &[
+                    ".mp4", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".m4v", ".ts",
+                    ".mts", ".m2ts", ".vob", ".ogv", ".3gp", ".3g2", ".f4v", ".asf", ".rm",
+                    ".rmvb", ".dv", ".mxf",
                 ],
-                back_slices: back.clone(),
-                max_front_slices: 7,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "text".to_string(),
-                name: "Text & Markdown".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![
-                    ".md", ".txt", ".rst", ".adoc", ".tex", ".typ", ".org", ".wiki", ".ipynb",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("HTML"),
-                    DonutSlicePreset::format("PDF"),
-                    DonutSlicePreset::format("DOCX"),
-                    DonutSlicePreset::format("TXT"),
-                    DonutSlicePreset::format("ODT"),
-                    DonutSlicePreset::format("RTF"),
-                ],
-                back_slices: back.clone(),
-                max_front_slices: 6,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "ebooks".to_string(),
-                name: "E-books".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![
-                    ".epub", ".mobi", ".azw", ".azw3", ".fb2", ".cbz", ".cbr", ".lit", ".lrf",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("EPUB"),
-                    DonutSlicePreset::format("PDF"),
-                    DonutSlicePreset::format("DOCX"),
-                    DonutSlicePreset::format("TXT"),
-                    DonutSlicePreset::format("MOBI"),
-                    DonutSlicePreset::format("AZW3"),
-                ],
-                back_slices: back.clone(),
-                max_front_slices: 6,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "video".to_string(),
-                name: "Video".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![
-                    ".mp4", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".m4v", ".ts", ".mts",
-                    ".m2ts", ".vob", ".ogv",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("MP4"),
-                    DonutSlicePreset::format("WEBM"),
-                    DonutSlicePreset::format("MKV"),
-                    DonutSlicePreset::format("GIF"),
-                    DonutSlicePreset::format("MP3"),
-                    DonutSlicePreset::action(
-                        "Extract Audio",
-                        "Audio",
-                        "Lossless audio stream extraction",
-                    ),
-                ],
-                back_slices: back.clone(),
-                max_front_slices: 6,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "audio".to_string(),
-                name: "Audio".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![
+                &["to-mp4", "mp4-720", "to-mov", "to-gif", "to-mp3", "caption-video"],
+                &["tool-clip", "crop-video", "compress-video", "merge-videos", "remove-metadata", "mp4-av1", "extract-frames-png", "zip-all"],
+            ),
+
+            // 10. Audio (5 Front, 5 Back)
+            DonutProfile::new(
+                "audio",
+                "Audio",
+                &[
                     ".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".wma", ".aiff",
-                    ".alac", ".caf", ".wv",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("MP3"),
-                    DonutSlicePreset::format("FLAC"),
-                    DonutSlicePreset::format("WAV"),
-                    DonutSlicePreset::format("M4A"),
-                    DonutSlicePreset::format("OGG"),
+                    ".aif", ".alac", ".caf", ".wv", ".ape", ".dsd", ".dsf", ".dff", ".dts",
+                    ".ac3", ".eac3", ".tta",
                 ],
-                back_slices: back.clone(),
-                max_front_slices: 5,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "subtitles".to_string(),
-                name: "Subtitles".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![
-                    ".srt", ".vtt", ".ass", ".ssa", ".smi", ".lrc", ".ttml", ".sub",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("SRT"),
-                    DonutSlicePreset::format("VTT"),
-                    DonutSlicePreset::format("ASS"),
-                    DonutSlicePreset::format("TXT"),
+                &["to-mp3", "mp3-128", "to-m4a", "to-wav", "caption-video"],
+                &["compress-audio", "merge-audio", "remove-metadata", "to-alac", "zip-all"],
+            ),
+
+            // 11. Subtitles (2 Front, 1 Back)
+            DonutProfile::new(
+                "subtitles",
+                "Subtitles",
+                &[
+                    ".srt", ".vtt", ".ass", ".ssa", ".smi", ".sami", ".lrc", ".ttml", ".sub",
+                    ".scc", ".krc",
                 ],
-                back_slices: back.clone(),
-                max_front_slices: 4,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "vector".to_string(),
-                name: "Vector graphics".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![".svg", ".svgz", ".eps", ".ps"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("PDF"),
-                    DonutSlicePreset::format("PNG"),
-                    DonutSlicePreset::format("SVG"),
-                    DonutSlicePreset::format("DXF"),
-                    DonutSlicePreset::format("WEBP"),
+                &["to-srt", "to-vtt"],
+                &["zip-all"],
+            ),
+
+            // 12. Vector Graphics (5 Front, 5 Back)
+            DonutProfile::new(
+                "vector",
+                "Vector graphics",
+                &[".svg", ".svgz", ".eps", ".ps"],
+                &["to-png", "to-pdf", "to-svg", "to-jpg", "to-webp"],
+                &["to-tiff", "to-ico", "to-icns", "to-dxf", "zip-all"],
+            ),
+
+            // 13. Archives (4 Front, 0 Back)
+            DonutProfile::new(
+                "archives",
+                "Archives",
+                &[
+                    ".zip", ".tar", ".gz", ".tgz", ".zst", ".tzst", ".7z", ".rar", ".bz2",
+                    ".tbz2", ".xz", ".txz", ".iso", ".cab", ".dmg", ".lz", ".wbpz",
                 ],
-                back_slices: back.clone(),
-                max_front_slices: 5,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "archives".to_string(),
-                name: "Archives".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![
-                    ".zip", ".tar", ".gz", ".tgz", ".zst", ".7z", ".rar", ".bz2", ".xz", ".iso",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::action(
-                        "Unpack",
-                        "Unpack",
-                        "Safe extraction preserving directory tree",
-                    ),
-                    DonutSlicePreset::format("ZIP"),
-                    DonutSlicePreset::format("TAR.GZ"),
-                    DonutSlicePreset::format("TAR.ZST"),
-                ],
-                back_slices: back.clone(),
-                max_front_slices: 4,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "cad".to_string(),
-                name: "CAD drawings".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![".dwg", ".dxf"].into_iter().map(String::from).collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("DXF"),
-                    DonutSlicePreset::format("PDF"),
-                    DonutSlicePreset::format("SVG"),
-                    DonutSlicePreset::format("PNG"),
-                    DonutSlicePreset::format("DWG"),
-                ],
-                back_slices: back.clone(),
-                max_front_slices: 5,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "fonts".to_string(),
-                name: "Fonts".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![".ttf", ".otf", ".woff", ".woff2", ".eot", ".fon"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("TTF"),
-                    DonutSlicePreset::format("OTF"),
-                    DonutSlicePreset::format("WOFF"),
-                    DonutSlicePreset::format("WOFF2"),
-                ],
-                back_slices: back.clone(),
-                max_front_slices: 4,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "data".to_string(),
-                name: "Data".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![
+                &["extract", "zip-all", "to-zip", "to-7z"],
+                &[],
+            ),
+
+            // 14. Folders (3 Front, 0 Back)
+            DonutProfile::new(
+                "folders",
+                "Folders",
+                &[],
+                &["to-iso", "to-zip", "zip-all"],
+                &[],
+            ),
+
+            // 15. CAD Drawings (5 Front, 3 Back)
+            DonutProfile::new(
+                "cad",
+                "CAD drawings",
+                &[".dwg", ".dxf", ".plt"],
+                &["to-pdf", "to-png", "to-svg", "to-dxf", "to-dwg"],
+                &["to-jpg", "merge-pdf", "zip-all"],
+            ),
+
+            // 16. Fonts (4 Front, 1 Back)
+            DonutProfile::new(
+                "fonts",
+                "Fonts",
+                &[".ttf", ".otf", ".woff", ".woff2", ".eot", ".fon", ".fnt"],
+                &["to-woff2", "to-woff", "to-ttf", "to-otf"],
+                &["zip-all"],
+            ),
+
+            // 17. Data (5 Front, 4 Back)
+            DonutProfile::new(
+                "data",
+                "Data",
+                &[
                     ".json", ".jsonl", ".yaml", ".yml", ".toml", ".xml", ".vcf", ".ics",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("JSON"),
-                    DonutSlicePreset::format("YAML"),
-                    DonutSlicePreset::format("TOML"),
-                    DonutSlicePreset::format("XML"),
-                    DonutSlicePreset::format("CSV"),
+                    ".plist",
                 ],
-                back_slices: back.clone(),
-                max_front_slices: 5,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "models3d".to_string(),
-                name: "3D models".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![".glb", ".gltf", ".stl", ".obj", ".3mf", ".ply", ".fbx"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("GLB"),
-                    DonutSlicePreset::format("STL"),
-                    DonutSlicePreset::format("OBJ"),
-                    DonutSlicePreset::format("3MF"),
-                    DonutSlicePreset::format("PNG"),
-                ],
-                back_slices: back.clone(),
-                max_front_slices: 5,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "geospatial".to_string(),
-                name: "Geospatial".to_string(),
-                is_mixed_selection: false,
-                extensions: vec![".geojson", ".kml", ".kmz", ".gpx", ".shp"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
-                front_slices: vec![
-                    DonutSlicePreset::format("GeoJSON"),
-                    DonutSlicePreset::format("KML"),
-                    DonutSlicePreset::format("KMZ"),
-                    DonutSlicePreset::format("GPX"),
-                    DonutSlicePreset::format("CSV"),
-                ],
-                back_slices: back.clone(),
-                max_front_slices: 5,
-                max_back_slices: 8,
-            },
-            DonutProfile {
-                id: "mixed".to_string(),
-                name: "Mixed files".to_string(),
-                is_mixed_selection: true,
-                extensions: Vec::new(),
-                front_slices: vec![
-                    DonutSlicePreset::action(
-                        "Compress ZIP",
-                        "ZIP",
-                        "Bundle all files into one ZIP",
-                    ),
-                    DonutSlicePreset::action(
-                        "PDF Portfolio",
-                        "PDF",
-                        "Combine into unified PDF document",
-                    ),
-                    DonutSlicePreset::action(
-                        "Batch Transcode",
-                        "Batch",
-                        "Transcode each to default format",
-                    ),
-                    DonutSlicePreset::action(
-                        "Batch Rename",
-                        "Rename",
-                        "Batch rename with numeric sequences",
-                    ),
-                    DonutSlicePreset::action(
-                        "Sibling Copy",
-                        "Copy",
-                        "Duplicate with non-destructive suffix",
-                    ),
-                ],
-                back_slices: back,
-                max_front_slices: 5,
-                max_back_slices: 8,
-            },
+                &["to-json", "to-yaml", "to-xml", "to-csv", "to-xlsx"],
+                &["to-ods", "to-html", "to-md", "zip-all"],
+            ),
+
+            // 18. 3D Models (5 Front, 1 Back)
+            DonutProfile::new(
+                "models",
+                "3D models",
+                &[".glb", ".gltf", ".stl", ".obj", ".3mf", ".ply", ".fbx"],
+                &["to-glb", "to-stl", "to-obj", "to-3mf", "to-png"],
+                &["zip-all"],
+            ),
+
+            // 19. Geospatial (5 Front, 1 Back)
+            DonutProfile::new(
+                "geo",
+                "Geospatial",
+                &[".geojson", ".kml", ".kmz", ".gpx", ".shp"],
+                &["to-geojson", "to-shp", "to-kml", "to-csv", "to-gpx"],
+                &["zip-all"],
+            ),
+
+            // 20. Mixed Files (5 Front, 2 Back)
+            DonutProfile::new(
+                "mixed",
+                "Mixed files",
+                &[],
+                &["to-pdf", "merge-pdf", "zip-all", "to-png", "to-txt"],
+                &["to-jpg", "to-docx"],
+            ),
         ];
 
         Self {
@@ -583,6 +487,15 @@ impl Default for DonutConfig {
 impl DonutConfig {
     pub fn find_profile_for_extension(&self, ext: &str) -> Option<&DonutProfile> {
         self.find_profile_for_extension_filtered(ext, None)
+    }
+
+    pub fn find_profile_for_filename(&self, filename: &str) -> Option<&DonutProfile> {
+        let path = std::path::Path::new(filename);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext.is_empty() {
+            return None;
+        }
+        self.find_profile_for_extension(ext)
     }
 
     pub fn find_profile_for_extension_filtered(
@@ -599,8 +512,8 @@ impl DonutConfig {
                 let domain_key = match p.id.as_str() {
                     "cad" => "cad",
                     "fonts" => "fonts",
-                    "models3d" => "models_3d",
-                    "geospatial" => "maps",
+                    "models" | "models3d" => "models_3d",
+                    "geo" | "geospatial" => "maps",
                     "audio" => "pro_audio",
                     "video" => "video_broadcast",
                     _ => "",
@@ -619,11 +532,10 @@ impl DonutConfig {
             .unwrap_or(&self.profiles[0])
     }
 
-    pub fn active_profile_mut(&mut self) -> &mut DonutProfile {
-        if self.selected_profile_index >= self.profiles.len() {
-            self.selected_profile_index = 0;
+    pub fn select_profile_by_id(&mut self, id: &str) {
+        if let Some(pos) = self.profiles.iter().position(|p| p.id == id || (p.id == "office" && id == "documents")) {
+            self.selected_profile_index = pos;
         }
-        &mut self.profiles[self.selected_profile_index]
     }
 
     pub fn move_profile_up(&mut self, index: usize) {
@@ -670,7 +582,7 @@ mod tests {
     #[test]
     fn test_donut_config_default_profiles() {
         let cfg = DonutConfig::default();
-        assert_eq!(cfg.profiles.len(), 19);
+        assert_eq!(cfg.profiles.len(), 20);
         assert_eq!(cfg.profiles[0].name, "Images");
         assert!(cfg.profiles[0].matches_extension("png"));
         assert!(cfg.profiles[0].matches_extension(".webp"));
