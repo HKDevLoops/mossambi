@@ -545,7 +545,12 @@ fn test_tier3_combo_launch_intent_single_instance_roundtrip() {
 
 #[test]
 fn test_tier3_combo_breadcrumbs_and_ancestors() {
+    // Use native separators: on POSIX a backslash is an ordinary character,
+    // so a hardcoded "C:\\..." path is a single component and has no ancestors.
+    #[cfg(windows)]
     let p = PathBuf::from("C:\\Users\\User\\Documents\\Project");
+    #[cfg(not(windows))]
+    let p = PathBuf::from("/home/user/Documents/Project");
     let ancestors = mossambi::gui::explorer_view::ancestor_chain(&p);
     assert!(ancestors.len() >= 3);
 
@@ -800,7 +805,11 @@ fn test_tier3_combo_search_query_case_insensitivity() {
 
 #[test]
 fn test_tier3_combo_breadcrumb_navigation_root_and_trailing_slashes() {
+    // Native separators keep the trailing-slash case valid on every OS.
+    #[cfg(windows)]
     let p = PathBuf::from("C:\\Projects\\mossambi\\");
+    #[cfg(not(windows))]
+    let p = PathBuf::from("/home/user/Projects/mossambi/");
     let crumbs = mossambi::core::fs_utils::parse_breadcrumbs(&p);
     assert!(!crumbs.is_empty());
     assert_eq!(crumbs.last().unwrap().label, "mossambi");

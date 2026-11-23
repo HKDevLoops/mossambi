@@ -448,6 +448,17 @@ pub fn is_protected_os_file(path: &Path) -> bool {
         }
     }
     let p_str = path.to_string_lossy().to_lowercase();
+    // Recognise Windows-style paths on every OS: on POSIX a backslash is not a
+    // separator, so file_name() alone cannot see "pagefile.sys" in
+    // "C:\\pagefile.sys". Inspect the last component split on both separators.
+    let tail = p_str.rsplit(['/', '\\']).next().unwrap_or("");
+    if tail == "pagefile.sys"
+        || tail == "hiberfil.sys"
+        || tail == "swapfile.sys"
+        || tail == "dumpstack.log"
+    {
+        return true;
+    }
     p_str.contains("$recycle.bin\\s-1-5-18")
         || p_str.contains("$recycle.bin/s-1-5-18")
         || p_str.contains("$recycle.bin\\s-1-5-19")
@@ -1034,6 +1045,15 @@ pub fn parse_breadcrumbs(path: &Path) -> Vec<BreadcrumbSegment> {
 /// trees cannot overflow the call stack and memory stays proportional to the
 /// widest level rather than the full path depth.
 pub fn copy_entry_recursive(src: &Path, dest: &Path) -> std::io::Result<u64> {
+    // Guard against copying an entry onto itself. On Windows std::fs::copy
+    // rejects this, but on POSIX it would truncate the source while reading,
+    // destroying the file. Reject on every platform.
+    if src == dest {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "source and destination are the same path",
+        ));
+    }
     let mut total = 0u64;
     let mut stack: Vec<(PathBuf, PathBuf)> = vec![(src.to_path_buf(), dest.to_path_buf())];
 

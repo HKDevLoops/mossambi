@@ -190,6 +190,10 @@ fn test_tier4_scenario3_adversarial_path_traversal_attack() {
     let source_file = fs
         .create_file("source_payload.txt", b"secret")
         .expect("source");
+    // Windows forbids < > " | ? *; POSIX forbids '/' and NUL. A NUL byte is
+    // illegal on every OS, so use a Windows-specific set there and a NUL-bearing
+    // name on POSIX to keep the assertion valid across the whole CI matrix.
+    #[cfg(windows)]
     let illegal_names = [
         "bad<less>",
         "bad>greater<",
@@ -198,6 +202,8 @@ fn test_tier4_scenario3_adversarial_path_traversal_attack() {
         "bad?question",
         "bad*wildcard",
     ];
+    #[cfg(not(windows))]
+    let illegal_names = ["bad\0nul"];
     for illegal in illegal_names {
         let target = fs.root().join(illegal);
         assert!(

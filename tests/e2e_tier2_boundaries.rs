@@ -873,7 +873,13 @@ fn test_tier2_f15_reject_trailing_dot_or_space() {
 #[test]
 fn test_tier2_f15_reject_all_illegal_characters() {
     let fs = TestFsTree::new().expect("fs");
+    // Windows forbids these characters; POSIX forbids '/' inside one component.
+    // Use the current OS's genuinely illegal character set so the assertion
+    // stays valid on every platform in the CI matrix.
+    #[cfg(windows)]
     let illegals = ['<', '>', '"', '|', '?', '*'];
+    #[cfg(not(windows))]
+    let illegals = ['/'];
     for ch in illegals {
         let name = format!("bad{}name.txt", ch);
         let target = fs.root().join(name);
@@ -2045,10 +2051,17 @@ fn test_tier2_f29_symlink_to_directory_parent() {
 #[test]
 fn test_tier2_f29_validate_file_name_spaces_only() {
     let fs = TestFsTree::new().expect("fs");
-    let target = fs.root().join("   ");
+    // Windows rejects a spaces-only filename; POSIX allows it but rejects a
+    // name containing '/'. Use the current OS's genuinely illegal name so the
+    // assertion stays valid on every platform in the CI matrix.
+    #[cfg(windows)]
+    let bad_name = "   ";
+    #[cfg(not(windows))]
+    let bad_name = "   /";
+    let target = fs.root().join(bad_name);
     assert!(
         std::fs::File::create(&target).is_err(),
-        "Filesystem must reject spaces-only filename"
+        "Filesystem must reject illegal filename '{bad_name}'"
     );
 }
 

@@ -331,7 +331,7 @@ pub static THEMES: [PantoneTheme; 13] = [
         accent: PantoneColor::new("Purple", "dracula purple", "#bd93f9"),
         highlight: PantoneColor::new("Yellow", "dracula yellow", "#f1fa8c"),
         accent_alt: PantoneColor::new("Yellow", "dracula yellow", "#f1fa8c"),
-        selection: PantoneColor::new("Selection", "dracula sel", "#44475a"),
+        selection: PantoneColor::new("Selection", "dracula sel", "#52556b"),
         hover: PantoneColor::new("Hover", "dracula hov", "#383a4a"),
         success: PantoneColor::new("Green", "dracula green", "#50fa7b"),
         warn: PantoneColor::new("Orange", "dracula orange", "#ffb86c"),
