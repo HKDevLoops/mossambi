@@ -35,11 +35,31 @@ pub fn handle_widget(pos: Option<&str>, _active_drag: bool, file: Option<PathBuf
                 let hwnd = FindWindowW(null_mut(), title.as_ptr());
                 if !hwnd.is_null() {
                     use windows_sys::Win32::UI::WindowsAndMessaging::{
-                        PostMessageW, ShowWindow, SW_RESTORE,
+                        SetForegroundWindow, SetWindowPos, ShowWindow, SWP_NOSIZE, SWP_NOZORDER,
+                        SW_RESTORE,
                     };
-                    const WM_CLOSE: u32 = 0x0010;
                     ShowWindow(hwnd, SW_RESTORE);
-                    let _ = PostMessageW(hwnd, WM_CLOSE, 0, 0);
+                    SetForegroundWindow(hwnd);
+                    if let Some(pos_str) = pos {
+                        let parts: Vec<&str> = pos_str.split(',').collect();
+                        if parts.len() == 2 {
+                            if let (Ok(x), Ok(y)) = (
+                                parts[0].trim().parse::<i32>(),
+                                parts[1].trim().parse::<i32>(),
+                            ) {
+                                SetWindowPos(
+                                    hwnd,
+                                    null_mut(),
+                                    x - 200,
+                                    y - 200,
+                                    0,
+                                    0,
+                                    SWP_NOSIZE | SWP_NOZORDER,
+                                );
+                            }
+                        }
+                    }
+                    return Ok(());
                 }
             }
         }

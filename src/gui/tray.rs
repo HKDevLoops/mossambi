@@ -287,11 +287,6 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                             Vec::new()
                         };
                         crate::daemon::spawn_widget_at_with_files(pt.x, pt.y, &files_slice, false);
-                        let _ = sender.send(AppControlEvent::SummonWidget {
-                            cursor_x: pt.x as f32,
-                            cursor_y: pt.y as f32,
-                            active_file,
-                        });
                     } else if msg.wParam == HOTKEY_GUI_ID as usize {
                         let _ = sender.send(AppControlEvent::OpenStudio);
                     }
@@ -514,11 +509,6 @@ fn run_win32_tray_and_activation_loop(sender: Sender<AppControlEvent>, shutdown:
                     &files_slice,
                     true,
                 );
-                let _ = sender.send(AppControlEvent::SummonWidget {
-                    cursor_x: evt.cursor_pos.0,
-                    cursor_y: evt.cursor_pos.1,
-                    active_file,
-                });
             }
         }
 

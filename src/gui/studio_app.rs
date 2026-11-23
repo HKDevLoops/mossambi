@@ -568,229 +568,43 @@ impl MossambiApp {
     }
 
     pub fn launch_radial_widget_at(&self, pos: Option<(f32, f32)>, file: Option<&Path>) {
-        let exe = std::env::current_exe().ok();
-        let mut cmd = std::process::Command::new(
-            exe.as_deref()
-                .unwrap_or_else(|| std::path::Path::new("mossambi.exe")),
-        );
-        cmd.arg("widget");
-
-        if let Some((x, y)) = pos {
-            cmd.arg("--pos").arg(format!("{:.0},{:.0}", x, y));
-        }
-        if let Some(f) = file {
-            cmd.arg("--active-drag");
-            cmd.arg(f);
-        }
-        let _ = cmd.spawn();
+        let (x, y) = if let Some((px, py)) = pos {
+            (px as i32, py as i32)
+        } else {
+            #[cfg(target_os = "windows")]
+            {
+                let mut pt = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt) };
+                (pt.x, pt.y)
+            }
+            #[cfg(not(target_os = "windows"))]
+            (400, 300)
+        };
+        let files_slice = file.map(|f| vec![f.to_path_buf()]).unwrap_or_default();
+        crate::daemon::spawn_widget_at_with_files(x, y, &files_slice, false);
     }
 
     pub fn open_in_window_donut(&mut self, pos: Option<egui::Pos2>, file: Option<PathBuf>) {
-        let target_file = file.or_else(|| self.current_file.clone());
-        let (sectors, back_sectors) = if let Some(ref f) = target_file {
-            let (_cat, ext) = UniversalRegistry::classify_file(f);
-            if let Some(p) = self
-                .config
-                .donut
-                .find_profile_for_extension_filtered(&ext, Some(&self.config.fields))
-            {
-                let front: Vec<String> = p.front_slices.iter().map(|s| s.name.clone()).collect();
-                let back: Vec<String> = p.back_slices.iter().map(|s| s.name.clone()).collect();
-                (front, back)
-            } else {
-                let front = UniversalRegistry::get_sectors_for_file(f)
-                    .into_iter()
-                    .map(|s| s.to_string())
-                    .collect();
-                (
-                    front,
-                    crate::core::donut_config::default_back_tools()
-                        .into_iter()
-                        .map(|s| s.name)
-                        .collect(),
-                )
-            }
-        } else if let Some(p) = self.config.donut.profiles.first() {
-            let front: Vec<String> = p.front_slices.iter().map(|s| s.name.clone()).collect();
-            let back: Vec<String> = p.back_slices.iter().map(|s| s.name.clone()).collect();
-            (front, back)
+        let (x, y) = if let Some(p) = pos {
+            (p.x as i32, p.y as i32)
         } else {
-            (
-                vec!["JPG", "WEBP", "HEIC", "TIFF", "AVIF", "BMP", "PDF", "DOCX"]
-                    .into_iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-                crate::core::donut_config::default_back_tools()
-                    .into_iter()
-                    .map(|s| s.name)
-                    .collect(),
-            )
+            #[cfg(target_os = "windows")]
+            {
+                let mut pt = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt) };
+                (pt.x, pt.y)
+            }
+            #[cfg(not(target_os = "windows"))]
+            (400, 300)
         };
-
-        let initial_pos = pos.unwrap_or(egui::pos2(400.0, 300.0));
-        self.in_window_donut = Some(InWindowDonutState {
-            pos: initial_pos,
-            face: crate::widget::DonutFace::PrimaryFormats,
-            sectors,
-            back_sectors,
-            hovered_carpel: None,
-            current_file: target_file,
-            is_dragging: false,
-            drag_start_offset: egui::Vec2::ZERO,
-        });
+        let target_file = file.or_else(|| self.current_file.clone());
+        let files_slice = target_file.map(|f| vec![f]).unwrap_or_default();
+        crate::daemon::spawn_widget_at_with_files(x, y, &files_slice, false);
     }
 
-    pub fn render_in_window_donut(&mut self, ctx: &egui::Context) {
-        let mut close = false;
-        let mut convert_target: Option<(PathBuf, String)> = None;
-
-        if let Some(ref mut state) = self.in_window_donut {
-            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                close = true;
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
-                state.face = match state.face {
-                    crate::widget::DonutFace::PrimaryFormats => {
-                        crate::widget::DonutFace::StudioTools
-                    }
-                    crate::widget::DonutFace::StudioTools => {
-                        crate::widget::DonutFace::PrimaryFormats
-                    }
-                };
-            }
-
-            let donut_size = 360.0_f32;
-            let geometry = crate::widget::RadialWidgetGeometry::new(state.pos, donut_size);
-
-            egui::Area::new(egui::Id::new("mossambi_in_window_donut_area"))
-                .order(egui::Order::Foreground)
-                .fixed_pos(egui::pos2(0.0, 0.0))
-                .show(ctx, |ui| {
-                    let screen_rect = ctx.screen_rect();
-                    // Semi-transparent scrim: dismiss on click outside
-                    let resp = ui.allocate_rect(screen_rect, egui::Sense::click_and_drag());
-                    let painter = ui.painter();
-                    if resp.clicked() {
-                        if let Some(ptr) = resp.interact_pointer_pos() {
-                            let dist = (ptr - state.pos).length();
-                            if dist > (donut_size * 0.5 + 20.0) {
-                                close = true;
-                            }
-                        }
-                    }
-
-                    // Mouse interactions over donut
-                    if let Some(ptr) = ctx.input(|i| i.pointer.hover_pos()) {
-                        let center_dist = (ptr - state.pos).length();
-                        let hub_r = geometry.inner_radius;
-
-                        if center_dist <= hub_r {
-                            state.hovered_carpel = None;
-                            if resp.drag_started() {
-                                state.is_dragging = true;
-                                state.drag_start_offset = state.pos - ptr;
-                            }
-                            if resp.clicked() {
-                                state.face = match state.face {
-                                    crate::widget::DonutFace::PrimaryFormats => {
-                                        crate::widget::DonutFace::StudioTools
-                                    }
-                                    crate::widget::DonutFace::StudioTools => {
-                                        crate::widget::DonutFace::PrimaryFormats
-                                    }
-                                };
-                            }
-                        } else if center_dist <= geometry.outer_radius + 4.0 {
-                            let wedge_idx = geometry.hit_test_petal(ptr);
-                            state.hovered_carpel = wedge_idx;
-                            if resp.clicked() {
-                                if let Some(idx) = wedge_idx {
-                                    let active_list = match state.face {
-                                        crate::widget::DonutFace::PrimaryFormats => &state.sectors,
-                                        crate::widget::DonutFace::StudioTools => {
-                                            &state.back_sectors
-                                        }
-                                    };
-                                    if let Some(target) = active_list.get(idx) {
-                                        if let Some(ref f) = state.current_file {
-                                            convert_target = Some((f.clone(), target.clone()));
-                                        }
-                                        close = true;
-                                    }
-                                }
-                            }
-                        } else {
-                            state.hovered_carpel = None;
-                        }
-                    }
-
-                    if resp.dragged() && state.is_dragging {
-                        if let Some(ptr) = ctx.input(|i| i.pointer.hover_pos()) {
-                            let mut new_pos = ptr + state.drag_start_offset;
-                            new_pos.x = new_pos.x.clamp(180.0, screen_rect.max.x - 180.0);
-                            new_pos.y = new_pos.y.clamp(180.0, screen_rect.max.y - 180.0);
-                            state.pos = new_pos;
-                        }
-                    }
-                    if resp.drag_stopped() {
-                        state.is_dragging = false;
-                    }
-
-                    // Wheel flip support
-                    let wheel_y = ctx.input(|i| i.raw_scroll_delta.y);
-                    if wheel_y.abs() > 10.0 {
-                        if let Some(ptr) = ctx.input(|i| i.pointer.hover_pos()) {
-                            if (ptr - state.pos).length() <= geometry.outer_radius + 20.0 {
-                                state.face = match state.face {
-                                    crate::widget::DonutFace::PrimaryFormats => {
-                                        crate::widget::DonutFace::StudioTools
-                                    }
-                                    crate::widget::DonutFace::StudioTools => {
-                                        crate::widget::DonutFace::PrimaryFormats
-                                    }
-                                };
-                            }
-                        }
-                    }
-
-                    let active_strs: Vec<&str> = match state.face {
-                        crate::widget::DonutFace::PrimaryFormats => {
-                            state.sectors.iter().map(|s| s.as_str()).collect()
-                        }
-                        crate::widget::DonutFace::StudioTools => {
-                            state.back_sectors.iter().map(|s| s.as_str()).collect()
-                        }
-                    };
-
-                    let dynamic_hint = match state.face {
-                        crate::widget::DonutFace::PrimaryFormats => "Tab: Power Tools",
-                        crate::widget::DonutFace::StudioTools => "Tab: Formats",
-                    };
-
-                    let widget_state = if let Some(idx) = state.hovered_carpel {
-                        crate::widget::WidgetState::Hovered(idx)
-                    } else {
-                        crate::widget::WidgetState::Idle
-                    };
-
-                    geometry.render_with_full_details(
-                        painter,
-                        &active_strs,
-                        widget_state,
-                        state.hovered_carpel,
-                        Some(dynamic_hint),
-                        0.0,
-                        None,
-                    );
-                });
-        }
-
-        if let Some((file, target)) = convert_target {
-            self.start_conversion_batch(vec![file], &target);
-        }
-        if close {
-            self.in_window_donut = None;
-        }
+    pub fn render_in_window_donut(&mut self, _ctx: &egui::Context) {
+        // Single canonical popup widget: in-window canvas clone disabled
+        // to prevent duplicate competing donut toolbars.
     }
 }
 
@@ -1146,21 +960,26 @@ impl eframe::App for MossambiApp {
             let _ = self.config.save();
         }
 
-        // Global Ctrl+D / Cmd+D to toggle in-window Donut Toolbar
+        // Global Ctrl+D / Cmd+D to toggle Donut Toolbar popup
         let toggle_donut = ctx.input(|i| {
             let ctrl = i.modifiers.ctrl || i.modifiers.command;
             ctrl && !i.modifiers.shift && !i.modifiers.alt && i.key_pressed(egui::Key::D)
         });
         if toggle_donut || self.studio_view.request_donut {
             self.studio_view.request_donut = false;
-            if self.in_window_donut.is_some() {
-                self.in_window_donut = None;
-            } else {
-                let pos = ctx
-                    .input(|i| i.pointer.hover_pos())
-                    .unwrap_or_else(|| ctx.screen_rect().center());
-                self.open_in_window_donut(Some(pos), None);
+            let files_slice = self
+                .current_file
+                .as_ref()
+                .map(|f| vec![f.clone()])
+                .unwrap_or_default();
+            #[cfg(target_os = "windows")]
+            {
+                let mut pt = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt) };
+                crate::daemon::spawn_widget_at_with_files(pt.x, pt.y, &files_slice, false);
             }
+            #[cfg(not(target_os = "windows"))]
+            crate::daemon::spawn_widget_at_with_files(400, 300, &files_slice, false);
         }
 
         // In-App Alt+Tab Quick Switcher HUD
