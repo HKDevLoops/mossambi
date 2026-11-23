@@ -4144,6 +4144,78 @@ impl PreferencesView {
         settings: &mut QuickSettingsState,
         dirty: &mut bool,
     ) {
+        section(ui, palette, "Conversion engines & system detection");
+        card(ui, palette, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Native Rust Engine")
+                        .size(design::type_scale::TITLE_SM)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new("Active (0 MB download)")
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.accent),
+                    );
+                });
+            });
+            ui.label(
+                egui::RichText::new("Pure native Rust codecs bundled inside Mossambi. Guaranteed 0.00% zero-data-loss standard, lossless 4:4:4 chroma, and Display P3 / wide-gamut ICC profile preservation.")
+                    .size(design::type_scale::CAPTION)
+                    .color(palette.text_secondary),
+            );
+            ui.add_space(design::space::SM);
+
+            ui.label(
+                egui::RichText::new("Detected system tools on PC")
+                    .size(design::type_scale::BODY_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.label(
+                egui::RichText::new("Mossambi inspects existing tools installed on your computer. If native parsing lacks proprietary format support, execution seamlessly shifts to your installed tools without downloading external packages.")
+                    .size(design::type_scale::MICRO)
+                    .color(palette.text_muted),
+            );
+            ui.add_space(design::space::XS);
+
+            let registry = crate::core::ExistingEngineRegistry::detect();
+            for eng in &registry.engines {
+                if eng.id == "native-rust" {
+                    continue;
+                }
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(&eng.name)
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_primary),
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let is_installed = eng.status == crate::core::EngineStatus::Installed;
+                        let status_text = if is_installed {
+                            "Installed"
+                        } else {
+                            "Not detected"
+                        };
+                        let status_color = if is_installed {
+                            palette.accent
+                        } else {
+                            palette.text_muted
+                        };
+                        ui.label(
+                            egui::RichText::new(status_text)
+                                .size(design::type_scale::MICRO)
+                                .color(status_color),
+                        );
+                    });
+                });
+            }
+        });
+
+        ui.add_space(design::space::MD);
+
         section(ui, palette, "Output destination & policy");
         card(ui, palette, |ui| {
             let om = self.cfg.output_mode;

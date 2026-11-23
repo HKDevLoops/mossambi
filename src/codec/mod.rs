@@ -10,6 +10,7 @@ pub mod dpi_meta;
 pub mod email;
 pub mod fonts;
 pub mod geo;
+pub mod icc_meta;
 pub mod models_3d;
 pub mod pdf_image;
 pub mod pdf_tables;
@@ -29,6 +30,10 @@ pub use dpi_meta::{inject_jfif_dpi, inject_png_dpi};
 pub use email::transcode_email;
 pub use fonts::transcode_font;
 pub use geo::transcode_geo;
+pub use icc_meta::{
+    extract_jpeg_metadata, extract_png_metadata, extract_webp_metadata, inject_jpeg_icc,
+    inject_png_icc, inject_webp_icc, EmbeddedMetadata,
+};
 pub use models_3d::transcode_3d_model;
 pub use pdf_image::{render_pdf_first_page_thumbnail, transcode_pdf_to_images};
 pub use pdf_tables::transcode_pdf_tables;

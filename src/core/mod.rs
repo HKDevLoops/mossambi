@@ -14,6 +14,7 @@ pub mod donut_config;
 pub mod drag_listener;
 pub mod drag_out;
 pub mod drop_action;
+pub mod existing_engines;
 pub mod fields_config;
 pub mod file_icons;
 pub mod fluent_icons;
@@ -80,6 +81,7 @@ pub use drop_action::{
     decide_drop_action, is_same_volume, paths_on_same_volume, DropActionKind, DropDecision,
     DropModifiers, DropMouseButton, DropRejectReason,
 };
+pub use existing_engines::{EngineStatus, ExistingEngineRegistry};
 pub use fields_config::{FieldItemSpec, FieldsConfig};
 pub use file_icons::{resolve_file_icon, FileIconSpec};
 pub use fs_utils::{
