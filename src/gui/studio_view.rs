@@ -181,6 +181,7 @@ pub struct StudioView {
     pub telemetry_detecting: bool,
     pub inspection_busy: bool,
     pub bench_busy: bool,
+    pub request_donut: bool,
 
     // Once-per-open listings for the sibling-folder context menu
     // (F-2 fix): cleared when a navigation target is applied.
@@ -241,6 +242,7 @@ impl Default for StudioView {
             telemetry_detecting: false,
             inspection_busy: false,
             bench_busy: false,
+            request_donut: false,
             sibling_menu_cache: std::collections::HashMap::new(),
             brand_logo_tex: None,
         }
@@ -1168,6 +1170,20 @@ impl StudioView {
                             &mut self.nav_anim_newfolder,
                         ) {
                             self.explorer_view.show_new_folder_dialog = true;
+                        }
+
+                        if crate::gui::finder_chrome::toolbar_animated_icon_button(
+                            ui,
+                            &palette,
+                            pack,
+                            IconGlyph::ActionRotate,
+                            text_rgb,
+                            "Donut Toolbar (Ctrl+D)",
+                            false,
+                            crate::gui::finder_chrome::ToolbarButtonAnim::SpinRotate,
+                            &mut self.nav_anim_refresh,
+                        ) {
+                            self.request_donut = true;
                         }
 
                         ui.add_space(4.0);

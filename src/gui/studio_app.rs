@@ -88,6 +88,20 @@ pub struct MossambiApp {
     pub alt_tab: crate::core::window_anim::AltTabState,
     /// Active window-level minimize animation progress: `(style, t)`.
     pub window_anim_progress: Option<(crate::core::window_anim::WindowAnimType, f32)>,
+    /// In-app floating Donut Toolbar overlay state.
+    pub in_window_donut: Option<InWindowDonutState>,
+}
+
+#[derive(Clone, Debug)]
+pub struct InWindowDonutState {
+    pub pos: egui::Pos2,
+    pub face: crate::widget::DonutFace,
+    pub sectors: Vec<String>,
+    pub back_sectors: Vec<String>,
+    pub hovered_carpel: Option<usize>,
+    pub current_file: Option<PathBuf>,
+    pub is_dragging: bool,
+    pub drag_start_offset: egui::Vec2,
 }
 
 impl Default for MossambiApp {
@@ -134,6 +148,7 @@ impl Default for MossambiApp {
             explorer_pref_mirror: None,
             alt_tab: crate::core::window_anim::AltTabState::default(),
             window_anim_progress: None,
+            in_window_donut: None,
         }
     }
 }
@@ -569,6 +584,212 @@ impl MossambiApp {
         }
         let _ = cmd.spawn();
     }
+
+    pub fn open_in_window_donut(&mut self, pos: Option<egui::Pos2>, file: Option<PathBuf>) {
+        let target_file = file.or_else(|| self.current_file.clone());
+        let (sectors, back_sectors) = if let Some(ref f) = target_file {
+            let (_cat, ext) = UniversalRegistry::classify_file(f);
+            if let Some(p) = self
+                .config
+                .donut
+                .find_profile_for_extension_filtered(&ext, Some(&self.config.fields))
+            {
+                let front: Vec<String> = p.front_slices.iter().map(|s| s.name.clone()).collect();
+                let back: Vec<String> = p.back_slices.iter().map(|s| s.name.clone()).collect();
+                (front, back)
+            } else {
+                let front = UniversalRegistry::get_sectors_for_file(f)
+                    .into_iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                (
+                    front,
+                    crate::core::donut_config::default_back_tools()
+                        .into_iter()
+                        .map(|s| s.name)
+                        .collect(),
+                )
+            }
+        } else if let Some(p) = self.config.donut.profiles.first() {
+            let front: Vec<String> = p.front_slices.iter().map(|s| s.name.clone()).collect();
+            let back: Vec<String> = p.back_slices.iter().map(|s| s.name.clone()).collect();
+            (front, back)
+        } else {
+            (
+                vec!["JPG", "WEBP", "HEIC", "TIFF", "AVIF", "BMP", "PDF", "DOCX"]
+                    .into_iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+                crate::core::donut_config::default_back_tools()
+                    .into_iter()
+                    .map(|s| s.name)
+                    .collect(),
+            )
+        };
+
+        let initial_pos = pos.unwrap_or(egui::pos2(400.0, 300.0));
+        self.in_window_donut = Some(InWindowDonutState {
+            pos: initial_pos,
+            face: crate::widget::DonutFace::PrimaryFormats,
+            sectors,
+            back_sectors,
+            hovered_carpel: None,
+            current_file: target_file,
+            is_dragging: false,
+            drag_start_offset: egui::Vec2::ZERO,
+        });
+    }
+
+    pub fn render_in_window_donut(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut convert_target: Option<(PathBuf, String)> = None;
+
+        if let Some(ref mut state) = self.in_window_donut {
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                close = true;
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
+                state.face = match state.face {
+                    crate::widget::DonutFace::PrimaryFormats => {
+                        crate::widget::DonutFace::StudioTools
+                    }
+                    crate::widget::DonutFace::StudioTools => {
+                        crate::widget::DonutFace::PrimaryFormats
+                    }
+                };
+            }
+
+            let donut_size = 360.0_f32;
+            let geometry = crate::widget::RadialWidgetGeometry::new(state.pos, donut_size);
+
+            egui::Area::new(egui::Id::new("mossambi_in_window_donut_area"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    let screen_rect = ctx.screen_rect();
+                    // Semi-transparent scrim: dismiss on click outside
+                    let resp = ui.allocate_rect(screen_rect, egui::Sense::click_and_drag());
+                    let painter = ui.painter();
+                    if resp.clicked() {
+                        if let Some(ptr) = resp.interact_pointer_pos() {
+                            let dist = (ptr - state.pos).length();
+                            if dist > (donut_size * 0.5 + 20.0) {
+                                close = true;
+                            }
+                        }
+                    }
+
+                    // Mouse interactions over donut
+                    if let Some(ptr) = ctx.input(|i| i.pointer.hover_pos()) {
+                        let center_dist = (ptr - state.pos).length();
+                        let hub_r = geometry.inner_radius;
+
+                        if center_dist <= hub_r {
+                            state.hovered_carpel = None;
+                            if resp.drag_started() {
+                                state.is_dragging = true;
+                                state.drag_start_offset = state.pos - ptr;
+                            }
+                            if resp.clicked() {
+                                state.face = match state.face {
+                                    crate::widget::DonutFace::PrimaryFormats => {
+                                        crate::widget::DonutFace::StudioTools
+                                    }
+                                    crate::widget::DonutFace::StudioTools => {
+                                        crate::widget::DonutFace::PrimaryFormats
+                                    }
+                                };
+                            }
+                        } else if center_dist <= geometry.outer_radius + 4.0 {
+                            let wedge_idx = geometry.hit_test_petal(ptr);
+                            state.hovered_carpel = wedge_idx;
+                            if resp.clicked() {
+                                if let Some(idx) = wedge_idx {
+                                    let active_list = match state.face {
+                                        crate::widget::DonutFace::PrimaryFormats => &state.sectors,
+                                        crate::widget::DonutFace::StudioTools => &state.back_sectors,
+                                    };
+                                    if let Some(target) = active_list.get(idx) {
+                                        if let Some(ref f) = state.current_file {
+                                            convert_target = Some((f.clone(), target.clone()));
+                                        }
+                                        close = true;
+                                    }
+                                }
+                            }
+                        } else {
+                            state.hovered_carpel = None;
+                        }
+                    }
+
+                    if resp.dragged() && state.is_dragging {
+                        if let Some(ptr) = ctx.input(|i| i.pointer.hover_pos()) {
+                            let mut new_pos = ptr + state.drag_start_offset;
+                            new_pos.x = new_pos.x.clamp(180.0, screen_rect.max.x - 180.0);
+                            new_pos.y = new_pos.y.clamp(180.0, screen_rect.max.y - 180.0);
+                            state.pos = new_pos;
+                        }
+                    }
+                    if resp.drag_stopped() {
+                        state.is_dragging = false;
+                    }
+
+                    // Wheel flip support
+                    let wheel_y = ctx.input(|i| i.raw_scroll_delta.y);
+                    if wheel_y.abs() > 10.0 {
+                        if let Some(ptr) = ctx.input(|i| i.pointer.hover_pos()) {
+                            if (ptr - state.pos).length() <= geometry.outer_radius + 20.0 {
+                                state.face = match state.face {
+                                    crate::widget::DonutFace::PrimaryFormats => {
+                                        crate::widget::DonutFace::StudioTools
+                                    }
+                                    crate::widget::DonutFace::StudioTools => {
+                                        crate::widget::DonutFace::PrimaryFormats
+                                    }
+                                };
+                            }
+                        }
+                    }
+
+                    let active_strs: Vec<&str> = match state.face {
+                        crate::widget::DonutFace::PrimaryFormats => {
+                            state.sectors.iter().map(|s| s.as_str()).collect()
+                        }
+                        crate::widget::DonutFace::StudioTools => {
+                            state.back_sectors.iter().map(|s| s.as_str()).collect()
+                        }
+                    };
+
+                    let dynamic_hint = match state.face {
+                        crate::widget::DonutFace::PrimaryFormats => "Tab: Power Tools",
+                        crate::widget::DonutFace::StudioTools => "Tab: Formats",
+                    };
+
+                    let widget_state = if let Some(idx) = state.hovered_carpel {
+                        crate::widget::WidgetState::Hovered(idx)
+                    } else {
+                        crate::widget::WidgetState::Idle
+                    };
+
+                    geometry.render_with_full_details(
+                        painter,
+                        &active_strs,
+                        widget_state,
+                        state.hovered_carpel,
+                        Some(dynamic_hint),
+                        0.0,
+                        None,
+                    );
+                });
+        }
+
+        if let Some((file, target)) = convert_target {
+            self.start_conversion_batch(vec![file], &target);
+        }
+        if close {
+            self.in_window_donut = None;
+        }
+    }
 }
 
 pub fn execute_conversion(
@@ -921,6 +1142,23 @@ impl eframe::App for MossambiApp {
         if toggle_sidebar {
             self.config.sidebar_collapsed = !self.config.sidebar_collapsed;
             let _ = self.config.save();
+        }
+
+        // Global Ctrl+D / Cmd+D to toggle in-window Donut Toolbar
+        let toggle_donut = ctx.input(|i| {
+            let ctrl = i.modifiers.ctrl || i.modifiers.command;
+            ctrl && !i.modifiers.shift && !i.modifiers.alt && i.key_pressed(egui::Key::D)
+        });
+        if toggle_donut || self.studio_view.request_donut {
+            self.studio_view.request_donut = false;
+            if self.in_window_donut.is_some() {
+                self.in_window_donut = None;
+            } else {
+                let pos = ctx
+                    .input(|i| i.pointer.hover_pos())
+                    .unwrap_or_else(|| ctx.screen_rect().center());
+                self.open_in_window_donut(Some(pos), None);
+            }
         }
 
         // In-App Alt+Tab Quick Switcher HUD
@@ -1343,7 +1581,16 @@ impl eframe::App for MossambiApp {
         }
 
         // 3. Handle Drag-and-Drop Files directly into Studio window
+        let mut drop_donut_summon: Option<(egui::Pos2, Option<PathBuf>)> = None;
         ctx.input(|i| {
+            let ctrl = i.modifiers.ctrl || i.modifiers.command;
+            if ctrl && !i.raw.hovered_files.is_empty() && self.in_window_donut.is_none() {
+                if let Some(pos) = i.pointer.hover_pos() {
+                    let first_path = i.raw.hovered_files.first().and_then(|f| f.path.clone());
+                    drop_donut_summon = Some((pos, first_path));
+                }
+            }
+
             if let Some(hover) = i.raw.hovered_files.first() {
                 if let Some(ref path) = hover.path {
                     if self.current_file.as_ref() != Some(path) {
@@ -1421,6 +1668,10 @@ impl eframe::App for MossambiApp {
                 }
             }
         });
+
+        if let Some((pos, path)) = drop_donut_summon {
+            self.open_in_window_donut(Some(pos), path);
+        }
 
         // 4. Render Desktop Studio Application Layout
         let cur_file = self.current_file.clone();
@@ -1597,6 +1848,9 @@ impl eframe::App for MossambiApp {
                     });
             }
         }
+
+        // 7b. In-window floating Donut Toolbar overlay
+        self.render_in_window_donut(ctx);
 
         // 8. Edge resizing. The window has no OS title bar or frame (Finder
         // chrome is drawn by the app), so Windows offers no resize border.

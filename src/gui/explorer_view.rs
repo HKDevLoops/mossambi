@@ -11623,22 +11623,26 @@ impl ExplorerView {
 
         let icon_spec = resolve_file_icon(&item.name, &item.extension, item.is_dir);
 
+        let default_x = ((ctx.screen_rect().width() - 360.0) * 0.5).max(20.0);
+        let default_y = ((ctx.screen_rect().height() - 520.0) * 0.5).max(20.0);
         egui::Window::new(format!("Info - {}", item.name))
+            .id(egui::Id::new("mossambi_file_get_info_modal"))
             .collapsible(false)
-            .resizable(true)
-            .default_width(500.0)
-            .min_width(460.0)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .resizable(false)
+            .fixed_size(Vec2::new(360.0, 520.0))
+            .default_pos(egui::pos2(default_x, default_y))
             .frame(
                 egui::Frame::window(&ctx.style())
                     .fill(palette.card_bg)
                     .stroke(Stroke::new(1.0_f32, palette.border))
-                    .rounding(Rounding::same(12.0))
-                    .inner_margin(egui::Margin::same(16.0)),
+                    .rounding(Rounding::same(16.0))
+                    .inner_margin(egui::Margin::same(14.0)),
             )
             .show(ctx, |ui| {
+                ui.spacing_mut().scroll.bar_width = 4.0;
+                ui.spacing_mut().scroll.floating = true;
                 egui::ScrollArea::vertical()
-                    .max_height(600.0)
+                    .max_height(460.0)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         // 1. Hero Identity Header (64x64 Preview / Shell Icon, Editable Name, Type Badge, Formatted Size)
@@ -13597,15 +13601,15 @@ impl ExplorerView {
         current_view: ViewMode,
         current_dir: &Path,
     ) -> CanvasMenuIntents {
-        let max_h = (menu_ui.ctx().screen_rect().height() - 24.0).max(140.0);
+        let max_h = 340.0_f32;
+        menu_ui.spacing_mut().scroll.bar_width = 4.0;
+        menu_ui.spacing_mut().scroll.floating = true;
         egui::ScrollArea::vertical()
             .max_height(max_h)
             .auto_shrink([true, true])
             .show(menu_ui, |menu_ui| {
                 menu_ui.set_min_width(240.0);
-                // Menu rows allocate `available_width()`; cap it so the menu stays
-                // compact instead of stretching across the whole window.
-                menu_ui.set_max_width(300.0);
+                menu_ui.set_max_width(240.0);
                 let mut intent = CanvasMenuIntents::default();
                 fm::menu_header(menu_ui, "Explorer", tint);
                 menu_ui.separator();
@@ -13861,15 +13865,15 @@ impl ExplorerView {
         item: &FileItem,
         targets: &[PathBuf],
     ) -> ItemMenuIntents {
-        let max_h = (menu_ui.ctx().screen_rect().height() - 24.0).max(140.0);
+        let max_h = 340.0_f32;
+        menu_ui.spacing_mut().scroll.bar_width = 4.0;
+        menu_ui.spacing_mut().scroll.floating = true;
         egui::ScrollArea::vertical()
             .max_height(max_h)
             .auto_shrink([true, true])
             .show(menu_ui, |menu_ui| {
                 menu_ui.set_min_width(240.0);
-                // Menu rows allocate `available_width()`; cap it so the menu stays
-                // compact instead of stretching across the whole window.
-                menu_ui.set_max_width(300.0);
+                menu_ui.set_max_width(240.0);
                 let mut intent = ItemMenuIntents::default();
                 let is_dir = item.is_dir;
                 let path: PathBuf = item.path.clone();

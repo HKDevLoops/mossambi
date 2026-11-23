@@ -299,7 +299,37 @@ impl PreferencesView {
                                                     ),
                                                 );
                                             }
-                                            let text_x = rect.left() + 8.0;
+                                            let badge_size = 20.0;
+                                            let badge_rect = Rect::from_min_size(
+                                                Pos2::new(rect.left() + 6.0, rect.center().y - badge_size * 0.5),
+                                                Vec2::splat(badge_size),
+                                            );
+                                            let (badge_col, symbol_char) = match i {
+                                                0 => (Color32::from_rgb(0, 122, 255), "^"),   // Home
+                                                1 => (Color32::from_rgb(142, 142, 147), "*"), // General
+                                                2 => (Color32::from_rgb(255, 149, 0), "="),   // Shortcuts
+                                                3 => (Color32::from_rgb(52, 199, 89), "O"),   // Donut
+                                                4 => (Color32::from_rgb(88, 86, 214), "#"),   // Presets
+                                                5 => (Color32::from_rgb(90, 200, 250), "%"),   // Fields
+                                                6 => (Color32::from_rgb(255, 204, 0), ">"),   // Watch folders
+                                                7 => (Color32::from_rgb(255, 45, 85), "@"),   // Theme
+                                                8 => (Color32::from_rgb(175, 82, 222), "+"),  // Engines
+                                                _ => (Color32::from_rgb(0, 199, 190), "i"),   // About
+                                            };
+                                            crate::gui::squircle::squircle_filled(
+                                                ui.painter(),
+                                                badge_rect,
+                                                Rounding::same(5.0),
+                                                badge_col,
+                                            );
+                                            ui.painter().text(
+                                                badge_rect.center(),
+                                                Align2::CENTER_CENTER,
+                                                symbol_char,
+                                                egui::FontId::monospace(10.0),
+                                                Color32::WHITE,
+                                            );
+                                            let text_x = rect.left() + 32.0;
                                             ui.painter().text(
                                                 Pos2::new(text_x, rect.center().y),
                                                 Align2::LEFT_CENTER,
@@ -354,6 +384,26 @@ impl PreferencesView {
                                         }
                                     }
                                 });
+
+                            ui.add_space(design::space::SM);
+                            let div_rect = ui.allocate_space(Vec2::new(sidebar_w - 24.0, 1.0)).1;
+                            crate::gui::squircle::squircle_filled(
+                                ui.painter(),
+                                div_rect,
+                                Rounding::ZERO,
+                                palette.border,
+                            );
+                            ui.add_space(design::space::XS);
+                            ui.horizontal(|ui| {
+                                let _ = ui.small_button("GitHub");
+                                let _ = ui.small_button("Sponsor");
+                            });
+                            ui.add_space(2.0);
+                            ui.label(
+                                egui::RichText::new("Version 2.5.0")
+                                    .size(design::type_scale::MICRO)
+                                    .color(palette.text_muted),
+                            );
                         });
                 },
             );
@@ -854,7 +904,8 @@ impl PreferencesView {
                         });
                 });
             });
-            ui.add_space(design::space::SM);
+
+            card_divider(ui, palette);
 
             toggle_row(
                 ui,
@@ -864,7 +915,8 @@ impl PreferencesView {
                 &mut self.cfg.launch_at_login,
                 dirty,
             );
-            ui.add_space(design::space::XS);
+
+            card_divider(ui, palette);
 
             ui.horizontal(|ui| {
                 ui.label(
@@ -911,7 +963,8 @@ impl PreferencesView {
                         });
                 });
             });
-            ui.add_space(design::space::SM);
+
+            card_divider(ui, palette);
 
             toggle_row(
                 ui,
@@ -937,7 +990,8 @@ impl PreferencesView {
                 });
             });
 
-            ui.add_space(design::space::XS);
+            card_divider(ui, palette);
+
             toggle_row(
                 ui,
                 palette,
@@ -953,7 +1007,9 @@ impl PreferencesView {
                     format!("Could not update the default file manager: {err}"),
                 );
             }
-            ui.add_space(design::space::XS);
+
+            card_divider(ui, palette);
+
             toggle_row(
                 ui,
                 palette,
@@ -986,7 +1042,7 @@ impl PreferencesView {
                     .size(design::type_scale::CAPTION)
                     .color(palette.text_secondary),
             );
-            ui.add_space(design::space::SM);
+            card_divider(ui, palette);
 
             ui.horizontal(|ui| {
                 ui.label(
@@ -1004,7 +1060,8 @@ impl PreferencesView {
                         });
                 });
             });
-            ui.add_space(design::space::SM);
+
+            card_divider(ui, palette);
 
             toggle_row(
                 ui,
@@ -1014,7 +1071,8 @@ impl PreferencesView {
                 &mut self.cfg.keep_original_file_dates,
                 dirty,
             );
-            ui.add_space(design::space::XS);
+
+            card_divider(ui, palette);
 
             toggle_row(
                 ui,
@@ -1024,7 +1082,8 @@ impl PreferencesView {
                 &mut self.cfg.collect_dropped_files_in_list,
                 dirty,
             );
-            ui.add_space(design::space::XS);
+
+            card_divider(ui, palette);
 
             toggle_row(
                 ui,
@@ -1050,7 +1109,7 @@ impl PreferencesView {
                     .size(design::type_scale::CAPTION)
                     .color(palette.text_secondary),
             );
-            ui.add_space(design::space::SM);
+            card_divider(ui, palette);
 
             ui.horizontal(|ui| {
                 ui.label(
@@ -1091,7 +1150,8 @@ impl PreferencesView {
                 }
             });
 
-            ui.add_space(design::space::XS);
+            card_divider(ui, palette);
+
             toggle_row(
                 ui,
                 palette,
@@ -1100,7 +1160,9 @@ impl PreferencesView {
                 &mut self.cfg.browser_save_converted_only,
                 dirty,
             );
-            ui.add_space(design::space::XS);
+
+            card_divider(ui, palette);
+
             toggle_row(
                 ui,
                 palette,
@@ -1153,7 +1215,7 @@ impl PreferencesView {
                     .strong()
                     .color(palette.text_primary),
             );
-            ui.add_space(design::space::XS);
+            card_divider(ui, palette);
 
             toggle_row(
                 ui,
@@ -1163,6 +1225,8 @@ impl PreferencesView {
                 &mut self.cfg.disable_conversion_history,
                 dirty,
             );
+
+            card_divider(ui, palette);
 
             ui.horizontal(|ui| {
                 ui.label(
@@ -1182,7 +1246,8 @@ impl PreferencesView {
                 });
             });
 
-            ui.add_space(design::space::SM);
+            card_divider(ui, palette);
+
             let history_cnt = crate::core::conversion_history::conversion_history_count();
             ui.horizontal(|ui| {
                 if ui
@@ -1389,6 +1454,16 @@ impl PreferencesView {
 
             let search_q = self.donut_profile_search.trim().to_lowercase();
             let num_profiles = self.cfg.donut.profiles.len();
+
+            ui.spacing_mut().scroll.bar_width = 4.0;
+            ui.spacing_mut().scroll.bar_inner_margin = 1.0;
+            ui.spacing_mut().scroll.bar_outer_margin = 1.0;
+            ui.spacing_mut().scroll.floating = true;
+            ui.input_mut(|i| {
+                if i.raw_scroll_delta.y != 0.0 {
+                    i.raw_scroll_delta.y = i.raw_scroll_delta.y.signum() * 64.0;
+                }
+            });
 
             ScrollArea::vertical()
                 .id_salt("donut_profiles_scroll")
@@ -1917,6 +1992,16 @@ impl PreferencesView {
 
                 let search_p = self.donut_preset_search.trim().to_lowercase();
                 let cat_filter = &self.donut_preset_category;
+
+                ui.spacing_mut().scroll.bar_width = 4.0;
+                ui.spacing_mut().scroll.bar_inner_margin = 1.0;
+                ui.spacing_mut().scroll.bar_outer_margin = 1.0;
+                ui.spacing_mut().scroll.floating = true;
+                ui.input_mut(|i| {
+                    if i.raw_scroll_delta.y != 0.0 {
+                        i.raw_scroll_delta.y = i.raw_scroll_delta.y.signum() * 64.0;
+                    }
+                });
 
                 ScrollArea::vertical()
                     .id_salt("donut_presets_catalog_scroll")
@@ -2530,7 +2615,10 @@ impl PreferencesView {
         ui.add_space(design::space::MD);
 
         card(ui, palette, |ui| {
-            for spec in FieldsConfig::SPECS {
+            for (idx, spec) in FieldsConfig::SPECS.iter().enumerate() {
+                if idx > 0 {
+                    card_divider(ui, palette);
+                }
                 let current = self.cfg.fields.is_field_enabled(spec.key);
 
                 let w = ui.available_width();
@@ -5039,10 +5127,22 @@ fn card<R>(ui: &mut Ui, palette: &ThemePalette, add_contents: impl FnOnce(&mut U
     Frame::none()
         .fill(bg)
         .stroke(Stroke::new(1.0_f32, palette.border))
-        .rounding(Rounding::same(10.0))
-        .inner_margin(Margin::symmetric(16.0, 12.0))
+        .rounding(Rounding::same(14.0))
+        .inner_margin(Margin::symmetric(18.0, 14.0))
         .show(ui, add_contents)
         .inner
+}
+
+fn card_divider(ui: &mut Ui, palette: &ThemePalette) {
+    ui.add_space(design::space::XS);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+    let divider_color = if palette.is_dark {
+        Color32::from_rgba_unmultiplied(255, 255, 255, 14)
+    } else {
+        Color32::from_rgba_unmultiplied(0, 0, 0, 12)
+    };
+    ui.painter().rect_filled(rect, Rounding::ZERO, divider_color);
+    ui.add_space(design::space::XS);
 }
 
 fn toggle_row(
@@ -5089,7 +5189,13 @@ fn toggle_row(
                     *dirty = true;
                 }
                 let track_radius = 11.0;
-                let track_color = if *val { palette.accent } else { palette.border };
+                let on_green = Color32::from_rgb(52, 199, 89);
+                let off_slate = if palette.is_dark {
+                    Color32::from_rgb(58, 58, 60)
+                } else {
+                    Color32::from_rgb(229, 229, 234)
+                };
+                let track_color = if *val { on_green } else { off_slate };
                 crate::gui::squircle::squircle_filled(
                     ui.painter(),
                     rect,
@@ -5107,23 +5213,12 @@ fn toggle_row(
                 ui.painter()
                     .circle_filled(thumb_center, 8.5, Color32::from_rgb(255, 255, 255));
 
-                // Ring highlight: soft on hover, full accent while on,
-                // strongest while pressed or keyboard-focused.
-                let ring_state = design::pill_state(&resp, *val);
-                design::paint_pill_ring(
-                    ui.painter(),
-                    rect,
-                    Rounding::same(track_radius),
-                    ring_state,
-                    palette.accent,
-                );
-
                 let text = if *val { "On" } else { "Off" };
                 ui.label(
                     egui::RichText::new(text)
                         .size(design::type_scale::BODY_SM)
                         .color(if *val {
-                            palette.accent
+                            on_green
                         } else {
                             palette.text_muted
                         }),

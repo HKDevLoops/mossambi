@@ -122,16 +122,39 @@ impl Default for MossambiWidgetApp {
         let (tx, rx) = channel();
         let cfg = crate::core::MossambiConfig::load();
         let size = crate::widget::clamp_donut_diameter(cfg.donut.appearance.size);
-        // Default petals matching Image reference.png: JPG, WEBP, HEIC, TIFF, AVIF, BMP, PDF, DOCX
-        let default_sectors: Vec<String> =
-            vec!["JPG", "WEBP", "HEIC", "TIFF", "AVIF", "BMP", "PDF", "DOCX"]
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect();
-        let default_back_sectors: Vec<String> = crate::core::donut_config::default_back_tools()
-            .into_iter()
-            .map(|s| s.name)
-            .collect();
+        let (default_sectors, default_back_sectors) = if let Some(p) = cfg.donut.profiles.first() {
+            let front: Vec<String> = p.front_slices.iter().map(|s| s.name.clone()).collect();
+            let back: Vec<String> = p.back_slices.iter().map(|s| s.name.clone()).collect();
+            (
+                if front.is_empty() {
+                    vec!["JPG", "WEBP", "HEIC", "TIFF", "AVIF", "BMP", "PDF", "DOCX"]
+                        .into_iter()
+                        .map(|s| s.to_string())
+                        .collect()
+                } else {
+                    front
+                },
+                if back.is_empty() {
+                    crate::core::donut_config::default_back_tools()
+                        .into_iter()
+                        .map(|s| s.name)
+                        .collect()
+                } else {
+                    back
+                },
+            )
+        } else {
+            (
+                vec!["JPG", "WEBP", "HEIC", "TIFF", "AVIF", "BMP", "PDF", "DOCX"]
+                    .into_iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+                crate::core::donut_config::default_back_tools()
+                    .into_iter()
+                    .map(|s| s.name)
+                    .collect(),
+            )
+        };
 
         Self {
             geometry: RadialWidgetGeometry::new(Pos2::new(240.0, 240.0), size),
@@ -829,8 +852,8 @@ impl eframe::App for MossambiWidgetApp {
                 }
             }
 
-            // Auto-dismiss on focus loss
-            if i.viewport().focused == Some(false) {
+            // Auto-dismiss on focus loss only after initial window focus stabilization (grace period: 20 frames)
+            if self.frame_count > 20 && i.viewport().focused == Some(false) {
                 close_requested = true;
             }
 
@@ -839,7 +862,7 @@ impl eframe::App for MossambiWidgetApp {
                 if let Some(pos) = i.pointer.interact_pos() {
                     let center = self.geometry.center;
                     let dist = (pos - center).length();
-                    if dist > 210.0 {
+                    if dist > 210.0 && !self.show_context_menu {
                         close_requested = true;
                     }
                 }
