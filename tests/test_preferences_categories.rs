@@ -25,7 +25,11 @@ fn test_preferences_has_exact_10_filee_tabs() {
 
     for (idx, (exp_id, exp_title)) in expected_tabs.iter().enumerate() {
         assert_eq!(cats[idx].id, *exp_id, "Tab index {} ID mismatch", idx);
-        assert_eq!(cats[idx].title, *exp_title, "Tab index {} title mismatch", idx);
+        assert_eq!(
+            cats[idx].title, *exp_title,
+            "Tab index {} title mismatch",
+            idx
+        );
     }
 }
 

@@ -21,7 +21,10 @@ fn test_existing_engines_detection_is_offline_and_non_blocking() {
 
     // Native Rust engine is always present and active
     let native = registry.get_engine("native-rust");
-    assert!(native.is_some(), "Native Rust engine must always be present");
+    assert!(
+        native.is_some(),
+        "Native Rust engine must always be present"
+    );
     let native = native.unwrap();
     assert_eq!(native.status, EngineStatus::Active);
     assert_eq!(native.download_required_mb, 0);

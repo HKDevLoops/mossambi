@@ -89,33 +89,83 @@ impl DonutSlicePreset {
             "to-webp" => Self::format("WEBP"),
             "to-gif" => Self::format("GIF"),
             "to-pdf" => Self::format("PDF"),
-            "merge-pdf" => Self::action("Merge PDF", "Merge PDF", "Merge selected files into one PDF"),
+            "merge-pdf" => Self::action(
+                "Merge PDF",
+                "Merge PDF",
+                "Merge selected files into one PDF",
+            ),
             "trace-svg" => Self::action("Trace SVG", "Trace SVG", "Vector contour tracing to SVG"),
             "tool-crop" => Self::action("Crop", "Crop", "Interactive crop canvas"),
             "rotate" => Self::action("Rotate", "Rotate", "Rotate image in 90 degree increments"),
-            "remove-background" => Self::action("Cut out", "Cut out", "Remove background with AI or color mask"),
-            "merge-images" => Self::action("Merge images", "Merge images", "Combine pictures horizontally or vertically"),
-            "compress-image" => Self::action("Compress image", "Compress image", "Lossy or lossless size reduction"),
-            "half-size" => Self::action("Half size", "Half size", "Scale image to 50% width and height"),
-            "tool-image-edit" => Self::action("Edit pictures", "Edit pictures", "Adjust brightness, contrast and tone"),
+            "remove-background" => Self::action(
+                "Cut out",
+                "Cut out",
+                "Remove background with AI or color mask",
+            ),
+            "merge-images" => Self::action(
+                "Merge images",
+                "Merge images",
+                "Combine pictures horizontally or vertically",
+            ),
+            "compress-image" => Self::action(
+                "Compress image",
+                "Compress image",
+                "Lossy or lossless size reduction",
+            ),
+            "half-size" => Self::action(
+                "Half size",
+                "Half size",
+                "Scale image to 50% width and height",
+            ),
+            "tool-image-edit" => Self::action(
+                "Edit pictures",
+                "Edit pictures",
+                "Adjust brightness, contrast and tone",
+            ),
             "zip-all" => Self::action("One ZIP", "One ZIP", "Compress items into one archive"),
             "to-docx" => Self::format("DOCX"),
             "to-xlsx" => Self::format("XLSX"),
-            "pdf-slides" => Self::action("PDF Slides", "Slides", "Extract PDF pages to slide presentations"),
+            "pdf-slides" => Self::action(
+                "PDF Slides",
+                "Slides",
+                "Extract PDF pages to slide presentations",
+            ),
             "to-txt" => Self::format("TXT"),
             "to-hwpx" => Self::format("HWPX"),
             "to-hwp" => Self::format("HWP"),
-            "pdf-edit" => Self::action("PDF Edit", "Edit", "Lossless page rearrangement and annotations"),
-            "pdf-split" => Self::action("PDF Split", "Split", "Separate PDF into individual page files"),
-            "compress-pdf" => Self::action("Compress PDF", "Compress PDF", "Downscale PDF images and compress streams"),
-            "remove-metadata" => Self::action("Remove Meta", "Strip Meta", "Strip EXIF and tracking metadata"),
+            "pdf-edit" => Self::action(
+                "PDF Edit",
+                "Edit",
+                "Lossless page rearrangement and annotations",
+            ),
+            "pdf-split" => Self::action(
+                "PDF Split",
+                "Split",
+                "Separate PDF into individual page files",
+            ),
+            "compress-pdf" => Self::action(
+                "Compress PDF",
+                "Compress PDF",
+                "Downscale PDF images and compress streams",
+            ),
+            "remove-metadata" => Self::action(
+                "Remove Meta",
+                "Strip Meta",
+                "Strip EXIF and tracking metadata",
+            ),
             "to-tiff" => Self::format("TIFF"),
             "to-html" => Self::format("HTML"),
             "translate" => Self::action("Translate", "Translate", "Document language translation"),
             "to-md" => Self::format("MD"),
-            "pdf-long-image" => Self::action("Long Image", "Long Image", "Stack pages into one vertical strip"),
+            "pdf-long-image" => Self::action(
+                "Long Image",
+                "Long Image",
+                "Stack pages into one vertical strip",
+            ),
             "to-csv" => Self::format("CSV"),
-            "tool-sheet-studio" => Self::action("Sheet Studio", "Studio", "Advanced tabular dataset editor"),
+            "tool-sheet-studio" => {
+                Self::action("Sheet Studio", "Studio", "Advanced tabular dataset editor")
+            }
             "to-vcf" => Self::format("VCF"),
             "to-ics" => Self::format("ICS"),
             "to-pptx" => Self::format("PPTX"),
@@ -128,18 +178,38 @@ impl DonutSlicePreset {
             "mp4-720" => Self::action("MP4 720p", "720p", "Export H.264 video at 720p resolution"),
             "to-mov" => Self::format("MOV"),
             "to-mp3" => Self::format("MP3"),
-            "caption-video" => Self::action("Captions", "Captions", "Transcribe audio to subtitles"),
+            "caption-video" => {
+                Self::action("Captions", "Captions", "Transcribe audio to subtitles")
+            }
             "tool-clip" => Self::action("Clip", "Clip", "Trim start and end timestamps"),
             "crop-video" => Self::action("Crop Video", "Crop Video", "Crop video aspect ratio"),
-            "compress-video" => Self::action("Compress Video", "Compress Video", "CRF-based video size reduction"),
-            "merge-videos" => Self::action("Merge Videos", "Merge Videos", "Concatenate video streams losslessly"),
+            "compress-video" => Self::action(
+                "Compress Video",
+                "Compress Video",
+                "CRF-based video size reduction",
+            ),
+            "merge-videos" => Self::action(
+                "Merge Videos",
+                "Merge Videos",
+                "Concatenate video streams losslessly",
+            ),
             "mp4-av1" => Self::action("MP4 AV1", "AV1", "Encode ultra-efficient AV1 video"),
-            "extract-frames-png" => Self::action("Extract Frames", "Frames", "Extract all video frames to PNGs"),
+            "extract-frames-png" => Self::action(
+                "Extract Frames",
+                "Frames",
+                "Extract all video frames to PNGs",
+            ),
             "mp3-128" => Self::action("MP3 128k", "128k", "Encode MP3 at 128 kbps"),
             "to-m4a" => Self::format("M4A"),
             "to-wav" => Self::format("WAV"),
-            "compress-audio" => Self::action("Compress Audio", "Compress Audio", "Audio bitrate optimization"),
-            "merge-audio" => Self::action("Merge Audio", "Merge Audio", "Join sound tracks into one"),
+            "compress-audio" => Self::action(
+                "Compress Audio",
+                "Compress Audio",
+                "Audio bitrate optimization",
+            ),
+            "merge-audio" => {
+                Self::action("Merge Audio", "Merge Audio", "Join sound tracks into one")
+            }
             "to-alac" => Self::format("ALAC"),
             "to-srt" => Self::format("SRT"),
             "to-vtt" => Self::format("VTT"),
@@ -268,19 +338,52 @@ impl Default for DonutConfig {
                     ".raf", ".pef", ".dcr", ".kdc", ".erf", ".mos", ".mrw", ".x3f", ".3fr", ".fff",
                     ".iiq", ".mef", ".rwl", ".srw", ".raw",
                 ],
-                &["to-png", "to-jpg", "to-webp", "to-gif", "to-pdf", "merge-pdf", "trace-svg"],
-                &["tool-crop", "rotate", "remove-background", "merge-images", "compress-image", "half-size", "tool-image-edit", "zip-all"],
+                &[
+                    "to-png",
+                    "to-jpg",
+                    "to-webp",
+                    "to-gif",
+                    "to-pdf",
+                    "merge-pdf",
+                    "trace-svg",
+                ],
+                &[
+                    "tool-crop",
+                    "rotate",
+                    "remove-background",
+                    "merge-images",
+                    "compress-image",
+                    "half-size",
+                    "tool-image-edit",
+                    "zip-all",
+                ],
             ),
-
             // 2. PDF (8 Front, 8 Back)
             DonutProfile::new(
                 "pdf",
                 "PDF",
                 &[".pdf", ".ai"],
-                &["to-png", "to-jpg", "to-docx", "to-xlsx", "pdf-slides", "to-txt", "to-hwpx", "to-hwp"],
-                &["pdf-edit", "pdf-split", "merge-pdf", "compress-pdf", "remove-metadata", "to-tiff", "to-html", "zip-all"],
+                &[
+                    "to-png",
+                    "to-jpg",
+                    "to-docx",
+                    "to-xlsx",
+                    "pdf-slides",
+                    "to-txt",
+                    "to-hwpx",
+                    "to-hwp",
+                ],
+                &[
+                    "pdf-edit",
+                    "pdf-split",
+                    "merge-pdf",
+                    "compress-pdf",
+                    "remove-metadata",
+                    "to-tiff",
+                    "to-html",
+                    "zip-all",
+                ],
             ),
-
             // 3. Documents (Office) (7 Front, 4 Back)
             DonutProfile::new(
                 "office",
@@ -289,10 +392,17 @@ impl Default for DonutConfig {
                     ".docx", ".doc", ".dotx", ".dotm", ".docm", ".odt", ".rtf", ".wps", ".wpd",
                     ".pages", ".oxps", ".xps",
                 ],
-                &["to-pdf", "to-hwpx", "to-hwp", "to-docx", "to-txt", "to-png", "merge-pdf"],
+                &[
+                    "to-pdf",
+                    "to-hwpx",
+                    "to-hwp",
+                    "to-docx",
+                    "to-txt",
+                    "to-png",
+                    "merge-pdf",
+                ],
                 &["translate", "to-md", "pdf-long-image", "zip-all"],
             ),
-
             // 4. Spreadsheets (6 Front, 5 Back)
             DonutProfile::new(
                 "spreadsheets",
@@ -301,42 +411,104 @@ impl Default for DonutConfig {
                     ".xlsx", ".xls", ".xltx", ".xlsm", ".xlsb", ".ods", ".ots", ".csv", ".tsv",
                     ".numbers",
                 ],
-                &["to-pdf", "to-xlsx", "to-csv", "to-hwpx", "to-hwp", "merge-pdf"],
-                &["tool-sheet-studio", "to-docx", "to-vcf", "to-ics", "zip-all"],
+                &[
+                    "to-pdf",
+                    "to-xlsx",
+                    "to-csv",
+                    "to-hwpx",
+                    "to-hwp",
+                    "merge-pdf",
+                ],
+                &[
+                    "tool-sheet-studio",
+                    "to-docx",
+                    "to-vcf",
+                    "to-ics",
+                    "zip-all",
+                ],
             ),
-
             // 5. Presentations (7 Front, 4 Back)
             DonutProfile::new(
                 "presentations",
                 "Presentations",
-                &[".pptx", ".ppt", ".potx", ".potm", ".pptm", ".ppsx", ".pps", ".odp", ".otp", ".key"],
-                &["to-pdf", "to-png", "to-jpg", "to-pptx", "to-hwpx", "to-hwp", "merge-pdf"],
+                &[
+                    ".pptx", ".ppt", ".potx", ".potm", ".pptm", ".ppsx", ".pps", ".odp", ".otp",
+                    ".key",
+                ],
+                &[
+                    "to-pdf",
+                    "to-png",
+                    "to-jpg",
+                    "to-pptx",
+                    "to-hwpx",
+                    "to-hwp",
+                    "merge-pdf",
+                ],
                 &["to-odp", "pdf-long-image", "to-docx", "zip-all"],
             ),
-
             // 6. HWP / HWPX (7 Front, 4 Back)
             DonutProfile::new(
                 "hwp",
                 "HWP / HWPX",
                 &[".hwp", ".hwpx"],
-                &["to-pdf", "to-docx", "to-hwpx", "to-hwp", "to-png", "to-txt", "merge-pdf"],
+                &[
+                    "to-pdf",
+                    "to-docx",
+                    "to-hwpx",
+                    "to-hwp",
+                    "to-png",
+                    "to-txt",
+                    "merge-pdf",
+                ],
                 &["to-html", "to-odt", "pdf-long-image", "zip-all"],
             ),
-
             // 7. Text & Markdown (6 Front, 5 Back)
             DonutProfile::new(
                 "text",
                 "Text & Markdown",
                 &[
-                    ".md", ".markdown", ".txt", ".rst", ".adoc", ".asciidoc", ".tex", ".latex",
-                    ".typ", ".typst", ".org", ".wiki", ".ipynb", ".log", ".bat", ".cmd", ".sh",
-                    ".bash", ".ps1", ".py", ".rb", ".js", ".ts", ".rs", ".c", ".cpp", ".h",
-                    ".hpp", ".cs", ".go", ".java", ".lua", ".sql", ".html", ".htm", ".css",
+                    ".md",
+                    ".markdown",
+                    ".txt",
+                    ".rst",
+                    ".adoc",
+                    ".asciidoc",
+                    ".tex",
+                    ".latex",
+                    ".typ",
+                    ".typst",
+                    ".org",
+                    ".wiki",
+                    ".ipynb",
+                    ".log",
+                    ".bat",
+                    ".cmd",
+                    ".sh",
+                    ".bash",
+                    ".ps1",
+                    ".py",
+                    ".rb",
+                    ".js",
+                    ".ts",
+                    ".rs",
+                    ".c",
+                    ".cpp",
+                    ".h",
+                    ".hpp",
+                    ".cs",
+                    ".go",
+                    ".java",
+                    ".lua",
+                    ".sql",
+                    ".html",
+                    ".htm",
+                    ".css",
                 ],
-                &["to-pdf", "to-hwpx", "to-hwp", "to-docx", "to-html", "to-txt"],
+                &[
+                    "to-pdf", "to-hwpx", "to-hwp", "to-docx", "to-html", "to-txt",
+                ],
                 &["translate", "to-md", "to-odt", "merge-pdf", "zip-all"],
             ),
-
             // 8. E-books (6 Front, 3 Back)
             DonutProfile::new(
                 "ebooks",
@@ -346,36 +518,57 @@ impl Default for DonutConfig {
                     ".cbt", ".cbc", ".lit", ".lrf", ".chm", ".pdb", ".pml", ".rb", ".snb", ".tcr",
                     ".oeb", ".azw4",
                 ],
-                &["to-pdf", "to-epub", "to-docx", "to-txt", "to-azw3", "to-kepub"],
+                &[
+                    "to-pdf", "to-epub", "to-docx", "to-txt", "to-azw3", "to-kepub",
+                ],
                 &["translate", "to-md", "zip-all"],
             ),
-
             // 9. Video (6 Front, 8 Back)
             DonutProfile::new(
                 "video",
                 "Video",
                 &[
-                    ".mp4", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".m4v", ".ts",
-                    ".mts", ".m2ts", ".vob", ".ogv", ".3gp", ".3g2", ".f4v", ".asf", ".rm",
-                    ".rmvb", ".dv", ".mxf",
+                    ".mp4", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".m4v", ".ts", ".mts",
+                    ".m2ts", ".vob", ".ogv", ".3gp", ".3g2", ".f4v", ".asf", ".rm", ".rmvb", ".dv",
+                    ".mxf",
                 ],
-                &["to-mp4", "mp4-720", "to-mov", "to-gif", "to-mp3", "caption-video"],
-                &["tool-clip", "crop-video", "compress-video", "merge-videos", "remove-metadata", "mp4-av1", "extract-frames-png", "zip-all"],
+                &[
+                    "to-mp4",
+                    "mp4-720",
+                    "to-mov",
+                    "to-gif",
+                    "to-mp3",
+                    "caption-video",
+                ],
+                &[
+                    "tool-clip",
+                    "crop-video",
+                    "compress-video",
+                    "merge-videos",
+                    "remove-metadata",
+                    "mp4-av1",
+                    "extract-frames-png",
+                    "zip-all",
+                ],
             ),
-
             // 10. Audio (5 Front, 5 Back)
             DonutProfile::new(
                 "audio",
                 "Audio",
                 &[
                     ".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".wma", ".aiff",
-                    ".aif", ".alac", ".caf", ".wv", ".ape", ".dsd", ".dsf", ".dff", ".dts",
-                    ".ac3", ".eac3", ".tta",
+                    ".aif", ".alac", ".caf", ".wv", ".ape", ".dsd", ".dsf", ".dff", ".dts", ".ac3",
+                    ".eac3", ".tta",
                 ],
                 &["to-mp3", "mp3-128", "to-m4a", "to-wav", "caption-video"],
-                &["compress-audio", "merge-audio", "remove-metadata", "to-alac", "zip-all"],
+                &[
+                    "compress-audio",
+                    "merge-audio",
+                    "remove-metadata",
+                    "to-alac",
+                    "zip-all",
+                ],
             ),
-
             // 11. Subtitles (2 Front, 1 Back)
             DonutProfile::new(
                 "subtitles",
@@ -387,7 +580,6 @@ impl Default for DonutConfig {
                 &["to-srt", "to-vtt"],
                 &["zip-all"],
             ),
-
             // 12. Vector Graphics (5 Front, 5 Back)
             DonutProfile::new(
                 "vector",
@@ -396,19 +588,17 @@ impl Default for DonutConfig {
                 &["to-png", "to-pdf", "to-svg", "to-jpg", "to-webp"],
                 &["to-tiff", "to-ico", "to-icns", "to-dxf", "zip-all"],
             ),
-
             // 13. Archives (4 Front, 0 Back)
             DonutProfile::new(
                 "archives",
                 "Archives",
                 &[
-                    ".zip", ".tar", ".gz", ".tgz", ".zst", ".tzst", ".7z", ".rar", ".bz2",
-                    ".tbz2", ".xz", ".txz", ".iso", ".cab", ".dmg", ".lz", ".wbpz",
+                    ".zip", ".tar", ".gz", ".tgz", ".zst", ".tzst", ".7z", ".rar", ".bz2", ".tbz2",
+                    ".xz", ".txz", ".iso", ".cab", ".dmg", ".lz", ".wbpz",
                 ],
                 &["extract", "zip-all", "to-zip", "to-7z"],
                 &[],
             ),
-
             // 14. Folders (3 Front, 0 Back)
             DonutProfile::new(
                 "folders",
@@ -417,7 +607,6 @@ impl Default for DonutConfig {
                 &["to-iso", "to-zip", "zip-all"],
                 &[],
             ),
-
             // 15. CAD Drawings (5 Front, 3 Back)
             DonutProfile::new(
                 "cad",
@@ -426,7 +615,6 @@ impl Default for DonutConfig {
                 &["to-pdf", "to-png", "to-svg", "to-dxf", "to-dwg"],
                 &["to-jpg", "merge-pdf", "zip-all"],
             ),
-
             // 16. Fonts (4 Front, 1 Back)
             DonutProfile::new(
                 "fonts",
@@ -435,19 +623,16 @@ impl Default for DonutConfig {
                 &["to-woff2", "to-woff", "to-ttf", "to-otf"],
                 &["zip-all"],
             ),
-
             // 17. Data (5 Front, 4 Back)
             DonutProfile::new(
                 "data",
                 "Data",
                 &[
-                    ".json", ".jsonl", ".yaml", ".yml", ".toml", ".xml", ".vcf", ".ics",
-                    ".plist",
+                    ".json", ".jsonl", ".yaml", ".yml", ".toml", ".xml", ".vcf", ".ics", ".plist",
                 ],
                 &["to-json", "to-yaml", "to-xml", "to-csv", "to-xlsx"],
                 &["to-ods", "to-html", "to-md", "zip-all"],
             ),
-
             // 18. 3D Models (5 Front, 1 Back)
             DonutProfile::new(
                 "models",
@@ -456,7 +641,6 @@ impl Default for DonutConfig {
                 &["to-glb", "to-stl", "to-obj", "to-3mf", "to-png"],
                 &["zip-all"],
             ),
-
             // 19. Geospatial (5 Front, 1 Back)
             DonutProfile::new(
                 "geo",
@@ -465,7 +649,6 @@ impl Default for DonutConfig {
                 &["to-geojson", "to-shp", "to-kml", "to-csv", "to-gpx"],
                 &["zip-all"],
             ),
-
             // 20. Mixed Files (5 Front, 2 Back)
             DonutProfile::new(
                 "mixed",
@@ -533,7 +716,11 @@ impl DonutConfig {
     }
 
     pub fn select_profile_by_id(&mut self, id: &str) {
-        if let Some(pos) = self.profiles.iter().position(|p| p.id == id || (p.id == "office" && id == "documents")) {
+        if let Some(pos) = self
+            .profiles
+            .iter()
+            .position(|p| p.id == id || (p.id == "office" && id == "documents"))
+        {
             self.selected_profile_index = pos;
         }
     }

@@ -730,11 +730,19 @@ impl PreferencesView {
             ui.painter(),
             rect,
             Rounding::same(design::radius::LG),
-            Stroke::new(1.5_f32, if is_hovered { palette.accent } else { palette.border }),
+            Stroke::new(
+                1.5_f32,
+                if is_hovered {
+                    palette.accent
+                } else {
+                    palette.border
+                },
+            ),
         );
 
         let center = rect.center();
-        let icon_rect = Rect::from_center_size(Pos2::new(center.x, center.y - 30.0), Vec2::new(32.0, 32.0));
+        let icon_rect =
+            Rect::from_center_size(Pos2::new(center.x, center.y - 30.0), Vec2::new(32.0, 32.0));
         crate::gui::squircle::squircle_filled(
             ui.painter(),
             icon_rect,
@@ -873,15 +881,30 @@ impl PreferencesView {
                     egui::ComboBox::from_id_salt("pref_close_action")
                         .selected_text(cur_action)
                         .show_ui(ui, |ui| {
-                            if ui.selectable_label(self.cfg.close_window_action == "ask", "Ask every time").clicked() {
+                            if ui
+                                .selectable_label(
+                                    self.cfg.close_window_action == "ask",
+                                    "Ask every time",
+                                )
+                                .clicked()
+                            {
                                 self.cfg.close_window_action = "ask".to_string();
                                 *dirty = true;
                             }
-                            if ui.selectable_label(self.cfg.close_window_action == "minimize", "Minimize to tray").clicked() {
+                            if ui
+                                .selectable_label(
+                                    self.cfg.close_window_action == "minimize",
+                                    "Minimize to tray",
+                                )
+                                .clicked()
+                            {
                                 self.cfg.close_window_action = "minimize".to_string();
                                 *dirty = true;
                             }
-                            if ui.selectable_label(self.cfg.close_window_action == "quit", "Quit").clicked() {
+                            if ui
+                                .selectable_label(self.cfg.close_window_action == "quit", "Quit")
+                                .clicked()
+                            {
                                 self.cfg.close_window_action = "quit".to_string();
                                 *dirty = true;
                             }
@@ -901,9 +924,11 @@ impl PreferencesView {
             ui.add_space(design::space::XS);
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("\"Convert with Mossambi\" is in the main Windows 11 menu.")
-                        .size(design::type_scale::CAPTION)
-                        .color(palette.text_secondary),
+                    egui::RichText::new(
+                        "\"Convert with Mossambi\" is in the main Windows 11 menu.",
+                    )
+                    .size(design::type_scale::CAPTION)
+                    .color(palette.text_secondary),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.button("Remove from the main menu").clicked() {
@@ -1147,7 +1172,10 @@ impl PreferencesView {
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let mut limit_val = self.cfg.conversion_history_limit as u32;
-                    if ui.add(egui::DragValue::new(&mut limit_val).range(0..=1000)).changed() {
+                    if ui
+                        .add(egui::DragValue::new(&mut limit_val).range(0..=1000))
+                        .changed()
+                    {
                         self.cfg.conversion_history_limit = limit_val as usize;
                         *dirty = true;
                     }
@@ -2023,7 +2051,11 @@ impl PreferencesView {
 
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("Gesture").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                    ui.label(
+                        egui::RichText::new("Gesture")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_secondary),
+                    );
                     egui::ComboBox::from_id_salt("shortcut_gesture_kind")
                         .selected_text("Modifier + drag files")
                         .show_ui(ui, |ui| {
@@ -2032,7 +2064,11 @@ impl PreferencesView {
                 });
                 ui.add_space(design::space::MD);
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("Active in").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                    ui.label(
+                        egui::RichText::new("Active in")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_secondary),
+                    );
                     egui::ComboBox::from_id_salt("shortcut_active_in")
                         .selected_text("File managers and desktop")
                         .show_ui(ui, |ui| {
@@ -2045,34 +2081,81 @@ impl PreferencesView {
 
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("Modifier keys").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                    ui.label(
+                        egui::RichText::new("Modifier keys")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_secondary),
+                    );
                     ui.horizontal(|ui| {
-                        if design::segmented_pill(ui, palette, self.shortcut_gesture_modifier_ctrl, "Ctrl").clicked() {
-                            self.shortcut_gesture_modifier_ctrl = !self.shortcut_gesture_modifier_ctrl;
+                        if design::segmented_pill(
+                            ui,
+                            palette,
+                            self.shortcut_gesture_modifier_ctrl,
+                            "Ctrl",
+                        )
+                        .clicked()
+                        {
+                            self.shortcut_gesture_modifier_ctrl =
+                                !self.shortcut_gesture_modifier_ctrl;
                             *dirty = true;
                         }
-                        if design::segmented_pill(ui, palette, self.shortcut_gesture_modifier_alt, "Alt").clicked() {
-                            self.shortcut_gesture_modifier_alt = !self.shortcut_gesture_modifier_alt;
+                        if design::segmented_pill(
+                            ui,
+                            palette,
+                            self.shortcut_gesture_modifier_alt,
+                            "Alt",
+                        )
+                        .clicked()
+                        {
+                            self.shortcut_gesture_modifier_alt =
+                                !self.shortcut_gesture_modifier_alt;
                             *dirty = true;
                         }
-                        if design::segmented_pill(ui, palette, self.shortcut_gesture_modifier_shift, "Shift").clicked() {
-                            self.shortcut_gesture_modifier_shift = !self.shortcut_gesture_modifier_shift;
+                        if design::segmented_pill(
+                            ui,
+                            palette,
+                            self.shortcut_gesture_modifier_shift,
+                            "Shift",
+                        )
+                        .clicked()
+                        {
+                            self.shortcut_gesture_modifier_shift =
+                                !self.shortcut_gesture_modifier_shift;
                             *dirty = true;
                         }
-                        if design::segmented_pill(ui, palette, self.shortcut_gesture_modifier_win, "Win").clicked() {
-                            self.shortcut_gesture_modifier_win = !self.shortcut_gesture_modifier_win;
+                        if design::segmented_pill(
+                            ui,
+                            palette,
+                            self.shortcut_gesture_modifier_win,
+                            "Win",
+                        )
+                        .clicked()
+                        {
+                            self.shortcut_gesture_modifier_win =
+                                !self.shortcut_gesture_modifier_win;
                             *dirty = true;
                         }
                     });
                 });
                 ui.add_space(design::space::MD);
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("Mouse button").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                    ui.label(
+                        egui::RichText::new("Mouse button")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_secondary),
+                    );
                     egui::ComboBox::from_id_salt("shortcut_mouse_btn")
                         .selected_text(&self.shortcut_gesture_mouse_button)
                         .show_ui(ui, |ui| {
                             for btn in ["Left", "Right", "Middle"] {
-                                if ui.selectable_value(&mut self.shortcut_gesture_mouse_button, btn.to_string(), btn).changed() {
+                                if ui
+                                    .selectable_value(
+                                        &mut self.shortcut_gesture_mouse_button,
+                                        btn.to_string(),
+                                        btn,
+                                    )
+                                    .changed()
+                                {
                                     *dirty = true;
                                 }
                             }
@@ -2101,8 +2184,18 @@ impl PreferencesView {
             ui.add_space(design::space::SM);
 
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Drag distance").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                if ui.add(egui::Slider::new(&mut self.shortcut_drag_distance, 10.0..=120.0).suffix("px")).changed() {
+                ui.label(
+                    egui::RichText::new("Drag distance")
+                        .size(design::type_scale::BODY_SM)
+                        .color(palette.text_secondary),
+                );
+                if ui
+                    .add(
+                        egui::Slider::new(&mut self.shortcut_drag_distance, 10.0..=120.0)
+                            .suffix("px"),
+                    )
+                    .changed()
+                {
                     *dirty = true;
                 }
             });
@@ -2126,8 +2219,17 @@ impl PreferencesView {
             ui.add_space(design::space::XS);
 
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Key").size(design::type_scale::BODY_SM).color(palette.text_secondary));
-                ui.label(egui::RichText::new("Tab").size(design::type_scale::BODY).strong().color(palette.accent));
+                ui.label(
+                    egui::RichText::new("Key")
+                        .size(design::type_scale::BODY_SM)
+                        .color(palette.text_secondary),
+                );
+                ui.label(
+                    egui::RichText::new("Tab")
+                        .size(design::type_scale::BODY)
+                        .strong()
+                        .color(palette.accent),
+                );
                 let _ = ui.button("Record");
                 let _ = ui.button("Use Tab");
                 let _ = ui.button("Clear");
@@ -2135,7 +2237,13 @@ impl PreferencesView {
             ui.add_space(design::space::SM);
 
             ui.horizontal(|ui| {
-                if ui.checkbox(&mut self.shortcut_flip_mouse_wheel, "Mouse wheel flips the donut").changed() {
+                if ui
+                    .checkbox(
+                        &mut self.shortcut_flip_mouse_wheel,
+                        "Mouse wheel flips the donut",
+                    )
+                    .changed()
+                {
                     *dirty = true;
                 }
             });
@@ -2200,9 +2308,11 @@ impl PreferencesView {
 
             ui.add_space(design::space::XS);
             ui.label(
-                egui::RichText::new("Gestures and shortcuts do nothing while the pointer is over these apps.")
-                    .size(design::type_scale::MICRO)
-                    .color(palette.text_muted),
+                egui::RichText::new(
+                    "Gestures and shortcuts do nothing while the pointer is over these apps.",
+                )
+                .size(design::type_scale::MICRO)
+                .color(palette.text_muted),
             );
         });
 
@@ -2755,9 +2865,11 @@ impl PreferencesView {
             );
             ui.add_space(design::space::SM);
             ui.label(
-                egui::RichText::new("Also on the command line: mossambi watch <folder> --to <format>")
-                    .size(design::type_scale::CAPTION)
-                    .color(palette.text_muted),
+                egui::RichText::new(
+                    "Also on the command line: mossambi watch <folder> --to <format>",
+                )
+                .size(design::type_scale::CAPTION)
+                .color(palette.text_muted),
             );
         } else {
             let mut to_remove = None;
@@ -2780,7 +2892,14 @@ impl PreferencesView {
                                 .selected_text(&wf.target_format)
                                 .show_ui(ui, |ui| {
                                     for fmt in ["PNG", "JPG", "WEBP", "PDF", "AVIF"] {
-                                        if ui.selectable_value(&mut wf.target_format, fmt.to_string(), fmt).changed() {
+                                        if ui
+                                            .selectable_value(
+                                                &mut wf.target_format,
+                                                fmt.to_string(),
+                                                fmt,
+                                            )
+                                            .changed()
+                                        {
                                             *dirty = true;
                                         }
                                     }
@@ -4774,9 +4893,12 @@ impl PreferencesView {
                             .color(palette.text_primary),
                     );
                     ui.label(
-                        egui::RichText::new(format!("Version {}  |  Alpha Preview (MSVC x86_64)", env!("CARGO_PKG_VERSION")))
-                            .size(design::type_scale::BODY_SM)
-                            .color(palette.text_secondary),
+                        egui::RichText::new(format!(
+                            "Version {}  |  Alpha Preview (MSVC x86_64)",
+                            env!("CARGO_PKG_VERSION")
+                        ))
+                        .size(design::type_scale::BODY_SM)
+                        .color(palette.text_secondary),
                     );
                 });
             });

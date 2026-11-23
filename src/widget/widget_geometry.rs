@@ -809,7 +809,12 @@ impl RadialWidgetGeometry {
         let petal_pts = if (self.anim_scale_x - 1.0).abs() > 0.001 {
             petal_pts
                 .into_iter()
-                .map(|p| Pos2::new(self.center.x + (p.x - self.center.x) * self.anim_scale_x, p.y))
+                .map(|p| {
+                    Pos2::new(
+                        self.center.x + (p.x - self.center.x) * self.anim_scale_x,
+                        p.y,
+                    )
+                })
                 .collect()
         } else {
             petal_pts

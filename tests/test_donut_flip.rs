@@ -89,10 +89,7 @@ fn test_widget_app_face_switching_and_active_sectors() {
         .into_iter()
         .map(|s| s.to_string())
         .collect();
-    assert!(
-        !back_sectors.is_empty(),
-        "Back sectors should not be empty"
-    );
+    assert!(!back_sectors.is_empty(), "Back sectors should not be empty");
     // Back face for image should have tools (e.g. Crop, Rotate, Compress)
     assert_ne!(
         front_sectors, back_sectors,

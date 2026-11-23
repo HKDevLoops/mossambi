@@ -254,7 +254,9 @@ impl ExistingEngineRegistry {
         let tgt = target_format.to_ascii_uppercase();
 
         // Native Rust Engine handles standard formats with 0.00% zero-loss
-        let native = self.get_engine("native-rust").expect("Native engine exists");
+        let native = self
+            .get_engine("native-rust")
+            .expect("Native engine exists");
         if native.formats.contains(&src) && native.formats.contains(&tgt) {
             return native;
         }

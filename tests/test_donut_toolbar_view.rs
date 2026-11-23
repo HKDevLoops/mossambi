@@ -52,7 +52,9 @@ fn test_donut_front_and_back_slice_limits() {
 
     // Slices beyond 12 should be rejected by caller logic
     if img_prof.front_slices.len() < img_prof.max_front_slices {
-        img_prof.front_slices.push(DonutSlicePreset::format("EXTRA"));
+        img_prof
+            .front_slices
+            .push(DonutSlicePreset::format("EXTRA"));
     }
     assert_eq!(img_prof.front_slices.len(), 12);
 }

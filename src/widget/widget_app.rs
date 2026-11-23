@@ -341,8 +341,7 @@ impl MossambiWidgetApp {
         {
             let front_names: Vec<String> =
                 prof.front_slices.iter().map(|s| s.name.clone()).collect();
-            let back_names: Vec<String> =
-                prof.back_slices.iter().map(|s| s.name.clone()).collect();
+            let back_names: Vec<String> = prof.back_slices.iter().map(|s| s.name.clone()).collect();
             if !front_names.is_empty() {
                 self.sectors = front_names;
                 self.back_sectors = back_names;

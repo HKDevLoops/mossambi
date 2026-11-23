@@ -68,8 +68,25 @@ fn test_profile_count_badge_formatting() {
         "images",
         "Images",
         &[".png"],
-        &["to-png", "to-jpg", "to-webp", "to-gif", "to-pdf", "merge-pdf", "trace-svg"],
-        &["tool-crop", "rotate", "remove-background", "merge-images", "compress-image", "half-size", "tool-image-edit", "zip-all"],
+        &[
+            "to-png",
+            "to-jpg",
+            "to-webp",
+            "to-gif",
+            "to-pdf",
+            "merge-pdf",
+            "trace-svg",
+        ],
+        &[
+            "tool-crop",
+            "rotate",
+            "remove-background",
+            "merge-images",
+            "compress-image",
+            "half-size",
+            "tool-image-edit",
+            "zip-all",
+        ],
     );
     assert_eq!(p_img.count_badge(), "7-8");
 
