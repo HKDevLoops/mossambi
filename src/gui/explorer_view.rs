@@ -3802,7 +3802,7 @@ impl ExplorerView {
                         .fill(dock_bg)
                         .inner_margin(egui::Margin {
                             left: 10.0,
-                            right: 0.0,
+                            right: 10.0,
                             top: 4.0,
                             bottom: 0.0,
                         }),
