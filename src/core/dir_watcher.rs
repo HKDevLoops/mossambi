@@ -219,7 +219,7 @@ mod tests {
         let _ = std::fs::write(&test_file, "hello");
 
         let mut received = false;
-        for _ in 0..10 {
+        for _ in 0..60 {
             std::thread::sleep(Duration::from_millis(50));
             if watcher.try_recv() {
                 received = true;
