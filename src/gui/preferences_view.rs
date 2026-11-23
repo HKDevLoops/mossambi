@@ -29,16 +29,15 @@ use eframe::egui::{
 use std::path::PathBuf;
 
 const CATEGORIES: &[&str] = &[
+    "Home",
     "General",
+    "Shortcuts",
     "Donut toolbar",
-    "Shortcuts & Gestures",
+    "Presets",
     "Fields",
-    "Appearance",
-    "Explorer",
-    "Behavior",
-    "Performance",
-    "Conversion & Engines",
-    "Scripts",
+    "Watch folders",
+    "Theme",
+    "Engines",
     "About",
 ];
 
@@ -51,46 +50,42 @@ pub struct PreferenceCategory {
 pub fn preference_categories() -> &'static [PreferenceCategory] {
     // Static table kept in sync with CATEGORIES above. Returned as a slice of
     // owned-ish statics so the command palette can reference category titles.
-    static CATS: [PreferenceCategory; 11] = [
+    static CATS: [PreferenceCategory; 10] = [
+        PreferenceCategory {
+            id: "home",
+            title: "Home",
+        },
         PreferenceCategory {
             id: "general",
             title: "General",
+        },
+        PreferenceCategory {
+            id: "shortcuts",
+            title: "Shortcuts",
         },
         PreferenceCategory {
             id: "donut",
             title: "Donut toolbar",
         },
         PreferenceCategory {
-            id: "shortcuts",
-            title: "Shortcuts & Gestures",
+            id: "presets",
+            title: "Presets",
         },
         PreferenceCategory {
             id: "fields",
             title: "Fields",
         },
         PreferenceCategory {
-            id: "appearance",
-            title: "Appearance",
+            id: "watch_folders",
+            title: "Watch folders",
         },
         PreferenceCategory {
-            id: "explorer",
-            title: "Explorer",
+            id: "theme",
+            title: "Theme",
         },
         PreferenceCategory {
-            id: "behavior",
-            title: "Behavior",
-        },
-        PreferenceCategory {
-            id: "performance",
-            title: "Performance",
-        },
-        PreferenceCategory {
-            id: "conversion",
-            title: "Conversion & Engines",
-        },
-        PreferenceCategory {
-            id: "scripts",
-            title: "Scripts",
+            id: "engines",
+            title: "Engines",
         },
         PreferenceCategory {
             id: "about",
@@ -129,6 +124,27 @@ pub struct PreferencesView {
     pub script_edit_title: String,
     pub script_edit_lang: ScriptLang,
     pub script_edit_body: String,
+
+    // Preset management state
+    pub selected_preset_idx: usize,
+    pub preset_search: String,
+    pub preset_dirty: bool,
+    pub preset_dpi_enabled: bool,
+    pub preset_dpi_val: u32,
+    pub preset_keep_exif: bool,
+    pub preset_keep_icc: bool,
+    pub preset_grayscale: bool,
+    pub preset_remove_bg: bool,
+    pub preset_bg_color: String,
+    pub preset_debayer_fits: bool,
+    pub preset_video_frames: bool,
+    pub preset_pdf_stack: bool,
+    // Watch folders state
+    pub new_watch_folder_path: String,
+    pub new_watch_folder_format: String,
+    // Gesture customization state
+    pub shortcut_drag_distance: f32,
+    pub shortcut_gesture_active: bool,
 }
 
 impl Default for PreferencesView {
@@ -151,6 +167,23 @@ impl Default for PreferencesView {
             script_edit_title: String::new(),
             script_edit_lang: ScriptLang::Rhai,
             script_edit_body: String::new(),
+            selected_preset_idx: 0,
+            preset_search: String::new(),
+            preset_dirty: false,
+            preset_dpi_enabled: true,
+            preset_dpi_val: 300,
+            preset_keep_exif: true,
+            preset_keep_icc: true,
+            preset_grayscale: false,
+            preset_remove_bg: false,
+            preset_bg_color: "#FFFFFF".to_string(),
+            preset_debayer_fits: true,
+            preset_video_frames: false,
+            preset_pdf_stack: false,
+            new_watch_folder_path: String::new(),
+            new_watch_folder_format: "PNG".to_string(),
+            shortcut_drag_distance: 45.0,
+            shortcut_gesture_active: true,
         }
     }
 }
@@ -166,8 +199,8 @@ impl PreferencesView {
         palette: &ThemePalette,
         current_theme: &mut ThemeStyle,
         settings: &mut QuickSettingsState,
-        console: &mut ScriptConsole,
-        run_ctx: (Option<std::path::PathBuf>, Vec<std::path::PathBuf>),
+        _console: &mut ScriptConsole,
+        _run_ctx: (Option<std::path::PathBuf>, Vec<std::path::PathBuf>),
     ) {
         // Keep cfg.theme_mode in sync with the live theme selection.
         self.cfg.theme_mode = (*current_theme).into();
@@ -368,7 +401,7 @@ impl PreferencesView {
                             // sidebar, divider, and pane stay flush.
                             ui.spacing_mut().item_spacing =
                                 Vec2::new(design::space::MD, design::space::SM);
-                            if self.selected == 1 {
+                            if self.selected == 3 {
                                 // Donut toolbar: fluid 3-column layout centered with safety
                                 // padding. Uncapped to 1280 so maximized windows use the
                                 // width instead of leaving a large centering void.
@@ -401,6 +434,32 @@ impl PreferencesView {
                                         self.render_donut_toolbar(ui, palette, &mut dirty);
                                     });
                                 });
+                            } else if self.selected == 4 {
+                                // Presets: wide 2-column layout (Preset drawer left, Parameter editor right)
+                                let presets_w = 1280.0_f32.min(ui.available_width() - 32.0);
+                                let pad_x = ((ui.available_width() - presets_w) * 0.5).max(16.0);
+                                ui.horizontal(|ui| {
+                                    ui.add_space(pad_x);
+                                    ui.vertical(|ui| {
+                                        ui.set_width(presets_w);
+                                        ui.set_max_width(presets_w);
+                                        ui.add_space(design::space::SM);
+                                        let title = CATEGORIES[self.selected];
+                                        ui.label(
+                                            egui::RichText::new(title)
+                                                .size(design::type_scale::TITLE_LG)
+                                                .strong()
+                                                .color(palette.text_primary),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(self.category_subtitle(self.selected))
+                                                .size(design::type_scale::BODY_SM)
+                                                .color(palette.text_secondary),
+                                        );
+                                        ui.add_space(design::space::MD);
+                                        self.render_presets(ui, palette, &mut dirty);
+                                    });
+                                });
                             } else {
                                 // System Settings layout: a bounded column next to the
                                 // category list (centering left a ~300 px void between them).
@@ -426,16 +485,15 @@ impl PreferencesView {
                                         ui.add_space(design::space::MD);
 
                                         match self.selected {
-                                            0 => self.render_general(ui, palette, &mut dirty),
-                                            1 => self.render_donut_toolbar(ui, palette, &mut dirty),
+                                            0 => self.render_home(ui, palette, &mut dirty),
+                                            1 => self.render_general(ui, palette, &mut dirty),
                                             2 => self.render_shortcuts(ui, palette, &mut dirty),
-                                            3 => self.render_fields(ui, palette, &mut dirty),
-                                            4 => self.render_appearance(ui, palette, current_theme, &mut dirty),
-                                            5 => self.render_explorer(ui, palette, &mut dirty),
-                                            6 => self.render_behavior(ui, palette, &mut dirty),
-                                            7 => self.render_performance(ui, palette, &mut dirty),
+                                            3 => self.render_donut_toolbar(ui, palette, &mut dirty),
+                                            4 => self.render_presets(ui, palette, &mut dirty),
+                                            5 => self.render_fields(ui, palette, &mut dirty),
+                                            6 => self.render_watch_folders(ui, palette, &mut dirty),
+                                            7 => self.render_appearance(ui, palette, current_theme, &mut dirty),
                                             8 => self.render_conversion(ui, palette, settings, &mut dirty),
-                                            9 => self.render_scripts(ui, palette, console, run_ctx, &mut dirty),
                                             _ => self.render_about(ui, palette),
                                         }
                                     });
@@ -466,17 +524,16 @@ impl PreferencesView {
     }
     fn category_subtitle(&self, i: usize) -> &'static str {
         match i {
-            0 => "Startup, default save locations, browser drag staging, and history.",
-            1 => "Profiles, interactive radial donut preview, extension bindings, and appearance metrics.",
-            2 => "Studio shortcut rebinds, gesture engine keys, and physics.",
-            3 => "Toggle specialized domains on or off across the suite.",
-            4 => "Theme, glass, opacity, menu and control style.",
-            5 => "Layout, hidden files, tags and pinned folders.",
-            6 => "Startup, sound, background work, and shell replacement.",
-            7 => "Threads, DirectML hardware acceleration, and frame rate.",
-            8 => "Zero-loss transcode engines, 255-format routing, and script engines.",
-            9 => "Create, run, and monitor Rhai and Lua automation scripts.",
-            _ => "Version, hardware telemetry, and credits.",
+            0 => "Drop files here or hold Ctrl while dragging files in Explorer.",
+            1 => "Language, startup, save locations, browser drag, and history.",
+            2 => "How the donut toolbar opens, gestures, and flip triggers.",
+            3 => "Choose a profile, arrange presets, and edit donut settings.",
+            4 => "Preset parameters, dimensions, DPI, and ICC color profile controls.",
+            5 => "Turn off the domains you do not work in to streamline the donut.",
+            6 => "Folders watched continuously for automatic conversion.",
+            7 => "Theme, color palette, glass opacity, and donut metrics.",
+            8 => "Zero-loss native conversion engine and external system engine status.",
+            _ => "Version 2.5.0, hardware telemetry, and license information.",
         }
     }
 
@@ -635,11 +692,146 @@ impl PreferencesView {
 
     // ---- category renderers ----
 
+    fn render_home(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
+        let drop_w = ui.available_width().max(320.0);
+        let drop_h = 160.0_f32;
+        let (rect, resp) = ui.allocate_exact_size(Vec2::new(drop_w, drop_h), Sense::click());
+        let is_hovered = resp.hovered();
+
+        let accent_tint = Color32::from_rgba_unmultiplied(
+            palette.accent.r(),
+            palette.accent.g(),
+            palette.accent.b(),
+            if is_hovered { 35 } else { 18 },
+        );
+        crate::gui::squircle::squircle_filled(
+            ui.painter(),
+            rect,
+            Rounding::same(design::radius::LG),
+            accent_tint,
+        );
+        crate::gui::squircle::squircle_stroke(
+            ui.painter(),
+            rect,
+            Rounding::same(design::radius::LG),
+            Stroke::new(1.5_f32, if is_hovered { palette.accent } else { palette.border }),
+        );
+
+        let center = rect.center();
+        let icon_rect = Rect::from_center_size(Pos2::new(center.x, center.y - 30.0), Vec2::new(32.0, 32.0));
+        crate::gui::squircle::squircle_filled(
+            ui.painter(),
+            icon_rect,
+            Rounding::same(design::radius::SM),
+            Color32::from_rgba_unmultiplied(
+                palette.accent.r(),
+                palette.accent.g(),
+                palette.accent.b(),
+                40,
+            ),
+        );
+        ui.painter().text(
+            icon_rect.center(),
+            Align2::CENTER_CENTER,
+            "^",
+            FontId::proportional(design::type_scale::TITLE),
+            palette.accent,
+        );
+
+        ui.painter().text(
+            Pos2::new(center.x, center.y + 8.0),
+            Align2::CENTER_CENTER,
+            "Drop files here",
+            FontId::proportional(design::type_scale::TITLE_SM),
+            palette.text_primary,
+        );
+        ui.painter().text(
+            Pos2::new(center.x, center.y + 32.0),
+            Align2::CENTER_CENTER,
+            "Or hold Ctrl while dragging files in Explorer. The donut toolbar opens at your cursor.",
+            FontId::proportional(design::type_scale::CAPTION),
+            palette.text_muted,
+        );
+
+        if resp.clicked() {
+            if let Some(path) = rfd::FileDialog::new().pick_file() {
+                log::info!("File selected from Home drop zone: {:?}", path);
+            }
+        }
+
+        ui.add_space(design::space::MD);
+
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Recent conversions")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button("Clear").clicked() {
+                    crate::core::conversion_history::clear_conversion_history();
+                    *dirty = true;
+                }
+            });
+        });
+        ui.add_space(design::space::SM);
+
+        let recents = crate::core::conversion_history::get_recent_conversions();
+        if recents.is_empty() {
+            ui.label(
+                egui::RichText::new("Your converted files will show up here.")
+                    .size(design::type_scale::BODY_SM)
+                    .color(palette.text_muted),
+            );
+        } else {
+            for item in recents.iter().take(20) {
+                card(ui, palette, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(&item.target)
+                                .size(design::type_scale::BODY)
+                                .color(palette.text_primary),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button("Open").clicked() {
+                                #[cfg(target_os = "windows")]
+                                let _ = std::process::Command::new("explorer.exe")
+                                    .arg(&item.target)
+                                    .spawn();
+                            }
+                            ui.label(
+                                egui::RichText::new(&item.format)
+                                    .size(design::type_scale::CAPTION)
+                                    .color(palette.text_muted),
+                            );
+                        });
+                    });
+                });
+                ui.add_space(design::space::XS);
+            }
+        }
+    }
+
     fn render_general(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
-        // Only rows that do something. The static "Language" and "When I
-        // close the window" labels and the no-op "Remove from the main
-        // menu" button are gone.
         card(ui, palette, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Language")
+                        .size(design::type_scale::BODY)
+                        .color(palette.text_primary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    egui::ComboBox::from_id_salt("pref_language")
+                        .selected_text("System default")
+                        .show_ui(ui, |ui| {
+                            let _ = ui.selectable_label(true, "System default");
+                            let _ = ui.selectable_label(false, "English");
+                        });
+                });
+            });
+            ui.add_space(design::space::SM);
+
             toggle_row(
                 ui,
                 palette,
@@ -649,14 +841,61 @@ impl PreferencesView {
                 dirty,
             );
             ui.add_space(design::space::XS);
+
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("When I close the window")
+                        .size(design::type_scale::BODY)
+                        .color(palette.text_primary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let cur_action = match self.cfg.close_window_action.as_str() {
+                        "minimize" => "Minimize to tray",
+                        "quit" => "Quit",
+                        _ => "Ask every time",
+                    };
+                    egui::ComboBox::from_id_salt("pref_close_action")
+                        .selected_text(cur_action)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(self.cfg.close_window_action == "ask", "Ask every time").clicked() {
+                                self.cfg.close_window_action = "ask".to_string();
+                                *dirty = true;
+                            }
+                            if ui.selectable_label(self.cfg.close_window_action == "minimize", "Minimize to tray").clicked() {
+                                self.cfg.close_window_action = "minimize".to_string();
+                                *dirty = true;
+                            }
+                            if ui.selectable_label(self.cfg.close_window_action == "quit", "Quit").clicked() {
+                                self.cfg.close_window_action = "quit".to_string();
+                                *dirty = true;
+                            }
+                        });
+                });
+            });
+            ui.add_space(design::space::SM);
+
             toggle_row(
                 ui,
                 palette,
                 "Show \"Convert with Mossambi\" in the Explorer context menu",
-                "Adds the entry for files in Windows Explorer (Show more options on Windows 11).",
+                "Adds the entry for files in Windows Explorer.",
                 &mut self.cfg.shell_context_menu,
                 dirty,
             );
+            ui.add_space(design::space::XS);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("\"Convert with Mossambi\" is in the main Windows 11 menu.")
+                        .size(design::type_scale::CAPTION)
+                        .color(palette.text_secondary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("Remove from the main menu").clicked() {
+                        let _ = crate::core::MossambiConfig::set_shell_context_menu(false);
+                    }
+                });
+            });
+
             ui.add_space(design::space::XS);
             toggle_row(
                 ui,
@@ -667,9 +906,6 @@ impl PreferencesView {
                 dirty,
             );
             if let Some(err) = crate::platform::default_handler::last_error() {
-                // Registry failure feedback shown inline next to the toggle.
-                // Danger red is theme-independent (see save banner above):
-                // ThemePalette carries no error role.
                 ui.add_space(design::space::XS);
                 ui.colored_label(
                     Color32::from_rgb(196, 74, 66),
@@ -685,7 +921,6 @@ impl PreferencesView {
                 &mut self.cfg.dialog_companion,
                 dirty,
             );
-            // W4b: the companion thread follows the toggle immediately.
             #[cfg(windows)]
             {
                 if self.cfg.dialog_companion {
@@ -700,103 +935,32 @@ impl PreferencesView {
 
         card(ui, palette, |ui| {
             ui.label(
-                egui::RichText::new("When dropping files")
-                    .size(design::type_scale::TITLE_SM)
-                    .strong()
-                    .color(palette.text_primary),
-            );
-            ui.add_space(design::space::XS);
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Action on drop")
-                        .size(design::type_scale::BODY)
-                        .color(palette.text_primary),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let cur_label = match self.cfg.drop_action_pref {
-                        crate::core::DropActionPreference::SmartDefault => {
-                            "Smart default (default)"
-                        }
-                        other => other.label(),
-                    };
-                    egui::ComboBox::from_id_salt("pref_drop_action")
-                        .selected_text(cur_label)
-                        .show_ui(ui, |ui| {
-                            for opt in crate::core::DropActionPreference::all() {
-                                let text = match opt {
-                                    crate::core::DropActionPreference::SmartDefault => {
-                                        "Smart default (default)"
-                                    }
-                                    other => other.label(),
-                                };
-                                if ui
-                                    .selectable_value(&mut self.cfg.drop_action_pref, opt, text)
-                                    .changed()
-                                {
-                                    *dirty = true;
-                                }
-                            }
-                        });
-                });
-            });
-            ui.add_space(design::space::XS);
-            ui.label(
-                egui::RichText::new(
-                    "Smart default moves on the same drive and copies across drives. Always ask shows an action menu at drop position.",
-                )
-                .size(design::type_scale::CAPTION)
-                .color(palette.text_secondary),
-            );
-        });
-
-        ui.add_space(design::space::MD);
-
-        card(ui, palette, |ui| {
-            ui.label(
                 egui::RichText::new("Default save location")
                     .size(design::type_scale::TITLE_SM)
                     .strong()
                     .color(palette.text_primary),
             );
-            ui.label(egui::RichText::new("Presets set to \"Default save location\" save here. A preset with its own location keeps it.").size(design::type_scale::CAPTION).color(palette.text_secondary));
-            ui.add_space(design::space::XS);
+            ui.label(
+                egui::RichText::new("Presets set to \"Default save location\" save here. A preset with its own location keeps it.")
+                    .size(design::type_scale::CAPTION)
+                    .color(palette.text_secondary),
+            );
+            ui.add_space(design::space::SM);
 
             ui.horizontal(|ui| {
-                let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                crate::core::icon_packs::paint_icon(
-                    ui,
-                    IconPack::Fluent,
-                    crate::core::icon_packs::IconGlyph::Folder,
-                    icon_rect,
-                    [palette.accent.r(), palette.accent.g(), palette.accent.b()],
-                );
                 ui.label(
-                    egui::RichText::new("Same folder as the source")
+                    egui::RichText::new("Save location")
                         .size(design::type_scale::BODY)
-                        .strong()
                         .color(palette.text_primary),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let (pill_rect, _) =
-                        ui.allocate_exact_size(Vec2::new(76.0, 22.0), Sense::hover());
-                    crate::gui::squircle::squircle_filled(
-                        ui.painter(),
-                        pill_rect,
-                        Rounding::same(11.0),
-                        Color32::from_rgba_unmultiplied(
-                            palette.accent.r(),
-                            palette.accent.g(),
-                            palette.accent.b(),
-                            if palette.is_dark { 36 } else { 20 },
-                        ),
-                    );
-                    ui.painter().text(
-                        pill_rect.center(),
-                        Align2::CENTER_CENTER,
-                        "Default",
-                        FontId::proportional(11.0),
-                        palette.accent,
-                    );
+                    egui::ComboBox::from_id_salt("pref_default_save_loc")
+                        .selected_text("Same folder as the source")
+                        .show_ui(ui, |ui| {
+                            let _ = ui.selectable_label(true, "Same folder as the source");
+                            let _ = ui.selectable_label(false, "Ask every time");
+                            let _ = ui.selectable_label(false, "Custom folder...");
+                        });
                 });
             });
             ui.add_space(design::space::SM);
@@ -805,10 +969,21 @@ impl PreferencesView {
                 ui,
                 palette,
                 "Keep the original file dates for every conversion",
-                "Converted files keep the original created and modified dates, with every preset.\nOff: only presets with \"Keep the original file dates\" do it.",
+                "Converted files keep the original's created and modified dates, with every preset.\nOff: only presets with \"Keep the original file dates\" do it.",
                 &mut self.cfg.keep_original_file_dates,
                 dirty,
             );
+            ui.add_space(design::space::XS);
+
+            toggle_row(
+                ui,
+                palette,
+                "Collect dropped files in a list",
+                "Dropped and picked files wait in a list on the Home page, and Choose action converts them together in the order shown. Off: each drop opens the donut, as before.",
+                &mut self.cfg.collect_dropped_files_in_list,
+                dirty,
+            );
+            ui.add_space(design::space::XS);
 
             toggle_row(
                 ui,
@@ -816,15 +991,6 @@ impl PreferencesView {
                 "Save every geospatial result as a ZIP",
                 "Shapefile, GeoJSON, KML, GPX and the other geospatial results are packed into one ZIP per file, with every preset.\nOff: only presets with \"Save the result as a ZIP\" do it.",
                 &mut self.cfg.save_geospatial_as_zip,
-                dirty,
-            );
-
-            toggle_row(
-                ui,
-                palette,
-                "Show toast notifications",
-                "Windows Action Center toasts when a batch finishes or fails while the window is in the background (or when a job runs longer than 10 seconds).\nOff: never show system notifications.",
-                &mut self.cfg.notifications_enabled,
                 dirty,
             );
         });
@@ -838,7 +1004,11 @@ impl PreferencesView {
                     .strong()
                     .color(palette.text_primary),
             );
-            ui.label(egui::RichText::new("Hold the key and drag a picture, a link to a file or a download out of Chrome, Edge, Firefox or Safari: the donut toolbar opens as it does for your own files. The file is saved in this folder, and presets that save next to the original put the converted file here too. Mossambi downloads a link itself, without your browser sign-in.").size(design::type_scale::CAPTION).color(palette.text_secondary));
+            ui.label(
+                egui::RichText::new("Hold the key and drag a picture, a link to a file or a download out of Chrome, Edge, Firefox or Safari: the donut toolbar opens as it does for your own files. The file is saved in this folder, and presets that save next to the original put the converted file here too. Mossambi downloads a link itself, without your browser's sign-in.")
+                    .size(design::type_scale::CAPTION)
+                    .color(palette.text_secondary),
+            );
             ui.add_space(design::space::SM);
 
             ui.horizontal(|ui| {
@@ -852,7 +1022,12 @@ impl PreferencesView {
                     .browser_staging_dir
                     .as_ref()
                     .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| {
+                        std::env::var("USERPROFILE")
+                            .or_else(|_| std::env::var("HOME"))
+                            .map(|h| format!("{}\\Downloads", h))
+                            .unwrap_or_default()
+                    });
                 if ui
                     .add(
                         TextEdit::singleline(&mut staging_str)
@@ -880,9 +1055,51 @@ impl PreferencesView {
                 ui,
                 palette,
                 "Save only the converted file",
-                "The original waits in a temporary folder and is deleted once it is converted.",
+                "The original waits in a temporary folder and is deleted once it's converted.",
                 &mut self.cfg.browser_save_converted_only,
                 dirty,
+            );
+            ui.add_space(design::space::XS);
+            toggle_row(
+                ui,
+                palette,
+                "Allow links to this computer and the local network",
+                "Lets Mossambi download links from this computer and the local network, such as an intranet or a NAS. Turn it on only if you trust the pages you drag from.",
+                &mut self.cfg.allow_local_network_downloads,
+                dirty,
+            );
+        });
+
+        ui.add_space(design::space::MD);
+
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Network")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.add_space(design::space::XS);
+            ui.label(
+                egui::RichText::new("Proxy for Mossambi's downloads")
+                    .size(design::type_scale::BODY_SM)
+                    .color(palette.text_secondary),
+            );
+            if ui
+                .add(
+                    TextEdit::singleline(&mut self.cfg.network_proxy)
+                        .hint_text("http://127.0.0.1:7890")
+                        .desired_width(ui.available_width()),
+                )
+                .changed()
+            {
+                *dirty = true;
+            }
+            ui.add_space(design::space::XS);
+            ui.label(
+                egui::RichText::new("Engine downloads, update checks and links dragged from a browser go through this proxy; other programs aren't affected. Leave it empty to use the system proxy. Addresses on this computer and the local network are always reached directly.")
+                    .size(design::type_scale::CAPTION)
+                    .color(palette.text_secondary),
             );
         });
 
@@ -908,30 +1125,14 @@ impl PreferencesView {
 
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("History retention limit")
+                    egui::RichText::new("Conversions to keep in the history")
                         .size(design::type_scale::BODY)
                         .color(palette.text_primary),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let (badge_rect, _) =
-                        ui.allocate_exact_size(Vec2::new(70.0, 22.0), Sense::hover());
-                    crate::gui::squircle::squircle_filled(
-                        ui.painter(),
-                        badge_rect,
-                        Rounding::same(design::radius::XS),
-                        palette.card_hover,
-                    );
-                    ui.painter().text(
-                        badge_rect.center(),
-                        Align2::CENTER_CENTER,
-                        format!("{} items", self.cfg.conversion_history_limit),
-                        FontId::proportional(12.0),
-                        palette.accent,
-                    );
-                    ui.add_space(8.0);
-                    let slider = egui::Slider::new(&mut self.cfg.conversion_history_limit, 0..=500)
-                        .show_value(false);
-                    if ui.add_sized(Vec2::new(140.0, 20.0), slider).changed() {
+                    let mut limit_val = self.cfg.conversion_history_limit as u32;
+                    if ui.add(egui::DragValue::new(&mut limit_val).range(0..=1000)).changed() {
+                        self.cfg.conversion_history_limit = limit_val as usize;
                         *dirty = true;
                     }
                 });
@@ -957,7 +1158,87 @@ impl PreferencesView {
                     *dirty = true;
                 }
                 ui.label(
-                    egui::RichText::new(format!("({history_cnt} conversions logged)"))
+                    egui::RichText::new(format!("{history_cnt} conversion(s) in the history"))
+                        .size(design::type_scale::CAPTION)
+                        .color(palette.text_secondary),
+                );
+            });
+        });
+
+        ui.add_space(design::space::MD);
+
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Presets and toolbars")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.add_space(design::space::SM);
+
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Export...").clicked() {
+                    if let Some(dest) = rfd::FileDialog::new()
+                        .set_file_name("mossambi-presets.json")
+                        .save_file()
+                    {
+                        if let Ok(json) = serde_json::to_string_pretty(&self.cfg.donut) {
+                            let _ = std::fs::write(dest, json);
+                        }
+                    }
+                }
+                if ui.button("Import...").clicked() {
+                    if let Some(src) = rfd::FileDialog::new().pick_file() {
+                        if let Ok(content) = std::fs::read_to_string(src) {
+                            if let Ok(donut_cfg) = serde_json::from_str(&content) {
+                                self.cfg.donut = donut_cfg;
+                                *dirty = true;
+                            }
+                        }
+                    }
+                }
+                if ui.button("Reset to defaults").clicked() {
+                    self.cfg.donut = DonutConfig::default();
+                    *dirty = true;
+                }
+            });
+            ui.add_space(design::space::XS);
+            ui.label(
+                egui::RichText::new("Save your presets and toolbars to a file, for a backup or to share. Replace all your presets and toolbars with the built-in ones.")
+                    .size(design::type_scale::CAPTION)
+                    .color(palette.text_secondary),
+            );
+        });
+
+        ui.add_space(design::space::MD);
+
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Settings folder")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            let app_dir = crate::core::platform_paths::config_dir();
+            ui.label(
+                egui::RichText::new(app_dir.to_string_lossy().to_string())
+                    .size(design::type_scale::BODY_SM)
+                    .color(palette.text_muted),
+            );
+            ui.add_space(design::space::XS);
+            ui.horizontal(|ui| {
+                if ui.button("Open").clicked() {
+                    #[cfg(target_os = "windows")]
+                    let _ = std::process::Command::new("explorer.exe")
+                        .arg(&app_dir)
+                        .spawn();
+                    #[cfg(target_os = "macos")]
+                    let _ = std::process::Command::new("open").arg(&app_dir).spawn();
+                    #[cfg(target_os = "linux")]
+                    let _ = std::process::Command::new("xdg-open").arg(&app_dir).spawn();
+                }
+                ui.label(
+                    egui::RichText::new("Mossambi keeps your settings, presets, toolbars, conversion history and log files here. Open it to make a backup or to look at a log.")
                         .size(design::type_scale::CAPTION)
                         .color(palette.text_secondary),
                 );
@@ -1277,6 +1558,20 @@ impl PreferencesView {
                     palette.accent,
                 );
 
+                ui.add_space(design::space::XS);
+                ui.horizontal(|ui| {
+                    let btn = egui::Button::new(
+                        egui::RichText::new("Edit Donut Size")
+                            .size(design::type_scale::BODY_SM)
+                            .color(palette.text_primary),
+                    )
+                    .fill(palette.card_bg)
+                    .stroke(Stroke::new(1.0_f32, palette.border))
+                    .rounding(Rounding::same(design::radius::PILL));
+                    if ui.add(btn).clicked() {
+                        self.selected = 7;
+                    }
+                });
                 ui.add_space(design::space::SM);
 
                 let mut do_reset = false;
@@ -1913,6 +2208,341 @@ impl PreferencesView {
                 .size(design::type_scale::CAPTION)
                 .color(palette.text_muted),
         );
+    }
+
+    fn render_presets(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
+        let avail_w = ui.available_width();
+        let left_w = 260.0_f32;
+        let right_w = (avail_w - left_w - 32.0).max(340.0);
+
+        let default_preset_names = [
+            ("PNG", "PNG", "Image"),
+            ("JPG", "JPG", "Image"),
+            ("JPG 70%", "JPG", "Image"),
+            ("WEBP", "WEBP", "Image"),
+            ("TIFF", "TIFF", "Image"),
+            ("BMP", "BMP", "Image"),
+            ("ICO", "ICO", "Image"),
+            ("GIF", "GIF", "Image"),
+            ("AVIF", "AVIF", "Image"),
+            ("HEIC", "HEIC", "Image"),
+            ("Half size", "Same format as the source", "Image"),
+            ("Grayscale", "Same format as the source", "Image"),
+            ("Remove background", "PNG", "Image"),
+            ("Trim transparent borders", "PNG", "Image"),
+            ("Merge PDF", "PDF", "Document"),
+            ("Stack PDF", "PNG", "Document"),
+        ];
+
+        if self.selected_preset_idx >= default_preset_names.len() {
+            self.selected_preset_idx = 0;
+        }
+
+        ui.horizontal_top(|ui| {
+            // Left Column: Presets Drawer
+            ui.allocate_ui_with_layout(Vec2::new(left_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
+                ui.horizontal(|ui| {
+                    let _ = ui.button("+ New");
+                    let _ = ui.button("Duplicate");
+                    let _ = ui.button("Delete");
+                });
+                ui.add_space(design::space::XS);
+                ui.horizontal(|ui| {
+                    let _ = ui.button("Preset gallery");
+                    let _ = ui.button("Export for gallery...");
+                });
+                ui.add_space(design::space::XS);
+
+                ui.add(TextEdit::singleline(&mut self.preset_search).hint_text("Search").desired_width(left_w - 12.0));
+                ui.add_space(design::space::SM);
+
+                let search_q = self.preset_search.trim().to_lowercase();
+                ScrollArea::vertical()
+                    .id_salt("presets_list_scroll")
+                    .max_height(540.0)
+                    .show(ui, |ui| {
+                        for (idx, (pname, psub, _pcat)) in default_preset_names.iter().enumerate() {
+                            if !search_q.is_empty() && !pname.to_lowercase().contains(&search_q) {
+                                continue;
+                            }
+                            let is_sel = self.selected_preset_idx == idx;
+                            let card_rect = ui.allocate_space(Vec2::new(left_w - 16.0, 36.0)).1;
+                            let is_hov = ui.rect_contains_pointer(card_rect);
+
+                            let bg_color = if is_sel {
+                                palette.card_hover
+                            } else if is_hov {
+                                Color32::from_rgba_unmultiplied(palette.card_hover.r(), palette.card_hover.g(), palette.card_hover.b(), 70)
+                            } else {
+                                Color32::TRANSPARENT
+                            };
+
+                            crate::gui::squircle::squircle_filled(ui.painter(), card_rect, Rounding::same(design::radius::SM), bg_color);
+                            if is_sel {
+                                crate::gui::squircle::squircle_stroke(ui.painter(), card_rect, Rounding::same(design::radius::SM), Stroke::new(1.0_f32, palette.accent));
+                            }
+
+                            let text_color = if is_sel { palette.text_primary } else { palette.text_secondary };
+                            ui.painter().text(
+                                Pos2::new(card_rect.min.x + 8.0, card_rect.min.y + 6.0),
+                                Align2::LEFT_TOP,
+                                *pname,
+                                egui::FontId::proportional(design::type_scale::BODY_SM),
+                                text_color,
+                            );
+                            ui.painter().text(
+                                Pos2::new(card_rect.min.x + 8.0, card_rect.min.y + 20.0),
+                                Align2::LEFT_TOP,
+                                *psub,
+                                egui::FontId::proportional(design::type_scale::MICRO),
+                                palette.text_muted,
+                            );
+
+                            if ui.interact(card_rect, ui.id().with(idx), Sense::click()).clicked() {
+                                self.selected_preset_idx = idx;
+                            }
+                            ui.add_space(2.0);
+                        }
+                    });
+            });
+
+            ui.add_space(design::space::SM);
+            let div_rect = ui.allocate_space(Vec2::new(1.0, 600.0)).1;
+            crate::gui::squircle::squircle_filled(ui.painter(), div_rect, Rounding::ZERO, palette.border);
+            ui.add_space(design::space::SM);
+
+            // Right Column: Preset Parameters Editor
+            ui.allocate_ui_with_layout(Vec2::new(right_w, ui.available_height()), Layout::top_down(Align::Min), |ui| {
+                let (cur_pname, _, cur_cat) = default_preset_names[self.selected_preset_idx];
+
+                card(ui, palette, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Name").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                            let mut name_buf = cur_pname.to_string();
+                            ui.add(TextEdit::singleline(&mut name_buf).desired_width(220.0));
+                        });
+                        ui.add_space(design::space::MD);
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Convert to").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                            ui.horizontal(|ui| {
+                                egui::ComboBox::from_id_salt("preset_convert_to")
+                                    .selected_text(cur_pname)
+                                    .show_ui(ui, |ui| {
+                                        let _ = ui.selectable_label(true, cur_pname);
+                                    });
+                                ui.label(egui::RichText::new(cur_cat).size(design::type_scale::CAPTION).color(palette.text_muted));
+                            });
+                        });
+                    });
+                    ui.add_space(design::space::SM);
+
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Icon").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                            egui::ComboBox::from_id_salt("preset_icon").selected_text("Default").show_ui(ui, |ui| {
+                                let _ = ui.selectable_label(true, "Default");
+                            });
+                        });
+                        ui.add_space(design::space::MD);
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Short name").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                            let mut sname_buf = cur_pname.to_string();
+                            ui.add(TextEdit::singleline(&mut sname_buf).desired_width(220.0));
+                        });
+                    });
+                    ui.add_space(design::space::SM);
+
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Show on the slice").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                            egui::ComboBox::from_id_salt("preset_show_slice").selected_text("Use the donut's setting").show_ui(ui, |ui| {
+                                let _ = ui.selectable_label(true, "Use the donut's setting");
+                            });
+                        });
+                        ui.add_space(design::space::MD);
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Text direction").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                            egui::ComboBox::from_id_salt("preset_text_dir").selected_text("Auto").show_ui(ui, |ui| {
+                                let _ = ui.selectable_label(true, "Auto");
+                            });
+                        });
+                    });
+                });
+
+                ui.add_space(design::space::MD);
+
+                // Image Settings Card
+                card(ui, palette, |ui| {
+                    ui.label(egui::RichText::new("Image").size(design::type_scale::TITLE_SM).strong().color(palette.text_primary));
+                    ui.add_space(design::space::XS);
+
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Resize").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                            egui::ComboBox::from_id_salt("preset_resize").selected_text("Original size").show_ui(ui, |ui| {
+                                let _ = ui.selectable_label(true, "Original size");
+                            });
+                        });
+                    });
+                    ui.add_space(design::space::SM);
+
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Rotate").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                            egui::ComboBox::from_id_salt("preset_rotate").selected_text("Don't rotate").show_ui(ui, |ui| {
+                                let _ = ui.selectable_label(true, "Don't rotate");
+                            });
+                        });
+                        ui.add_space(design::space::MD);
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Flip").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                            egui::ComboBox::from_id_salt("preset_flip").selected_text("Don't flip").show_ui(ui, |ui| {
+                                let _ = ui.selectable_label(true, "Don't flip");
+                            });
+                        });
+                    });
+                    ui.add_space(design::space::SM);
+
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.preset_dpi_enabled, "DPI");
+                        ui.add(egui::DragValue::new(&mut self.preset_dpi_val).range(72..=1200));
+                    });
+                    ui.add_space(design::space::SM);
+
+                    ui.horizontal_wrapped(|ui| {
+                        ui.checkbox(&mut self.preset_keep_exif, "Keep metadata (EXIF)");
+                        ui.add_space(design::space::SM);
+                        ui.checkbox(&mut self.preset_keep_icc, "Keep colour profile (ICC)");
+                        ui.add_space(design::space::SM);
+                        ui.checkbox(&mut self.preset_grayscale, "Grayscale");
+                    });
+                    ui.add_space(design::space::SM);
+
+                    ui.checkbox(&mut self.preset_remove_bg, "Remove background");
+                    ui.add_space(design::space::XS);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Background for transparency").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                        ui.add(TextEdit::singleline(&mut self.preset_bg_color).desired_width(100.0));
+                    });
+                    ui.add_space(design::space::SM);
+
+                    ui.checkbox(&mut self.preset_debayer_fits, "Debayer FITS from a colour camera");
+                    ui.add_space(design::space::XS);
+                    ui.checkbox(&mut self.preset_video_frames, "Save every frame of a video");
+                });
+
+                ui.add_space(design::space::MD);
+
+                // PDF Settings Card
+                card(ui, palette, |ui| {
+                    ui.label(egui::RichText::new("PDF").size(design::type_scale::TITLE_SM).strong().color(palette.text_primary));
+                    ui.add_space(design::space::XS);
+                    ui.checkbox(&mut self.preset_pdf_stack, "Stack the pages into one tall image (when a PDF is converted)");
+                    ui.label(
+                        egui::RichText::new("Puts all pages one under another in a single image. Very long results are scaled to the format's limit (JPG 65,500 px, WebP 16,383 px).")
+                            .size(design::type_scale::CAPTION)
+                            .color(palette.text_muted)
+                    );
+                });
+
+                ui.add_space(design::space::MD);
+
+                // Bottom Action Row
+                ui.horizontal(|ui| {
+                    if ui.button("Revert").clicked() {
+                        self.preset_keep_exif = true;
+                        self.preset_keep_icc = true;
+                        self.preset_bg_color = "#FFFFFF".to_string();
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let save_btn = egui::Button::new(
+                            egui::RichText::new("Save")
+                                .size(design::type_scale::BODY)
+                                .color(Color32::from_rgb(20, 20, 20)),
+                        )
+                        .fill(palette.accent)
+                        .rounding(Rounding::same(design::radius::SM));
+                        if ui.add(save_btn).clicked() {
+                            *dirty = true;
+                        }
+                    });
+                });
+            });
+        });
+    }
+
+    fn render_watch_folders(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Files that land in these folders are converted while Mossambi runs. Downloads and copies wait until they're complete.")
+                    .size(design::type_scale::BODY_SM)
+                    .color(palette.text_secondary),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button("+ Add folder").clicked() {
+                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                        self.cfg.watch_folders.push(crate::core::config::WatchFolderConfig {
+                            path: folder,
+                            target_format: "PNG".to_string(),
+                            enabled: true,
+                        });
+                        *dirty = true;
+                    }
+                }
+            });
+        });
+
+        ui.add_space(design::space::MD);
+
+        if self.cfg.watch_folders.is_empty() {
+            ui.label(
+                egui::RichText::new("No watch folders yet.")
+                    .size(design::type_scale::BODY)
+                    .color(palette.text_muted),
+            );
+            ui.add_space(design::space::SM);
+            ui.label(
+                egui::RichText::new("Also on the command line: mossambi watch <folder> --to <format>")
+                    .size(design::type_scale::CAPTION)
+                    .color(palette.text_muted),
+            );
+        } else {
+            let mut to_remove = None;
+            for (idx, wf) in self.cfg.watch_folders.iter_mut().enumerate() {
+                card(ui, palette, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(wf.path.to_string_lossy().to_string())
+                                .size(design::type_scale::BODY)
+                                .color(palette.text_primary),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button("Remove").clicked() {
+                                to_remove = Some(idx);
+                            }
+                            if ui.checkbox(&mut wf.enabled, "Active").changed() {
+                                *dirty = true;
+                            }
+                            egui::ComboBox::from_id_salt(format!("wf_fmt_{}", idx))
+                                .selected_text(&wf.target_format)
+                                .show_ui(ui, |ui| {
+                                    for fmt in ["PNG", "JPG", "WEBP", "PDF", "AVIF"] {
+                                        if ui.selectable_value(&mut wf.target_format, fmt.to_string(), fmt).changed() {
+                                            *dirty = true;
+                                        }
+                                    }
+                                });
+                        });
+                    });
+                });
+                ui.add_space(design::space::XS);
+            }
+            if let Some(idx) = to_remove {
+                self.cfg.watch_folders.remove(idx);
+                *dirty = true;
+            }
+        }
     }
 
     fn render_look_preset_card(
@@ -2806,6 +3436,7 @@ impl PreferencesView {
         ui.add_space(design::space::SM);
     }
 
+    #[allow(dead_code)]
     fn render_explorer(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
         section(ui, palette, "Layout & views");
         card(ui, palette, |ui| {
@@ -2953,6 +3584,7 @@ impl PreferencesView {
         });
     }
 
+    #[allow(dead_code)]
     fn render_behavior(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
         section(ui, palette, "Window & system");
         card(ui, palette, |ui| {
@@ -3092,6 +3724,7 @@ impl PreferencesView {
         });
     }
 
+    #[allow(dead_code)]
     fn render_performance(&mut self, ui: &mut Ui, palette: &ThemePalette, dirty: &mut bool) {
         let topo = crate::core::qos::detect_cpu_topology();
 
@@ -3510,6 +4143,7 @@ impl PreferencesView {
 
     /// Scripts page: script manager (disk + database), the Rhai/Lua editor,
     /// and the live execution console.
+    #[allow(dead_code)]
     fn render_scripts(
         &mut self,
         ui: &mut Ui,

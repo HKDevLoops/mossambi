@@ -62,6 +62,11 @@ pub fn conversion_history_count() -> usize {
     load_history_locked().len()
 }
 
+pub fn get_recent_conversions() -> Vec<ConversionRecord> {
+    let _guard = HISTORY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    load_history_locked()
+}
+
 pub fn clear_conversion_history() {
     let _guard = HISTORY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let path = history_file_path();

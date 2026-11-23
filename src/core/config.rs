@@ -1059,6 +1059,18 @@ impl AnimationSettings {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WatchFolderConfig {
+    pub path: PathBuf,
+    pub target_format: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_close_window_action() -> String {
+    "ask".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MossambiConfig {
     pub theme_mode: ThemeMode,
@@ -1288,6 +1300,21 @@ pub struct MossambiConfig {
     /// Maximum count of recent conversions kept in history
     #[serde(default = "default_conversion_history_limit")]
     pub conversion_history_limit: usize,
+    /// Active watch folders configured for continuous background conversion
+    #[serde(default)]
+    pub watch_folders: Vec<WatchFolderConfig>,
+    /// Optional network proxy for updates or external engine fetching
+    #[serde(default)]
+    pub network_proxy: String,
+    /// Allow browser drag links to local computer and intranet
+    #[serde(default)]
+    pub allow_local_network_downloads: bool,
+    /// Collect dropped files in a list instead of opening the donut immediately
+    #[serde(default)]
+    pub collect_dropped_files_in_list: bool,
+    /// Behavior when closing main window ("ask", "minimize", "quit")
+    #[serde(default = "default_close_window_action")]
+    pub close_window_action: String,
 }
 
 fn default_keybinding_profile() -> u8 {
@@ -1526,6 +1553,11 @@ impl Default for MossambiConfig {
             default_file_manager: false,
             dialog_companion: false,
             conversion_history_limit: default_conversion_history_limit(),
+            watch_folders: Vec::new(),
+            network_proxy: String::new(),
+            allow_local_network_downloads: false,
+            collect_dropped_files_in_list: false,
+            close_window_action: default_close_window_action(),
         }
     }
 }

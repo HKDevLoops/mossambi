@@ -34,6 +34,32 @@ pub struct PresetOptions {
     pub max_kb: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub whiten_background: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keep_icc_profile: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grayscale: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remove_background: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bg_color_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debayer_fits: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub save_video_frames: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pdf_stack_tall_image: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resize_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotate_deg: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flip_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_on_slice: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_direction: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub short_name: Option<String>,
 }
 
 impl Default for PresetOptions {
@@ -51,6 +77,19 @@ impl Default for PresetOptions {
             min_kb: None,
             max_kb: None,
             whiten_background: None,
+            keep_icc_profile: Some(true),
+            grayscale: Some(false),
+            remove_background: Some(false),
+            bg_color_hex: Some("#FFFFFF".to_string()),
+            debayer_fits: Some(true),
+            save_video_frames: Some(false),
+            pdf_stack_tall_image: Some(false),
+            resize_mode: Some("Original size".to_string()),
+            rotate_deg: Some(0),
+            flip_mode: Some("Don't flip".to_string()),
+            show_on_slice: Some("Use the donut's setting".to_string()),
+            text_direction: Some("Auto".to_string()),
+            short_name: None,
         }
     }
 }
@@ -161,6 +200,7 @@ pub fn get_builtin_presets() -> Vec<PresetDefinition> {
                 min_kb: None,
                 max_kb: None,
                 whiten_background: None,
+                ..Default::default()
             },
             icon: "globe".to_string(),
             author: "Mossambi".to_string(),
@@ -196,6 +236,7 @@ pub fn get_builtin_presets() -> Vec<PresetDefinition> {
                 min_kb: None,
                 max_kb: None,
                 whiten_background: None,
+                ..Default::default()
             },
             icon: "shield".to_string(),
             author: "Mossambi".to_string(),
@@ -230,6 +271,7 @@ pub fn get_builtin_presets() -> Vec<PresetDefinition> {
                 min_kb: Some(20),
                 max_kb: Some(50),
                 whiten_background: Some(true),
+                ..Default::default()
             },
             icon: "user-check".to_string(),
             author: "Mossambi Exam Engine".to_string(),
@@ -263,6 +305,7 @@ pub fn get_builtin_presets() -> Vec<PresetDefinition> {
                 min_kb: Some(10),
                 max_kb: Some(20),
                 whiten_background: Some(true),
+                ..Default::default()
             },
             icon: "feather".to_string(),
             author: "Mossambi Exam Engine".to_string(),
@@ -300,6 +343,7 @@ pub fn get_builtin_presets() -> Vec<PresetDefinition> {
                 min_kb: None,
                 max_kb: None,
                 whiten_background: None,
+                ..Default::default()
             },
             icon: "file-text".to_string(),
             author: "Mossambi".to_string(),
