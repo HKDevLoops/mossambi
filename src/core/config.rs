@@ -1315,6 +1315,9 @@ pub struct MossambiConfig {
     /// Behavior when closing main window ("ask", "minimize", "quit")
     #[serde(default = "default_close_window_action")]
     pub close_window_action: String,
+    /// Applications where gesture wake-up and shortcuts are suppressed
+    #[serde(default)]
+    pub excluded_apps: Vec<String>,
 }
 
 fn default_keybinding_profile() -> u8 {
@@ -1558,6 +1561,7 @@ impl Default for MossambiConfig {
             allow_local_network_downloads: false,
             collect_dropped_files_in_list: false,
             close_window_action: default_close_window_action(),
+            excluded_apps: Vec::new(),
         }
     }
 }

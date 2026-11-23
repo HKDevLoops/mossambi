@@ -25,6 +25,8 @@ pub struct PresetOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strip_metadata: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub keep_metadata_exif: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exam_preset: Option<String>,
@@ -72,6 +74,7 @@ impl Default for PresetOptions {
             target_height: None,
             dpi: Some(300),
             strip_metadata: Some(false),
+            keep_metadata_exif: Some(true),
             effort: Some(6),
             exam_preset: None,
             min_kb: None,
@@ -231,6 +234,7 @@ pub fn get_builtin_presets() -> Vec<PresetDefinition> {
                 target_height: None,
                 dpi: Some(300),
                 strip_metadata: Some(false),
+            keep_metadata_exif: Some(true),
                 effort: Some(9),
                 exam_preset: None,
                 min_kb: None,
@@ -338,6 +342,7 @@ pub fn get_builtin_presets() -> Vec<PresetDefinition> {
                 target_height: None,
                 dpi: Some(300),
                 strip_metadata: Some(false),
+            keep_metadata_exif: Some(true),
                 effort: Some(6),
                 exam_preset: None,
                 min_kb: None,

@@ -145,6 +145,14 @@ pub struct PreferencesView {
     // Gesture customization state
     pub shortcut_drag_distance: f32,
     pub shortcut_gesture_active: bool,
+    pub new_excluded_app_input: String,
+    pub shortcut_gesture_opens_on: String,
+    pub shortcut_gesture_mouse_button: String,
+    pub shortcut_gesture_modifier_ctrl: bool,
+    pub shortcut_gesture_modifier_alt: bool,
+    pub shortcut_gesture_modifier_shift: bool,
+    pub shortcut_gesture_modifier_win: bool,
+    pub shortcut_flip_mouse_wheel: bool,
 }
 
 impl Default for PreferencesView {
@@ -184,6 +192,14 @@ impl Default for PreferencesView {
             new_watch_folder_format: "PNG".to_string(),
             shortcut_drag_distance: 45.0,
             shortcut_gesture_active: true,
+            new_excluded_app_input: String::new(),
+            shortcut_gesture_opens_on: "Front of the donut".to_string(),
+            shortcut_gesture_mouse_button: "Left".to_string(),
+            shortcut_gesture_modifier_ctrl: true,
+            shortcut_gesture_modifier_alt: false,
+            shortcut_gesture_modifier_shift: false,
+            shortcut_gesture_modifier_win: false,
+            shortcut_flip_mouse_wheel: true,
         }
     }
 }
@@ -1388,9 +1404,11 @@ impl PreferencesView {
                         );
 
                         let badge_str = if is_mixed {
-                            format!("M {}-{}", front_len, back_len)
+                            format!("M {} . {}", front_len, back_len)
+                        } else if back_len == 0 {
+                            format!("{}", front_len)
                         } else {
-                            format!("{}-{}", front_len, back_len)
+                            format!("{} . {}", front_len, back_len)
                         };
                         let badge_pos = egui::pos2(card_rect.max.x - 8.0, card_rect.center().y - 6.0);
                         ui.painter().text(
@@ -1513,7 +1531,7 @@ impl PreferencesView {
                 let center = preview_rect.center();
                 let painter = ui.painter_at(preview_rect);
 
-                let n_slices = slices_copy.len().clamp(1, 8);
+                let n_slices = slices_copy.len().clamp(1, 12);
                 let outer_r = (canvas_w * 0.38).clamp(70.0, 100.0);
                 let inner_r = (outer_r * 0.44).clamp(32.0, 46.0);
 
@@ -1550,10 +1568,15 @@ impl PreferencesView {
                 // Center columella hub
                 painter.circle_filled(center, inner_r, palette.card_hover);
                 painter.circle_stroke(center, inner_r, Stroke::new(1.5_f32, palette.accent));
+                let hub_text = if self.donut_view_back {
+                    format!("{}\nBack . {} / 12", profile_name, slices_copy.len())
+                } else {
+                    format!("{}\n{} / 12", profile_name, slices_copy.len())
+                };
                 painter.text(
                     center,
                     Align2::CENTER_CENTER,
-                    format!("{}\n{}/8", profile_name, n_slices),
+                    hub_text,
                     egui::FontId::proportional(design::type_scale::BODY_SM),
                     palette.accent,
                 );
@@ -1955,6 +1978,235 @@ impl PreferencesView {
                 }
             }
         }
+
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(
+                    egui::RichText::new("Choose how the donut toolbar opens. You can add as many gestures as you like.")
+                        .size(design::type_scale::BODY_SM)
+                        .color(palette.text_secondary),
+                );
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let _ = ui.button("+ Add gesture");
+            });
+        });
+        ui.add_space(design::space::XS);
+
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Global input detection is running.")
+                    .size(design::type_scale::CAPTION)
+                    .color(palette.text_muted),
+            );
+            if ui.button("Retry gestures").clicked() {
+                // Refresh hooks
+            }
+        });
+        ui.add_space(design::space::SM);
+
+        // Card 1: Gesture Card (Ctrl + Left)
+        card(ui, palette, |ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.shortcut_gesture_active, "");
+                ui.label(
+                    egui::RichText::new("Ctrl + Left")
+                        .size(design::type_scale::BODY)
+                        .strong()
+                        .color(palette.text_primary),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let _ = ui.button("Delete");
+                });
+            });
+            ui.add_space(design::space::SM);
+
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("Gesture").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                    egui::ComboBox::from_id_salt("shortcut_gesture_kind")
+                        .selected_text("Modifier + drag files")
+                        .show_ui(ui, |ui| {
+                            let _ = ui.selectable_label(true, "Modifier + drag files");
+                        });
+                });
+                ui.add_space(design::space::MD);
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("Active in").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                    egui::ComboBox::from_id_salt("shortcut_active_in")
+                        .selected_text("File managers and desktop")
+                        .show_ui(ui, |ui| {
+                            let _ = ui.selectable_label(true, "File managers and desktop");
+                            let _ = ui.selectable_label(false, "Everywhere");
+                        });
+                });
+            });
+            ui.add_space(design::space::SM);
+
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("Modifier keys").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                    ui.horizontal(|ui| {
+                        if design::segmented_pill(ui, palette, self.shortcut_gesture_modifier_ctrl, "Ctrl").clicked() {
+                            self.shortcut_gesture_modifier_ctrl = !self.shortcut_gesture_modifier_ctrl;
+                            *dirty = true;
+                        }
+                        if design::segmented_pill(ui, palette, self.shortcut_gesture_modifier_alt, "Alt").clicked() {
+                            self.shortcut_gesture_modifier_alt = !self.shortcut_gesture_modifier_alt;
+                            *dirty = true;
+                        }
+                        if design::segmented_pill(ui, palette, self.shortcut_gesture_modifier_shift, "Shift").clicked() {
+                            self.shortcut_gesture_modifier_shift = !self.shortcut_gesture_modifier_shift;
+                            *dirty = true;
+                        }
+                        if design::segmented_pill(ui, palette, self.shortcut_gesture_modifier_win, "Win").clicked() {
+                            self.shortcut_gesture_modifier_win = !self.shortcut_gesture_modifier_win;
+                            *dirty = true;
+                        }
+                    });
+                });
+                ui.add_space(design::space::MD);
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("Mouse button").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                    egui::ComboBox::from_id_salt("shortcut_mouse_btn")
+                        .selected_text(&self.shortcut_gesture_mouse_button)
+                        .show_ui(ui, |ui| {
+                            for btn in ["Left", "Right", "Middle"] {
+                                if ui.selectable_value(&mut self.shortcut_gesture_mouse_button, btn.to_string(), btn).changed() {
+                                    *dirty = true;
+                                }
+                            }
+                        });
+                });
+            });
+            ui.add_space(design::space::SM);
+
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("Opens on").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                egui::ComboBox::from_id_salt("shortcut_opens_on")
+                    .selected_text(&self.shortcut_gesture_opens_on)
+                    .show_ui(ui, |ui| {
+                        for face in ["Front of the donut", "Back of the donut"] {
+                            if ui.selectable_value(&mut self.shortcut_gesture_opens_on, face.to_string(), face).changed() {
+                                *dirty = true;
+                            }
+                        }
+                    });
+                ui.label(
+                    egui::RichText::new("Give two gestures different modifier keys to open each face straight away. If the back has nothing for the files, the front opens.")
+                        .size(design::type_scale::MICRO)
+                        .color(palette.text_muted),
+                );
+            });
+            ui.add_space(design::space::SM);
+
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Drag distance").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                if ui.add(egui::Slider::new(&mut self.shortcut_drag_distance, 10.0..=120.0).suffix("px")).changed() {
+                    *dirty = true;
+                }
+            });
+        });
+
+        ui.add_space(design::space::MD);
+
+        // Card 2: Flip the donut
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Flip the donut")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.label(
+                egui::RichText::new("While the donut is open, this key or a turn of the mouse wheel shows its back. Each donut gets its back under Donut toolbar.")
+                    .size(design::type_scale::CAPTION)
+                    .color(palette.text_secondary),
+            );
+            ui.add_space(design::space::XS);
+
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Key").size(design::type_scale::BODY_SM).color(palette.text_secondary));
+                ui.label(egui::RichText::new("Tab").size(design::type_scale::BODY).strong().color(palette.accent));
+                let _ = ui.button("Record");
+                let _ = ui.button("Use Tab");
+                let _ = ui.button("Clear");
+            });
+            ui.add_space(design::space::SM);
+
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut self.shortcut_flip_mouse_wheel, "Mouse wheel flips the donut").changed() {
+                    *dirty = true;
+                }
+            });
+        });
+
+        ui.add_space(design::space::MD);
+
+        // Card 3: Never trigger in these apps
+        card(ui, palette, |ui| {
+            ui.label(
+                egui::RichText::new("Never trigger in these apps")
+                    .size(design::type_scale::TITLE_SM)
+                    .strong()
+                    .color(palette.text_primary),
+            );
+            ui.add_space(design::space::XS);
+
+            ui.horizontal(|ui| {
+                let text_resp = ui.add(
+                    TextEdit::singleline(&mut self.new_excluded_app_input)
+                        .hint_text("Type an app name and press Enter, e.g. photoshop")
+                        .desired_width(ui.available_width() - 150.0),
+                );
+                if text_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    let clean = self.new_excluded_app_input.trim().to_lowercase();
+                    if !clean.is_empty() && !self.cfg.excluded_apps.contains(&clean) {
+                        self.cfg.excluded_apps.push(clean);
+                        self.new_excluded_app_input.clear();
+                        *dirty = true;
+                    }
+                }
+                if ui.button("+ Pick a running app").clicked() {
+                    // Pick running app dialog
+                }
+            });
+
+            if !self.cfg.excluded_apps.is_empty() {
+                ui.add_space(design::space::XS);
+                let mut app_to_remove = None;
+                ui.horizontal_wrapped(|ui| {
+                    for (app_idx, app_name) in self.cfg.excluded_apps.iter().enumerate() {
+                        let pill_btn = egui::Button::new(
+                            egui::RichText::new(format!("{} x", app_name))
+                                .size(design::type_scale::BODY_SM)
+                                .color(palette.text_secondary),
+                        )
+                        .fill(palette.card_bg)
+                        .stroke(Stroke::new(1.0_f32, palette.border))
+                        .rounding(Rounding::same(design::radius::PILL));
+                        if ui.add(pill_btn).clicked() {
+                            app_to_remove = Some(app_idx);
+                        }
+                    }
+                });
+                if let Some(idx) = app_to_remove {
+                    if idx < self.cfg.excluded_apps.len() {
+                        self.cfg.excluded_apps.remove(idx);
+                        *dirty = true;
+                    }
+                }
+            }
+
+            ui.add_space(design::space::XS);
+            ui.label(
+                egui::RichText::new("Gestures and shortcuts do nothing while the pointer is over these apps.")
+                    .size(design::type_scale::MICRO)
+                    .color(palette.text_muted),
+            );
+        });
+
+        ui.add_space(design::space::MD);
 
         ui.label(
             egui::RichText::new(
