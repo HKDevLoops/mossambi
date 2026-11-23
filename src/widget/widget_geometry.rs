@@ -71,6 +71,25 @@ pub fn hover_growth(factor: f32) -> f32 {
     HOVER_GROW_PX * factor.clamp(0.0, 1.0)
 }
 
+/// 3D perspective flip scale and opacity transition (180ms duration).
+/// Returns (scale_x, alpha):
+/// - scale_x follows a cosine half-period curve from 1.0 down to near 0.0 at midpoint (90ms)
+///   and back up to 1.0 at 180ms.
+/// - alpha fades slightly near edge-on transition and recovers.
+#[inline]
+pub fn face_flip_3d_scale(elapsed_sec: f32) -> (f32, f32) {
+    const DURATION: f32 = 0.180;
+    if elapsed_sec >= DURATION {
+        (1.0, 1.0)
+    } else {
+        let p = (elapsed_sec / DURATION).clamp(0.0, 1.0);
+        let raw_cos = (p * std::f32::consts::PI).cos().abs();
+        let scale_x = raw_cos.max(0.04);
+        let alpha = 0.4 + 0.6 * raw_cos;
+        (scale_x, alpha)
+    }
+}
+
 /// Face switch transition (180ms smooth rotation and crossfade).
 /// Returns (rotation_radians, alpha) where rotation goes -PI/9 -> 0.0 and alpha goes 0.0 -> 1.0.
 #[inline]
@@ -345,6 +364,7 @@ pub struct RadialWidgetGeometry {
     pub anim_scale: f32,
     pub anim_alpha: f32,
     pub anim_rotation: f32,
+    pub anim_scale_x: f32,
 }
 
 impl Default for RadialWidgetGeometry {
@@ -360,6 +380,7 @@ impl Default for RadialWidgetGeometry {
             anim_scale: 1.0,
             anim_alpha: 1.0,
             anim_rotation: 0.0,
+            anim_scale_x: 1.0,
         }
     }
 }
@@ -378,6 +399,7 @@ impl RadialWidgetGeometry {
             anim_scale: 1.0,
             anim_alpha: 1.0,
             anim_rotation: 0.0,
+            anim_scale_x: 1.0,
         }
     }
 
@@ -784,6 +806,14 @@ impl RadialWidgetGeometry {
             Vec2::ZERO
         };
         let petal_pts = offset_points(&base_pts, pop_vec);
+        let petal_pts = if (self.anim_scale_x - 1.0).abs() > 0.001 {
+            petal_pts
+                .into_iter()
+                .map(|p| Pos2::new(self.center.x + (p.x - self.center.x) * self.anim_scale_x, p.y))
+                .collect()
+        } else {
+            petal_pts
+        };
 
         // 1. Soft Ambient Drop Shadows under the individual petal
         let shadow_pts_deep = offset_points(&petal_pts, Vec2::new(0.0, 3.5));
@@ -845,6 +875,21 @@ impl RadialWidgetGeometry {
             self.center.x + r_text * center_angle.cos(),
             self.center.y + r_text * center_angle.sin(),
         ) + pop_vec;
+
+        let (icon_pos, text_pos) = if (self.anim_scale_x - 1.0).abs() > 0.001 {
+            (
+                Pos2::new(
+                    self.center.x + (icon_pos.x - self.center.x) * self.anim_scale_x,
+                    icon_pos.y,
+                ),
+                Pos2::new(
+                    self.center.x + (text_pos.x - self.center.x) * self.anim_scale_x,
+                    text_pos.y,
+                ),
+            )
+        } else {
+            (icon_pos, text_pos)
+        };
 
         // 4. Draw Authentic Vector Glyph Icon matching Image reference.png
         self.render_petal_icon(painter, icon_pos, label, icon_color);

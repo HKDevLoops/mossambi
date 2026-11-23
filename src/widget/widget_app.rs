@@ -20,6 +20,26 @@ pub enum DonutFace {
     StudioTools,
 }
 
+impl DonutFace {
+    pub const FRONT: DonutFace = DonutFace::PrimaryFormats;
+    pub const BACK: DonutFace = DonutFace::StudioTools;
+
+    pub fn is_front(&self) -> bool {
+        matches!(self, Self::PrimaryFormats)
+    }
+
+    pub fn is_back(&self) -> bool {
+        matches!(self, Self::StudioTools)
+    }
+
+    pub fn toggle(&self) -> Self {
+        match self {
+            Self::PrimaryFormats => Self::StudioTools,
+            Self::StudioTools => Self::PrimaryFormats,
+        }
+    }
+}
+
 pub const STUDIO_TOOL_SECTORS: [&str; 8] = [
     "CROP", "EXAM", "META", "RENAME", "AI OCR", "PDF", "ZIP", "EXPLORE",
 ];
@@ -49,6 +69,7 @@ pub enum WidgetResult {
 pub struct MossambiWidgetApp {
     pub geometry: RadialWidgetGeometry,
     pub sectors: Vec<String>,
+    pub back_sectors: Vec<String>,
     pub face: DonutFace,
     pub flip_start: Option<Instant>,
     pub last_wheel_flip: Instant,
@@ -107,10 +128,15 @@ impl Default for MossambiWidgetApp {
                 .into_iter()
                 .map(|s| s.to_string())
                 .collect();
+        let default_back_sectors: Vec<String> = crate::core::donut_config::default_back_tools()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
 
         Self {
             geometry: RadialWidgetGeometry::new(Pos2::new(240.0, 240.0), size),
             sectors: default_sectors,
+            back_sectors: default_back_sectors,
             face: DonutFace::PrimaryFormats,
             flip_start: None,
             last_wheel_flip: Instant::now(),
@@ -153,6 +179,10 @@ impl Default for MossambiWidgetApp {
 }
 
 impl MossambiWidgetApp {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn trigger_wedge(&mut self, petal_idx: usize) {
         self.trigger_wedge_with_alt(petal_idx, false);
     }
@@ -291,7 +321,13 @@ impl MossambiWidgetApp {
     pub fn active_sectors(&self) -> Vec<&str> {
         match self.face {
             DonutFace::PrimaryFormats => self.sectors.iter().map(|s| s.as_str()).collect(),
-            DonutFace::StudioTools => STUDIO_TOOL_SECTORS.to_vec(),
+            DonutFace::StudioTools => {
+                if !self.back_sectors.is_empty() {
+                    self.back_sectors.iter().map(|s| s.as_str()).collect()
+                } else {
+                    STUDIO_TOOL_SECTORS.to_vec()
+                }
+            }
         }
     }
 
@@ -305,8 +341,11 @@ impl MossambiWidgetApp {
         {
             let front_names: Vec<String> =
                 prof.front_slices.iter().map(|s| s.name.clone()).collect();
+            let back_names: Vec<String> =
+                prof.back_slices.iter().map(|s| s.name.clone()).collect();
             if !front_names.is_empty() {
                 self.sectors = front_names;
+                self.back_sectors = back_names;
                 self.current_file = Some(path);
                 return;
             }
@@ -315,6 +354,7 @@ impl MossambiWidgetApp {
             .into_iter()
             .map(|s| s.to_string())
             .collect();
+        self.back_sectors = Vec::new();
         self.current_file = Some(path);
     }
 
@@ -835,18 +875,18 @@ impl eframe::App for MossambiWidgetApp {
                     }
                 };
 
-                // Face switch animation (180ms smooth rotation & crossfade)
-                let (face_rot, face_alpha) = if let Some(start) = self.flip_start {
+                // Face switch animation (180ms smooth 3D flip & crossfade)
+                let ((face_scale_x, face_alpha), face_rot) = if let Some(start) = self.flip_start {
                     let elapsed = start.elapsed().as_secs_f32();
                     if elapsed < 0.180 {
                         ctx.request_repaint();
-                        crate::widget::face_switch_factors(elapsed)
+                        (crate::widget::face_flip_3d_scale(elapsed), 0.0)
                     } else {
                         self.flip_start = None;
-                        (0.0, 1.0)
+                        ((1.0, 1.0), 0.0)
                     }
                 } else {
-                    (0.0, 1.0)
+                    ((1.0, 1.0), 0.0)
                 };
 
                 // Hover transition (80ms smooth blend)
@@ -867,6 +907,7 @@ impl eframe::App for MossambiWidgetApp {
                     (cfg.donut.appearance.hole * open_scale).clamp(25.0, 75.0);
                 self.geometry.hub_radius = self.geometry.inner_radius * 0.90;
                 self.geometry.anim_scale = open_scale;
+                self.geometry.anim_scale_x = face_scale_x;
                 self.geometry.anim_alpha = open_alpha * face_alpha;
                 self.geometry.anim_rotation = face_rot;
                 self.geometry.file_count = if self.current_file.is_some() { 1 } else { 0 };
