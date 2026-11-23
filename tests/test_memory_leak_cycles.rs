@@ -263,14 +263,15 @@ fn test_navigation_clears_hover_anims() {
     assert_eq!(explorer.hover_anims.len(), 2);
 
     // Navigating to a directory clears stale hover springs
-    explorer.navigate_to(PathBuf::from("C:/"));
+    let target_dir = std::env::temp_dir();
+    explorer.navigate_to(target_dir.clone());
     assert_eq!(explorer.hover_anims.len(), 0);
 
     explorer
         .hover_anims
         .drive(201, 1.0, AnimStyle::Spring, 0.016);
     assert_eq!(explorer.hover_anims.len(), 1);
-    explorer.open_directory(PathBuf::from("C:/"));
+    explorer.open_directory(target_dir);
     assert_eq!(explorer.hover_anims.len(), 0);
 }
 
