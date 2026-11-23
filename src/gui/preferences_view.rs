@@ -4774,7 +4774,7 @@ impl PreferencesView {
                             .color(palette.text_primary),
                     );
                     ui.label(
-                        egui::RichText::new("Version 2.1.0  |  Production Build (MSVC x86_64)")
+                        egui::RichText::new(format!("Version {}  |  Alpha Preview (MSVC x86_64)", env!("CARGO_PKG_VERSION")))
                             .size(design::type_scale::BODY_SM)
                             .color(palette.text_secondary),
                     );

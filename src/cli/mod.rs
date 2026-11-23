@@ -39,7 +39,7 @@ use self::output::ExitCode;
 #[command(
     name = "mossambi",
     author = "Mossambi Systems Team",
-    version = "2.1.0",
+    version = env!("CARGO_PKG_VERSION"),
     about = "Zero-loss native desktop file converter, archive suite, Indian exam form tuner, and macOS-style Universal File Explorer",
     long_about = "Mossambi: Zero-Loss Desktop File Converter & Universal File Explorer\nWindows & Linux | x86_64 & ARM64 | 0.00% Zero-Loss Standard | Hardware Accelerated\n\nACCESS MODALITIES:\n  1. mossambi [or: mossambi app, mossambi explorer]  -> Launch macOS-styled Universal File Explorer & Studio GUI\n  2. mossambi widget                                  -> Launch Sweet Lime Resident Radial Widget overlay\n  3. mossambi tui                                     -> Launch Yazi-grade interactive Terminal File Explorer\n  4. mossambi <INPUT> [TARGET_FORMAT]                 -> Fast UNIX mv-style file conversion",
     subcommand_precedence_over_arg = true
