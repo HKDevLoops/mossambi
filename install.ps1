@@ -198,8 +198,9 @@ if ($choice -eq "1") {
 } elseif ($choice -eq "2" -and ($detectedPms -contains "winget")) {
     Write-Host "$C_CYAN Invoking WinGet...$C_RESET"
     winget install --manifest "$PSScriptRoot\packaging\winget\Mossambi.Mossambi.yaml"
-} elseif ($choice -eq "2" -or $choice -eq "3") {
-    Install-DirectBinaries
+} elseif (($choice -eq "3" -or ($choice -eq "2" -and -not ($detectedPms -contains "winget"))) -and ($detectedPms -contains "scoop")) {
+    Write-Host "$C_CYAN Invoking Scoop...$C_RESET"
+    scoop install "$PSScriptRoot\packaging\scoop\mossambi.json"
 } else {
     Install-DirectBinaries
 }

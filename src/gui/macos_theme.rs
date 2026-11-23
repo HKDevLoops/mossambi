@@ -785,6 +785,16 @@ fn glassify(mut p: ThemePalette, effect: crate::core::GlassEffect, opacity: f32)
 
     // Guarantee WCAG contrast >= 4.5:1 for primary text against window_bg
     p.text_primary = choose_readable_text_color(p.window_bg, p.is_dark);
+
+    // Guarantee selection has at least 1.5:1 contrast against text_primary
+    let sel_cr = crate::core::glass::contrast_ratio(p.text_primary, p.selection);
+    if sel_cr < 1.5 {
+        if p.text_primary.r() > 128 {
+            p.selection = Color32::from_rgb(56, 70, 45);
+        } else {
+            p.selection = Color32::from_rgb(214, 223, 197);
+        }
+    }
     p
 }
 

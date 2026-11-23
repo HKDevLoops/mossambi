@@ -96,7 +96,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install ffmpeg -y --no-progress --limit-output
+          if (Get-Command scoop -ErrorAction SilentlyContinue) {
+            scoop install ffmpeg
+          } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
+            choco install ffmpeg -y --no-progress --limit-output
+          }
 
       - name: Setup Rust Stable Toolchain
         uses: dtolnay/rust-toolchain@stable

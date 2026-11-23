@@ -108,7 +108,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install ffmpeg -y --no-progress --limit-output
+          if (Get-Command scoop -ErrorAction SilentlyContinue) {
+            scoop install ffmpeg
+          } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
+            choco install ffmpeg -y --no-progress --limit-output
+          }
 
       - name: Setup Rust Stable Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -151,7 +155,43 @@ jobs:
           Copy-Item "LICENSE*" "dist/$pkgName/" -ErrorAction SilentlyContinue
 
           Compress-Archive -Path "dist/$pkgName/*" -DestinationPath "dist/$pkgName.zip" -Force
-          Get-FileHash -Path "dist/$pkgName.zip" -Algorithm SHA256 | Out-File -FilePath "dist/$pkgName.zip.sha256"
+          $hashObj = Get-FileHash -Path "dist/$pkgName.zip" -Algorithm SHA256
+          $hashObj | Out-File -FilePath "dist/$pkgName.zip.sha256"
+
+          # Generate dynamic Scoop manifest for this release
+          $cleanVer = $ver -replace '^v',''
+          $scoopManifest = [ordered]@{
+            version = "$cleanVer"
+            description = "Zero-loss native desktop file converter, archive suite, and Indian exam form tuner"
+            homepage = "https://github.com/${{ github.repository }}"
+            license = "MIT"
+            notes = "Run 'mossambi' for CLI, 'mossambi gui' for Desktop Studio, or 'mossambi widget' for radial fruit widget."
+            suggest = @{
+              FFmpeg = "ffmpeg"
+            }
+            architecture = @{
+              "64bit" = @{
+                url = "https://github.com/${{ github.repository }}/releases/download/$ver/$pkgName.zip"
+                hash = "$($hashObj.Hash.ToLower())"
+              }
+            }
+            bin = @("mossambi.exe")
+            shortcuts = @(
+              @("mossambi.exe", "Mossambi Studio", "gui"),
+              @("mossambi.exe", "Mossambi Radial Widget", "widget")
+            )
+            checkver = @{
+              github = "https://github.com/${{ github.repository }}"
+            }
+            autoupdate = @{
+              architecture = @{
+                "64bit" = @{
+                  url = "https://github.com/${{ github.repository }}/releases/download/v`$version/mossambi-v`$version-${{ matrix.target }}.zip"
+                }
+              }
+            }
+          }
+          $scoopManifest | ConvertTo-Json -Depth 5 | Set-Content -Path "dist/mossambi.json" -Encoding UTF8
 
       - name: Prepare Release Artifacts (Linux)
         if: runner.os == 'Linux'

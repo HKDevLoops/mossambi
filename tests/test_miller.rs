@@ -6,76 +6,102 @@ use mossambi::core::FileItem;
 use mossambi::gui::explorer_view::{ancestor_chain, lineage_policy, MillerLineage};
 use std::path::{Path, PathBuf};
 
+fn make_path(parts: &[&str]) -> PathBuf {
+    #[cfg(windows)]
+    let mut p = PathBuf::from("C:\\");
+    #[cfg(not(windows))]
+    let mut p = PathBuf::from("/");
+    for part in parts {
+        p.push(part);
+    }
+    p
+}
+
 /// Builds a fake Miller column stack from directory paths; the entry
 /// payloads are empty because lineage_policy never reads them.
-fn stack_paths(dirs: &[&str]) -> Vec<(PathBuf, Vec<FileItem>)> {
-    dirs.iter()
-        .map(|d| (PathBuf::from(d), Vec::new()))
-        .collect()
+fn stack_paths(dirs: &[PathBuf]) -> Vec<(PathBuf, Vec<FileItem>)> {
+    dirs.iter().map(|d| (d.clone(), Vec::new())).collect()
 }
 
 #[test]
 fn test_ancestor_chain_root_first_excludes_self() {
-    let chain = ancestor_chain(Path::new("Z:\\Projects\\mossambi"));
-    assert_eq!(
-        chain,
-        vec![PathBuf::from("Z:\\"), PathBuf::from("Z:\\Projects")]
-    );
+    let path = make_path(&["Projects", "mossambi"]);
+    let chain = ancestor_chain(&path);
+    assert_eq!(chain, vec![make_path(&[]), make_path(&["Projects"])]);
 }
 
 #[test]
 fn test_ancestor_chain_single_level() {
-    let chain = ancestor_chain(Path::new("Z:\\Users"));
-    assert_eq!(chain, vec![PathBuf::from("Z:\\")]);
+    let path = make_path(&["Users"]);
+    let chain = ancestor_chain(&path);
+    assert_eq!(chain, vec![make_path(&[])]);
 }
 
 #[test]
 fn test_ancestor_chain_at_root_is_empty() {
-    assert!(ancestor_chain(Path::new("Z:\\")).is_empty());
+    assert!(ancestor_chain(&make_path(&[])).is_empty());
 }
 
 #[test]
 fn test_ancestor_chain_relative_is_empty() {
-    assert!(ancestor_chain(Path::new("foo\\bar")).is_empty());
+    let rel = Path::new("foo").join("bar");
+    assert!(ancestor_chain(&rel).is_empty());
 }
 
 #[test]
 fn test_policy_same_dir_keeps_stack() {
-    let stack = stack_paths(&["Z:\\a\\b", "Z:\\a\\b\\c"]);
-    let p = lineage_policy(Path::new("Z:\\a"), Path::new("Z:\\a"), &stack);
+    let a = make_path(&["a"]);
+    let ab = make_path(&["a", "b"]);
+    let abc = make_path(&["a", "b", "c"]);
+    let stack = stack_paths(&[ab, abc]);
+    let p = lineage_policy(&a, &a, &stack);
     assert_eq!(p, MillerLineage::KeepStack);
 }
 
 #[test]
 fn test_policy_stack_hit_mid_shifts() {
-    let stack = stack_paths(&["Z:\\a\\b", "Z:\\a\\b\\c", "Z:\\a\\b\\c\\d"]);
-    let p = lineage_policy(Path::new("Z:\\a\\b\\c"), Path::new("Z:\\a"), &stack);
+    let a = make_path(&["a"]);
+    let ab = make_path(&["a", "b"]);
+    let abc = make_path(&["a", "b", "c"]);
+    let abcd = make_path(&["a", "b", "c", "d"]);
+    let stack = stack_paths(&[ab, abc.clone(), abcd]);
+    let p = lineage_policy(&abc, &a, &stack);
     assert_eq!(p, MillerLineage::ShiftTo(1));
 }
 
 #[test]
 fn test_policy_deepest_stack_hit_shifts_to_last() {
-    let stack = stack_paths(&["Z:\\a\\b", "Z:\\a\\b\\c"]);
-    let p = lineage_policy(Path::new("Z:\\a\\b\\c"), Path::new("Z:\\a"), &stack);
+    let a = make_path(&["a"]);
+    let ab = make_path(&["a", "b"]);
+    let abc = make_path(&["a", "b", "c"]);
+    let stack = stack_paths(&[ab, abc.clone()]);
+    let p = lineage_policy(&abc, &a, &stack);
     assert_eq!(p, MillerLineage::ShiftTo(1));
 }
 
 #[test]
 fn test_policy_up_nav_clears_stack() {
-    let stack = stack_paths(&["Z:\\a\\b"]);
-    let p = lineage_policy(Path::new("Z:\\a"), Path::new("Z:\\a\\b"), &stack);
+    let a = make_path(&["a"]);
+    let ab = make_path(&["a", "b"]);
+    let stack = stack_paths(std::slice::from_ref(&ab));
+    let p = lineage_policy(&a, &ab, &stack);
     assert_eq!(p, MillerLineage::ClearStack);
 }
 
 #[test]
 fn test_policy_unrelated_clears_stack() {
-    let stack = stack_paths(&["Z:\\a\\b"]);
-    let p = lineage_policy(Path::new("Z:\\other"), Path::new("Z:\\a"), &stack);
+    let a = make_path(&["a"]);
+    let ab = make_path(&["a", "b"]);
+    let other = make_path(&["other"]);
+    let stack = stack_paths(&[ab]);
+    let p = lineage_policy(&other, &a, &stack);
     assert_eq!(p, MillerLineage::ClearStack);
 }
 
 #[test]
 fn test_policy_empty_stack_clears() {
-    let p = lineage_policy(Path::new("Z:\\x"), Path::new("Z:\\y"), &[]);
+    let x = make_path(&["x"]);
+    let y = make_path(&["y"]);
+    let p = lineage_policy(&x, &y, &[]);
     assert_eq!(p, MillerLineage::ClearStack);
 }

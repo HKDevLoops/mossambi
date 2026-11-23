@@ -1,45 +1,40 @@
 {
-  "version": "2.1.0",
+  "version": "0.0.1-alpha",
   "description": "Zero-loss native desktop file converter, archive suite, and Indian exam form tuner",
-  "homepage": "https://github.com/mossambi/mossambi",
+  "homepage": "https://github.com/HKDevLoops/mossambi",
   "license": "MIT",
-  "notes": "Run 'mossambi' for CLI, 'mossambi-tui' for terminal workspace, 'mossambi-gui' for Desktop Studio, or 'mossambi-widget' for frameless radial fruit widget.",
+  "notes": "Run 'mossambi' for CLI, 'mossambi gui' for Desktop Studio, or 'mossambi widget' for frameless radial fruit widget.",
   "suggest": {
     "FFmpeg": "ffmpeg"
   },
   "architecture": {
     "64bit": {
-      "url": "https://github.com/mossambi/mossambi/releases/download/v2.1.0/mossambi-v2.1.0-x86_64-pc-windows-msvc.zip",
+      "url": "https://github.com/HKDevLoops/mossambi/releases/download/v0.0.1-alpha/mossambi-v0.0.1-alpha-x86_64-pc-windows-msvc.zip",
       "hash": "0000000000000000000000000000000000000000000000000000000000000000"
     }
   },
   "bin": [
-    "mossambi.exe",
-    "mossambi-gui.exe",
-    "mossambi-widget.exe",
-    "mossambi-tui.exe"
+    "mossambi.exe"
   ],
   "shortcuts": [
     [
-      "mossambi-gui.exe",
-      "Mossambi Studio"
+      "mossambi.exe",
+      "Mossambi Studio",
+      "gui"
     ],
     [
-      "mossambi-widget.exe",
-      "Mossambi Radial Widget"
-    ],
-    [
-      "mossambi-tui.exe",
-      "Mossambi TUI"
+      "mossambi.exe",
+      "Mossambi Radial Widget",
+      "widget"
     ]
   ],
   "checkver": {
-    "github": "https://github.com/mossambi/mossambi"
+    "github": "https://github.com/HKDevLoops/mossambi"
   },
   "autoupdate": {
     "architecture": {
       "64bit": {
-        "url": "https://github.com/mossambi/mossambi/releases/download/v$version/mossambi-v$version-x86_64-pc-windows-msvc.zip"
+        "url": "https://github.com/HKDevLoops/mossambi/releases/download/v$version/mossambi-v$version-x86_64-pc-windows-msvc.zip"
       }
     }
   }
